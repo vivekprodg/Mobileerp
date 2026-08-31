@@ -1,0 +1,128 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Vendor RMA & Distributor Warranty Claims | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-truck-ramp-box text-primary me-2"></i> Vendor RMA & Distributor Claims (खराबी फिर्ता)
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Batch defective parts (swollen batteries, dead screens, boards) and claim replacement stock or credit notes from distributors
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'inventory:vendor_rma_create' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-plus-circle me-1"></i> New Vendor RMA Dispatch
+            </a>
+            <a href="{% url 'repairs:dashboard' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Warranty Desk
+            </a>
+        </div>
+    </div>
+
+    <!-- Defective Parts in Quarantine Banner -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-warning bg-opacity-10 border border-warning border-opacity-25 mb-4">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+            <div>
+                <h6 class="fw-bold text-dark mb-1">
+                    <i class="fas fa-boxes-packing text-warning me-2"></i> {{ pending_defective_parts.count }} Defective Replaced Parts Waiting in Shop Quarantine
+                </h6>
+                <p class="text-muted fs-xs mb-0">
+                    Defective batteries and displays replaced from customer tickets ready to be batched into an official vendor claim challan.
+                </p>
+            </div>
+            {% if pending_defective_parts.count > 0 %}
+                <a href="{% url 'inventory:vendor_rma_create' %}" class="btn btn-warning btn-sm rounded-pill px-4 fw-bold text-dark">
+                    Batch into RMA Challan &rarr;
+                </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- RMA Claims Master Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Dispatched Vendor RMA Vouchers
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ rma_claims.paginator.count|default:rma_claims|length }} Claims</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-xs">
+                    <tr>
+                        <th class="ps-4">RMA Voucher No</th>
+                        <th>Supplier / Distributor</th>
+                        <th>Dispatch Date</th>
+                        <th>Tracking / Courier Ref</th>
+                        <th>Items Claimed</th>
+                        <th>Status</th>
+                        <th>Reimbursed Amount</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for claim in rma_claims %}
+                    <tr>
+                        <td class="ps-4 font-monospace fw-bold text-primary">
+                            <a href="{% url 'inventory:vendor_rma_detail' claim.pk %}" class="text-decoration-none">
+                                {{ claim.rma_number }}
+                            </a>
+                        </td>
+                        <td>
+                            <strong>{{ claim.supplier.company_name }}</strong>
+                            <small class="text-muted d-block">{{ claim.distributor_service_center|default:"Authorized Lab" }}</small>
+                        </td>
+                        <td>{{ claim.dispatch_date|default:"Draft" }}</td>
+                        <td><code>{{ claim.distributor_tracking_ref|default:"-" }}</code></td>
+                        <td><span class="badge bg-light text-dark border">{{ claim.total_claimed_parts_count }} Parts</span></td>
+                        <td>
+                            {% if claim.status == 'COMPLETED' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs">
+                                    <i class="fas fa-check-circle me-1"></i> Resolved
+                                </span>
+                            {% elif claim.status == 'DISPATCHED_TO_VENDOR' %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-xs">
+                                    <i class="fas fa-truck me-1"></i> At Distributor Lab
+                                </span>
+                            {% elif claim.status == 'REJECTED' %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-xs">
+                                    <i class="fas fa-times-circle me-1"></i> Rejected
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold fs-xs">
+                                    {{ claim.get_status_display }}
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="fw-bold text-success">Rs. {{ claim.total_credit_amount|floatformat:2 }}</td>
+                        <td class="text-end pe-4">
+                            <a href="{% url 'inventory:vendor_rma_detail' claim.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                                View & Settle
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="fas fa-truck-ramp-box fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No Vendor RMA Claims recorded yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+</div>
+{% endblock %}

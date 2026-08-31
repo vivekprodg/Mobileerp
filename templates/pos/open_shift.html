@@ -1,0 +1,37 @@
+{% extends "core/base.html" %}
+
+{% block title %}Open Cash Register Shift | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-5" style="max-width: 650px;">
+    <div class="card border-0 shadow-lg rounded-4 overflow-hidden bg-white">
+        <div class="bg-primary p-4 text-white text-center">
+            <div class="badge bg-white bg-opacity-25 rounded-pill px-3 py-1 fs-xs mb-2">Shift Float Initialization</div>
+            <h4 class="fw-bold mb-1"><i class="fas fa-cash-register me-2"></i> Open Register Shift</h4>
+            <p class="text-white-50 fs-xs mb-0">Terminal: <strong>{{ ACTIVE_BRANCH.name|default:"Main Counter" }}</strong></p>
+        </div>
+        <div class="p-4 p-md-5">
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-4">
+                    <label class="form-label fw-bold text-dark fs-sm">Opening Float Cash in Drawer (NPR) <span class="text-danger">*</span></label>
+                    {{ form.opening_cash }}
+                    <small class="text-muted fs-xs mt-1 d-block">Count opening cash change before taking customer transactions.</small>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label fw-bold text-dark fs-sm">Shift Notes / Float Denominations</label>
+                    {{ form.remarks }}
+                </div>
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-primary btn-lg rounded-pill fw-bold shadow-sm">
+                        <i class="fas fa-key me-2"></i> Open Shift &amp; Launch POS
+                    </button>
+                    <a href="{% url 'core:dashboard' %}" class="btn btn-outline-secondary rounded-pill">
+                        Cancel
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

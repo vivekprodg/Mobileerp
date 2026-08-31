@@ -1,0 +1,88 @@
+{% extends "core/base.html" %}
+
+{% block title %}Sales Register (Annex 5 Format) | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-book-open text-primary me-2"></i> Internal Sales Register (बिक्री खाता - Annex 5)
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Annex 5 proforma breakdown for monthly assessment and accountant review
+            </p>
+        </div>
+        <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+            <i class="fas fa-print me-1"></i> Print Register
+        </button>
+    </div>
+
+    <!-- Date Range Filter -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-12 col-md-4">
+                <label class="form-label fs-xs fw-bold text-muted mb-1">Start Date (AD)</label>
+                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm bg-light border-0">
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label fs-xs fw-bold text-muted mb-1">End Date (AD)</label>
+                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm bg-light border-0">
+            </div>
+            <div class="col-12 col-md-4">
+                <button type="submit" class="btn btn-primary btn-sm w-100 rounded-3 fw-bold">Filter Range</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Register Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-xs">
+                    <tr>
+                        <th class="ps-4">Date</th>
+                        <th>Estimate Slip</th>
+                        <th>Customer Name</th>
+                        <th>Cust PAN</th>
+                        <th>Taxable Base</th>
+                        <th>Non-Taxable Base</th>
+                        <th>Tax / VAT</th>
+                        <th class="text-end pe-4">Grand Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report.records %}
+                    <tr>
+                        <td class="ps-4">{{ row.bill_date_ad }}</td>
+                        <td class="font-monospace fw-bold">{{ row.estimate_number }}</td>
+                        <td>{{ row.recipient_display_name }}</td>
+                        <td><code>{{ row.customer_pan|default:"-" }}</code></td>
+                        <td>Rs. {{ row.taxable_amount|floatformat:2 }}</td>
+                        <td>Rs. {{ row.non_taxable_amount|floatformat:2 }}</td>
+                        <td class="text-warning-emphasis">Rs. {{ row.vat_amount|floatformat:2 }}</td>
+                        <td class="text-end pe-4 fw-bold text-primary">Rs. {{ row.grand_total|floatformat:2 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">No sales records in selected period.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if report.records %}
+                <tfoot class="bg-light fw-bold fs-xs">
+                    <tr>
+                        <td colspan="4" class="ps-4 text-end">TOTALS:</td>
+                        <td>Rs. {{ report.totals.taxable|floatformat:2 }}</td>
+                        <td>Rs. {{ report.totals.non_taxable|floatformat:2 }}</td>
+                        <td class="text-warning-emphasis">Rs. {{ report.totals.vat|floatformat:2 }}</td>
+                        <td class="text-end pe-4 text-primary fs-6">Rs. {{ report.totals.grand_total|floatformat:2 }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

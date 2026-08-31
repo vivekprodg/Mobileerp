@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Staff & System Users{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">System Users & Cashiers</h4>
+            <p class="text-muted fs-xs mb-0">Role authorizations, branch assignments and manager override PINs</p>
+        </div>
+        <a href="{% url 'users:user_create' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold">
+            <i class="fas fa-user-plus me-1"></i> Register Staff
+        </a>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <table class="table table-hover align-middle mb-0 fs-sm">
+            <thead class="bg-light text-muted text-uppercase fs-xs">
+                <tr>
+                    <th class="ps-4">Staff Name / Username</th>
+                    <th>Role</th>
+                    <th>Phone</th>
+                    <th>Assigned Branch</th>
+                    <th>Status</th>
+                    <th class="text-end pe-4">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in staff_users %}
+                <tr>
+                    <td class="ps-4">
+                        <strong>{{ u.get_full_name|default:u.username }}</strong>
+                        <br><small class="text-muted">{{ u.email|default:"No email" }}</small>
+                    </td>
+                    <td><span class="badge bg-light text-dark border">{{ u.get_role_display }}</span></td>
+                    <td>{{ u.phone_number }}</td>
+                    <td>{{ u.assigned_branch.name|default:"All Outlets" }}</td>
+                    <td><span class="badge bg-{% if u.is_active %}success{% else %}danger{% endif %}">{% if u.is_active %}Active{% else %}Disabled{% endif %}</span></td>
+                    <td class="text-end pe-4">
+                        <a href="{% url 'users:user_edit' u.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">Edit</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

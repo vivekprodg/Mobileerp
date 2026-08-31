@@ -1,0 +1,70 @@
+{% extends "core/base.html" %}
+
+{% block title %}{% if form.instance.pk %}Edit Customer{% else %}Register Customer{% endif %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">{% if form.instance.pk %}Edit Customer Profile{% else %}Add New Customer{% endif %}</h4>
+            <p class="text-muted fs-xs mb-0">Set up retail or wholesale contact information and allowed credit/udhaari limit</p>
+        </div>
+        <a href="{% url 'customers:customer_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+            &larr; Back to Directory
+        </a>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
+        <form method="post" novalidate>
+            {% csrf_token %}
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Customer / Business Name <span class="text-danger">*</span></label>
+                    {{ form.name }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Primary Phone Number <span class="text-danger">*</span></label>
+                    {{ form.phone_number }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Alternate Phone</label>
+                    {{ form.alt_phone_number }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Customer Type</label>
+                    {{ form.customer_type }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">PAN Number (For Business/Wholesale)</label>
+                    {{ form.pan_number }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Credit Limit (NPR)</label>
+                    {{ form.credit_limit }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Date of Birth (BS: YYYY-MM-DD)</label>
+                    {{ form.date_of_birth_bs }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Preferred Branch</label>
+                    {{ form.preferred_branch }}
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold">Address / Location</label>
+                    {{ form.address }}
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold">Customer Notes</label>
+                    {{ form.notes }}
+                </div>
+                <div class="col-12 mt-4 text-end">
+                    <button type="submit" class="btn btn-primary px-4 py-2 rounded-pill fw-bold shadow-sm">
+                        <i class="fas fa-save me-1"></i> Save Customer
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

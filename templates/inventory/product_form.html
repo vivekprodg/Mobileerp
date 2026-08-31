@@ -1,0 +1,755 @@
+{% extends "core/base.html" %}
+
+{% block title %}{% if form.instance.pk %}Edit Product - {{ form.instance.name }}{% else %}Register Product{% endif %} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.prod-form-sticky-bar {
+    position: sticky;
+    top: var(--erp-header-height, 62px);
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    z-index: 1010;
+    border-bottom: 1px solid var(--erp-slate-200);
+    padding: 12px 20px;
+    border-radius: 14px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.prod-nav-tabs .nav-link {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--erp-slate-600);
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 18px;
+    border-radius: 0;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.prod-nav-tabs .nav-link:hover {
+    color: var(--erp-primary);
+    border-bottom-color: var(--erp-primary-border);
+}
+
+.prod-nav-tabs .nav-link.active {
+    color: var(--erp-primary) !important;
+    background: transparent !important;
+    border-bottom: 2px solid var(--erp-primary) !important;
+}
+
+.warranty-card-row {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+    transition: border-color 0.15s ease;
+}
+
+.warranty-card-row:hover {
+    border-color: var(--erp-primary-border);
+}
+
+/* Photo Thumbnail Preview Card */
+.current-photo-preview-box {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 8px;
+}
+
+.current-photo-thumbnail {
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid #94a3b8;
+    background: #ffffff;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+
+.current-photo-thumbnail:hover {
+    transform: scale(1.08);
+}
+
+.photo-placeholder-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
+    background: #e2e8f0;
+    color: #64748b;
+    display: grid;
+    place-items: center;
+    font-size: 22px;
+    border: 1px dashed #94a3b8;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+
+    <!-- Form Tag Wrapping All Tabs and Sticky Bar -->
+    <form method="post" enctype="multipart/form-data" novalidate id="productMasterForm">
+        {% csrf_token %}
+
+        <!-- STICKY TOP ACTION BAR -->
+        <div class="prod-form-sticky-bar d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+            <div>
+                <h4 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-mobile-screen text-primary me-2"></i>
+                    {% if form.instance.pk %}Edit Product: {{ form.instance.name }}{% else %}Register New Product / Smartphone{% endif %}
+                </h4>
+                <p class="text-muted fs-xs mb-0">Structured tabbed form with complete mobile hardware specs, warranties, taxes, and warehouse storage locations.</p>
+            </div>
+            
+            <div class="d-flex align-items-center gap-2">
+                <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3" id="cancelFormBtn">
+                    Cancel
+                </a>
+                <button type="submit" name="_save_and_add_another" value="1" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                    <i class="fas fa-plus me-1"></i> Save &amp; Add Another
+                </button>
+                <button type="submit" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                    <i class="fas fa-save me-1"></i> Save Product
+                </button>
+            </div>
+        </div>
+
+        <!-- DISMISSIBLE ERROR SUMMARY BANNER -->
+        {% if form.errors or warranty_formset.errors %}
+        <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-danger text-white rounded-pill px-2 py-1 fs-2xs">
+                    {{ form.errors|length|add:warranty_formset.errors|length }} Errors
+                </span>
+                <h6 class="fw-bold text-danger mb-0">Please resolve the validation errors below:</h6>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <ul class="mb-0 fs-xs mt-2 ps-3">
+                {% for field in form %}
+                    {% for error in field.errors %}
+                        <li><strong>{{ field.label }}:</strong> {{ error }}</li>
+                    {% endfor %}
+                {% endfor %}
+                {% for error in form.non_field_errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+                {% for f_err in warranty_formset.errors %}
+                    {% for k, v in f_err.items %}
+                        <li><strong>Component Warranty:</strong> {{ v }}</li>
+                    {% endfor %}
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- TAB NAVIGATION BAR -->
+        <ul class="nav nav-tabs prod-nav-tabs border-bottom mb-4 bg-white px-3 pt-2 rounded-top-4 shadow-xs" id="productFormTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#tab-basic" type="button" role="tab" aria-controls="tab-basic" aria-selected="true">
+                    <i class="fas fa-info-circle text-primary"></i> 1. Basic Info
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="specs-tab" data-bs-toggle="tab" data-bs-target="#tab-specs" type="button" role="tab" aria-controls="tab-specs" aria-selected="false">
+                    <i class="fas fa-layer-group text-primary"></i> 2. Mobile Variants &amp; Specs
+                    <span class="badge bg-primary bg-opacity-10 text-primary ms-1 fs-2xs d-none" id="mobileSpecsIndicator">Phone</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="warranties-tab" data-bs-toggle="tab" data-bs-target="#tab-warranties" type="button" role="tab" aria-controls="tab-warranties" aria-selected="false">
+                    <i class="fas fa-shield-halved text-success"></i> 3. Component Warranties
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="pricing-tab" data-bs-toggle="tab" data-bs-target="#tab-pricing" type="button" role="tab" aria-controls="tab-pricing" aria-selected="false">
+                    <i class="fas fa-coins text-warning-emphasis"></i> 4. Pricing &amp; Tax Mode
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="storage-tab" data-bs-toggle="tab" data-bs-target="#tab-storage" type="button" role="tab" aria-controls="tab-storage" aria-selected="false">
+                    <i class="fas fa-warehouse text-secondary"></i> 5. Inventory &amp; Storage Location
+                </button>
+            </li>
+        </ul>
+
+        <!-- TAB CONTENT PANELS -->
+        <div class="tab-content" id="productFormTabsContent">
+            
+            <!-- TAB 1: BASIC INFORMATION -->
+            <div class="tab-pane fade show active" id="tab-basic" role="tabpanel" aria-labelledby="basic-tab">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                        <i class="fas fa-info-circle text-primary me-2"></i> Product Core Identification
+                    </h6>
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Product Full Name <span class="text-danger">*</span></label>
+                            {{ form.name }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Category <span class="text-danger">*</span></label>
+                            {{ form.category }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Sub-Category</label>
+                            {{ form.subcategory }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Brand <span class="text-danger">*</span></label>
+                            {{ form.brand }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Model Name</label>
+                            {{ form.model_name }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Model Number</label>
+                            {{ form.model_number }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">SKU Code (Auto if blank)</label>
+                            {{ form.sku }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Product Barcode (Optional)</label>
+                            {{ form.barcode }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Base Unit <span class="text-danger">*</span></label>
+                            {{ form.base_unit }}
+                        </div>
+
+                        <!-- PRODUCT IMAGE WITH PHOTO PREVIEW & LIVE SELECTOR -->
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Product Image</label>
+                            
+                            <!-- Current Photo Preview / Live Upload Container -->
+                            <div class="current-photo-preview-box" id="currentPhotoWrapper">
+                                <div class="position-relative flex-shrink-0" style="width: 60px; height: 60px;">
+                                    {% if form.instance.image %}
+                                        <img src="{{ form.instance.image.url }}" 
+                                             id="productFormImagePreview" 
+                                             alt="{{ form.instance.name }}" 
+                                             class="current-photo-thumbnail"
+                                             onclick="window.open('{{ form.instance.image.url }}', '_blank')"
+                                             title="Click to view full photo">
+                                    {% else %}
+                                        <div id="productPhotoPlaceholder" class="photo-placeholder-icon">
+                                            <i class="fas fa-image"></i>
+                                        </div>
+                                        <img src="" id="productFormImagePreview" class="current-photo-thumbnail d-none" alt="Preview">
+                                    {% endif %}
+                                </div>
+
+                                <div class="flex-grow-1 fs-xs">
+                                    {% if form.instance.image %}
+                                        <strong class="text-dark d-block" id="photoStatusTitle">Current Photo Attached</strong>
+                                        <a href="{{ form.instance.image.url }}" target="_blank" class="text-primary text-decoration-none fs-2xs fw-bold" id="viewFullPhotoLink">
+                                            <i class="fas fa-magnifying-glass-plus me-1"></i> View Full Resolution
+                                        </a>
+                                    {% else %}
+                                        <span class="text-muted d-block" id="photoStatusTitle">No image currently attached</span>
+                                        <small class="text-muted fs-2xs">Choose a file to attach product photo</small>
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                            {{ form.image }}
+                            <small class="text-muted fs-2xs mt-1 d-block">Upload JPG, PNG, or WebP product picture.</small>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Description &amp; Overview Notes</label>
+                            {{ form.description }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: MOBILE VARIANTS & HARDWARE SPECS -->
+            <div class="tab-pane fade" id="tab-specs" role="tabpanel" aria-labelledby="specs-tab">
+                
+                <!-- 2.1 Memory, SIM, Dimensions & Network Variants -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4 mobile-feature-panel">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-layer-group text-primary me-2"></i> Mobile Memory, SIM &amp; Body Form
+                        </h6>
+                        <span class="badge bg-primary bg-opacity-10 text-primary fs-xs">Handset Variants</span>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Variant Tag / Label</label>
+                            {{ form.variant_name }}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">RAM Capacity</label>
+                            {{ form.ram }}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">Internal Storage (ROM)</label>
+                            {{ form.internal_storage }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Color / Finish</label>
+                            {{ form.color_variant }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Network Generation</label>
+                            {{ form.network_type }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">SIM Configuration</label>
+                            {{ form.sim_configuration }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Region / Country Variant</label>
+                            {{ form.region_variant }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Physical Dimensions (H x W x T mm)</label>
+                            {{ form.size_dimension }}
+                            <small class="text-muted fs-2xs mt-1 d-block">e.g. 161.1 x 77.4 x 8.2 mm</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2.2 Core Performance, Display & Cameras -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4 mobile-feature-panel">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-microchip text-primary me-2"></i> Performance, Display &amp; Camera Architecture
+                        </h6>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Operating System</label>
+                            {{ form.operating_system }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Processor / Chipset</label>
+                            {{ form.processor_chipset }}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">Display Size</label>
+                            {{ form.display_size }}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">Display Type</label>
+                            {{ form.display_type }}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">Resolution</label>
+                            {{ form.display_resolution }}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">Refresh Rate</label>
+                            {{ form.refresh_rate }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Rear Camera Setup</label>
+                            {{ form.rear_camera }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Front Camera Setup</label>
+                            {{ form.front_camera }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Battery Capacity</label>
+                            {{ form.battery_capacity }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Fast Charging Support</label>
+                            {{ form.fast_charging }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2.3 Storage Expansion, Audio Ports & Biometrics -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4 mobile-feature-panel">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-fingerprint text-primary me-2"></i> Biometrics, Audio Ports &amp; Storage Expansion
+                        </h6>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Fingerprint Sensor</label>
+                            {{ form.fingerprint_sensor }}
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="form-check form-switch pb-2">
+                                {{ form.face_unlock }}
+                                <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.face_unlock.id_for_label }}">
+                                    Face Unlock / 3D Biometrics Supported
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">USB Port &amp; OTG Standard</label>
+                            {{ form.usb_port_type }}
+                            <small class="text-muted fs-2xs mt-1 d-block">e.g. USB Type-C 2.0 (OTG), Type-C 3.2</small>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="form-check form-switch pb-2">
+                                {{ form.headphone_jack_35mm }}
+                                <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.headphone_jack_35mm.id_for_label }}">
+                                    3.5mm Headphone Jack Available
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Max Supported Memory Card</label>
+                            {{ form.max_memory_card }}
+                            <small class="text-muted fs-2xs mt-1 d-block">e.g. microSDXC up to 1TB (Dedicated / Shared Slot)</small>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="form-check form-switch pb-2">
+                                {{ form.expandable_storage }}
+                                <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.expandable_storage.id_for_label }}">
+                                    Expandable Storage (MicroSD Slot Supported)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2.4 Wireless Connectivity & Navigation Sensors -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4 mobile-feature-panel">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-wifi text-primary me-2"></i> Wireless Connectivity &amp; Satellite Navigation
+                        </h6>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Wi-Fi Specification</label>
+                            {{ form.wifi_spec }}
+                            <small class="text-muted fs-2xs mt-1 d-block">e.g. Wi-Fi 802.11 a/b/g/n/ac/6, Dual Band, Wi-Fi Direct</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Bluetooth Version &amp; Profiles</label>
+                            {{ form.bluetooth_version }}
+                            <small class="text-muted fs-2xs mt-1 d-block">e.g. Bluetooth 5.3, A2DP, LE</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">GPS &amp; Positioning Satellite Systems</label>
+                            {{ form.gps_capabilities }}
+                            <small class="text-muted fs-2xs mt-1 d-block">e.g. GPS, GLONASS, GALILEO, BDS, QZSS</small>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="form-check form-switch pb-2">
+                                {{ form.nfc_available }}
+                                <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.nfc_available.id_for_label }}">
+                                    NFC (Near Field Communication) Available
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- TAB 3: COMPONENT WARRANTIES -->
+            <div class="tab-pane fade" id="tab-warranties" role="tabpanel" aria-labelledby="warranties-tab">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <div>
+                            <h6 class="fw-bold text-dark mb-0">
+                                <i class="fas fa-shield-halved text-success me-2"></i> Multi-Component Warranty Schedule
+                            </h6>
+                            <small class="text-muted fs-2xs">Define independent warranty durations for Main Board, Screen Panel, Battery, and Accessories.</small>
+                        </div>
+                        <span class="badge bg-success bg-opacity-10 text-success fs-xs fw-bold">Automated Sub-Warranty Engine</span>
+                    </div>
+
+                    {{ warranty_formset.management_form }}
+
+                    <div id="warrantyFormsetContainer">
+                        {% for wform in warranty_formset %}
+                        <div class="warranty-card-row">
+                            <div class="row g-2 align-items-center">
+                                <div class="col-12 col-md-3">
+                                    <label class="form-label fs-2xs fw-bold text-muted mb-1">Component Type</label>
+                                    {{ wform.component_type }}
+                                </div>
+                                <div class="col-12 col-md-3">
+                                    <label class="form-label fs-2xs fw-bold text-muted mb-1">Component Name / Label</label>
+                                    {{ wform.component_name }}
+                                </div>
+                                <div class="col-6 col-md-2">
+                                    <label class="form-label fs-2xs fw-bold text-muted mb-1">Warranty (Months)</label>
+                                    {{ wform.warranty_months }}
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    <label class="form-label fs-2xs fw-bold text-muted mb-1">Coverage Condition</label>
+                                    {{ wform.coverage_conditions }}
+                                </div>
+                                <div class="col-12 col-md-1 text-center pt-md-3">
+                                    {% if wform.instance.pk %}
+                                        <div class="form-check form-check-inline">
+                                            {{ wform.DELETE }}
+                                            <label class="form-check-label text-danger fs-2xs fw-bold">Delete</label>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 4: PRICING & TAX MODE -->
+            <div class="tab-pane fade" id="tab-pricing" role="tabpanel" aria-labelledby="pricing-tab">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                        <i class="fas fa-coins text-warning-emphasis me-2"></i> Pricing, Tax Calculation &amp; Discounts
+                    </h6>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Tax Pricing Mode <span class="text-danger">*</span></label>
+                            {{ form.tax_pricing_type }}
+                            <small class="text-muted fs-2xs mt-1 d-block">
+                                &bull; <strong>Inclusive:</strong> Rate includes tax (Retail MRP)<br>
+                                &bull; <strong>Exclusive:</strong> Adds tax on top during checkout<br>
+                                &bull; <strong>Exempt:</strong> 0% Tax Non-VAT Mode
+                            </small>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Default NTA MDMS Status</label>
+                            {{ form.default_mdms_status }}
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Purchase Cost Price (NPR)</label>
+                            {{ form.purchase_price }}
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Selling Price / Counter MRP (NPR) <span class="text-danger">*</span></label>
+                            {{ form.selling_price }}
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Wholesale Price (NPR)</label>
+                            {{ form.wholesale_price }}
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Max Cashier Discount (%)</label>
+                            {{ form.max_discount_percent }}
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Applicable VAT / Tax Rate (%)</label>
+                            {{ form.vat_rate }}
+                        </div>
+
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check form-switch pb-2">
+                                {{ form.is_vat_applicable }}
+                                <label class="form-check-label fw-semibold fs-xs" for="{{ form.is_vat_applicable.id_for_label }}">
+                                    Enable Tax Calculation
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 5: INVENTORY & STORAGE LOCATION -->
+            <div class="tab-pane fade" id="tab-storage" role="tabpanel" aria-labelledby="storage-tab">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                        <i class="fas fa-warehouse text-secondary me-2"></i> Inventory Tracking &amp; Warehouse Location
+                    </h6>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Inventory Tracking Type</label>
+                            {{ form.inventory_tracking_type }}
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Reorder Threshold Alert</label>
+                            {{ form.reorder_level }}
+                        </div>
+
+                        <div class="col-md-4">
+                            <div class="form-check form-switch mt-2">
+                                {{ form.requires_imei_tracking }}
+                                <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.requires_imei_tracking.id_for_label }}">
+                                    Track 15-Digit IMEI 1 / IMEI 2
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <div class="form-check form-switch mt-2">
+                                {{ form.requires_serial_tracking }}
+                                <label class="form-check-label fw-semibold fs-xs" for="{{ form.requires_serial_tracking.id_for_label }}">
+                                    Track Serial Number
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <div class="form-check form-switch mt-2">
+                                {{ form.is_spare_part }}
+                                <label class="form-check-label fw-semibold fs-xs text-danger" for="{{ form.is_spare_part.id_for_label }}">
+                                    Is Workshop Spare Part
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Rack / Cabinet Number</label>
+                            {{ form.rack_number }}
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Shelf Identifier</label>
+                            {{ form.shelf_identifier }}
+                        </div>
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Bin Location</label>
+                            {{ form.bin_location }}
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Overall Device Warranty (Months)</label>
+                            {{ form.warranty_months }}
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Warranty Provider</label>
+                            {{ form.warranty_provider }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- BOTTOM STICKY SUBMIT FOOTER -->
+        <div class="d-flex justify-content-end gap-2 mt-4 pt-3 border-top">
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary px-4 rounded-pill">
+                Cancel
+            </a>
+            <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm">
+                <i class="fas fa-save me-2"></i> Save Product Details
+            </button>
+        </div>
+
+    </form>
+</div>
+
+<!-- UNSAVED CHANGES CANCEL MODAL -->
+<div class="modal fade" id="cancelConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-body p-4 text-center">
+                <i class="fas fa-triangle-exclamation text-warning mb-2" style="font-size: 32px;"></i>
+                <h6 class="fw-bold text-dark mb-1">Discard Unsaved Changes?</h6>
+                <p class="text-muted fs-xs mb-3">Any modifications made to this product form will be lost.</p>
+                <div class="d-flex justify-content-center gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Stay on Form</button>
+                    <a href="{% url 'inventory:product_list' %}" class="btn btn-danger btn-sm px-3 rounded-pill fw-bold">Discard</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const categorySelect = document.getElementById('id_category_select') || document.querySelector('[name="category"]');
+    const imeiCheckbox = document.getElementById('id_requires_imei') || document.querySelector('[name="requires_imei_tracking"]');
+    const mobilePanels = document.querySelectorAll('.mobile-feature-panel');
+    const mobileIndicator = document.getElementById('mobileSpecsIndicator');
+
+    function evaluateMobileDisplay() {
+        let isMobileCategory = false;
+        if (categorySelect && categorySelect.selectedIndex >= 0) {
+            const selectedText = categorySelect.options[categorySelect.selectedIndex].text.toLowerCase();
+            if (selectedText.includes('phone') || selectedText.includes('mobile') || selectedText.includes('smartphone') || selectedText.includes('स्मार्टफोन')) {
+                isMobileCategory = true;
+            }
+        }
+        if (imeiCheckbox && imeiCheckbox.checked) {
+            isMobileCategory = true;
+        }
+
+        mobilePanels.forEach(panel => {
+            panel.style.display = isMobileCategory ? 'block' : 'none';
+        });
+
+        if (mobileIndicator) {
+            if (isMobileCategory) mobileIndicator.classList.remove('d-none');
+            else mobileIndicator.classList.add('d-none');
+        }
+    }
+
+    if (categorySelect) categorySelect.addEventListener('change', evaluateMobileDisplay);
+    if (imeiCheckbox) imeiCheckbox.addEventListener('change', evaluateMobileDisplay);
+    evaluateMobileDisplay();
+
+    // Instant Image Preview on File Selection
+    const imageFileInput = document.querySelector('input[type="file"][name="image"]');
+    const imagePreview = document.getElementById('productFormImagePreview');
+    const photoPlaceholder = document.getElementById('productPhotoPlaceholder');
+    const photoStatusTitle = document.getElementById('photoStatusTitle');
+    const viewFullLink = document.getElementById('viewFullPhotoLink');
+
+    if (imageFileInput && imagePreview) {
+        imageFileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    imagePreview.src = event.target.result;
+                    imagePreview.classList.remove('d-none');
+                    if (photoPlaceholder) photoPlaceholder.classList.add('d-none');
+                    if (photoStatusTitle) photoStatusTitle.innerHTML = '<span class="text-success fw-bold"><i class="fas fa-check me-1"></i> New Photo Selected (Ready to save)</span>';
+                    if (viewFullLink) viewFullLink.classList.add('d-none');
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    // Dirty Form Change Detection
+    const masterForm = document.getElementById('productMasterForm');
+    let formIsDirty = false;
+    masterForm.addEventListener('change', () => { formIsDirty = true; });
+    masterForm.addEventListener('input', () => { formIsDirty = true; });
+
+    const cancelBtn = document.getElementById('cancelFormBtn');
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', (e) => {
+            if (formIsDirty) {
+                e.preventDefault();
+                new bootstrap.Modal(document.getElementById('cancelConfirmModal')).show();
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

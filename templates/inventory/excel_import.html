@@ -1,0 +1,164 @@
+{% extends "core/base.html" %}
+
+{% block title %}Import Products from Excel / CSV | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.import-upload-zone {
+    border: 2px dashed #b2ccff;
+    background: #f8fbff;
+    border-radius: 16px;
+    padding: 48px 24px;
+    text-align: center;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+.import-upload-zone:hover, .import-upload-zone.dragover {
+    border-color: #175cd3;
+    background: #eff8ff;
+}
+.import-step-badge {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #175cd3;
+    color: #fff;
+    display: inline-grid;
+    place-items: center;
+    font-weight: 800;
+    font-size: 13px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1100px;">
+    <!-- Page Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-file-excel text-success me-2"></i> Intelligent Catalog Excel & CSV Importer
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Upload existing spreadsheets in any format. Our intelligent mapper aligns your columns and handles duplicates automatically.
+            </p>
+        </div>
+        <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+            &larr; Back to Inventory
+        </a>
+    </div>
+
+    <!-- Step Progress Tracker -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="d-flex justify-content-around align-items-center text-center">
+            <div class="d-flex align-items-center gap-2">
+                <span class="import-step-badge">1</span>
+                <strong class="text-primary fs-sm">Upload Spreadsheet</strong>
+            </div>
+            <div class="text-muted opacity-50">&rarr;</div>
+            <div class="d-flex align-items-center gap-2 opacity-50">
+                <span class="import-step-badge bg-secondary">2</span>
+                <span class="text-muted fs-sm">Match Columns & Conflict Rules</span>
+            </div>
+            <div class="text-muted opacity-50">&rarr;</div>
+            <div class="d-flex align-items-center gap-2 opacity-50">
+                <span class="import-step-badge bg-secondary">3</span>
+                <span class="text-muted fs-sm">Atomic Stock Inward</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Card -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <form method="post" enctype="multipart/form-data" id="excelUploadForm">
+            {% csrf_token %}
+
+            <div class="import-upload-zone mb-4" id="dropZone" onclick="document.getElementById('id_excel_file').click()">
+                <i class="fas fa-cloud-arrow-up text-primary mb-3" style="font-size: 48px;"></i>
+                <h5 class="fw-bold text-dark mb-1">Click to select or drag & drop spreadsheet</h5>
+                <p class="text-muted fs-xs mb-3">Supports Microsoft Excel (.xlsx, .xls) and Comma-Separated Values (.csv) up to 25MB</p>
+                <div class="d-inline-flex align-items-center gap-2 bg-white px-3 py-2 border rounded-pill shadow-sm fs-xs fw-semibold text-secondary">
+                    <i class="fas fa-file-lines text-primary"></i> <span id="selectedFileName">No file chosen yet</span>
+                </div>
+                <div style="display: none;">
+                    {{ form.excel_file }}
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-12 col-md-6">
+                    <div class="p-3 bg-light rounded-3 border h-100">
+                        <h6 class="fw-bold text-dark fs-xs mb-2"><i class="fas fa-magic text-primary me-1"></i> Auto-Detection Features</h6>
+                        <ul class="text-muted fs-xs mb-0 ps-3">
+                            <li>Fuzzy column matcher guesses your headers automatically.</li>
+                            <li>Generates unique SKU codes and Code128 barcodes if blank.</li>
+                            <li>Automatically creates missing Categories and Brands with active status.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <div class="p-3 bg-light rounded-3 border h-100">
+                        <h6 class="fw-bold text-dark fs-xs mb-2"><i class="fas fa-shield-halved text-success me-1"></i> Conflict & Duplicate Protection</h6>
+                        <ul class="text-muted fs-xs mb-0 ps-3">
+                            <li>Merge duplicate rows in your file by consolidating stock.</li>
+                            <li>Update existing inventory prices with new landed costs.</li>
+                            <li>Zero data loss & full audit logging of imported records.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="col-12 text-end mt-4">
+                    <button type="submit" class="btn btn-primary px-4 py-2 rounded-pill fw-bold shadow-sm" id="uploadSubmitBtn" disabled>
+                        Proceed to Column Mapping &rarr;
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.getElementById('id_excel_file');
+    const fileNameDisplay = document.getElementById('selectedFileName');
+    const submitBtn = document.getElementById('uploadSubmitBtn');
+    const dropZone = document.getElementById('dropZone');
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const name = e.target.files[0].name;
+            fileNameDisplay.innerText = name;
+            submitBtn.disabled = false;
+        } else {
+            fileNameDisplay.innerText = 'No file chosen yet';
+            submitBtn.disabled = true;
+        }
+    });
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('dragover');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('dragover');
+        });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            fileInput.files = e.dataTransfer.files;
+            fileNameDisplay.innerText = e.dataTransfer.files[0].name;
+            submitBtn.disabled = false;
+        }
+    });
+});
+</script>
+{% endblock %}

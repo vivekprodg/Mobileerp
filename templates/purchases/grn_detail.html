@@ -1,0 +1,115 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}GRN {{ grn.grn_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0 font-monospace">{{ grn.grn_number }}</h4>
+                <span class="badge bg-{% if grn.status == 'RECEIVED' %}success{% else %}warning text-dark{% endif %} fs-xs px-3 py-1 rounded-pill">
+                    {{ grn.get_status_display }}
+                </span>
+                {% if grn.distributor_mdms_certified %}
+                <span class="badge bg-success bg-opacity-10 text-success fs-xs fw-bold px-3 py-1 rounded-pill">
+                    <i class="fas fa-shield-halved me-1"></i> NTA MDMS Certified
+                </span>
+                {% endif %}
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Supplier: <strong>{{ grn.supplier.company_name }}</strong> | 
+                Challan/Bill Ref: <strong class="font-monospace text-primary">{{ grn.supplier_bill_no }}</strong> | 
+                Date: <strong>{{ grn.bill_date }} ({{ grn.bill_date_bs|default:"-" }} BS)</strong>
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print GRN Voucher
+            </button>
+            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to GRN List
+            </a>
+        </div>
+    </div>
+
+    <!-- Financial Breakdown Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-primary border-4">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Gross Inward Total</span>
+                <h3 class="fw-bold text-primary font-monospace mt-1 mb-0">Rs. {{ grn.gross_amount|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">Before overheads & taxes</small>
+            </div>
+        </div>
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-warning border-4">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Distributed Overhead</span>
+                <h3 class="fw-bold text-warning-emphasis font-monospace mt-1 mb-0">
+                    Rs. {{ grn.extra_freight_charge|add:grn.customs_import_charge|add:grn.other_handling_charge|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Freight, Customs & Handling</small>
+            </div>
+        </div>
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-success border-4">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Paid on Inward</span>
+                <h3 class="fw-bold text-success font-monospace mt-1 mb-0">Rs. {{ grn.paid_amount|floatformat:2|intcomma }}</h3>
+                <small class="text-success fs-2xs">Cash / Digital payment</small>
+            </div>
+        </div>
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-danger border-4">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Due Payable (Udhaari)</span>
+                <h3 class="fw-bold text-danger font-monospace mt-1 mb-0">Rs. {{ grn.due_amount|floatformat:2|intcomma }}</h3>
+                <small class="text-danger fs-2xs">Added to supplier ledger</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Line Items Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-boxes-stacked text-primary me-2"></i> Inward Consignment Items</h6>
+            <span class="badge bg-primary rounded-pill">{{ items.count }} Line Items</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Product / Item Description</th>
+                        <th>Purchased Qty</th>
+                        <th>Atomic Stock Qty</th>
+                        <th>Purchase Rate</th>
+                        <th>Unit Landed Cost</th>
+                        <th>New Target MRP</th>
+                        <th class="text-end pe-4">Line Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td class="ps-4">
+                            <strong>{{ item.product.name }}</strong>
+                            {% if item.supplier_item_code %}<small class="text-muted font-monospace d-block">Supplier SKU: {{ item.supplier_item_code }}</small>{% endif %}
+                            {% if item.scanned_imei_list %}
+                                <div class="mt-1 font-monospace text-primary fs-2xs text-truncate" style="max-width: 350px;">
+                                    IMEIs: {{ item.scanned_imei_list }}
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td>{{ item.purchased_quantity|floatformat:2 }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ item.base_unit_quantity|floatformat:2 }} {{ item.product.base_unit.code }}</span></td>
+                        <td class="font-monospace">Rs. {{ item.purchase_rate|floatformat:2 }}</td>
+                        <td class="font-monospace fw-bold text-dark">Rs. {{ item.unit_landed_cost|floatformat:2 }}</td>
+                        <td class="font-monospace fw-bold text-primary">Rs. {{ item.new_selling_price|default:item.product.selling_price|floatformat:2 }}</td>
+                        <td class="text-end pe-4 font-monospace fw-bold">Rs. {{ item.line_total|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

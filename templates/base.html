@@ -1,0 +1,195 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="h-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    
+    <title>{% block title %}{{ COMPANY_NAME }} | Store ERP{% endblock %}</title>
+
+    <!-- PWA Manifest & Icons -->
+    <link rel="manifest" href="{% static 'manifest.json' %}">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="icon" type="image/png" href="{% if HAS_COMPANY_LOGO %}{{ COMPANY_LOGO_URL }}{% else %}{% static 'images/icons/icon-192x192.png' %}{% endif %}">
+
+    <!-- Fonts & Core Vendor CSS -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/custom.css' %}">
+
+    <!-- High-Performance Layout & Sidebar Collapse Engine -->
+    <style>
+        :root {
+            --erp-bg: #f8fafc;
+            --erp-surface: #ffffff;
+            --erp-border: #e2e8f0;
+            --erp-primary: #2563eb;
+            --erp-primary-hover: #1d4ed8;
+            --erp-dark: #0f172a;
+            --erp-sidebar-width: 260px;
+            --erp-sidebar-collapsed-width: 72px;
+            --erp-header-height: 62px;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+            background-color: var(--erp-bg);
+            color: #0f172a;
+            letter-spacing: -0.015em;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* Fluid Master Layout */
+        .app-layout {
+            display: flex;
+            flex: 1 1 auto;
+            width: 100%;
+            min-height: calc(100vh - var(--erp-header-height));
+            position: relative;
+        }
+
+        /* Desktop Sidebar Navigation */
+        .app-sidebar-wrapper {
+            width: var(--erp-sidebar-width);
+            min-width: var(--erp-sidebar-width);
+            max-width: var(--erp-sidebar-width);
+            background: #ffffff;
+            border-right: 1px solid var(--erp-border);
+            height: calc(100vh - var(--erp-header-height));
+            position: sticky;
+            top: var(--erp-header-height);
+            display: flex;
+            flex-direction: column;
+            transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                        min-width 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                        max-width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1020;
+        }
+
+        /* Collapsed Icon-Only Desktop Mode */
+        .app-layout.sidebar-collapsed .app-sidebar-wrapper {
+            width: var(--erp-sidebar-collapsed-width);
+            min-width: var(--erp-sidebar-collapsed-width);
+            max-width: var(--erp-sidebar-collapsed-width);
+        }
+        .app-layout.sidebar-collapsed .nav-text,
+        .app-layout.sidebar-collapsed .nav-header,
+        .app-layout.sidebar-collapsed .sidebar-footer-disclaimer,
+        .app-layout.sidebar-collapsed .badge-hide-collapsed {
+            display: none !important;
+        }
+        .app-layout.sidebar-collapsed .nav-link {
+            justify-content: center !important;
+            padding: 0.65rem 0 !important;
+        }
+        .app-layout.sidebar-collapsed .nav-link i {
+            margin: 0 !important;
+            font-size: 1.15rem !important;
+        }
+
+        /* Main Scrollable Viewport with Integrated Sticky Footer */
+        .app-content-wrapper {
+            flex: 1 1 0%;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--erp-bg);
+            position: relative;
+        }
+        .app-main-body {
+            flex: 1 0 auto;
+            width: 100%;
+        }
+
+        /* Tablet & Small Desktop Scaling */
+        @media (max-width: 1200px) and (min-width: 992px) {
+            :root {
+                --erp-sidebar-width: 220px;
+            }
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="d-flex flex-column min-vh-100">
+
+    <!-- Top Navigation Header -->
+    {% include "includes/_header.html" %}
+
+    <div class="app-layout" id="appLayout">
+        <!-- Desktop Fixed Sidebar -->
+        <aside class="app-sidebar-wrapper d-none d-lg-flex" id="desktopSidebar">
+            {% include "includes/_sidebar.html" %}
+        </aside>
+
+        <!-- Mobile Offcanvas Sidebar -->
+        <div class="offcanvas offcanvas-start p-0 d-lg-none" tabindex="-1" id="sidebarOffcanvas" style="width: 280px;">
+            <div class="offcanvas-header bg-dark text-white border-bottom border-secondary px-3 py-3">
+                <div class="d-flex align-items-center gap-2">
+                    {% if HAS_COMPANY_LOGO %}
+                        <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="rounded-3 bg-white p-1" style="height: 32px; width: auto; object-fit: contain;">
+                    {% else %}
+                        <span class="badge bg-primary p-2 rounded-3 fs-6"><i class="fas fa-mobile-screen"></i></span>
+                    {% endif %}
+                    <div>
+                        <h6 class="fw-bold text-white mb-0 fs-sm text-truncate" style="max-width: 170px;">{{ COMPANY_NAME }}</h6>
+                        <small class="text-white-50 fs-2xs">{{ STORE_OUTLET_NAME }}</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+            </div>
+            <div class="offcanvas-body p-0 h-100 overflow-y-auto">
+                {% include "includes/_sidebar.html" %}
+            </div>
+        </div>
+
+        <!-- Main Content Viewport -->
+        <main class="app-content-wrapper" id="mainContent">
+            <div class="app-main-body">
+                {% include "includes/_messages.html" %}
+                {% block content %}{% endblock %}
+            </div>
+            <!-- Sticky Seamless Footer -->
+            {% include "includes/_footer.html" %}
+        </main>
+    </div>
+
+    <!-- Bootstrap 5.3 & App JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{% static 'js/pwa_register.js' %}"></script>
+
+    <!-- Sidebar Desktop Collapse & Tooltip Initializer -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const layout = document.getElementById('appLayout');
+            const toggleBtn = document.getElementById('sidebarToggleBtn');
+
+            // Restore sidebar state from LocalStorage
+            if (localStorage.getItem('erp_sidebar_collapsed') === 'true') {
+                layout.classList.add('sidebar-collapsed');
+            }
+
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    layout.classList.toggle('sidebar-collapsed');
+                    const isCollapsed = layout.classList.contains('sidebar-collapsed');
+                    localStorage.setItem('erp_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+                });
+            }
+
+            // Initialize Bootstrap Tooltips
+            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            tooltipTriggerList.map(el => new bootstrap.Tooltip(el));
+        });
+    </script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

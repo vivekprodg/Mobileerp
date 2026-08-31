@@ -1,0 +1,1784 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Inventory &amp; Warehouse Catalog | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ==========================================================================
+   ENTERPRISE INVENTORY DASHBOARD DESIGN SYSTEM & SPECIFICATION ARCHITECTURE
+   ========================================================================== */
+:root {
+    --inv-bg: #f5f7fa;
+    --inv-surface: #ffffff;
+    --inv-surface-soft: #f8fafc;
+    --inv-surface-muted: #f1f5f9;
+    --inv-text: #101828;
+    --inv-text-secondary: #475467;
+    --inv-text-muted: #98a2b3;
+    --inv-placeholder: #98a2b3;
+    --inv-border: #e4e7ec;
+    --inv-border-strong: #d0d5dd;
+    --inv-primary: #175cd3;
+    --inv-primary-dark: #1849a9;
+    --inv-primary-soft: #eff8ff;
+    --inv-primary-border: #bfdbfe;
+    --inv-success: #079455;
+    --inv-success-soft: #ecfdf3;
+    --inv-success-border: #a6f4c5;
+    --inv-warning: #dc6803;
+    --inv-warning-soft: #fffaeb;
+    --inv-warning-border: #fedf89;
+    --inv-danger: #d92d20;
+    --inv-danger-soft: #fef3f2;
+    --inv-danger-border: #fee4e2;
+    --inv-purple: #6941c6;
+    --inv-purple-soft: #f4f3ff;
+    --inv-purple-border: #e9d7fe;
+    --inv-radius-sm: 8px;
+    --inv-radius-md: 12px;
+    --inv-radius-lg: 16px;
+    --inv-radius-pill: 9999px;
+    --inv-shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.04);
+    --inv-shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.05);
+    --inv-shadow-md: 0 8px 24px rgba(16, 24, 40, 0.06);
+    --inv-shadow-lg: 0 20px 60px rgba(16, 24, 40, 0.12);
+    --inv-transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.inv-content {
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 24px 20px;
+}
+
+/* Page Header & Title Bar */
+.inv-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 24px;
+}
+
+.inv-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--inv-primary);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 6px;
+}
+
+.inv-eyebrow-line {
+    width: 24px;
+    height: 2px;
+    background: var(--inv-primary);
+    border-radius: 999px;
+}
+
+.inv-page-title {
+    margin: 0;
+    font-size: clamp(26px, 2.5vw, 34px);
+    letter-spacing: -.035em;
+    line-height: 1.15;
+    font-weight: 800;
+    color: var(--inv-text);
+}
+
+.inv-page-description {
+    max-width: 720px;
+    margin: 8px 0 0;
+    color: var(--inv-text-secondary);
+    font-size: 13.5px;
+    line-height: 1.6;
+}
+
+.inv-header-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: nowrap;
+    align-items: center;
+}
+
+/* Global Button System */
+.inv-btn {
+    min-height: 40px !important;
+    border-radius: 10px !important;
+    border: 1px solid var(--inv-border) !important;
+    background: white !important;
+    color: #344054 !important;
+    padding: 0 16px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    font-size: 12.5px !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
+    box-shadow: var(--inv-shadow-sm) !important;
+    text-decoration: none !important;
+    transition: all var(--inv-transition) !important;
+    cursor: pointer;
+}
+
+.inv-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--inv-shadow-md) !important;
+}
+
+.inv-btn-primary {
+    background: var(--inv-primary) !important;
+    border-color: var(--inv-primary) !important;
+    color: #ffffff !important;
+}
+
+.inv-btn-primary:hover {
+    background: var(--inv-primary-dark) !important;
+    border-color: var(--inv-primary-dark) !important;
+    color: #ffffff !important;
+}
+
+.inv-btn-excel {
+    background: #ecfdf5 !important;
+    border-color: var(--inv-success-border) !important;
+    color: #065f46 !important;
+}
+
+.inv-btn-excel:hover {
+    background: #d1fae5 !important;
+    border-color: #6ee7b7 !important;
+    color: #047857 !important;
+}
+
+/* Metric Cards System */
+.inv-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.inv-kpi {
+    background: var(--inv-surface);
+    border: 1px solid var(--inv-border);
+    border-radius: var(--inv-radius-lg);
+    padding: 18px 20px;
+    min-height: 135px;
+    box-shadow: var(--inv-shadow-sm);
+    transition: all var(--inv-transition);
+}
+
+.inv-kpi:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--inv-shadow-md);
+    border-color: var(--inv-border-strong);
+}
+
+.inv-kpi-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.inv-kpi-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .065em;
+    color: var(--inv-text-secondary);
+    font-weight: 800;
+}
+
+.inv-kpi-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+}
+
+.inv-kpi-value {
+    margin-top: 14px;
+    font-size: 27px;
+    line-height: 1;
+    letter-spacing: -.04em;
+    font-weight: 800;
+    color: var(--inv-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-kpi-meta {
+    margin-top: 8px;
+    font-size: 11.5px;
+    color: var(--inv-text-muted);
+}
+
+/* Two-Column Responsive Workspace Grid */
+.inv-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 20px;
+    align-items: start;
+}
+
+.inv-panel {
+    background: #ffffff;
+    border: 1px solid var(--inv-border);
+    border-radius: var(--inv-radius-lg);
+    box-shadow: var(--inv-shadow-sm);
+}
+
+.inv-panel-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--inv-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.inv-panel-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -.015em;
+    color: var(--inv-text);
+}
+
+.inv-panel-subtitle {
+    color: var(--inv-text-muted);
+    font-size: 11.5px;
+    margin-top: 3px;
+}
+
+/* Search & Filter Toolbar */
+.inv-toolbar {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--inv-border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    background: #ffffff;
+}
+
+.inv-search {
+    flex: 1 1 240px;
+    position: relative;
+}
+
+.inv-search input {
+    width: 100%;
+    min-height: 40px;
+    border: 1px solid var(--inv-border);
+    border-radius: 10px;
+    outline: none;
+    padding: 0 14px 0 38px;
+    color: var(--inv-text);
+    background: #ffffff;
+    font-size: 12.5px;
+    transition: all 0.15s ease;
+}
+
+.inv-search input::placeholder,
+.inv-form-input::placeholder {
+    color: var(--inv-placeholder) !important;
+    opacity: 1;
+}
+
+.inv-search input:focus,
+.inv-select:focus,
+.inv-form-input:focus {
+    border-color: #84adff;
+    box-shadow: 0 0 0 3px rgba(23, 92, 211, 0.08);
+}
+
+.inv-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #98a2b3;
+    pointer-events: none;
+}
+
+.inv-select {
+    min-height: 40px;
+    min-width: 140px;
+    border: 1px solid var(--inv-border);
+    border-radius: 10px;
+    background: #ffffff;
+    color: #475467;
+    padding: 0 12px;
+    outline: none;
+    font-size: 12.5px;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.inv-filter-btn {
+    min-height: 40px;
+    width: 40px;
+    border: 1px solid var(--inv-border);
+    border-radius: 10px;
+    background: #ffffff;
+    color: #475467;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s ease;
+}
+
+.inv-filter-btn:hover {
+    border-color: var(--inv-primary);
+    color: var(--inv-primary);
+    background: var(--inv-primary-soft);
+}
+
+/* Master Catalog Table Architecture */
+.inv-table-wrap {
+    overflow-x: auto;
+}
+
+.inv-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 960px;
+}
+
+.inv-table thead th {
+    text-align: left;
+    padding: 12px 18px;
+    color: #667085;
+    background: #fcfcfd;
+    border-bottom: 1px solid var(--inv-border);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .065em;
+    font-weight: 800;
+}
+
+.inv-table tbody td {
+    padding: 14px 18px;
+    border-bottom: 1px solid #f0f2f5;
+    vertical-align: middle;
+    font-size: 12.5px;
+    color: var(--inv-text);
+}
+
+.inv-table tbody tr:hover {
+    background: #fafcff;
+}
+
+.inv-product-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.inv-product-image {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    background: linear-gradient(145deg, #f8fafc, #e2e8f0);
+    display: grid;
+    place-items: center;
+    color: #667085;
+    font-size: 16px;
+    flex: 0 0 auto;
+    overflow: hidden;
+    border: 1px solid var(--inv-border);
+}
+
+.inv-product-thumbnail-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.inv-product-name {
+    font-weight: 750;
+    color: #101828;
+    text-decoration: none;
+}
+
+.inv-product-name:hover {
+    color: var(--inv-primary);
+}
+
+.inv-product-sku {
+    margin-top: 2px;
+    font-size: 10.5px;
+    color: #98a2b3;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.inv-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 800;
+}
+
+.inv-badge-success { color: #067647; background: #ecfdf3; border: 1px solid var(--inv-success-border); }
+.inv-badge-warning { color: #b54708; background: #fffaeb; border: 1px solid var(--inv-warning-border); }
+.inv-badge-danger  { color: #b42318; background: #fef3f2; border: 1px solid var(--inv-danger-border); }
+.inv-badge-purple  { color: #6941c6; background: #f4f3ff; border: 1px solid var(--inv-purple-border); }
+
+.inv-price {
+    font-weight: 750;
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-stock-value {
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-muted {
+    color: var(--inv-text-muted);
+}
+
+.inv-icon-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--inv-border);
+    background: white;
+    color: #667085;
+    display: grid;
+    place-items: center;
+    text-decoration: none;
+    transition: all 0.15s ease;
+}
+
+.inv-icon-btn:hover {
+    color: var(--inv-primary);
+    border-color: #9bbcff;
+    background: var(--inv-primary-soft);
+}
+
+/* Right-Hand Activity & Replenishment Feeds */
+.inv-right-column {
+    display: grid;
+    gap: 18px;
+}
+
+.inv-alert-panel {
+    padding: 18px;
+}
+
+.inv-alert-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.inv-alert-count {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--inv-warning-soft);
+    color: var(--inv-warning);
+    border: 1px solid var(--inv-warning-border);
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    font-size: 11px;
+}
+
+.inv-alert-item {
+    padding: 12px 0;
+    border-bottom: 1px solid #f2f4f7;
+}
+
+.inv-alert-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.inv-alert-product {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.inv-alert-name {
+    font-size: 12px;
+    font-weight: 750;
+    color: var(--inv-text);
+}
+
+.inv-alert-stock {
+    font-size: 10.5px;
+    color: var(--inv-danger);
+    font-weight: 750;
+    margin-top: 2px;
+}
+
+.inv-progress {
+    height: 6px;
+    margin-top: 8px;
+    background: #f2f4f7;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.inv-progress-bar {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--inv-danger);
+}
+
+.inv-activity-panel {
+    padding: 18px;
+}
+
+.inv-activity {
+    display: grid;
+    gap: 14px;
+    margin-top: 14px;
+}
+
+.inv-activity-item {
+    display: flex;
+    gap: 10px;
+}
+
+.inv-activity-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--inv-primary-soft);
+    color: var(--inv-primary);
+    border: 1px solid var(--inv-primary-border);
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.inv-activity-title {
+    font-size: 11.5px;
+    font-weight: 750;
+    color: var(--inv-text);
+}
+
+.inv-activity-meta {
+    margin-top: 2px;
+    color: var(--inv-text-muted);
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+/* Modals Architecture & Backdrop Blur */
+.inv-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(16, 24, 40, 0.6);
+    backdrop-filter: blur(6px);
+    z-index: 1050;
+    display: none;
+    place-items: center;
+    padding: 20px;
+}
+
+.inv-modal-overlay.show {
+    display: grid;
+}
+
+.inv-modal {
+    width: min(760px, 100%);
+    max-height: 90vh;
+    overflow-y: auto;
+    background: #ffffff;
+    border-radius: 18px;
+    box-shadow: var(--inv-shadow-lg);
+}
+
+.inv-modal-header {
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--inv-border);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+}
+
+.inv-modal-title {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -.02em;
+    color: var(--inv-text);
+}
+
+.inv-modal-description {
+    color: var(--inv-text-secondary);
+    font-size: 11.5px;
+    margin-top: 3px;
+}
+
+.inv-modal-close {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--inv-border);
+    background: white;
+    border-radius: 8px;
+    color: #667085;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    transition: all 0.15s ease;
+}
+
+.inv-modal-close:hover {
+    background: #f8fafc;
+    color: var(--inv-text);
+}
+
+.inv-form {
+    padding: 20px 22px;
+}
+
+.inv-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+
+.inv-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.inv-form-group.full {
+    grid-column: 1 / -1;
+}
+
+.inv-form-label {
+    font-size: 11.5px;
+    font-weight: 750;
+    color: #344054;
+}
+
+.inv-form-input {
+    min-height: 38px;
+    border: 1px solid var(--inv-border);
+    border-radius: 9px;
+    padding: 0 11px;
+    outline: none;
+    font-size: 12.5px;
+    color: var(--inv-text);
+}
+
+.inv-modal-footer {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+/* Quick Add Category/SubCategory/Unit Button (Prominent 28x28px) */
+.inv-quick-add-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--inv-primary-soft);
+    color: var(--inv-primary);
+    border: 1px solid var(--inv-primary-border);
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.15s ease;
+}
+
+.inv-quick-add-btn:hover {
+    background: var(--inv-primary);
+    color: white;
+    border-color: var(--inv-primary);
+    transform: scale(1.05);
+}
+
+@media (max-width: 1200px) {
+    .inv-workspace { grid-template-columns: 1fr; }
+    .inv-right-column { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 900px) {
+    .inv-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .inv-page-header { flex-direction: column; }
+    .inv-header-actions { justify-content: flex-start; width: 100%; flex-wrap: wrap; }
+}
+
+@media (max-width: 600px) {
+    .inv-kpi-grid, .inv-right-column { grid-template-columns: 1fr; }
+    .inv-toolbar { flex-direction: column; align-items: stretch; }
+    .inv-search { flex-basis: 100%; }
+    .inv-form-grid { grid-template-columns: 1fr; }
+    .inv-form-group.full { grid-column: auto; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="inv-content">
+
+    <!-- PAGE HEADER -->
+    <div class="inv-page-header">
+        <div>
+            <div class="inv-eyebrow">
+                <span class="inv-eyebrow-line"></span>
+                Inventory &amp; Smartphones Management
+            </div>
+            <h1 class="inv-page-title">
+                Inventory &amp; Warehouse
+            </h1>
+            <p class="inv-page-description">
+                Manage smartphone memory variants (RAM/ROM), specifications, branch inventory stock counters,
+                fluctuating batch landed costs, warranty terms, and warehouse rack locations.
+            </p>
+        </div>
+
+        <div class="inv-header-actions">
+            <!-- Intelligent Excel Importer Link -->
+            <a href="{% url 'inventory:excel_import' %}" class="inv-btn inv-btn-excel" title="Upload existing Excel/CSV spreadsheet">
+                <i class="fas fa-file-excel text-success"></i> Import Excel (.xlsx)
+            </a>
+
+            <a href="{% url 'products:barcode_print' %}" class="inv-btn">
+                <i class="fas fa-barcode text-primary"></i> Generate Barcodes
+            </a>
+
+            <a href="{% url 'reports:export_csv' 'valuation' %}" class="inv-btn">
+                <i class="fas fa-file-invoice-dollar text-secondary"></i> Stock Valuation
+            </a>
+
+            <button type="button" class="inv-btn inv-btn-primary" id="openAddModalBtn">
+                <i class="fas fa-plus-circle"></i> Add Product / Phone
+            </button>
+        </div>
+    </div>
+
+    <!-- KPI CARDS -->
+    <div class="inv-kpi-grid">
+        <div class="inv-kpi">
+            <div class="inv-kpi-top">
+                <div class="inv-kpi-label">Active SKUs</div>
+                <div class="inv-kpi-icon" style="background:#eff8ff; color:#175cd3;">
+                    <i class="fas fa-boxes-stacked"></i>
+                </div>
+            </div>
+            <div class="inv-kpi-value">{{ kpi_active_skus|intcomma }}</div>
+            <div class="inv-kpi-meta">Catalog models registered</div>
+        </div>
+
+        <!-- OUTLET CONTEXT CARD WITH INSTANT SWITCHER -->
+        <div class="inv-kpi position-relative">
+            <div class="inv-kpi-top">
+                <div class="inv-kpi-label">Active Outlet Context</div>
+                <div class="dropdown">
+                    <button class="inv-kpi-icon border-0 p-0" style="background:#ecfdf3; color:#079455; cursor:pointer;" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Switch Active Outlet">
+                        <i class="fas fa-store"></i>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0 p-2 rounded-3" style="min-width: 240px; z-index: 1060;">
+                        <li class="px-3 py-1 text-muted fs-2xs text-uppercase fw-bold border-bottom mb-1">Switch Branch View</li>
+                        {% for br in AVAILABLE_BRANCHES %}
+                        <li>
+                            <form action="{% url 'branches:switch_branch' %}" method="post" class="m-0">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                <input type="hidden" name="branch" value="{{ br.id }}">
+                                <button type="submit" class="dropdown-item rounded-2 py-2 fs-xs d-flex align-items-center justify-content-between {% if ACTIVE_BRANCH.id == br.id %}bg-success bg-opacity-10 text-success fw-bold{% endif %}">
+                                    <span>{{ br.name }}</span>
+                                    <span class="badge bg-light text-dark border">{{ br.code }}</span>
+                                </button>
+                            </form>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            <div class="inv-kpi-value fs-4 text-truncate" title="{{ ACTIVE_BRANCH.name }}">{{ ACTIVE_BRANCH.name|default:"Main Counter" }}</div>
+            <div class="inv-kpi-meta d-flex align-items-center justify-content-between">
+                <span>Code: <strong>{{ ACTIVE_BRANCH.code|default:"HQ" }}</strong></span>
+                <span class="badge bg-success bg-opacity-10 text-success fs-2xs fw-bold"><i class="fas fa-circle fs-2xs me-1"></i> Live Active</span>
+            </div>
+        </div>
+
+        <div class="inv-kpi">
+            <div class="inv-kpi-top">
+                <div class="inv-kpi-label">Low Stock Items</div>
+                <div class="inv-kpi-icon" style="background:#fffaeb; color:#dc6803;">
+                    <i class="fas fa-triangle-exclamation"></i>
+                </div>
+            </div>
+            <div class="inv-kpi-value">{{ kpi_low_stock_count }}</div>
+            <div class="inv-kpi-meta"><strong style="color:#dc6803;">Below alert threshold</strong></div>
+        </div>
+
+        <div class="inv-kpi">
+            <div class="inv-kpi-top">
+                <div class="inv-kpi-label">Inventory Asset Value</div>
+                <div class="inv-kpi-icon" style="background:#f4f3ff; color:#6941c6;">
+                    <i class="fas fa-coins"></i>
+                </div>
+            </div>
+            <div class="inv-kpi-value">Rs. {{ kpi_inventory_value|floatformat:0|intcomma }}</div>
+            <div class="inv-kpi-meta">Current stock at landed cost</div>
+        </div>
+    </div>
+
+    <!-- WORKSPACE -->
+    <div class="inv-workspace">
+
+        <!-- MAIN INVENTORY PANEL -->
+        <div class="inv-panel">
+            <div class="inv-panel-header">
+                <div>
+                    <h2 class="inv-panel-title">Product &amp; Smartphone Catalog</h2>
+                    <div class="inv-panel-subtitle">Track memory variants, pricing, stock levels and storage racks</div>
+                </div>
+
+                <a href="{% url 'reports:export_csv' 'valuation' %}" class="inv-btn" style="height:34px; padding:0 12px; font-size:11.5px;">
+                    <i class="fas fa-download me-1"></i> Export CSV
+                </a>
+            </div>
+
+            <!-- TOOLBAR -->
+            <form method="get" class="inv-toolbar" id="filterForm">
+                <div class="inv-search">
+                    <i class="fas fa-search inv-search-icon"></i>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Search by phone name, RAM/ROM, SKU, processor or rack...">
+                </div>
+
+                <select class="inv-select" name="category" id="catalogCategoryFilter" onchange="document.getElementById('filterForm').submit()">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if request.GET.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+
+                <select class="inv-select" name="brand" onchange="document.getElementById('filterForm').submit()">
+                    <option value="all">All Brands</option>
+                    {% for b in brands %}
+                        <option value="{{ b.id }}" {% if request.GET.brand == b.id|stringformat:"s" %}selected{% endif %}>
+                            {{ b.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+
+                <select class="inv-select" name="stock_status" onchange="document.getElementById('filterForm').submit()">
+                    <option value="all" {% if request.GET.stock_status == 'all' or not request.GET.stock_status %}selected{% endif %}>All Stock</option>
+                    <option value="healthy" {% if request.GET.stock_status == 'healthy' %}selected{% endif %}>In Stock</option>
+                    <option value="low" {% if request.GET.stock_status == 'low' %}selected{% endif %}>Low Stock</option>
+                    <option value="critical" {% if request.GET.stock_status == 'critical' %}selected{% endif %}>Zero / Out</option>
+                </select>
+
+                <a href="{% url 'inventory:product_list' %}" class="inv-filter-btn" title="Clear filters">
+                    <i class="fas fa-rotate-left"></i>
+                </a>
+            </form>
+
+            <!-- TABLE -->
+            <div class="inv-table-wrap">
+                <table class="inv-table">
+                    <thead>
+                        <tr>
+                            <th>Phone / Product</th>
+                            <th>Variant (RAM/ROM)</th>
+                            <th>Category</th>
+                            <th>Rack Location</th>
+                            <th>Stock Available</th>
+                            <th>Latest Cost</th>
+                            <th>Current MRP</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for product in products %}
+                        <tr>
+                            <td>
+                                <div class="inv-product-cell">
+                                    <!-- DYNAMIC PRODUCT PHOTO THUMBNAIL CONTAINER WITH FALLBACK -->
+                                    <div class="inv-product-image">
+                                        {% if product.image %}
+                                            <img src="{{ product.image.url }}" 
+                                                 alt="{{ product.name }}" 
+                                                 class="inv-product-thumbnail-img"
+                                                 onclick="window.open('{{ product.image.url }}', '_blank')"
+                                                 title="Click to view photo">
+                                        {% elif product.requires_imei_tracking %}
+                                            <i class="fas fa-mobile-screen text-primary"></i>
+                                        {% elif product.is_spare_part %}
+                                            <i class="fas fa-wrench text-danger"></i>
+                                        {% else %}
+                                            <i class="fas fa-box text-secondary"></i>
+                                        {% endif %}
+                                    </div>
+                                    <div>
+                                        <a href="{% url 'inventory:product_detail' product.pk %}" class="inv-product-name">
+                                            {{ product.name }}
+                                        </a>
+                                        <div class="inv-product-sku">
+                                            SKU: {{ product.sku }}{% if product.barcode %} &middot; {{ product.barcode }}{% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+
+                            <td>
+                                {% if product.ram and product.internal_storage %}
+                                    <span class="inv-badge inv-badge-purple">
+                                        {{ product.ram }} / {{ product.internal_storage }}
+                                    </span>
+                                    {% if product.color_variant %}
+                                        <div class="text-muted" style="font-size: 10px; margin-top: 2px;">{{ product.color_variant }}</div>
+                                    {% endif %}
+                                {% elif product.variant_name %}
+                                    <span class="inv-badge" style="background:#f2f4f7; color:#344054; border:1px solid var(--inv-border);">{{ product.variant_name }}</span>
+                                {% else %}
+                                    <span class="inv-muted">-</span>
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                <div>{{ product.category.name }}</div>
+                                {% if product.brand %}<small class="inv-muted">{{ product.brand.name }}</small>{% endif %}
+                            </td>
+
+                            <td>
+                                {% if product.rack_number %}
+                                    <span class="inv-badge" style="background:#f8fafc; border:1px solid var(--inv-border); color:#475467;">
+                                        {{ product.rack_number }}{% if product.shelf_identifier %} ({{ product.shelf_identifier }}){% endif %}
+                                    </span>
+                                {% else %}
+                                    <span class="inv-muted">-</span>
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                {% for bs in product.branch_stocks.all %}
+                                    {% if bs.branch == ACTIVE_BRANCH %}
+                                        <span class="inv-stock-value">{{ bs.quantity|floatformat:0 }}</span>
+                                        <span class="inv-muted"> {{ product.base_unit.code }}</span>
+                                    {% endif %}
+                                {% empty %}
+                                    <span class="inv-stock-value">0</span>
+                                    <span class="inv-muted"> {{ product.base_unit.code }}</span>
+                                {% endfor %}
+                            </td>
+
+                            <td class="inv-price">
+                                NPR {{ product.purchase_price|floatformat:2|intcomma }}
+                            </td>
+
+                            <td class="inv-price" style="color: var(--inv-primary);">
+                                NPR {{ product.selling_price|floatformat:2|intcomma }}
+                            </td>
+
+                            <td>
+                                {% for bs in product.branch_stocks.all %}
+                                    {% if bs.branch == ACTIVE_BRANCH %}
+                                        {% if bs.quantity <= 0 %}
+                                            <span class="inv-badge inv-badge-danger">Critical</span>
+                                        {% elif bs.is_low_stock %}
+                                            <span class="inv-badge inv-badge-warning">Low Stock</span>
+                                        {% else %}
+                                            <span class="inv-badge inv-badge-success">In Stock</span>
+                                        {% endif %}
+                                    {% endif %}
+                                {% empty %}
+                                    <span class="inv-badge inv-badge-danger">Zero Stock</span>
+                                {% endfor %}
+                            </td>
+
+                            <td>
+                                <div class="d-flex align-items-center gap-1">
+                                    <a href="{% url 'inventory:product_detail' product.pk %}" class="inv-icon-btn" title="View Details &amp; Historical Costs">
+                                        <i class="fas fa-ellipsis-vertical"></i>
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="9" class="text-center py-5 text-muted">
+                                <div class="py-4">
+                                    <i class="fas fa-boxes-stacked fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                                    <div style="font-weight: 750; color: #101828; font-size: 14px;">No products or smartphones matched your query</div>
+                                    <div style="font-size: 12px; color: #667085; margin-top: 4px;">Click the button below to register a new phone or import from Excel.</div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- PAGINATION -->
+            <div class="p-3 border-top bg-light">
+                {% include "includes/_pagination.html" %}
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="inv-right-column">
+
+            <!-- LOW STOCK WATCH -->
+            <div class="inv-panel inv-alert-panel">
+                <div class="inv-alert-heading">
+                    <div>
+                        <h2 class="inv-panel-title">Replenishment Watch</h2>
+                        <div class="inv-panel-subtitle">Items requiring purchase reorder</div>
+                    </div>
+                    <div class="inv-alert-count">
+                        {{ kpi_low_stock_count }}
+                    </div>
+                </div>
+
+                {% for item in replenishment_items %}
+                <div class="inv-alert-item">
+                    <div class="inv-alert-product">
+                        <div>
+                            <div class="inv-alert-name">{{ item.product.name|truncatechars:24 }}</div>
+                            <div class="inv-alert-stock">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }} remaining</div>
+                        </div>
+                        <strong style="font-size:10.5px; color: var(--inv-danger);">
+                            Alert: {{ item.low_stock_threshold|floatformat:0 }}
+                        </strong>
+                    </div>
+                    <div class="inv-progress">
+                        <div class="inv-progress-bar" style="width: {% widthratio item.quantity item.low_stock_threshold 100 %}%;"></div>
+                    </div>
+                </div>
+                {% empty %}
+                <div class="text-center py-4 text-muted" style="font-size: 11.5px;">
+                    <i class="fas fa-circle-check text-success me-1"></i> All inventory stocks healthy
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- ACTIVITY FEED -->
+            <div class="inv-panel inv-activity-panel">
+                <h2 class="inv-panel-title">Recent Activity</h2>
+                <div class="inv-panel-subtitle">Latest inventory &amp; IMEI logs</div>
+
+                <div class="inv-activity">
+                    {% for act in recent_activities %}
+                    <div class="inv-activity-item">
+                        <div class="inv-activity-icon">
+                            {% if act.movement_type == 'PURCHASE' %}
+                                <i class="fas fa-plus"></i>
+                            {% elif act.movement_type == 'SALE' %}
+                                <i class="fas fa-arrow-down"></i>
+                            {% else %}
+                                <i class="fas fa-rotate"></i>
+                            {% endif %}
+                        </div>
+                        <div>
+                            <div class="inv-activity-title">
+                                {{ act.quantity_delta }} {{ act.product.base_unit.code }} ({{ act.get_movement_type_display }})
+                            </div>
+                            <div class="inv-activity-meta">
+                                {{ act.product.name|truncatechars:22 }} &middot; {{ act.reference_document|default:"Manual" }}
+                                <br>
+                                {{ act.created_at|timesince }} ago
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div class="text-center py-4 text-muted" style="font-size: 11.5px;">
+                        No recent stock movements recorded.
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================
+     1. QUICK ADD PRODUCT MODAL
+     ========================================================= -->
+<div class="inv-modal-overlay" id="addProductModal">
+    <div class="inv-modal">
+        <div class="inv-modal-header">
+            <div>
+                <div class="inv-modal-title">Quick Add Product / Smartphone</div>
+                <div class="inv-modal-description">Establish technical specifications, memory variants, and initial stock.</div>
+            </div>
+            <button type="button" class="inv-modal-close" id="closeAddModalBtn" aria-label="Close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <form class="inv-form" action="{% url 'products:quick_create' %}" method="post" id="quickAddForm">
+            {% csrf_token %}
+            
+            <input type="hidden" name="tax_pricing_type" value="{% if IS_VAT_MODE %}INCLUSIVE{% else %}EXEMPT{% endif %}">
+            <input type="hidden" name="is_vat_applicable" value="{% if IS_VAT_MODE %}true{% else %}false{% endif %}">
+            <input type="hidden" name="vat_rate" value="{{ DEFAULT_TAX_RATE|default:'0.00' }}">
+
+            <div class="inv-form-grid">
+                <div class="inv-form-group full">
+                    <label class="inv-form-label">Product Name *</label>
+                    <input class="inv-form-input" name="name" required placeholder="e.g. Samsung Galaxy A55 5G">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Model Name</label>
+                    <input class="inv-form-input" name="model_name" placeholder="e.g. Galaxy A55">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">SKU Code (Auto if blank)</label>
+                    <input class="inv-form-input" name="sku" placeholder="e.g. SAM-A55-256">
+                </div>
+
+                <!-- CATEGORY DROPDOWN WITH QUICK-ADD TRIGGER BUTTON -->
+                <div class="inv-form-group">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="inv-form-label mb-0">Category *</label>
+                        <button type="button" class="inv-quick-add-btn" id="openQuickCategoryBtn" title="Quick Add New Category" data-bs-toggle="tooltip">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <select class="inv-form-input" name="category" id="productCategorySelect" required>
+                        <option value="" disabled selected>-- Select Category --</option>
+                        {% for cat in categories %}
+                            <option value="{{ cat.id }}">{{ cat.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- SUBCATEGORY DROPDOWN WITH QUICK-ADD TRIGGER BUTTON -->
+                <div class="inv-form-group">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="inv-form-label mb-0">Sub-Category</label>
+                        <button type="button" class="inv-quick-add-btn" id="openQuickSubCategoryBtn" title="Quick Add SubCategory" data-bs-toggle="tooltip">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <select class="inv-form-input" name="subcategory" id="productSubCategorySelect">
+                        <option value="">-- Optional SubCategory --</option>
+                    </select>
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Brand</label>
+                    <select class="inv-form-input" name="brand">
+                        <option value="">-- Select Brand --</option>
+                        {% for b in brands %}
+                            <option value="{{ b.id }}">{{ b.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">RAM (e.g. 8GB)</label>
+                    <input class="inv-form-input" name="ram" placeholder="e.g. 8GB">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Storage (e.g. 256GB)</label>
+                    <input class="inv-form-input" name="internal_storage" placeholder="e.g. 256GB">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Color / Finish</label>
+                    <input class="inv-form-input" name="color_variant" placeholder="e.g. Awesome Navy">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Network Type</label>
+                    <select class="inv-form-input" name="network_type">
+                        <option value="5G">5G / LTE</option>
+                        <option value="4G">4G VoLTE</option>
+                        <option value="WIFI_ONLY">Wi-Fi Only</option>
+                    </select>
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Cost Price (NPR)</label>
+                    <input class="inv-form-input" type="number" step="0.01" name="purchase_price" placeholder="0.00">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Selling Price / MRP *</label>
+                    <input class="inv-form-input" type="number" step="0.01" name="selling_price" required placeholder="0.00">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Opening Stock Quantity</label>
+                    <input class="inv-form-input" type="number" step="1" name="initial_stock" value="0">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Rack Location</label>
+                    <input class="inv-form-input" name="rack_number" placeholder="e.g. Rack-M01">
+                </div>
+
+                <!-- BASE UNIT DROPDOWN WITH QUICK-ADD TRIGGER BUTTON -->
+                <div class="inv-form-group">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="inv-form-label mb-0">Base Atomic Unit *</label>
+                        <button type="button" class="inv-quick-add-btn" id="openQuickUnitBtn" title="Quick Add Unit of Measurement" data-bs-toggle="tooltip">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <select class="inv-form-input" name="base_unit" id="productUnitSelect" required>
+                        {% for u in units %}
+                            <option value="{{ u.id }}" {% if u.code == 'PCS' %}selected{% endif %}>{{ u.name }} ({{ u.code }})</option>
+                        {% empty %}
+                            <option value="1">Piece (Pcs)</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="inv-form-group full">
+                    <label class="d-flex align-items-center gap-2 inv-form-label mt-1">
+                        <input type="checkbox" name="requires_imei_tracking" value="true" checked>
+                        <span>Track Unique 15-Digit IMEI Numbers (Smartphones/Tablets)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="inv-modal-footer">
+                <button type="button" class="inv-btn" id="cancelAddModalBtn">Cancel</button>
+                <button type="submit" class="inv-btn inv-btn-primary" id="submitQuickProductBtn">Create Product</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- =========================================================
+     2. QUICK ADD CATEGORY POPUP MODAL
+     ========================================================= -->
+<div class="inv-modal-overlay" id="quickCategoryModal" style="z-index: 1060;">
+    <div class="inv-modal" style="width: min(440px, 100%);">
+        <div class="inv-modal-header" style="background:#f8fafc;">
+            <div>
+                <div class="inv-modal-title" style="font-size:14px;"><i class="fas fa-tag text-primary me-2"></i> Quick Add Category</div>
+                <div class="inv-modal-description">Instantly register a category without leaving this screen.</div>
+            </div>
+            <button type="button" class="inv-modal-close" id="closeQuickCategoryBtn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <form class="inv-form" id="quickCategoryForm">
+            {% csrf_token %}
+            <div class="d-flex flex-column gap-3">
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Category Name *</label>
+                    <input class="inv-form-input" id="quickCatNameInput" required placeholder="e.g. Smart Watches, Optical Frames">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Category Code (Optional)</label>
+                    <input class="inv-form-input" id="quickCatCodeInput" placeholder="e.g. WAT, OPT">
+                </div>
+            </div>
+
+            <div class="inv-modal-footer">
+                <button type="button" class="inv-btn" id="cancelQuickCategoryBtn">Cancel</button>
+                <button type="submit" class="inv-btn inv-btn-primary" id="saveQuickCategoryBtn">Save Category</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- =========================================================
+     3. QUICK ADD SUBCATEGORY POPUP MODAL
+     ========================================================= -->
+<div class="inv-modal-overlay" id="quickSubCategoryModal" style="z-index: 1060;">
+    <div class="inv-modal" style="width: min(460px, 100%);">
+        <div class="inv-modal-header" style="background:#f8fafc;">
+            <div>
+                <div class="inv-modal-title" style="font-size:14px;"><i class="fas fa-folder-tree text-primary me-2"></i> Quick Add Sub-Category</div>
+                <div class="inv-modal-description">Register a sub-category under a parent product category.</div>
+            </div>
+            <button type="button" class="inv-modal-close" id="closeQuickSubCategoryBtn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <form class="inv-form" id="quickSubCategoryForm">
+            {% csrf_token %}
+            <div class="d-flex flex-column gap-3">
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Parent Category *</label>
+                    <select class="inv-form-input" id="quickSubCatParentSelect" required>
+                        <option value="" disabled selected>-- Select Parent Category --</option>
+                        {% for cat in categories %}
+                            <option value="{{ cat.id }}">{{ cat.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Sub-Category Name *</label>
+                    <input class="inv-form-input" id="quickSubCatNameInput" required placeholder="e.g. Flagship 5G, Tempered Glass, RayBan Frames">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Sub-Category Code (Optional)</label>
+                    <input class="inv-form-input" id="quickSubCatCodeInput" placeholder="e.g. SUB-FLAG, SUB-TG">
+                </div>
+            </div>
+
+            <div class="inv-modal-footer">
+                <button type="button" class="inv-btn" id="cancelQuickSubCategoryBtn">Cancel</button>
+                <button type="submit" class="inv-btn inv-btn-primary" id="saveQuickSubCategoryBtn">Save Sub-Category</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- =========================================================
+     4. QUICK ADD UNIT OF MEASUREMENT (UOM) POPUP MODAL
+     ========================================================= -->
+<div class="inv-modal-overlay" id="quickUnitModal" style="z-index: 1060;">
+    <div class="inv-modal" style="width: min(460px, 100%);">
+        <div class="inv-modal-header" style="background:#f8fafc;">
+            <div>
+                <div class="inv-modal-title" style="font-size:14px;"><i class="fas fa-scale-balanced text-primary me-2"></i> Quick Add Unit of Measurement</div>
+                <div class="inv-modal-description">Register atomic base measurement units (Piece, Set, Meter, Box).</div>
+            </div>
+            <button type="button" class="inv-modal-close" id="closeQuickUnitBtn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <form class="inv-form" id="quickUnitForm">
+            {% csrf_token %}
+            <div class="d-flex flex-column gap-3">
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Unit Name *</label>
+                    <input class="inv-form-input" id="quickUnitNameInput" required placeholder="e.g. Meter, Roll, Set, Packet">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Short Code (Uppercase) *</label>
+                    <input class="inv-form-input" id="quickUnitCodeInput" required placeholder="e.g. MTR, ROL, SET, PKT">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Nepali Name (Optional)</label>
+                    <input class="inv-form-input" id="quickUnitNameNpInput" placeholder="e.g. मिटर, रोल, सेट, बक्स">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="d-flex align-items-center gap-2 inv-form-label mt-1">
+                        <input type="checkbox" id="quickUnitDecimalCheck">
+                        <span>Allow Decimal Fractions (e.g. 1.50)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="inv-modal-footer">
+                <button type="button" class="inv-btn" id="cancelQuickUnitBtn">Cancel</button>
+                <button type="submit" class="inv-btn inv-btn-primary" id="saveQuickUnitBtn">Save Unit</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- =========================================================
+     5. EXPLANATORY WARNING MODAL FOR IMEI ZERO-STOCK RULES
+     ========================================================= -->
+<div class="inv-modal-overlay" id="productWarningModal" style="z-index: 1070;">
+    <div class="inv-modal" style="width: min(520px, 100%);">
+        <div class="inv-modal-header bg-warning bg-opacity-10 border-warning border-opacity-25">
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-warning text-dark p-2 rounded-circle"><i class="fas fa-triangle-exclamation"></i></span>
+                <div>
+                    <div class="inv-modal-title text-dark">Important Inventory Compliance Notice</div>
+                    <div class="inv-modal-description">Product catalog record created with zero initial stock rule</div>
+                </div>
+            </div>
+            <button type="button" class="inv-modal-close" id="closeProductWarningBtn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <div class="p-4">
+            <div class="alert alert-warning bg-opacity-10 border border-warning border-opacity-25 rounded-3 p-3 mb-3 fs-xs text-dark lh-base" id="productWarningText">
+                <!-- Dynamic Warning Notice Injected Here -->
+            </div>
+            <p class="fs-xs text-muted mb-0">
+                To add available sellable units with valid 15-digit IMEIs, please receive them via <strong>Goods Received Note (GRN)</strong> or use the <strong>Excel Importer</strong>.
+            </p>
+        </div>
+
+        <div class="inv-modal-footer p-3 bg-light border-top">
+            <button type="button" class="inv-btn inv-btn-primary px-4" id="acknowledgeWarningBtn">
+                <i class="fas fa-check me-1"></i> Acknowledge &amp; View Catalog
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const productModal = document.getElementById('addProductModal');
+    const openProductBtn = document.getElementById('openAddModalBtn');
+    const closeProductBtn = document.getElementById('closeAddModalBtn');
+    const cancelProductBtn = document.getElementById('cancelAddModalBtn');
+    const quickProductForm = document.getElementById('quickAddForm');
+    const submitQuickProductBtn = document.getElementById('submitQuickProductBtn');
+
+    const categoryModal = document.getElementById('quickCategoryModal');
+    const openCatBtn = document.getElementById('openQuickCategoryBtn');
+    const closeCatBtn = document.getElementById('closeQuickCategoryBtn');
+    const cancelCatBtn = document.getElementById('cancelQuickCategoryBtn');
+    const quickCategoryForm = document.getElementById('quickCategoryForm');
+    const catNameInput = document.getElementById('quickCatNameInput');
+    const catCodeInput = document.getElementById('quickCatCodeInput');
+    const categorySelect = document.getElementById('productCategorySelect');
+    const catalogFilter = document.getElementById('catalogCategoryFilter');
+
+    const subCategoryModal = document.getElementById('quickSubCategoryModal');
+    const openSubCatBtn = document.getElementById('openQuickSubCategoryBtn');
+    const closeSubCatBtn = document.getElementById('closeQuickSubCategoryBtn');
+    const cancelSubCatBtn = document.getElementById('cancelQuickSubCategoryBtn');
+    const quickSubCategoryForm = document.getElementById('quickSubCategoryForm');
+    const subCatParentSelect = document.getElementById('quickSubCatParentSelect');
+    const subCatNameInput = document.getElementById('quickSubCatNameInput');
+    const subCatCodeInput = document.getElementById('quickSubCatCodeInput');
+    const productSubCategorySelect = document.getElementById('productSubCategorySelect');
+
+    const unitModal = document.getElementById('quickUnitModal');
+    const openUnitBtn = document.getElementById('openQuickUnitBtn');
+    const closeUnitBtn = document.getElementById('closeQuickUnitBtn');
+    const cancelUnitBtn = document.getElementById('cancelQuickUnitBtn');
+    const quickUnitForm = document.getElementById('quickUnitForm');
+    const unitNameInput = document.getElementById('quickUnitNameInput');
+    const unitCodeInput = document.getElementById('quickUnitCodeInput');
+    const unitNameNpInput = document.getElementById('quickUnitNameNpInput');
+    const unitDecimalCheck = document.getElementById('quickUnitDecimalCheck');
+    const productUnitSelect = document.getElementById('productUnitSelect');
+
+    const warningModal = document.getElementById('productWarningModal');
+    const warningTextEl = document.getElementById('productWarningText');
+    const closeWarningBtn = document.getElementById('closeProductWarningBtn');
+    const acknowledgeWarningBtn = document.getElementById('acknowledgeWarningBtn');
+
+    function openModal(el) { if (el) el.classList.add('show'); }
+    function closeModal(el) { if (el) el.classList.remove('show'); }
+
+    if (openProductBtn) openProductBtn.addEventListener('click', () => openModal(productModal));
+    if (closeProductBtn) closeProductBtn.addEventListener('click', () => closeModal(productModal));
+    if (cancelProductBtn) cancelProductBtn.addEventListener('click', () => closeModal(productModal));
+
+    if (openCatBtn) {
+        openCatBtn.addEventListener('click', () => {
+            if (catNameInput) catNameInput.value = '';
+            if (catCodeInput) catCodeInput.value = '';
+            openModal(categoryModal);
+            setTimeout(() => catNameInput && catNameInput.focus(), 100);
+        });
+    }
+    if (closeCatBtn) closeCatBtn.addEventListener('click', () => closeModal(categoryModal));
+    if (cancelCatBtn) cancelCatBtn.addEventListener('click', () => closeModal(categoryModal));
+
+    if (openSubCatBtn) {
+        openSubCatBtn.addEventListener('click', () => {
+            if (subCatNameInput) subCatNameInput.value = '';
+            if (subCatCodeInput) subCatCodeInput.value = '';
+            if (subCatParentSelect && categorySelect && categorySelect.value) {
+                subCatParentSelect.value = categorySelect.value;
+            }
+            openModal(subCategoryModal);
+            setTimeout(() => subCatNameInput && subCatNameInput.focus(), 100);
+        });
+    }
+    if (closeSubCatBtn) closeSubCatBtn.addEventListener('click', () => closeModal(subCategoryModal));
+    if (cancelSubCatBtn) cancelSubCatBtn.addEventListener('click', () => closeModal(subCategoryModal));
+
+    if (openUnitBtn) {
+        openUnitBtn.addEventListener('click', () => {
+            if (unitNameInput) unitNameInput.value = '';
+            if (unitCodeInput) unitCodeInput.value = '';
+            if (unitNameNpInput) unitNameNpInput.value = '';
+            if (unitDecimalCheck) unitDecimalCheck.checked = false;
+            openModal(unitModal);
+            setTimeout(() => unitNameInput && unitNameInput.focus(), 100);
+        });
+    }
+    if (closeUnitBtn) closeUnitBtn.addEventListener('click', () => closeModal(unitModal));
+    if (cancelUnitBtn) cancelUnitBtn.addEventListener('click', () => closeModal(unitModal));
+
+    if (closeWarningBtn) closeWarningBtn.addEventListener('click', () => window.location.reload());
+    if (acknowledgeWarningBtn) acknowledgeWarningBtn.addEventListener('click', () => window.location.reload());
+
+    [productModal, categoryModal, subCategoryModal, unitModal].forEach(modalEl => {
+        if (modalEl) {
+            modalEl.addEventListener('click', (e) => {
+                if (e.target === modalEl) closeModal(modalEl);
+            });
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (warningModal && warningModal.classList.contains('show')) window.location.reload();
+            else if (unitModal && unitModal.classList.contains('show')) closeModal(unitModal);
+            else if (subCategoryModal && subCategoryModal.classList.contains('show')) closeModal(subCategoryModal);
+            else if (categoryModal && categoryModal.classList.contains('show')) closeModal(categoryModal);
+            else if (productModal && productModal.classList.contains('show')) closeModal(productModal);
+        }
+    });
+
+    // 1. AJAX Handler: Quick Category Creation
+    if (quickCategoryForm) {
+        quickCategoryForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = catNameInput.value.trim();
+            const code = catCodeInput.value.trim();
+            if (!name) { alert('Please enter a category name.'); return; }
+
+            const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
+            const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
+            const saveBtn = document.getElementById('saveQuickCategoryBtn');
+            saveBtn.disabled = true;
+            saveBtn.innerText = 'Saving...';
+
+            try {
+                const resp = await fetch("{% url 'inventory:category_quick_create_api' %}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    body: JSON.stringify({ name: name, code: code })
+                });
+
+                const data = await resp.json();
+
+                if (data.status === 'success' && data.category) {
+                    const newId = data.category.id;
+                    const newName = data.category.name;
+
+                    if (categorySelect) {
+                        let exists = false;
+                        for (let opt of categorySelect.options) {
+                            if (opt.value == newId) { exists = true; break; }
+                        }
+                        if (!exists) {
+                            const newOption = new Option(newName, newId, true, true);
+                            categorySelect.add(newOption);
+                        }
+                        categorySelect.value = newId;
+                    }
+
+                    if (subCatParentSelect) {
+                        let exists = false;
+                        for (let opt of subCatParentSelect.options) {
+                            if (opt.value == newId) { exists = true; break; }
+                        }
+                        if (!exists) {
+                            const newOption = new Option(newName, newId, false, false);
+                            subCatParentSelect.add(newOption);
+                        }
+                    }
+
+                    if (catalogFilter) {
+                        const filterOption = new Option(newName, newId, false, false);
+                        catalogFilter.add(filterOption);
+                    }
+
+                    closeModal(categoryModal);
+                } else {
+                    alert('Error: ' + (data.message || 'Could not create category.'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Failed to connect to server.');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerText = 'Save Category';
+            }
+        });
+    }
+
+    // 2. AJAX Handler: Quick SubCategory Creation
+    if (quickSubCategoryForm) {
+        quickSubCategoryForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const parentCatId = subCatParentSelect ? subCatParentSelect.value : '';
+            const name = subCatNameInput ? subCatNameInput.value.trim() : '';
+            const code = subCatCodeInput ? subCatCodeInput.value.trim() : '';
+
+            if (!parentCatId) { alert('Please select a parent category.'); return; }
+            if (!name) { alert('Please enter a subcategory name.'); return; }
+
+            const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
+            const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
+            const saveBtn = document.getElementById('saveQuickSubCategoryBtn');
+            saveBtn.disabled = true;
+            saveBtn.innerText = 'Saving...';
+
+            try {
+                const resp = await fetch("{% url 'inventory:subcategory_quick_create_api' %}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    body: JSON.stringify({ category_id: parentCatId, name: name, code: code })
+                });
+
+                const data = await resp.json();
+
+                if (data.status === 'success' && data.subcategory) {
+                    const newId = data.subcategory.id;
+                    const newName = data.subcategory.name;
+
+                    if (productSubCategorySelect) {
+                        let exists = false;
+                        for (let opt of productSubCategorySelect.options) {
+                            if (opt.value == newId) { exists = true; break; }
+                        }
+                        if (!exists) {
+                            const newOption = new Option(newName, newId, true, true);
+                            productSubCategorySelect.add(newOption);
+                        }
+                        productSubCategorySelect.value = newId;
+                    }
+
+                    closeModal(subCategoryModal);
+                } else {
+                    alert('Error: ' + (data.message || 'Could not create sub-category.'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Failed to connect to server.');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerText = 'Save Sub-Category';
+            }
+        });
+    }
+
+    // 3. AJAX Handler: Quick Unit of Measurement (UOM) Creation
+    if (quickUnitForm) {
+        quickUnitForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = unitNameInput ? unitNameInput.value.trim() : '';
+            const code = unitCodeInput ? unitCodeInput.value.trim().toUpperCase() : '';
+            const nameNp = unitNameNpInput ? unitNameNpInput.value.trim() : '';
+            const allowDecimal = unitDecimalCheck ? unitDecimalCheck.checked : false;
+
+            if (!name) { alert('Please enter a unit name.'); return; }
+            if (!code) { alert('Please enter a unit short code (e.g. MTR, BOX).'); return; }
+
+            const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
+            const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
+            const saveBtn = document.getElementById('saveQuickUnitBtn');
+            saveBtn.disabled = true;
+            saveBtn.innerText = 'Saving...';
+
+            try {
+                const resp = await fetch("{% url 'inventory:unit_quick_create_api' %}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    body: JSON.stringify({ name: name, code: code, name_np: nameNp, allow_decimal: allowDecimal })
+                });
+
+                const data = await resp.json();
+
+                if (data.status === 'success' && data.unit) {
+                    const newId = data.unit.id;
+                    const newLabel = `${data.unit.name} (${data.unit.code})`;
+
+                    if (productUnitSelect) {
+                        let exists = false;
+                        for (let opt of productUnitSelect.options) {
+                            if (opt.value == newId) { exists = true; break; }
+                        }
+                        if (!exists) {
+                            const newOption = new Option(newLabel, newId, true, true);
+                            productUnitSelect.add(newOption);
+                        }
+                        productUnitSelect.value = newId;
+                    }
+
+                    closeModal(unitModal);
+                } else {
+                    alert('Error: ' + (data.message || 'Could not register unit.'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Failed to connect to server.');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerText = 'Save Unit';
+            }
+        });
+    }
+
+    // 4. AJAX Handler: Quick Product Creation
+    if (quickProductForm) {
+        quickProductForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(quickProductForm);
+
+            if (submitQuickProductBtn) {
+                submitQuickProductBtn.disabled = true;
+                submitQuickProductBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
+            }
+
+            try {
+                const resp = await fetch(quickProductForm.action, {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+
+                const data = await resp.json();
+
+                if (data.status === 'success') {
+                    if (data.warning) {
+                        closeModal(productModal);
+                        if (warningTextEl) {
+                            warningTextEl.innerHTML = `<i class="fas fa-info-circle text-warning me-1"></i> ${data.warning}`;
+                        }
+                        openModal(warningModal);
+                    } else {
+                        window.location.reload();
+                    }
+                } else {
+                    const errorMsg = data.errors ? JSON.stringify(data.errors) : (data.message || 'Validation error.');
+                    alert('Could not save product: ' + errorMsg);
+                    if (submitQuickProductBtn) {
+                        submitQuickProductBtn.disabled = false;
+                        submitQuickProductBtn.innerText = 'Create Product';
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Failed to communicate with catalog server. Form will be submitted directly.');
+                quickProductForm.submit();
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

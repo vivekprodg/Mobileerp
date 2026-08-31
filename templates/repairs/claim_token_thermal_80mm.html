@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Claim_Token_{{ ticket.ticket_number }}</title>
+    <style>
+        @page { 
+            size: 80mm auto; 
+            margin: 0; 
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 74mm;
+            max-width: 74mm;
+            margin: 0 auto;
+            padding: 3mm;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            line-height: 1.2;
+            color: #000000;
+            background: #ffffff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .text-center { text-align: center; }
+        .text-end { text-align: right; }
+        .text-start { text-align: left; }
+        .fw-bold { font-weight: bold; }
+        
+        .divider { 
+            border-top: 1px dashed #000000; 
+            margin: 4px 0; 
+            width: 100%;
+        }
+        
+        .double-divider { 
+            border-top: 1px solid #000000; 
+            border-bottom: 1px solid #000000; 
+            padding: 2px 0; 
+            margin: 4px 0; 
+        }
+
+        .thermal-logo-img {
+            max-height: 44px;
+            max-width: 160px;
+            object-fit: contain;
+            filter: grayscale(100%) contrast(150%);
+            display: block;
+            margin: 0 auto 3px auto;
+        }
+
+        @media print { 
+            .no-print { display: none !important; } 
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <div class="no-print" style="margin-bottom: 10px; text-align: center; background: #0f172a; padding: 6px; border-radius: 4px;">
+        <button onclick="window.print()" style="padding: 6px 16px; font-weight: bold; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer;">
+            PRINT CLAIM TOKEN (80mm)
+        </button>
+    </div>
+
+    <!-- Company Branding Header -->
+    <div class="text-center">
+        {% if ticket.branch.logo_url %}
+            <img src="{{ ticket.branch.logo_url }}" alt="{{ ticket.branch.display_company_name }}" class="thermal-logo-img">
+        {% elif COMPANY_LOGO_URL %}
+            <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="thermal-logo-img">
+        {% endif %}
+
+        <div class="fw-bold" style="font-size: 14px;">{{ ticket.branch.display_company_name|default:COMPANY_NAME|upper }}</div>
+        <div>{{ ticket.branch.address }}, {{ ticket.branch.city }}</div>
+        <div>Tel: {{ ticket.branch.phone_number }}</div>
+    </div>
+
+    <div class="double-divider text-center fw-bold">
+        CUSTOMER CLAIM TOKEN (अमानत पुर्जी)<br>
+        <span style="font-size: 9px; font-weight: normal;">Service &amp; Repair Workshop</span>
+    </div>
+
+    <div>
+        <strong>TICKET NO   : {{ ticket.ticket_number }}</strong><br>
+        Date / Time : {{ ticket.created_at|date:"Y-m-d H:i" }}<br>
+        Customer    : {{ ticket.customer_name_manual }}<br>
+        Phone       : {{ ticket.customer_phone_manual }}<br>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+        Device Model: <strong>{{ ticket.product.name }}</strong><br>
+        IMEI/Serial : {{ ticket.imei_or_serial }}<br>
+        Claim Type  : {{ ticket.get_claim_type_display }}<br>
+        Fault Bug   : {{ ticket.reported_fault }}<br>
+        Accessories : {{ ticket.intake_accessories_received }}<br>
+    </div>
+
+    {% if checklist %}
+    <div class="divider"></div>
+    <div>
+        <strong>INTAKE PHYSICAL AUDIT:</strong><br>
+        * Power State  : {{ checklist.get_power_status_display }}<br>
+        * Body Grade   : {{ checklist.get_body_physical_grade_display }}<br>
+        * Liquid (LDI) : {{ checklist.get_ldi_indicator_status_display }}<br>
+        {% if checklist.is_front_glass_cracked %}* NOTE: Front screen has pre-existing cracks.<br>{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="divider"></div>
+
+    <div style="font-size: 9px; line-height: 1.25;">
+        <strong>TERMS &amp; CONDITIONS:</strong><br>
+        1. Present this slip to claim device.<br>
+        2. Back up data. Shop is not liable for data loss.<br>
+        3. Final warranty subject to lab teardown inspection.<br>
+        4. Devices unclaimed after 45 days may be recycled.<br>
+    </div>
+
+    <div class="divider"></div>
+    <div class="text-center" style="margin-top: 18px;">
+        --------------------------------<br>
+        Customer Signature
+    </div>
+</body>
+</html>

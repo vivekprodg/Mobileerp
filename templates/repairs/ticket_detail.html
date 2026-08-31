@@ -1,0 +1,488 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Ticket {{ ticket.ticket_number }} | Technician Workbench{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/repair.css' %}">
+<style>
+/* Technician Workbench Enhancements */
+.pipeline-stepper-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 12px;
+    background: #f8fafc;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+}
+
+.pipeline-stage-btn {
+    flex: 1 1 auto;
+    min-width: 110px;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #475569;
+    font-size: 0.72rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.pipeline-stage-btn:hover {
+    background: #eff6ff;
+    border-color: #3b82f6;
+    color: #1d4ed8;
+}
+
+.pipeline-stage-btn.active {
+    background: #2563eb !important;
+    border-color: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+
+.cta-install-part {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #ffffff !important;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+    transition: all 0.15s ease;
+    animation: installPartPulse 2s infinite;
+}
+
+.cta-install-part:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
+}
+
+@keyframes installPartPulse {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+    70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+/* Lightbox Gallery Thumbnails */
+.evidence-photo-card {
+    position: relative;
+    cursor: pointer;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    transition: all 0.15s ease;
+}
+
+.evidence-photo-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.1);
+}
+
+.evidence-photo-card img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+}
+
+/* Financial Visual Breakdown */
+.cost-split-bar {
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #e2e8f0;
+    display: flex;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+    <!-- Top Header Bar -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0 font-monospace">{{ ticket.ticket_number }}</h4>
+                <span class="badge bg-{% if ticket.claim_type == 'FREE_WARRANTY' %}success{% elif ticket.claim_type == 'BRAND_SPECIAL_POLICY' %}info{% else %}danger{% endif %} fs-xs px-3 py-1 rounded-pill">
+                    {{ ticket.get_claim_type_display }}
+                </span>
+                <span class="badge bg-primary fs-xs px-3 py-1 rounded-pill">
+                    {{ ticket.get_service_status_display }}
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Device: <strong>{{ ticket.product.name }}</strong> | 
+                IMEI: <strong class="font-monospace text-dark">{{ ticket.imei_or_serial }}</strong> | 
+                Customer: <strong>{{ ticket.customer_name_manual }}</strong> ({{ ticket.customer_phone_manual }})
+            </p>
+        </div>
+
+        <div class="d-flex gap-2 align-items-center">
+            <a href="{% url 'repairs:claim_token_print' ticket.pk %}" target="_blank" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-print me-1"></i> Claim Slip (80mm)
+            </a>
+            <a href="{% url 'repairs:job_sheet_print' ticket.pk %}" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-file-invoice me-1"></i> A4 Job Sheet
+            </a>
+            <a href="{% url 'repairs:dashboard' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Workshop Queue
+            </a>
+        </div>
+    </div>
+
+    <!-- Interactive Visual Pipeline Stepper -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-2 px-1">
+            <span class="text-uppercase fw-bold text-muted fs-2xs" style="letter-spacing: .06em;">
+                <i class="fas fa-sliders text-primary me-1"></i> Live Workshop Pipeline Status
+            </span>
+            <small class="text-muted fs-2xs">Click stage button to advance workflow</small>
+        </div>
+        <form action="{% url 'repairs:status_update' ticket.pk %}" method="post" id="pipelineStatusForm" class="m-0">
+            {% csrf_token %}
+            <input type="hidden" name="new_status" id="pipelineStatusInput" value="{{ ticket.service_status }}">
+            
+            <div class="pipeline-stepper-container">
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'RECEIVED' %}active{% endif %}" onclick="setStage('RECEIVED')">
+                    <i class="fas fa-box-archive"></i> 1. Received
+                </button>
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'DIAGNOSING' %}active{% endif %}" onclick="setStage('DIAGNOSING')">
+                    <i class="fas fa-microscope"></i> 2. Diagnostics
+                </button>
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'QUOTATION_PENDING' %}active{% endif %}" onclick="setStage('QUOTATION_PENDING')">
+                    <i class="fas fa-receipt"></i> 3. Quoting
+                </button>
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'APPROVED' %}active{% endif %}" onclick="setStage('APPROVED')">
+                    <i class="fas fa-thumbs-up"></i> 4. Approved
+                </button>
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'IN_REPAIR' %}active{% endif %}" onclick="setStage('IN_REPAIR')">
+                    <i class="fas fa-screwdriver"></i> 5. In Repair
+                </button>
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'WAITING_PARTS' %}active{% endif %}" onclick="setStage('WAITING_PARTS')">
+                    <i class="fas fa-clock"></i> 6. Waiting Parts
+                </button>
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'QC_TESTING' %}active{% endif %}" onclick="setStage('QC_TESTING')">
+                    <i class="fas fa-vial-circle-check"></i> 7. QC Testing
+                </button>
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'READY_FOR_PICKUP' %}active{% endif %}" onclick="setStage('READY_FOR_PICKUP')">
+                    <i class="fas fa-bell"></i> 8. Ready Pickup
+                </button>
+                <button type="button" class="pipeline-stage-btn {% if ticket.service_status == 'DELIVERED' %}active{% endif %}" onclick="setStage('DELIVERED')">
+                    <i class="fas fa-circle-check"></i> 9. Delivered
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Main Workbench Grid -->
+    <div class="row g-4">
+        <!-- Left 8 Cols: Diagnostics Verdict, Parts & Evidence -->
+        <div class="col-12 col-lg-8">
+            
+            <!-- 1. Diagnostics Decision Matrix -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-microscope text-primary me-2"></i> Lab Diagnostic Decision &amp; Defect Classification
+                    </h6>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs fw-bold">Inspection Verdict</span>
+                </div>
+
+                <form action="{% url 'repairs:diagnostics_verdict' ticket.pk %}" method="post">
+                    {% csrf_token %}
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Diagnostic Classification Verdict <span class="text-danger">*</span></label>
+                            <select name="verdict" class="form-select fw-semibold" required>
+                                <option value="GENUINE_FACTORY_DEFECT" {% if verdict.verdict == 'GENUINE_FACTORY_DEFECT' %}selected{% endif %}>
+                                    1. Genuine Factory / Systematic Defect (100% Free Brand Warranty Claim)
+                                </option>
+                                <option value="VOID_PHYSICAL_DROP_DAMAGE" {% if verdict.verdict == 'VOID_PHYSICAL_DROP_DAMAGE' %}selected{% endif %}>
+                                    2. Warranty Void: Physical Drop Damage / Impact Cracks (Paid Repair)
+                                </option>
+                                <option value="VOID_LIQUID_INGRESS" {% if verdict.verdict == 'VOID_LIQUID_INGRESS' %}selected{% endif %}>
+                                    3. Warranty Void: Liquid Ingress / LDI Sticker Triggered Red (Paid Repair)
+                                </option>
+                                <option value="BRAND_SPECIAL_RECALL" {% if verdict.verdict == 'BRAND_SPECIAL_RECALL' %}selected{% endif %}>
+                                    4. Manufacturer Green-Line / Special Recall Program (Free Screen Replacement)
+                                </option>
+                                <option value="OUT_OF_WARRANTY_STANDARD" {% if verdict.verdict == 'OUT_OF_WARRANTY_STANDARD' %}selected{% endif %}>
+                                    5. Out of Warranty by Elapsed Time (Standard Paid)
+                                </option>
+                            </select>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Technical Analysis &amp; Justification Note <span class="text-danger">*</span></label>
+                            <textarea name="technical_justification" class="form-control" rows="2" placeholder="Explain microscopic findings, board measurements, or drop points..." required>{{ verdict.technical_justification|default:"" }}</textarea>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Estimated Labor Charge (NPR)</label>
+                            <input type="number" step="0.01" name="estimated_labor" class="form-control" value="{{ ticket.labor_charge|default:'0.00' }}">
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Estimated Parts Total (NPR)</label>
+                            <input type="number" step="0.01" name="estimated_parts" class="form-control" value="{{ ticket.parts_cost|default:'0.00' }}">
+                        </div>
+
+                        <div class="col-12 text-end">
+                            <button type="submit" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                                <i class="fas fa-save me-1"></i> Update Diagnostic Verdict
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- 2. Spare Parts Installation & Live Stock Deduction (PROMINENT CTA) -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 border-bottom pb-3 mb-3">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-boxes-packing text-success me-2"></i> Installed Replacement Spare Parts
+                        </h6>
+                        <small class="text-muted fs-2xs">Live inventory deduction &amp; automated sub-warranty stamping</small>
+                    </div>
+                    <!-- Prominent Animated CTA -->
+                    <button type="button" class="cta-install-part" data-bs-toggle="modal" data-bs-target="#installPartModal">
+                        <i class="fas fa-plus-circle me-1"></i> Install Spare Part from Stock
+                    </button>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-xs">
+                        <thead class="bg-light text-muted text-uppercase fs-2xs">
+                            <tr>
+                                <th class="ps-3">Spare Part Name</th>
+                                <th>New Part S/N</th>
+                                <th>Customer Charge</th>
+                                <th>Sub-Warranty</th>
+                                <th>Defective Part Destination</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for part in replaced_parts %}
+                            <tr>
+                                <td class="ps-3 fw-bold text-dark">{{ part.spare_part_product.name }}</td>
+                                <td class="font-monospace text-primary">{{ part.new_part_serial_or_batch|default:"Standard Batch" }}</td>
+                                <td class="fw-bold font-monospace">Rs. {{ part.customer_charge|floatformat:2 }}</td>
+                                <td>
+                                    <span class="badge bg-success bg-opacity-10 text-success fw-bold">
+                                        {{ part.replacement_warranty_months }}M (Till {{ part.warranty_end_date }})
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis">
+                                        {{ part.get_defective_part_status_display }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">
+                                    No replacement spare parts installed on this ticket yet. Click above to install parts from stock.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 3. Photo Evidence Vault (Interactive Lightbox Trigger) -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-camera text-primary me-2"></i> Diagnostic Photo Evidence Gallery
+                    </h6>
+                    <small class="text-muted fs-2xs">Click any image for full-screen inspection</small>
+                </div>
+                <div class="row g-3">
+                    {% for photo in evidence_photos %}
+                    <div class="col-6 col-md-3">
+                        <div class="evidence-photo-card" 
+                             data-img-url="{{ photo.image.url }}" 
+                             data-caption="{{ photo.get_evidence_type_display }}{% if photo.caption %} - {{ photo.caption }}{% endif %}"
+                             onclick="handleEvidenceClick(this)">
+                            <img src="{{ photo.image.url }}" alt="{{ photo.get_evidence_type_display }}">
+                            <div class="p-1 text-center bg-white border-top">
+                                <span class="badge bg-light text-dark border fs-2xs fw-semibold">{{ photo.get_evidence_type_display }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div class="col-12 text-center py-4 text-muted fs-xs">
+                        <i class="fas fa-images fs-2 text-secondary opacity-25 d-block mb-2"></i>
+                        No diagnostic teardown photos attached to this ticket.
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right 4 Cols: Financial Breakdown, POS Handover & Security -->
+        <div class="col-12 col-lg-4">
+            
+            <!-- Financial Summary & Visual Cost Ratio Card -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-coins text-success me-2"></i> Cost &amp; Billing Breakdown
+                    </h6>
+                    <span class="badge bg-success bg-opacity-10 text-success fs-xs fw-bold">Live Assessment</span>
+                </div>
+
+                <div class="d-flex justify-content-between fs-xs py-1">
+                    <span class="text-muted">Labor / Service Fee:</span>
+                    <strong>Rs. {{ ticket.labor_charge|floatformat:2 }}</strong>
+                </div>
+                <div class="d-flex justify-content-between fs-xs py-1">
+                    <span class="text-muted">Spare Parts Total:</span>
+                    <strong>Rs. {{ ticket.parts_cost|floatformat:2 }}</strong>
+                </div>
+                <div class="d-flex justify-content-between fs-xs py-1 text-muted border-bottom pb-2">
+                    <span>Discount Applied:</span>
+                    <strong>-Rs. {{ ticket.discount_amount|floatformat:2 }}</strong>
+                </div>
+
+                <!-- Visual Ratio Bar -->
+                <div class="my-3">
+                    <div class="d-flex justify-content-between fs-2xs text-muted mb-1">
+                        <span><span class="badge bg-primary p-1 rounded-circle"></span> Labor</span>
+                        <span><span class="badge bg-success p-1 rounded-circle"></span> Parts</span>
+                    </div>
+                    <div class="cost-split-bar">
+                        {% if ticket.final_total_amount > 0 %}
+                            <div style="width: {% widthratio ticket.labor_charge ticket.final_total_amount 100 %}%; background: #2563eb;"></div>
+                            <div style="width: {% widthratio ticket.parts_cost ticket.final_total_amount 100 %}%; background: #10b981;"></div>
+                        {% else %}
+                            <div style="width: 100%; background: #10b981;"></div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center fs-5 fw-bold pt-1">
+                    <span>Total Service Amount:</span>
+                    <span class="text-primary font-monospace">Rs. {{ ticket.final_total_amount|floatformat:2|intcomma }}</span>
+                </div>
+
+                <!-- Prominent POS Checkout Handover Button -->
+                <div class="d-grid mt-4">
+                    <a href="{% url 'sales:pos_terminal' %}?repair_ticket={{ ticket.id }}" class="btn btn-success btn-lg rounded-pill fw-bold shadow-sm d-flex align-items-center justify-content-center gap-2">
+                        <i class="fas fa-cash-register fs-5"></i> Complete &amp; Pay at POS
+                    </a>
+                </div>
+            </div>
+
+            <!-- Security Credentials & Unlock Pattern Card -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-lock text-warning me-2"></i> Screen Unlock Security
+                </h6>
+                <p class="fs-xs mb-2 text-muted">
+                    PIN / Password: <strong class="text-dark font-monospace">{{ ticket.security_pin_code|default:"None provided" }}</strong>
+                </p>
+                <p class="fs-xs mb-0 text-muted">
+                    Pattern Sequence: <strong class="text-primary font-monospace">{{ ticket.pattern_lock_sequence|default:"None" }}</strong>
+                </p>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- Lightbox Modal for Photo Evidence Inspection -->
+<div class="modal fade" id="lightboxModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark">
+            <div class="modal-header border-0 text-white py-2">
+                <span class="fs-sm fw-bold" id="lightboxCaption">Evidence Photo</span>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0 text-center">
+                <img src="" id="lightboxImage" class="img-fluid" style="max-height: 75vh; object-fit: contain;">
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Install Spare Part -->
+<div class="modal fade" id="installPartModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <form action="{% url 'repairs:install_part' ticket.pk %}" method="post">
+                {% csrf_token %}
+                <div class="modal-header bg-success text-white border-0 py-3">
+                    <h5 class="modal-title fs-6 fw-bold"><i class="fas fa-wrench me-2"></i> Install Replacement Spare Part</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Select Spare Part from Live Stock <span class="text-danger">*</span></label>
+                        {{ part_form.spare_part_product }}
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Quantity</label>
+                            {{ part_form.quantity }}
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Customer Charge (NPR)</label>
+                            {{ part_form.customer_charge }}
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">New Installed Part Serial / Barcode</label>
+                        {{ part_form.new_part_serial_or_batch }}
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Sub-Warranty (Months)</label>
+                            {{ part_form.replacement_warranty_months }}
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Defective Part Destination</label>
+                            {{ part_form.defective_part_status }}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success btn-sm px-4 rounded-pill fw-bold">Deduct Stock &amp; Install</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function setStage(stageCode) {
+    document.getElementById('pipelineStatusInput').value = stageCode;
+    document.getElementById('pipelineStatusForm').submit();
+}
+
+function handleEvidenceClick(element) {
+    const imgUrl = element.getAttribute('data-img-url');
+    const caption = element.getAttribute('data-caption');
+    openLightbox(imgUrl, caption);
+}
+
+function openLightbox(imageUrl, caption) {
+    document.getElementById('lightboxImage').src = imageUrl;
+    document.getElementById('lightboxCaption').innerText = caption;
+    new bootstrap.Modal(document.getElementById('lightboxModal')).show();
+}
+</script>
+{% endblock %}

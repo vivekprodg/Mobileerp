@@ -1,0 +1,87 @@
+<div class="modal fade" id="quickAddProductModal" tabindex="-1" aria-labelledby="quickAddProductModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-white">
+            <form id="quickProductAddForm" action="{% url 'products:quick_create' %}" method="post">
+                {% csrf_token %}
+
+                <!-- Hidden Tax Classification & Safety Fields for Non-JS / Direct Submissions -->
+                <input type="hidden" name="tax_pricing_type" value="{% if IS_VAT_MODE %}INCLUSIVE{% else %}EXEMPT{% endif %}">
+                <input type="hidden" name="is_vat_applicable" value="{% if IS_VAT_MODE %}true{% else %}false{% endif %}">
+                <input type="hidden" name="vat_rate" value="{{ DEFAULT_TAX_RATE|default:'0.00' }}">
+
+                <div class="modal-header bg-primary text-white border-0 py-3">
+                    <h5 class="modal-title fs-6 fw-bold" id="quickAddProductModalLabel">
+                        <i class="fas fa-plus-circle me-2"></i> Quick Add Small Accessory / Product
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Product Name <span class="text-danger">*</span></label>
+                            <input type="text" name="name" id="quickProdName" class="form-control" placeholder="e.g. 20W Type-C Fast Charger / Tempered Glass" required>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Product Barcode (Optional)</label>
+                            <input type="text" name="barcode" id="quickProdBarcode" class="form-control font-monospace" placeholder="Scan physical barcode or leave blank (Optional)">
+                            <small class="text-muted fs-2xs mt-1 d-block">Scan box barcode or leave empty if this item has no barcode.</small>
+                        </div>
+                        
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Category</label>
+                            <select name="category" id="quickProdCategory" class="form-select">
+                                <option value="">-- General / Accessories --</option>
+                                {% if categories %}
+                                    {% for cat in categories %}
+                                        <option value="{{ cat.id }}">{{ cat.name }}</option>
+                                    {% endfor %}
+                                {% else %}
+                                    <option value="1">Mobile Accessories</option>
+                                {% endif %}
+                            </select>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Base Unit <span class="text-danger">*</span></label>
+                            <select name="base_unit" id="quickProdUnit" class="form-select">
+                                <option value="1" selected>Piece (Pcs)</option>
+                                <option value="2">Pair (PR)</option>
+                                <option value="3">Set</option>
+                                <option value="4">Box</option>
+                            </select>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Selling Price / MRP (NPR) <span class="text-danger">*</span></label>
+                            <input type="number" step="0.01" name="selling_price" id="quickProdSellPrice" class="form-control font-monospace" placeholder="150.00" required>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Cost Price (NPR)</label>
+                            <input type="number" step="0.01" name="purchase_price" id="quickProdCostPrice" class="form-control font-monospace" placeholder="80.00" value="0.00">
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Initial Opening Stock</label>
+                            <input type="number" step="1" name="initial_stock" id="quickProdStock" class="form-control font-monospace" value="10">
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Rack / Shelf Location</label>
+                            <input type="text" name="rack_number" id="quickProdRack" class="form-control" placeholder="e.g. Rack-A1">
+                        </div>
+
+                        <input type="hidden" name="requires_imei_tracking" value="false">
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold shadow-sm">
+                        <i class="fas fa-check-circle me-1"></i> Save &amp; Add to Cart
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,910 @@
+{% extends "core/base.html" %}
+{% load static humanize %}
+
+{% block title %}POS Billing Terminal | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/pos.css' %}">
+<style>
+/* ==========================================================================
+   POS WORKSPACE & DUAL-CAMERA SCANNER RETICLE STYLES
+   ========================================================================== */
+:root {
+    --pos-surface-dark: #0f172a;
+    --pos-card-dark: #1e293b;
+    --pos-border-dark: #334155;
+}
+
+.pos-workspace-container {
+    height: calc(100vh - var(--erp-header-height, 62px) - 15px);
+    overflow: hidden;
+}
+
+/* Category Filter Pills */
+.cat-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    outline: none;
+}
+
+.cat-pill:hover, 
+.cat-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+}
+
+/* Sequential Dual-IMEI Auto-Routing Dynamic Status Banner */
+.dual-imei-scanning-banner {
+    border-radius: 12px;
+    border: 2px solid #2563eb;
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    animation: pulseBorder 1.5s infinite;
+}
+
+@keyframes pulseBorder {
+    0% { 
+        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); 
+    }
+    70% { 
+        box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); 
+    }
+    100% { 
+        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); 
+    }
+}
+
+.imei-slot-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+}
+
+.imei-slot-active {
+    background-color: #fef08a !important;
+    color: #854d0e !important;
+    border: 1px solid #eab308 !important;
+    font-weight: 700;
+}
+
+.imei-slot-complete {
+    background-color: #dcfce7 !important;
+    color: #166534 !important;
+    border: 1px solid #86efac !important;
+}
+
+/* Cart Table Styling */
+.pos-cart-table thead th {
+    background-color: #f8fafc;
+    color: #64748b;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 8px 10px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.pos-cart-table tbody tr:hover {
+    background-color: #f8fafc;
+}
+
+.pos-cart-table td {
+    padding: 8px 10px;
+    vertical-align: middle;
+}
+
+/* Hero Payable Display */
+.pos-hero-total-box {
+    background: linear-gradient(145deg, #0f172a 0%, #1e293b 100%);
+    border: 1px solid #334155;
+    border-radius: 14px;
+    color: #ffffff;
+}
+
+/* Flash Visual Effect on Barcode Scan */
+@keyframes scanFlashGreen {
+    0% { 
+        background-color: rgba(16, 185, 129, 0.4); 
+    }
+    100% { 
+        background-color: transparent; 
+    }
+}
+
+.scan-flash {
+    animation: scanFlashGreen 0.4s ease-out;
+}
+
+/* ==========================================================================
+   CAMERA SCANNER VIEWFINDER OVERLAY STYLES
+   ========================================================================== */
+.pos-scanner-modal-body {
+    background-color: #0b1120;
+    position: relative;
+    padding: 0;
+    overflow: hidden;
+    min-height: 380px;
+}
+
+.scanner-video-feed {
+    width: 100%;
+    height: 100%;
+    max-height: 480px;
+    object-fit: cover;
+    display: block;
+}
+
+.scanner-viewfinder-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    padding: 20px;
+}
+
+.scanner-aiming-reticle {
+    width: 260px;
+    height: 160px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 16px;
+    position: relative;
+    box-shadow: 0 0 0 9999px rgba(11, 17, 32, 0.65);
+}
+
+.scanner-aiming-reticle::before,
+.scanner-aiming-reticle::after {
+    content: '';
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    border-color: #10b981;
+    border-style: solid;
+}
+
+.scanner-aiming-reticle::before { 
+    top: -2px; 
+    left: -2px; 
+    border-width: 4px 0 0 4px; 
+    border-top-left-radius: 14px; 
+}
+
+.scanner-aiming-reticle::after { 
+    bottom: -2px; 
+    right: -2px; 
+    border-width: 0 4px 4px 0; 
+    border-bottom-right-radius: 14px; 
+}
+
+.scanner-corner-tr { 
+    position: absolute; 
+    top: -2px; 
+    right: -2px; 
+    width: 24px; 
+    height: 24px; 
+    border-top: 4px solid #10b981; 
+    border-right: 4px solid #10b981; 
+    border-top-right-radius: 14px; 
+}
+
+.scanner-corner-bl { 
+    position: absolute; 
+    bottom: -2px; 
+    left: -2px; 
+    width: 24px; 
+    height: 24px; 
+    border-bottom: 4px solid #10b981; 
+    border-left: 4px solid #10b981; 
+    border-bottom-left-radius: 14px; 
+}
+
+.scanner-laser-line {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%);
+    box-shadow: 0 0 8px #10b981;
+    animation: laserScan 2s ease-in-out infinite alternate;
+}
+
+@keyframes laserScan { 
+    0% { 
+        top: 8%; 
+        opacity: 0.8; 
+    } 
+    100% { 
+        top: 92%; 
+        opacity: 1; 
+    } 
+}
+
+.scanner-controls-bar {
+    position: absolute;
+    bottom: 16px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    z-index: 10;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 py-2 pos-workspace-container d-flex flex-column">
+    {% csrf_token %}
+
+    <!-- Hidden Meta Configuration for JavaScript Engine -->
+    <div id="posTaxConfigMeta"
+         data-tax-mode="{{ SHOP_TAX_MODE }}"
+         data-default-vat-rate="{{ DEFAULT_TAX_RATE }}"
+         style="display: none;">
+    </div>
+    
+    <!-- Proforma Estimation & White-Label Compliance Notice Bar -->
+    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 py-2 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs flex-shrink-0">
+        <span class="text-truncate">
+            <i class="fas fa-circle-exclamation text-warning me-1"></i>
+            <strong>{{ COMPANY_NAME }} &bull; {{ BILL_HEADER_TITLE }}:</strong> {{ ESTIMATE_DISCLAIMER }}
+        </span>
+        <div class="d-flex align-items-center gap-2 flex-shrink-0">
+            <span id="posNetworkStatusBadge" class="badge bg-success text-white">
+                <i class="fas fa-wifi me-1"></i> Online
+            </span>
+            <button type="button" class="btn btn-sm btn-outline-primary bg-white text-primary border-primary border-opacity-25 px-2 py-0 fs-2xs fw-bold" id="toggleDualScanModeBtn" title="Toggle Auto Dual-IMEI Scanning">
+                <i class="fas fa-barcode text-primary me-1"></i> Dual-IMEI Scan: <span id="dualScanModeStatusText" class="text-success">AUTO (ON)</span>
+            </button>
+            {% if ENABLE_MDMS_TRACKING %}
+            <span class="badge bg-success text-white"><i class="fas fa-shield-halved me-1"></i> NTA MDMS Guard</span>
+            {% endif %}
+            <span class="badge bg-primary text-white">{{ STORE_OUTLET_NAME }} ({{ STORE_OUTLET_CODE }})</span>
+            <span class="badge bg-dark text-white">{{ CURRENT_BS_DATE_EN }} BS</span>
+        </div>
+    </div>
+
+    <!-- Linked Service Repair Ticket Pre-Fill Banner (If launched from workshop desk) -->
+    {% if prefill_repair_ticket %}
+    <div class="alert alert-info py-2 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs flex-shrink-0" id="linkedRepairBanner">
+        <span>
+            <i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>#{{ prefill_repair_ticket.ticket_number }}</strong> 
+            ({{ prefill_repair_ticket.product.name }} &bull; Payable: <strong>Rs. {{ prefill_repair_ticket.final_total_amount }}</strong>)
+        </span>
+        <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); if(window.smartPos){ window.smartPos.repairTicketId=null; }" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
+    <!-- Active Sequential IMEI Scanning Banner -->
+    <div id="dualImeiActivePrompt" class="dual-imei-scanning-banner p-2 mb-2 d-none shadow-sm flex-shrink-0">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-3">
+                <div class="spinner-grow spinner-grow-sm text-primary" role="status"></div>
+                <div>
+                    <span class="fw-bold text-dark fs-xs" id="dualScanPromptTitle">📱 Dual-SIM Sequential Scan Active:</span>
+                    <strong class="text-primary fs-xs ms-1" id="dualScanPromptModelName">Phone Model</strong>
+                    <div class="d-flex gap-2 align-items-center mt-1">
+                        <span class="imei-slot-badge imei-slot-complete" id="slotBadgeImei1">
+                            <i class="fas fa-check-circle me-1"></i> IMEI 1: <span id="slotValImei1">---</span>
+                        </span>
+                        <i class="fas fa-arrow-right text-muted fs-2xs"></i>
+                        <span class="imei-slot-badge imei-slot-active" id="slotBadgeImei2">
+                            <i class="fas fa-barcode me-1"></i> <strong>SCAN IMEI 2 NOW (Barcode / Box)...</strong>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex gap-1">
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" id="skipImei2Btn" title="Bypass IMEI 2 for Single-SIM phones">
+                    <i class="fas fa-forward me-1"></i> Single SIM (Skip IMEI 2)
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 fs-2xs rounded-pill" id="cancelDualScanBtn" title="Cancel this handset scan">
+                    <i class="fas fa-times me-1"></i> Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN POS WORKSPACE -->
+    <div class="row g-2 flex-grow-1 overflow-hidden">
+        
+        <!-- LEFT COLUMN: Product Catalog, Search & Scan (7 Cols) -->
+        <div class="col-12 col-lg-7 d-flex flex-column h-100">
+            
+            <!-- Fast Search Bar & Barcode Scanner Input -->
+            <div class="card border-0 shadow-sm rounded-4 p-2 bg-white mb-2 flex-shrink-0">
+                <div class="input-group input-group-lg">
+                    <span class="input-group-text bg-primary text-white border-0 py-2">
+                        <i class="fas fa-barcode fs-5"></i>
+                    </span>
+                    <input type="text" 
+                           id="posProductSearchInput" 
+                           class="form-control border-0 bg-light fs-6 font-mono" 
+                           placeholder="Scan 15-Digit IMEI or search phone name, model, storage [F2]..." 
+                           autofocus 
+                           autocomplete="off">
+                    
+                    <!-- 1-TAP CAMERA SCANNER BUTTON -->
+                    <button type="button" class="btn btn-primary px-3 fw-bold d-flex align-items-center gap-1 shadow-sm" id="posOpenCameraButton" title="Scan Barcode / IMEI using Camera or Image">
+                        <i class="fas fa-camera"></i> <span class="d-none d-sm-inline">Camera</span>
+                    </button>
+
+                    <!-- QUICK ACCESSORY ADD BUTTON -->
+                    <button type="button" class="btn btn-outline-secondary px-3 fw-bold d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#quickAddProductModal" title="Quick Add Small Accessory">
+                        <i class="fas fa-plus"></i> <span class="d-none d-md-inline">Item</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Category Pills: Universal Smart Tabs + Dynamic Database Categories -->
+            <div class="d-flex gap-2 mb-2 overflow-x-auto pb-1 flex-shrink-0" id="categoryPillContainer">
+                <button type="button" class="cat-pill active" data-category-key="ALL">All Items (सबै)</button>
+                <button type="button" class="cat-pill" data-category-key="PHONES">📱 Smartphones</button>
+                <button type="button" class="cat-pill" data-category-key="CHARGERS">🔌 Chargers &amp; Cables</button>
+                <button type="button" class="cat-pill" data-category-key="GLASS_COVER">🛡️ Glass &amp; Covers</button>
+                <button type="button" class="cat-pill" data-category-key="AUDIO">🎧 Earbuds &amp; Audio</button>
+                <button type="button" class="cat-pill" data-category-key="PARTS">🔧 Batteries &amp; Parts</button>
+
+                <!-- Dynamic Active Database Categories -->
+                {% if categories %}
+                <span class="border-end border-secondary border-opacity-25 my-1 mx-1 d-inline-block" style="width: 1px; height: 20px;"></span>
+                {% for cat in categories %}
+                <button type="button" class="cat-pill" data-category-id="{{ cat.id }}" data-category-key="{{ cat.name|upper }}" title="{{ cat.name }}">
+                    🏷️ {{ cat.name }}
+                </button>
+                {% endfor %}
+                {% endif %}
+            </div>
+
+            <!-- Product Cards Grid -->
+            <div class="card border-0 shadow-sm rounded-4 flex-grow-1 bg-white p-2 overflow-y-auto" id="posSearchResultsContainer">
+                <div class="product-grid" id="productGridContainer">
+                    <div class="col-12 text-center py-5 text-muted">
+                        <i class="fas fa-barcode fs-1 text-secondary mb-2 d-block opacity-25"></i>
+                        <span>Ready for hardware barcode scanner or click Camera/Image to scan phone box</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Customer Bill & Checkout Panel (5 Cols) -->
+        <div class="col-12 col-lg-5 d-flex flex-column h-100">
+            <div class="card border-0 shadow-sm rounded-4 bg-white d-flex flex-column h-100 overflow-hidden">
+                
+                <!-- Customer Selector Row -->
+                <div class="p-2 border-bottom bg-light d-flex flex-column gap-2 flex-shrink-0">
+                    <div class="d-flex align-items-center justify-content-between gap-2">
+                        <div class="input-group input-group-sm flex-grow-1">
+                            <span class="input-group-text bg-white border-0"><i class="fas fa-user text-muted"></i></span>
+                            <input type="text" id="posCustomerInput" class="form-control border-0" placeholder="Walk-in Customer (or Search Phone)">
+                        </div>
+                        <div class="input-group input-group-sm" style="max-width: 140px;">
+                            <span class="input-group-text bg-white border-0 font-monospace fs-2xs">PAN</span>
+                            <input type="text" id="posCustomerPanInput" class="form-control border-0 font-monospace fs-xs" placeholder="9-Digit PAN" maxlength="15">
+                        </div>
+                        <div class="d-flex gap-1 flex-shrink-0">
+                            <button type="button" class="btn btn-outline-warning btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark" id="attachTradeInPromptBtn" data-bs-toggle="modal" data-bs-target="#exchangeModal" title="Attach Trade-In Voucher">
+                                <i class="fas fa-repeat text-warning-emphasis me-1"></i> Exchange
+                            </button>
+                            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill text-nowrap fs-xs" data-bs-toggle="modal" data-bs-target="#shortcutsModal" title="POS Shortcuts">
+                                <i class="fas fa-keyboard"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cart Table Header -->
+                <div class="d-flex justify-content-between text-muted fs-xs fw-bold px-3 py-1 bg-light rounded-0 border-bottom mb-0 flex-shrink-0">
+                    <span style="width: 48%;">Item / Phone</span>
+                    <span style="width: 15%; text-align: center;">Qty</span>
+                    <span style="width: 27%; text-align: right;">Rate</span>
+                    <span style="width: 10%;"></span>
+                </div>
+
+                <!-- Cart Items Scroll Container -->
+                <div class="flex-grow-1 overflow-y-auto p-2" id="cartItemsContainer">
+                    <table class="table table-sm pos-cart-table align-middle mb-0" id="posCartTable">
+                        <tbody id="posCartTableBody">
+                            <tr>
+                                <td colspan="5" class="text-center py-5 text-muted">
+                                    <i class="fas fa-shopping-cart fs-1 opacity-25 d-block mb-2"></i>
+                                    Cart is empty. Scan barcodes or select products to begin.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Calculations & Grand Total Checkout Panel -->
+                <div class="p-3 border-top bg-light flex-shrink-0">
+                    <div class="d-flex justify-content-between text-xs text-muted mb-1 px-1">
+                        <span>Subtotal (सामानको जम्मा):</span>
+                        <span id="posSubtotalText" class="font-monospace fw-semibold">Rs. 0.00</span>
+                    </div>
+
+                    <div class="d-flex justify-content-between text-xs text-danger mb-1 px-1" id="posTradeInRow" style="display: none;">
+                        <span><i class="fas fa-repeat me-1"></i> Trade-In Credit <small id="posTradeInTag"></small>:</span>
+                        <span id="posTradeInText" class="font-monospace fw-bold">-Rs. 0.00</span>
+                    </div>
+                    
+                    {% if IS_VAT_MODE %}
+                    <div class="d-flex justify-content-between text-xs text-muted mb-1 px-1" id="posVatRow">
+                        <span id="posVatLabel">Tax / VAT Breakdown ({{ DEFAULT_TAX_RATE }}%):</span>
+                        <span id="posVatText" class="font-monospace fw-semibold">Rs. 0.00</span>
+                    </div>
+                    {% endif %}
+
+                    <div class="d-flex justify-content-between align-items-center text-xs text-muted mb-2 px-1">
+                        <span>Cashier Discount (%):</span>
+                        <input type="number" id="posBillDiscountInput" class="form-control form-control-sm text-end p-0 px-2 border rounded font-monospace" style="width: 70px;" value="0" min="0" max="100" step="0.5">
+                    </div>
+
+                    <!-- Big Payable Total Display Box -->
+                    <div class="pos-hero-total-box p-3 mb-2 d-flex justify-content-between align-items-center shadow-sm">
+                        <div>
+                            <span class="text-uppercase text-white-50 fs-2xs fw-bold d-block" style="letter-spacing: 0.05em;">Payable Grand Total</span>
+                            <span class="fs-xs text-warning"><i class="fas fa-coins me-1"></i> Net Payable (कुल रकम)</span>
+                        </div>
+                        <h3 class="fw-extrabold text-white font-monospace mb-0" id="posGrandTotalText">Rs. 0.00</h3>
+                    </div>
+
+                    <!-- Checkout Actions -->
+                    <div class="row g-1">
+                        <div class="col-4">
+                            <button type="button" class="btn btn-warning btn-sm w-100 py-2 fw-bold text-dark rounded-3 fs-xs" id="posHoldCartBtn" title="Hold Active Cart [F9]">
+                                <i class="fas fa-pause me-1"></i> Hold [F9]
+                            </button>
+                        </div>
+                        <div class="col-4">
+                            <button type="button" class="btn btn-secondary btn-sm w-100 py-2 fw-bold text-white rounded-3 fs-xs" id="posRecallHeldCartsBtn" onclick="window.smartPos.holdCartManager.openRecallModal()" title="Recall Parked Carts [F10]">
+                                <i class="fas fa-folder-open me-1"></i> Recall [F10]
+                            </button>
+                        </div>
+                        <div class="col-4">
+                            <button type="button" class="btn btn-info btn-sm w-100 py-2 fw-bold text-white rounded-3 fs-xs" id="posSplitPaymentBtn" onclick="window.smartPos.openSplitPaymentModal()" title="Split Payment [F8]">
+                                <i class="fas fa-layer-group me-1"></i> Split [F8]
+                            </button>
+                        </div>
+                        <div class="col-12 mt-1">
+                            <button type="button" class="btn btn-success btn-lg w-100 py-3 fw-bold rounded-3 fs-5 shadow-sm" id="posDirectCashCheckoutBtn">
+                                <i class="fas fa-money-bill-wave me-2"></i> CASH PAYMENT (नगद भुक्तानी) [F4]
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 1: SMART DUAL-IMEI SELECTOR MODAL (AUTO-FILLS SECONDARY IMEI)
+     ========================================================================= -->
+<div class="modal fade" id="imeiCaptureModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <div class="modal-header bg-primary text-white py-2 px-3">
+                <h6 class="modal-title fs-sm fw-bold mb-0">
+                    <i class="fas fa-barcode me-1"></i> Select or Scan In-Stock IMEI
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-3">
+                <p class="fs-xs fw-bold text-dark mb-2" id="imeiModalPhoneName">Phone Model</p>
+                
+                <div class="mb-3">
+                    <label class="form-label fs-2xs text-uppercase fw-bold text-muted mb-1">Pick Available In-Stock Handset:</label>
+                    <select id="modalInStockSelect" class="form-select form-select-sm font-mono">
+                        <option value="">-- Choose from In-Stock Phone Boxes --</option>
+                    </select>
+                </div>
+
+                <div class="p-3 bg-light rounded-3 border mb-2">
+                    <div class="mb-2">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">Primary IMEI 1 (SIM 1):</label>
+                        <input type="text" id="modalInputImei1" class="form-control font-mono fs-sm" placeholder="Scan or enter IMEI 1...">
+                    </div>
+
+                    <div>
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">
+                            Secondary IMEI 2: 
+                            <span class="badge bg-success bg-opacity-10 text-success fs-2xs ms-1">Auto-Filled from Stock</span>
+                        </label>
+                        <input type="text" id="modalInputImei2" class="form-control font-mono fs-sm bg-white" placeholder="Auto-filled..." readonly>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light py-2 px-3 d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="confirmImeiModalBtn">
+                    Add to Bill &rarr;
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 2: OLD PHONE EXCHANGE / TRADE-IN POPUP MODAL
+     ========================================================================= -->
+<div class="modal fade" id="exchangeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <div class="modal-header bg-warning text-dark py-2 px-3">
+                <h6 class="modal-title fs-sm fw-bold mb-0">
+                    <i class="fas fa-repeat me-1"></i> Old Phone Exchange / Trade-In (साट्ने)
+                </h6>
+                <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div class="mb-2">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">Old Phone Model Name / Voucher Ref</label>
+                    <input type="text" id="exchangePhoneModel" class="form-control" placeholder="e.g. Redmi Note 10 Pro or EXC-BR-XXXXXX">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">Agreed Buy-Back Value (NPR)</label>
+                    <input type="number" id="exchangePhoneValue" class="form-control font-mono fw-bold text-success fs-6" placeholder="Rs. 8000">
+                </div>
+            </div>
+            <div class="modal-footer bg-light py-2 px-3 d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-warning btn-sm fw-bold" id="applyExchangeBtn">Apply Exchange Credit</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL (WITH COMPANY BRANDING)
+     ========================================================================= -->
+<div class="modal fade" id="receiptModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-dark text-white py-2 px-3 d-flex justify-content-between align-items-center">
+                <h6 class="modal-title fs-sm fw-bold mb-0 text-white">
+                    <i class="fas fa-print text-warning me-1"></i> Estimation Bill Slip
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closeReceiptBtn"></button>
+            </div>
+            
+            <div class="modal-body p-3 bg-light text-center">
+                <div class="thermal-receipt-preview text-start" id="thermalReceiptContent">
+                    <div class="text-center fw-bold fs-6">{{ COMPANY_NAME|upper }}</div>
+                    {% if COMPANY_NAME_NP %}
+                    <div class="text-center" style="font-size: 10px;">{{ COMPANY_NAME_NP }}</div>
+                    {% endif %}
+                    <div class="text-center" style="font-size: 9px;">{{ ACTIVE_BRANCH.address }}, {{ ACTIVE_BRANCH.city }} &bull; Tel: {{ ACTIVE_BRANCH.phone_number }}</div>
+                    {% if SYS_CONFIG.pan_number %}
+                    <div class="text-center" style="font-size: 9px;">PAN: {{ SYS_CONFIG.pan_number }}</div>
+                    {% endif %}
+                    
+                    <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 5px 0;" class="text-center fw-bold">
+                        *** {{ BILL_HEADER_TITLE }} ***
+                    </div>
+
+                    <div>Slip No : <strong id="recSlipNo">EST-000000</strong></div>
+                    <div>Date    : <span>{{ CURRENT_BS_DATE_EN }} BS</span></div>
+                    <div>Customer: <span id="recCustomer">Walk-in Customer</span></div>
+                    
+                    <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
+                    
+                    <div id="recItemsContainer"></div>
+
+                    <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
+
+                    <div class="d-flex justify-content-between">
+                        <span>Subtotal:</span>
+                        <strong id="recSubtotal">Rs. 0.00</strong>
+                    </div>
+                    <div class="d-flex justify-content-between text-danger" id="recExchangeRow" style="display: none;">
+                        <span>Exchange Credit:</span>
+                        <strong id="recExchange">-Rs. 0.00</strong>
+                    </div>
+                    <div class="d-flex justify-content-between" id="recDiscountRow" style="display: none;">
+                        <span>Discount:</span>
+                        <strong id="recDiscount">-Rs. 0.00</strong>
+                    </div>
+                    <div class="d-flex justify-content-between fw-bold" style="font-size: 13px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2px 0; margin-top: 2px;">
+                        <span>GRAND TOTAL:</span>
+                        <span id="recGrandTotal">Rs. 0.00</span>
+                    </div>
+                    <div class="d-flex justify-content-between mt-1">
+                        <span>Payment Mode:</span>
+                        <strong id="recPayMode">CASH</strong>
+                    </div>
+
+                    <div style="border-top: 1px dashed #000; margin: 6px 0;"></div>
+                    <div class="text-center" style="font-size: 8.5px;">
+                        * Exchange possible within 7 days with this slip.<br>
+                        *** Thank You For Visiting! ***
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer bg-white py-2 px-3 d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal" id="finishReceiptBtn">
+                    Next Bill
+                </button>
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold shadow-sm" onclick="window.print()">
+                    <i class="fas fa-print me-1"></i> Print 80mm Slip
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================================================
+     MODAL 4: SUPERVISOR MANAGER OVERRIDE PIN MODAL
+     ========================================================================= -->
+<div class="modal fade" id="posManagerPinModal" tabindex="-1" aria-labelledby="posManagerPinModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-dark text-white border-0 py-2 px-3">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-warning text-dark p-2 rounded-circle"><i class="fas fa-key"></i></span>
+                    <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posManagerPinModalLabel">Supervisor Override PIN</h6>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closePinModalBtn" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4 text-center">
+                <p class="fs-xs text-muted mb-3" id="posPinModalReasonText">
+                    This transaction requires Manager authorization for price override or discount.
+                </p>
+                <div class="mb-3">
+                    <input type="password" id="posManagerPinInput" 
+                           class="form-control form-control-lg text-center font-monospace fw-bold fs-4 letter-spacing-lg" 
+                           placeholder="••••" maxlength="6" autocomplete="new-password">
+                </div>
+                <div id="posPinErrorAlert" class="alert alert-danger p-2 fs-2xs d-none mb-0"></div>
+            </div>
+            <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="submitManagerPinBtn">
+                    Authorize Sale
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================================================
+     MODAL 5: POS LIVE CAMERA & IMAGE SCANNER POPUP MODAL
+     ========================================================================= -->
+<div class="modal fade" id="posCameraScannerModal" tabindex="-1" aria-labelledby="posCameraScannerModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark text-white">
+            <div class="modal-header border-bottom border-secondary border-opacity-25 py-2 px-3 bg-dark">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-success p-2 rounded-circle"><i class="fas fa-camera"></i></span>
+                    <div>
+                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posCameraScannerModalLabel">Camera / Picture Barcode &amp; IMEI Scanner</h6>
+                        <small class="text-white-50 fs-2xs">Aim camera or pick mobile box image from PC</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" id="closePosCameraScannerBtn"></button>
+            </div>
+            
+            <div class="modal-body pos-scanner-modal-body">
+                <!-- Video Stream Feed -->
+                <video id="posCameraFeedVideo" class="scanner-video-feed" playsinline autoplay muted></video>
+                
+                <!-- Aiming Reticle Overlay with Animated Laser -->
+                <div class="scanner-viewfinder-overlay">
+                    <div class="scanner-aiming-reticle">
+                        <div class="scanner-corner-tr"></div>
+                        <div class="scanner-corner-bl"></div>
+                        <div class="scanner-laser-line"></div>
+                    </div>
+                </div>
+
+                <!-- Floating Controls Toolbar with Image File Picker -->
+                <div class="scanner-controls-bar flex-wrap">
+                    <label class="btn btn-primary btn-sm rounded-pill px-3 py-1 bg-opacity-90 fs-xs fw-bold shadow-sm" style="cursor: pointer;">
+                        <i class="fas fa-image me-1"></i> Pick Box Picture
+                        <input type="file" id="posModalImageFileInput" accept="image/*" style="display: none;">
+                    </label>
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="posTorchToggleBtn" style="display: none;">
+                        <i class="fas fa-bolt me-1 text-warning"></i> Flashlight
+                    </button>
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="posSwitchLensBtn">
+                        <i class="fas fa-camera-rotate me-1 text-info"></i> Switch Lens
+                    </button>
+                </div>
+            </div>
+
+            <div class="modal-footer border-top border-secondary border-opacity-25 py-2 px-3 bg-dark d-flex justify-content-between align-items-center">
+                <div class="fs-2xs text-white-50" id="posCameraStatusText">
+                    <i class="fas fa-circle-notch fa-spin me-1 text-success"></i> Scanner Active (15 FPS)
+                </div>
+                <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 py-1 fs-xs" data-bs-dismiss="modal">
+                    Close Scanner
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Included Operational Partials -->
+{% include "pos/shortcuts_modal.html" %}
+{% include "pos/hold_bills_modal.html" %}
+{% include "pos/split_payment_modal.html" %}
+{% include "pos/quick_add_modal.html" %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<!-- Core POS & Hardware Scripts -->
+<script src="{% static 'js/barcode_scanner_listener.js' %}"></script>
+<script src="{% static 'js/camera_barcode_scanner.js' %}"></script>
+<script src="{% static 'js/pos_engine.js' %}"></script>
+
+<script>
+/**
+ * POS Full Operational Hardware & Camera Integration Script
+ */
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. Online / Offline Connectivity Listeners
+    const netStatusBadge = document.getElementById('posNetworkStatusBadge');
+    window.addEventListener('online', () => {
+        if (netStatusBadge) {
+            netStatusBadge.className = 'badge bg-success text-white';
+            netStatusBadge.innerHTML = '<i class="fas fa-wifi me-1"></i> Online';
+        }
+    });
+    window.addEventListener('offline', () => {
+        if (netStatusBadge) {
+            netStatusBadge.className = 'badge bg-danger text-white';
+            netStatusBadge.innerHTML = '<i class="fas fa-triangle-exclamation me-1"></i> Offline Mode';
+        }
+    });
+
+    // 2. Camera Barcode Scanner Integration
+    const openCameraBtn = document.getElementById('posOpenCameraButton');
+    const cameraModalEl = document.getElementById('posCameraScannerModal');
+    const videoEl = document.getElementById('posCameraFeedVideo');
+    const torchBtn = document.getElementById('posTorchToggleBtn');
+    const switchLensBtn = document.getElementById('posSwitchLensBtn');
+    const statusText = document.getElementById('posCameraStatusText');
+    const fileInput = document.getElementById('posModalImageFileInput');
+    
+    let posCameraScannerInstance = null;
+    let cameraModalInstance = null;
+
+    if (cameraModalEl) {
+        cameraModalInstance = new bootstrap.Modal(cameraModalEl);
+    }
+
+    if (openCameraBtn && cameraModalEl && videoEl) {
+        posCameraScannerInstance = new CameraBarcodeScanner({
+            facingMode: 'environment',
+            cooldown: 1200
+        });
+
+        openCameraBtn.addEventListener('click', () => {
+            cameraModalInstance.show();
+        });
+
+        cameraModalEl.addEventListener('shown.bs.modal', async () => {
+            if (statusText) {
+                statusText.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1 text-success"></i> Starting camera sensor...';
+            }
+
+            await posCameraScannerInstance.start(
+                videoEl,
+                (scannedCode) => {
+                    if (statusText) {
+                        statusText.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> Scanned: <strong>${scannedCode}</strong>`;
+                    }
+                    
+                    if (window.smartPos) {
+                        window.smartPos.handleDirectImeiOrBarcodeScan(scannedCode);
+                    }
+
+                    setTimeout(() => {
+                        cameraModalInstance.hide();
+                    }, 400);
+                },
+                (err) => {
+                    if (statusText) {
+                        statusText.innerHTML = `<i class="fas fa-triangle-exclamation text-danger me-1"></i> ${err.message}`;
+                    }
+                }
+            );
+
+            if (posCameraScannerInstance.hasTorch && torchBtn) {
+                torchBtn.style.display = 'inline-flex';
+            } else if (torchBtn) {
+                torchBtn.style.display = 'none';
+            }
+
+            if (statusText) {
+                statusText.innerHTML = '<i class="fas fa-check text-success me-1"></i> Ready &bull; Align barcode or pick image';
+            }
+        });
+
+        cameraModalEl.addEventListener('hidden.bs.modal', () => {
+            if (posCameraScannerInstance) {
+                posCameraScannerInstance.stop();
+            }
+            if (window.smartPos && window.smartPos.searchInput) {
+                window.smartPos.searchInput.focus();
+            }
+        });
+
+        // Direct Image File Decode Listener
+        if (fileInput) {
+            fileInput.addEventListener('change', async (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    const file = e.target.files[0];
+                    if (statusText) statusText.innerHTML = '<i class="fas fa-spinner fa-spin me-1 text-warning"></i> Reading box picture...';
+                    
+                    try {
+                        const code = await posCameraScannerInstance.decodeFromImageFile(file);
+                        if (statusText) statusText.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> Decoded: <strong>${code}</strong>`;
+                        
+                        if (window.smartPos) {
+                            window.smartPos.handleDirectImeiOrBarcodeScan(code);
+                        }
+
+                        setTimeout(() => {
+                            cameraModalInstance.hide();
+                        }, 400);
+                    } catch (err) {
+                        alert(err.message);
+                        if (statusText) statusText.innerHTML = `<i class="fas fa-triangle-exclamation text-danger me-1"></i> ${err.message}`;
+                    }
+                    fileInput.value = '';
+                }
+            });
+        }
+
+        if (torchBtn) {
+            torchBtn.addEventListener('click', async () => {
+                const state = await posCameraScannerInstance.toggleTorch();
+                torchBtn.classList.toggle('btn-warning', state);
+                torchBtn.classList.toggle('btn-dark', !state);
+            });
+        }
+
+        if (switchLensBtn) {
+            switchLensBtn.addEventListener('click', async () => {
+                await posCameraScannerInstance.switchCamera();
+            });
+        }
+    }
+
+    // Modal Close & Reset Focus Listeners
+    const finishReceiptBtn = document.getElementById('finishReceiptBtn');
+    const closeReceiptBtn = document.getElementById('closeReceiptBtn');
+    [finishReceiptBtn, closeReceiptBtn].forEach(btn => {
+        if (btn) {
+            btn.addEventListener('click', () => {
+                if (window.smartPos && window.smartPos.searchInput) {
+                    setTimeout(() => window.smartPos.searchInput.focus(), 300);
+                }
+            });
+        }
+    });
+
+    // Auto-focus search box on load
+    const searchInput = document.getElementById('posProductSearchInput');
+    if (searchInput) {
+        searchInput.focus();
+    }
+});
+</script>
+{% endblock %}

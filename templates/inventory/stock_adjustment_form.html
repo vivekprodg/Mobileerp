@@ -1,0 +1,34 @@
+<!--
+    DEPRECATION NOTICE:
+    This standalone prototype template (inventory/stock_adjustment_form.html) has been deprecated.
+    Stock balance adjustments and audit write-offs are performed in-line directly on the Product Detail page:
+    - View: apps/inventory/views.py -> ProductDetailView & ProductStockAdjustmentView
+    - Template: apps/inventory/templates/inventory/product_detail.html
+-->
+{% extends "core/base.html" %}
+
+{% block title %}Stock Adjustment Redirect | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container py-5 text-center my-auto" style="max-width: 600px;">
+    <div class="card border-0 shadow-lg rounded-4 p-5 bg-white">
+        <div class="mb-3">
+            <span class="badge bg-primary bg-opacity-10 text-primary p-4 rounded-circle">
+                <i class="fas fa-sliders fs-1"></i>
+            </span>
+        </div>
+        <h4 class="fw-bold text-dark mb-2">Stock Adjustment Managed In-Catalog</h4>
+        <p class="text-muted fs-xs mb-4">
+            Manual stock count corrections and damage write-offs are conducted directly inside each item's specification overview. Serialized smartphones are managed via Goods Received Notes (GRN) to preserve IMEI audit integrity.
+        </p>
+        <div class="d-flex justify-content-center gap-2">
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-primary rounded-pill px-4 fw-bold">
+                <i class="fas fa-boxes-stacked me-1"></i> View Inventory Catalog
+            </a>
+            <a href="{% url 'purchases:grn_create' %}" class="btn btn-outline-secondary rounded-pill px-4">
+                Receive Stock (GRN)
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

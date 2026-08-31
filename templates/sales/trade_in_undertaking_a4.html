@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ne">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Police_Undertaking_{{ trade_in.voucher_number }}</title>
+    <style>
+        @page {
+            size: A4 portrait;
+            margin: 10mm 12mm;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 11px;
+            color: #0f172a;
+            background: #ffffff;
+            line-height: 1.35;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .a4-page-container {
+            width: 100%;
+            max-width: 100%;
+            margin: 0 auto;
+        }
+
+        .text-center { text-align: center; }
+        .text-start { text-align: left; }
+        .text-end { text-align: right; }
+        .fw-bold { font-weight: 700; }
+        .font-mono { font-family: 'Courier New', Courier, monospace; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 6px 0;
+        }
+
+        th, td {
+            border: 1px solid #94a3b8;
+            padding: 4px 6px;
+            vertical-align: top;
+            font-size: 10.5px;
+        }
+
+        th {
+            background-color: #f1f5f9;
+            font-size: 10px;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: #334155;
+        }
+
+        .section-header {
+            font-size: 11.5px;
+            font-weight: 800;
+            color: #1e3a8a;
+            margin: 8px 0 3px 0;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .kyc-photo-box {
+            width: 105px;
+            height: 105px;
+            border: 1px solid #94a3b8;
+            border-radius: 6px;
+            object-fit: cover;
+            display: block;
+            margin: 0 auto;
+        }
+
+        .kyc-placeholder-box {
+            width: 105px;
+            height: 105px;
+            border: 1px dashed #94a3b8;
+            border-radius: 6px;
+            display: grid;
+            place-items: center;
+            background: #f8fafc;
+            color: #64748b;
+            font-size: 9px;
+            text-align: center;
+            margin: 0 auto;
+        }
+
+        .undertaking-text-box {
+            border: 1.5px solid #0f172a;
+            border-radius: 6px;
+            padding: 8px 10px;
+            background-color: #fffaf0;
+            font-size: 10.5px;
+            text-align: justify;
+            line-height: 1.45;
+            margin: 6px 0;
+            color: #1e293b;
+        }
+
+        .sig-block {
+            text-align: center;
+            width: 32%;
+            font-size: 10px;
+        }
+
+        .sig-space {
+            height: 48px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            margin-bottom: 2px;
+        }
+
+        .sig-line {
+            border-top: 1px solid #0f172a;
+            padding-top: 3px;
+        }
+
+        .thumbprint-box {
+            width: 75px;
+            height: 42px;
+            border: 1px dashed #64748b;
+            border-radius: 4px;
+            margin: 0 auto 3px auto;
+            display: grid;
+            place-items: center;
+            font-size: 8px;
+            color: #94a3b8;
+        }
+
+        .a4-undertaking-logo {
+            max-height: 48px;
+            max-width: 180px;
+            object-fit: contain;
+            margin-bottom: 2px;
+        }
+
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                background: #ffffff !important;
+                padding: 0 !important;
+            }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <!-- Top Action Toolbar -->
+    <div class="no-print" style="background:#0f172a; color:#ffffff; padding:8px 16px; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <span style="font-size:12px; font-weight:700;">
+            Police-Compliant Handover Undertaking Certificate &bull; Voucher {{ trade_in.voucher_number }}
+        </span>
+        <button onclick="window.print()" style="background:#dc2626; color:#ffffff; border:none; padding:6px 18px; border-radius:999px; font-weight:700; cursor:pointer; font-size:12px;">
+            Print A4 Undertaking Form
+        </button>
+    </div>
+
+    <div class="a4-page-container">
+        <!-- 1. Master Shop Header -->
+        <div class="text-center">
+            {% if trade_in.branch.logo_url %}
+                <img src="{{ trade_in.branch.logo_url }}" alt="{{ trade_in.branch.display_company_name }}" class="a4-undertaking-logo">
+            {% elif COMPANY_LOGO_URL %}
+                <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="a4-undertaking-logo">
+            {% endif %}
+
+            <h2 style="font-size: 16px; color: #0f172a; margin-bottom: 1px;">{{ trade_in.branch.display_company_name|default:COMPANY_NAME|upper }}</h2>
+            {% if trade_in.branch.display_company_name_np or COMPANY_NAME_NP %}
+                <div style="font-size: 12px; font-weight: 700; color: #334155;">{{ trade_in.branch.display_company_name_np|default:COMPANY_NAME_NP }}</div>
+            {% endif %}
+            
+            <div style="font-size: 9.5px; color: #475569;">
+                {{ trade_in.branch.address }}, {{ trade_in.branch.city }} | फोन: {{ trade_in.branch.phone_number }}
+                {% if SYS_CONFIG.pan_number %} | PAN / दर्ता नं: <strong>{{ SYS_CONFIG.pan_number }}</strong>{% endif %}
+            </div>
+            
+            <div style="font-size: 12.5px; font-weight: 800; text-decoration: underline; color: #b91c1c; margin-top: 4px; letter-spacing: .02em;">
+                पुरानो मोबाइल फोन स्वामित्व हस्तान्तरण, बिक्री तथा कानुनी जिम्मानामा फारम
+            </div>
+            <div style="font-size: 9px; color: #64748b;">
+                (नेपाल प्रहरी, स्थानीय प्रशासन तथा प्रचलित कानुनको अनुपालन प्रयोजनार्थ भरिएको वैधानिक अभिलेख)
+            </div>
+        </div>
+
+        <!-- 2. Transaction Header Metadata -->
+        <table style="margin-top: 6px;">
+            <tr>
+                <td style="width: 50%;">
+                    जिम्मानामा भौचर नं: <strong class="font-mono" style="color:#2563eb; font-size: 11px;">{{ trade_in.voucher_number }}</strong><br>
+                    मिति (AD): <strong>{{ trade_in.created_at|date:"Y-m-d H:i" }}</strong> &bull; BS: <strong>{{ CURRENT_BS_DATE_EN }} BS</strong><br>
+                    शाखा / काउन्टर: <strong>{{ trade_in.branch.name }} ({{ trade_in.branch.code }})</strong>
+                </td>
+                <td style="width: 50%;">
+                    जाँचकर्ता अधिकृत / क्यासियर: <strong>{{ trade_in.cashier.get_full_name|default:trade_in.cashier.username }}</strong><br>
+                    साटासाट खरिद मूल्य (Valuation): <strong class="font-mono" style="font-size: 12px; color: #16a34a;">Rs. {{ trade_in.final_trade_in_value|floatformat:2 }}</strong><br>
+                    प्राविधिक स्थिति ग्रेड: <strong>{{ trade_in.get_recommended_condition_grade_display }}</strong>
+                </td>
+            </tr>
+        </table>
+
+        <!-- 3. Section 1: Customer Identity & KYC -->
+        <div class="section-header">१. फोन बिक्री/साटासाट गर्ने ग्राहकको व्यक्तिगत विवरण (Customer Identity &amp; KYC)</div>
+        <table>
+            <tr>
+                <td style="width: 72%;">
+                    ग्राहकको पूरा नाम: <strong>{{ undertaking.customer_full_name|default:trade_in.customer_name_manual }}</strong><br>
+                    बाबु / पतिको नाम: <strong>{{ undertaking.customer_father_or_spouse_name|default:"-" }}</strong><br>
+                    परिचयपत्र किसिम: <strong>{{ undertaking.get_id_type_display }}</strong> &bull; नं: <strong class="font-mono">{{ undertaking.id_number }}</strong><br>
+                    जारी जिल्ला / मिति: <strong>{{ undertaking.id_issued_district }} {% if undertaking.id_issued_date_bs %}({{ undertaking.id_issued_date_bs }}){% endif %}</strong><br>
+                    स्थायी ठेगाना: <strong>{{ undertaking.permanent_address }}</strong><br>
+                    हालको बसाइ / कोठा ठेगाना: <strong>{{ undertaking.current_address|default:undertaking.permanent_address }}</strong><br>
+                    सम्पर्क मोबाइल नं: <strong class="font-mono">{{ trade_in.customer_phone_manual }}</strong>
+                </td>
+                <td style="width: 28%; text-align: center;">
+                    {% if undertaking.customer_live_photo %}
+                        <img src="{{ undertaking.customer_live_photo.url }}" alt="Customer Photo" class="kyc-photo-box">
+                        <div style="font-size: 8px; color: #475569; margin-top: 2px;">ग्राहकको प्रत्यक्ष तस्विर (Live Photo)</div>
+                    {% else %}
+                        <div class="kyc-placeholder-box">ग्राहकको प्रत्यक्ष तस्विर<br>(Photo)</div>
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
+
+        <!-- 4. Section 2: Traded-In Phone Hardware Details -->
+        <div class="section-header">२. साटासाट/बिक्री गरिएको पुरानो मोबाइल फोनको विवरण (Handset Hardware Details)</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ब्रान्ड (Brand)</th>
+                    <th>मोडेल नाम (Model)</th>
+                    <th>स्टोरेज / रङ (Specs)</th>
+                    <th>IMEI नं १ (Primary SIM)</th>
+                    <th>IMEI नं २ (Secondary SIM)</th>
+                    <th>NTA MDMS स्थिति</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>{{ trade_in.brand_name }}</strong></td>
+                    <td><strong>{{ trade_in.model_name }}</strong></td>
+                    <td>{{ trade_in.storage_capacity }} {% if trade_in.color_variant %}&bull; {{ trade_in.color_variant }}{% endif %}</td>
+                    <td class="font-mono fw-bold" style="color: #2563eb;">{{ trade_in.imei_1 }}</td>
+                    <td class="font-mono">{{ trade_in.imei_2|default:"Single SIM / N/A" }}</td>
+                    <td>
+                        <strong style="color: {% if trade_in.mdms_status == 'REGISTERED_OFFICIAL' %}#16a34a{% else %}#dc2626{% endif %}; font-size: 9.5px;">
+                            {{ trade_in.get_mdms_status_display }}
+                        </strong>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- 5. Section 3: 10-Point Diagnostic Check Summary -->
+        {% if checklist %}
+        <div class="section-header">३. १०-बुँदे प्राविधिक जाँच तथा स्थिति मूल्याङ्कन (10-Point Diagnostic Audit)</div>
+        <table>
+            <tbody>
+                <tr>
+                    <td style="width: 50%;">१. स्क्रिन तथा टच: <strong>{{ checklist.get_touch_and_display_display }}</strong></td>
+                    <td style="width: 50%;">६. बायोमेट्रिक्स / सेन्सर: <strong>{{ checklist.get_biometrics_security_display }}</strong></td>
+                </tr>
+                <tr>
+                    <td>२. क्यामेरा (अगाडि/पछाडि): <strong>{{ checklist.get_front_and_back_cameras_display }}</strong></td>
+                    <td>७. बडी तथा हाउजिङ: <strong>{{ checklist.get_body_frame_condition_display }}</strong></td>
+                </tr>
+                <tr>
+                    <td>३. ब्याट्री तथा चार्जिङ: <strong>{{ checklist.get_charging_and_battery_display }}</strong></td>
+                    <td>८. पानी/आद्र्रता (LDI): <strong>{{ checklist.get_liquid_ingress_ldi_display }}</strong></td>
+                </tr>
+                <tr>
+                    <td>४. वाइफाइ / ब्लुटुथ / GPS: <strong>{{ checklist.get_wifi_bluetooth_gps_display }}</strong></td>
+                    <td>९. सामान/बक्स: <strong>{{ checklist.get_original_accessories_available_display }}</strong></td>
+                </tr>
+                <tr>
+                    <td>५. कलिङ, माइक तथा स्पिकर: <strong>{{ checklist.get_cellular_calling_mic_speaker_display }}</strong></td>
+                    <td>१०. क्लाउड लक/रिसेट: <strong>{{ checklist.get_account_lock_factory_reset_display }}</strong></td>
+                </tr>
+            </tbody>
+        </table>
+        {% endif %}
+
+        <!-- 6. Section 4: Police Anti-Theft Legal Undertaking Declaration -->
+        <div class="section-header" style="color: #b91c1c;">४. कानुनी जिम्मानामा तथा मञ्जुरीनामा व्यहोरा (Statutory Undertaking)</div>
+        <div class="undertaking-text-box">
+            {{ SYS_CONFIG.undertaking_declaration_text_np }}
+        </div>
+
+        <!-- 7. Section 5: Signatures, Thumbprints & Store Certification -->
+        <table style="margin-top: 14px; border: none;">
+            <tr style="border: none;">
+                <!-- Customer Signature & Thumbprints -->
+                <td style="border: none; width: 33%;" class="sig-block">
+                    <div class="sig-space">
+                        {% if undertaking.customer_digital_signature %}
+                            <img src="{{ undertaking.customer_digital_signature }}" alt="Customer Signature" style="max-height: 42px; max-width: 90%; object-fit: contain;">
+                        {% endif %}
+                    </div>
+                    <div class="sig-line">
+                        <strong>फोन बिक्री/साटासाट गर्ने ग्राहक</strong><br>
+                        नाम: {{ undertaking.customer_full_name|default:trade_in.customer_name_manual }}
+                    </div>
+                </td>
+
+                <td style="border: none; width: 33%;" class="sig-block">
+                    <div class="thumbprint-box">
+                        ल्याप्चे (Thumbprint)
+                    </div>
+                    <div class="sig-line">
+                        <strong>दायाँ / बायाँ बुढीऔँलाको छाप</strong>
+                    </div>
+                </td>
+
+                <!-- Store Manager Certification -->
+                <td style="border: none; width: 34%;" class="sig-block">
+                    <div class="sig-space">
+                        <span style="font-size: 9px; color: #64748b;">(Authorized Counter Verification)</span>
+                    </div>
+                    <div class="sig-line">
+                        <strong>पसल काउन्टर अधिकृत / प्रबन्धक</strong><br>
+                        दस्तखत तथा छाप
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+</body>
+</html>

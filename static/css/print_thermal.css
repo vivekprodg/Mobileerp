@@ -1,0 +1,281 @@
+/*!
+ * Thermal POS Receipt (80mm & 58mm Roll) Dedicated Print Stylesheet
+ * File: static/css/print_thermal.css
+ *
+ * Supports:
+ * - 80mm standard paper roll width (72mm-76mm printable area)
+ * - 58mm mini thermal printer fallback
+ * - Dedicated dual-IMEI line spacing without mid-number line wrapping
+ * - Crisp monospace font rendering & pixel alignment
+ * - Elimination of all browser headers/footers in print dialog
+ */
+
+/* ==========================================================================
+   PAGE SETUP & MARGIN RESETS
+   ========================================================================== */
+@page {
+    size: 80mm auto;
+    margin: 0mm !important;
+}
+
+@page :left {
+    margin: 0;
+}
+
+@page :right {
+    margin: 0;
+}
+
+/* ==========================================================================
+   SCREEN PREVIEW CONTAINER (Before clicking Print)
+   ========================================================================== */
+body {
+    background-color: #f1f5f9;
+    color: #0f172a;
+    font-family: 'Courier New', Courier, 'Lucida Console', Monaco, monospace;
+    font-size: 11px;
+    line-height: 1.25;
+    margin: 0;
+    padding: 20px 0;
+    -webkit-font-smoothing: antialiased;
+}
+
+.thermal-bill-container {
+    width: 76mm;
+    max-width: 76mm;
+    margin: 0 auto;
+    background: #ffffff;
+    padding: 12px 10px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+    border-radius: 8px;
+    box-sizing: border-box;
+    word-break: break-word;
+}
+
+/* ==========================================================================
+   HEADER & LOGO SECTION
+   ========================================================================== */
+.thermal-header {
+    text-align: center;
+    margin-bottom: 6px;
+}
+
+.thermal-title {
+    font-size: 14px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1.15;
+    margin-bottom: 2px;
+}
+
+.thermal-subtitle {
+    font-size: 10px;
+    font-weight: 600;
+    color: #334155;
+    line-height: 1.2;
+}
+
+.thermal-meta {
+    font-size: 9.5px;
+    line-height: 1.25;
+    color: #1e293b;
+    margin-top: 2px;
+}
+
+/* ==========================================================================
+   DIVIDERS & RULE LINES
+   ========================================================================== */
+.thermal-divider {
+    border: none;
+    border-top: 1px dashed #000000;
+    margin: 5px 0;
+    width: 100%;
+}
+
+.thermal-double-divider {
+    border: none;
+    border-top: 1px solid #000000;
+    border-bottom: 1px solid #000000;
+    padding: 3px 0;
+    margin: 5px 0;
+    text-align: center;
+    font-weight: 800;
+    font-size: 10.5px;
+    line-height: 1.2;
+}
+
+/* ==========================================================================
+   LINE ITEMS & DUAL-IMEI ROW ALIGNMENT
+   ========================================================================== */
+.thermal-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 4px 0;
+    font-size: 10px;
+}
+
+.thermal-table th {
+    border-bottom: 1px dashed #000000;
+    text-transform: uppercase;
+    font-size: 9.5px;
+    font-weight: 800;
+    padding: 3px 0;
+    letter-spacing: 0.02em;
+}
+
+.thermal-table td {
+    padding: 2px 0;
+    vertical-align: top;
+}
+
+.item-desc-cell {
+    font-weight: 700;
+    font-size: 10.5px;
+    color: #000000;
+    padding-top: 3px !important;
+}
+
+/* Dedicated Dual-IMEI Number Alignment */
+.imei-line {
+    font-size: 9.5px;
+    font-weight: 800;
+    font-family: 'Courier New', Courier, monospace;
+    letter-spacing: 0.03em;
+    padding-left: 6px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.imei-line-secondary {
+    font-size: 9.5px;
+    font-weight: 700;
+    font-family: 'Courier New', Courier, monospace;
+    letter-spacing: 0.03em;
+    padding-left: 6px !important;
+    white-space: nowrap;
+}
+
+.spec-line {
+    font-size: 9px;
+    color: #334155;
+    padding-left: 6px !important;
+}
+
+.warranty-box {
+    border: 1px dotted #000000;
+    padding: 2px 4px;
+    margin: 2px 0 2px 6px;
+    font-size: 8.5px;
+    line-height: 1.15;
+    background-color: #fafafa;
+}
+
+/* ==========================================================================
+   TOTALS & SETTLEMENT BREAKDOWN
+   ========================================================================== */
+.thermal-totals-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+    margin: 4px 0;
+}
+
+.thermal-totals-table td {
+    padding: 1.5px 0;
+}
+
+.grand-total-row td {
+    font-size: 12.5px;
+    font-weight: 900;
+    border-top: 1px solid #000000;
+    border-bottom: 1px solid #000000;
+    padding: 3px 0;
+}
+
+.due-debt-row td {
+    font-size: 11px;
+    font-weight: 800;
+}
+
+/* ==========================================================================
+   DISCLAIMERS, FOOTERS & QR CODES
+   ========================================================================== */
+.thermal-footer {
+    text-align: center;
+    font-size: 8.5px;
+    line-height: 1.25;
+    margin-top: 6px;
+    color: #1e293b;
+}
+
+.thermal-qr-container {
+    text-align: center;
+    margin: 6px 0;
+}
+
+.thermal-qr-container img {
+    width: 110px;
+    height: 110px;
+    image-rendering: pixelated;
+}
+
+.text-start  { text-align: left !important; }
+.text-center { text-align: center !important; }
+.text-end    { text-align: right !important; }
+.fw-bold     { font-weight: bold !important; }
+.font-mono   { font-family: 'Courier New', Courier, monospace !important; }
+
+/* ==========================================================================
+   PRINT MEDIA RULES (HARDWARE PRINTER OPTIMIZED)
+   ========================================================================== */
+@media print {
+    html, body {
+        width: 76mm !important;
+        min-width: 76mm !important;
+        max-width: 76mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 11px !important;
+        line-height: 1.18 !important;
+    }
+
+    .no-print, 
+    header, 
+    footer, 
+    nav, 
+    aside, 
+    .btn, 
+    .modal,
+    #appHeader,
+    #appSidebar,
+    #appLayout,
+    .navbar {
+        display: none !important;
+    }
+
+    .thermal-bill-container {
+        width: 74mm !important;
+        max-width: 74mm !important;
+        margin: 0 auto !important;
+        padding: 1mm 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+        border-radius: 0 !important;
+    }
+
+    .warranty-box {
+        background-color: transparent !important;
+    }
+
+    /* Prevent page breaks within receipt sections */
+    .thermal-table,
+    .thermal-totals-table,
+    .thermal-header,
+    .thermal-footer {
+        page-break-inside: avoid;
+    }
+}

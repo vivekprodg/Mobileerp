@@ -1,0 +1,33 @@
+<div class="modal fade" id="holdBillsModal" tabindex="-1" aria-labelledby="holdBillsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-dark text-white border-0 py-3">
+                <h5 class="modal-title fs-6 fw-bold" id="holdBillsModalLabel">
+                    <i class="fas fa-pause-circle text-warning me-2"></i> Held Carts / Suspended Bills
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-sm">
+                        <thead class="bg-light text-muted text-uppercase fs-xs">
+                            <tr>
+                                <th class="ps-4">Reference</th>
+                                <th>Customer</th>
+                                <th>Items</th>
+                                <th>Subtotal</th>
+                                <th>Time</th>
+                                <th class="text-end pe-4">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="heldCartsTableBody">
+                            <tr>
+                                <td colspan="6" class="text-center py-4 text-muted">Loading held carts...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

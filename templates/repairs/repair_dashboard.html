@@ -1,0 +1,215 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Repair Workshop &amp; Service Queue | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.repair-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200) !important;
+    border-radius: 16px;
+    padding: 18px 20px;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.repair-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-screwdriver-wrench text-warning me-2"></i> Service Workshop &amp; Repair Queue
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Manage live technician tickets, warranty defect evaluations, customer quote approvals, and QC testing
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.location.reload();">
+                <i class="fas fa-rotate me-1"></i> Refresh Queue
+            </button>
+            <a href="{% url 'repairs:public_tracking' %}" target="_blank" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-magnifying-glass me-1"></i> Public Tracking
+            </a>
+            <a href="{% url 'repairs:ticket_create' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-plus-circle me-1"></i> New Device Intake
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority KPI Cards with Full Soft Borders -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="repair-kpi-card h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Active In-Queue Jobs</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle"><i class="fas fa-list-check fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">{{ kpi_active_queue }}</h3>
+                <small class="text-muted fs-xs">Under diagnosis or lab repair</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="repair-kpi-card h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Awaiting Customer Approval</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle"><i class="fas fa-clock fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">{{ kpi_waiting_approval }}</h3>
+                <small class="text-muted fs-xs">Paid quote SMS links sent</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="repair-kpi-card h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Ready for Customer Pickup</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle"><i class="fas fa-circle-check fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">{{ kpi_ready_pickup }}</h3>
+                <small class="text-muted fs-xs">QC passed &amp; assembled</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="repair-kpi-card h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Free Warranty Claims</span>
+                    <span class="badge bg-info bg-opacity-10 text-info p-2 rounded-circle"><i class="fas fa-shield-halved fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-info font-monospace mt-2 mb-0">{{ kpi_warranty_claims }}</h3>
+                <small class="text-muted fs-xs">Genuine factory defects</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search & Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2">
+            <div class="col-12 col-md-5">
+                <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control form-control-sm bg-light border-0" placeholder="Search by Ticket No, IMEI, Customer Name, or Phone...">
+            </div>
+            <div class="col-6 col-md-3">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Service Statuses</option>
+                    <option value="RECEIVED" {% if request.GET.status == 'RECEIVED' %}selected{% endif %}>Received / In-Queue</option>
+                    <option value="DIAGNOSING" {% if request.GET.status == 'DIAGNOSING' %}selected{% endif %}>Under Diagnostics</option>
+                    <option value="QUOTATION_PENDING" {% if request.GET.status == 'QUOTATION_PENDING' %}selected{% endif %}>Awaiting Quote Approval</option>
+                    <option value="IN_REPAIR" {% if request.GET.status == 'IN_REPAIR' %}selected{% endif %}>In Repair by Tech</option>
+                    <option value="QC_TESTING" {% if request.GET.status == 'QC_TESTING' %}selected{% endif %}>QC Hardware Testing</option>
+                    <option value="READY_FOR_PICKUP" {% if request.GET.status == 'READY_FOR_PICKUP' %}selected{% endif %}>Ready for Pickup</option>
+                    <option value="DELIVERED" {% if request.GET.status == 'DELIVERED' %}selected{% endif %}>Delivered &amp; Closed</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <select name="claim_type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Claim Types</option>
+                    <option value="FREE_WARRANTY" {% if request.GET.claim_type == 'FREE_WARRANTY' %}selected{% endif %}>Free In-Warranty</option>
+                    <option value="PAID_OUT_OF_WARRANTY" {% if request.GET.claim_type == 'PAID_OUT_OF_WARRANTY' %}selected{% endif %}>Paid Out-of-Warranty</option>
+                    <option value="BRAND_SPECIAL_POLICY" {% if request.GET.claim_type == 'BRAND_SPECIAL_POLICY' %}selected{% endif %}>Brand Special Policy</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.status or request.GET.claim_type %}
+                <a href="{% url 'repairs:dashboard' %}" class="btn btn-outline-secondary btn-sm rounded-3">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Active Tickets Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Ticket No</th>
+                        <th>Device Model &amp; IMEI</th>
+                        <th>Customer</th>
+                        <th>Reported Defect</th>
+                        <th>Warranty Type</th>
+                        <th>Status</th>
+                        <th>Technician</th>
+                        <th>Total Amount</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in tickets %}
+                    <tr>
+                        <td class="ps-4 font-monospace fw-bold">
+                            <a href="{% url 'repairs:ticket_detail' t.pk %}" class="text-decoration-none text-primary">
+                                {{ t.ticket_number }}
+                            </a>
+                            <small class="text-muted d-block" style="font-size: 0.65rem;">{{ t.created_at|date:"M d, H:i" }}</small>
+                        </td>
+                        <td>
+                            <strong>{{ t.product.name }}</strong>
+                            <small class="text-muted d-block font-monospace">IMEI: {{ t.imei_or_serial|truncatechars:18 }}</small>
+                        </td>
+                        <td>
+                            <strong>{{ t.customer_name_manual }}</strong>
+                            <small class="text-muted d-block"><i class="fas fa-phone fs-2xs me-1"></i>{{ t.customer_phone_manual }}</small>
+                        </td>
+                        <td>
+                            <small class="text-muted">{{ t.reported_fault|truncatechars:35 }}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-{% if t.claim_type == 'FREE_WARRANTY' %}success{% elif t.claim_type == 'BRAND_SPECIAL_POLICY' %}info{% else %}danger{% endif %} bg-opacity-10 text-{% if t.claim_type == 'FREE_WARRANTY' %}success{% elif t.claim_type == 'BRAND_SPECIAL_POLICY' %}info{% else %}danger{% endif %} fw-bold fs-2xs px-2 py-1">
+                                {{ t.get_claim_type_display }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge bg-{% if t.service_status == 'READY_FOR_PICKUP' %}success{% elif t.service_status == 'QUOTATION_PENDING' %}warning text-dark{% elif t.service_status == 'DELIVERED' %}secondary{% else %}primary{% endif %} fs-2xs px-2 py-1 rounded-pill">
+                                {{ t.get_service_status_display }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if t.technician %}
+                                {{ t.technician.get_full_name|default:t.technician.username }}
+                            {% else %}
+                                <span class="text-muted">Unassigned</span>
+                            {% endif %}
+                        </td>
+                        <td class="fw-bold font-monospace">
+                            {% if t.claim_type == 'FREE_WARRANTY' %}
+                                <span class="text-success">Rs. 0.00 (Free)</span>
+                            {% else %}
+                                Rs. {{ t.final_total_amount|floatformat:2|intcomma }}
+                            {% endif %}
+                        </td>
+                        <td class="text-end pe-4">
+                            <div class="d-inline-flex gap-2">
+                                <a href="{% url 'repairs:ticket_detail' t.pk %}" class="btn btn-primary btn-md rounded-pill px-3 shadow-sm" title="Open Technician Workbench">
+                                    <i class="fas fa-wrench me-1"></i> Workbench
+                                </a>
+                                <a href="{% url 'repairs:claim_token_print' t.pk %}" target="_blank" class="btn btn-outline-dark btn-md rounded-circle p-2" title="Print 80mm Claim Slip">
+                                    <i class="fas fa-print"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-screwdriver-wrench fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No repair tickets found in the queue.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

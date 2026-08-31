@@ -1,0 +1,189 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Sales Returns &amp; Defective Items Registry | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+    
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-rotate-left text-danger me-2"></i> Customer Sales Returns &amp; Exchange Registry
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit customer product return vouchers, defective item quarantine routing, and store credit ledger adjustments
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'sales:estimate_list' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-receipt me-1"></i> Look up Bill to Return
+            </a>
+            <a href="{% url 'inventory:vendor_rma_list' %}" class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold text-dark">
+                <i class="fas fa-truck-ramp-box me-1"></i> Vendor RMA Claims
+            </a>
+        </div>
+    </div>
+
+    <!-- Metric KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-4">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-danger border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Return Vouchers</span>
+                <h3 class="fw-extrabold text-danger font-monospace mt-1 mb-0">{{ total_returns_count }}</h3>
+                <small class="text-muted fs-2xs">Processed return vouchers</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-4">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Refund Value Issued</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-1 mb-0">Rs. {{ total_refund_sum|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">Cash &amp; store credit refunds</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-4">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-warning border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Defective Items Quarantined</span>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-1 mb-0">{{ defective_returns_count }}</h3>
+                <small class="text-muted fs-2xs">Queued for vendor RMA claim</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search & Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-5">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search by Return No, Bill No, Customer Name, or Scanned IMEI...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="refund_mode" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Refund Modes</option>
+                    <option value="CASH" {% if request.GET.refund_mode == 'CASH' %}selected{% endif %}>Cash Refund (नगद फिर्ता)</option>
+                    <option value="STORE_CREDIT" {% if request.GET.refund_mode == 'STORE_CREDIT' %}selected{% endif %}>Customer Store Credit / Udhaari</option>
+                    <option value="EXCHANGE_ADJUST" {% if request.GET.refund_mode == 'EXCHANGE_ADJUST' %}selected{% endif %}>Exchange Bill Adjustment</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ request.GET.start_date|default:'' }}" class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ request.GET.end_date|default:'' }}" class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.refund_mode or request.GET.start_date or request.GET.end_date %}
+                <a href="{% url 'sales:return_list' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Returns Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Return Voucher No</th>
+                        <th>Original Estimate No</th>
+                        <th>Customer</th>
+                        <th>Returned Items</th>
+                        <th>Refund Mode</th>
+                        <th>Total Refund</th>
+                        <th>Processed By</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in returns %}
+                    <tr>
+                        <td class="ps-4 font-monospace fw-bold">
+                            <a href="{% url 'sales:return_detail' r.pk %}" class="text-decoration-none text-danger">
+                                {{ r.return_number }}
+                            </a>
+                            <small class="text-muted d-block" style="font-size: 0.65rem;">{{ r.created_at|date:"M d, Y H:i" }}</small>
+                        </td>
+
+                        <td class="font-monospace">
+                            <a href="{% url 'sales:estimate_detail' r.original_estimate.pk %}" class="text-decoration-none text-primary fw-bold">
+                                {{ r.original_estimate.estimate_number }}
+                            </a>
+                        </td>
+
+                        <td>
+                            <strong>{{ r.customer.name|default:r.original_estimate.recipient_display_name }}</strong>
+                            {% if r.customer.phone_number or r.original_estimate.customer_phone_manual %}
+                                <small class="text-muted d-block font-monospace">
+                                    <i class="fas fa-phone fs-2xs me-1"></i>{{ r.customer.phone_number|default:r.original_estimate.customer_phone_manual }}
+                                </small>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border">
+                                <i class="fas fa-boxes-stacked me-1"></i> {{ r.items.count }} Line(s)
+                            </span>
+                        </td>
+
+                        <td>
+                            {% if r.refund_mode == 'CASH' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-money-bill-wave me-1"></i> Cash Refund
+                                </span>
+                            {% elif r.refund_mode == 'STORE_CREDIT' %}
+                                <span class="badge bg-info bg-opacity-10 text-info fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-wallet me-1"></i> Store Credit
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold fs-2xs px-2 py-1">
+                                    {{ r.get_refund_mode_display }}
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td class="fw-bold font-monospace text-danger">
+                            Rs. {{ r.total_refund_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <td>{{ r.processed_by.get_full_name|default:r.processed_by.username }}</td>
+
+                        <td class="text-end pe-4">
+                            <div class="d-inline-flex gap-2">
+                                <a href="{% url 'sales:return_detail' r.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                                    Details
+                                </a>
+                                <a href="{% url 'sales:return_thermal_slip' r.pk %}" target="_blank" class="btn btn-outline-dark btn-sm rounded-circle p-2" title="Print Return Slip (80mm)">
+                                    <i class="fas fa-print"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="fas fa-rotate-left fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No sales returns recorded matching your query.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+</div>
+{% endblock %}

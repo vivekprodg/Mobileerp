@@ -1,0 +1,349 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+:root {
+    /* Brand Colors */
+    --erp-primary: #2563eb;
+    --erp-primary-hover: #1d4ed8;
+    --erp-primary-light: #eff6ff;
+    --erp-primary-border: #bfdbfe;
+    
+    /* Slate Neutrals */
+    --erp-dark: #0f172a;
+    --erp-slate-900: #0f172a;
+    --erp-slate-800: #1e293b;
+    --erp-slate-700: #334155;
+    --erp-slate-600: #475569;
+    --erp-slate-500: #64748b;
+    --erp-slate-400: #94a3b8;
+    --erp-slate-300: #cbd5e1;
+    --erp-slate-200: #e2e8f0;
+    --erp-slate-100: #f1f5f9;
+    --erp-slate-50: #f8fafc;
+    
+    /* Semantic Colors */
+    --erp-success: #10b981;
+    --erp-success-light: #ecfdf5;
+    --erp-success-border: #a7f3d0;
+    
+    --erp-warning: #f59e0b;
+    --erp-warning-light: #fffbeb;
+    --erp-warning-border: #fde68a;
+    
+    --erp-danger: #ef4444;
+    --erp-danger-light: #fef2f2;
+    --erp-danger-border: #fecaca;
+
+    --erp-info: #0ea5e9;
+    --erp-info-light: #f0f9ff;
+    --erp-info-border: #bae6fd;
+
+    /* Geometry & Shadows */
+    --erp-radius-sm: 8px;
+    --erp-radius-md: 12px;
+    --erp-radius-lg: 16px;
+    --erp-radius-pill: 9999px;
+    
+    --erp-shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+    --erp-shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+    --erp-shadow-md: 0 4px 10px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+    --erp-shadow-lg: 0 12px 24px -4px rgba(15, 23, 42, 0.1), 0 4px 6px -2px rgba(15, 23, 42, 0.05);
+}
+
+/* Base Body Styles */
+body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: var(--erp-slate-50);
+    color: var(--erp-slate-800);
+    letter-spacing: -0.012em;
+    -webkit-font-smoothing: antialiased;
+    scrollbar-width: thin;
+    scrollbar-color: var(--erp-slate-400) transparent;
+}
+
+/* Typography Utilities */
+.fs-2xs { font-size: 0.6875rem !important; }
+.fs-xs { font-size: 0.75rem !important; }
+.fs-sm { font-size: 0.845rem !important; }
+.fs-base { font-size: 0.9375rem !important; }
+.font-mono { font-family: 'JetBrains Mono', monospace !important; }
+.font-tabular { font-variant-numeric: tabular-nums; }
+.fw-semibold { font-weight: 600 !important; }
+.fw-bold { font-weight: 700 !important; }
+.fw-extrabold { font-weight: 800 !important; }
+.tracking-tight { letter-spacing: -0.025em; }
+
+/* Cross-Browser Sleek Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--erp-slate-400); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--erp-slate-500); }
+
+/* ==========================================================================
+   SIDEBAR NAVIGATION SYSTEM
+   ========================================================================== */
+.app-sidebar-wrapper .nav-pills,
+.offcanvas-body .nav-pills {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap !important;
+    width: 100% !important;
+}
+
+.app-sidebar-wrapper .nav-item,
+.offcanvas-body .nav-item {
+    width: 100% !important;
+    flex-shrink: 0 !important;
+}
+
+.app-sidebar-wrapper .nav-link,
+.offcanvas-body .nav-link {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    text-decoration: none !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    box-sizing: border-box !important;
+    padding-block: 0.55rem !important;
+    padding-inline: 0.85rem !important;
+}
+
+.app-sidebar-wrapper .nav-link:hover:not(.active),
+.offcanvas-body .nav-link:hover:not(.active) {
+    background-color: var(--erp-slate-100) !important;
+    color: var(--erp-primary) !important;
+}
+
+/* ==========================================================================
+   BUTTON ARCHITECTURE
+   ========================================================================== */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    white-space: nowrap;
+    font-weight: 600;
+    line-height: 1.4;
+    border-radius: var(--erp-radius-pill);
+    transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--erp-shadow-xs);
+    cursor: pointer;
+    padding-block: 0.5rem;
+    padding-inline: 1.15rem;
+    min-height: 38px;
+}
+
+.btn-sm {
+    min-height: 32px;
+    padding-block: 0.35rem;
+    padding-inline: 0.85rem;
+    font-size: 0.8125rem;
+}
+
+.btn-lg {
+    min-height: 46px;
+    padding-block: 0.65rem;
+    padding-inline: 1.65rem;
+    font-size: 0.95rem;
+}
+
+/* Ensure Bootstrap display utilities override .btn display rules */
+.btn.d-none { display: none !important; }
+.btn.d-inline-flex { display: inline-flex !important; }
+
+@media (min-width: 992px) {
+    .btn.d-lg-none { display: none !important; }
+    .btn.d-lg-inline-flex { display: inline-flex !important; }
+}
+
+@media (max-width: 991.98px) {
+    .btn.d-lg-inline-flex { display: none !important; }
+    .btn.d-lg-none { display: inline-flex !important; }
+}
+
+/* Button Color Variants */
+.btn-primary {
+    background-color: var(--erp-primary) !important;
+    border: 1px solid var(--erp-primary) !important;
+    color: #ffffff !important;
+}
+.btn-primary:hover {
+    background-color: var(--erp-primary-hover) !important;
+    border-color: var(--erp-primary-hover) !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3) !important;
+    transform: translateY(-1.5px);
+}
+
+.btn-outline-dark {
+    background-color: #ffffff !important;
+    border: 1px solid var(--erp-slate-200) !important;
+    color: var(--erp-slate-700) !important;
+}
+.btn-outline-dark:hover {
+    background-color: var(--erp-slate-100) !important;
+    border-color: var(--erp-slate-400) !important;
+    color: var(--erp-dark) !important;
+    transform: translateY(-1.5px);
+}
+
+.btn-outline-secondary {
+    background-color: #ffffff !important;
+    border: 1px solid var(--erp-slate-200) !important;
+    color: var(--erp-slate-600) !important;
+}
+.btn-outline-secondary:hover {
+    background-color: var(--erp-slate-50) !important;
+    border-color: var(--erp-slate-400) !important;
+    color: var(--erp-slate-800) !important;
+    transform: translateY(-1.5px);
+}
+
+/* ==========================================================================
+   ENTERPRISE SOFT BADGES
+   ========================================================================== */
+.badge-soft-primary {
+    background-color: var(--erp-primary-light);
+    color: var(--erp-primary);
+    border: 1px solid var(--erp-primary-border);
+}
+
+.badge-soft-success {
+    background-color: var(--erp-success-light);
+    color: #065f46;
+    border: 1px solid var(--erp-success-border);
+}
+
+.badge-soft-warning {
+    background-color: var(--erp-warning-light);
+    color: #92400e;
+    border: 1px solid var(--erp-warning-border);
+}
+
+.badge-soft-danger {
+    background-color: var(--erp-danger-light);
+    color: #991b1b;
+    border: 1px solid var(--erp-danger-border);
+}
+
+.badge-soft-secondary {
+    background-color: var(--erp-slate-100);
+    color: var(--erp-slate-600);
+    border: 1px solid var(--erp-slate-200);
+}
+
+/* ==========================================================================
+   CARDS & CONTAINERS
+   ========================================================================== */
+.card {
+    background-color: #ffffff;
+    border: 1px solid var(--erp-slate-200) !important;
+    border-radius: var(--erp-radius-lg);
+    box-shadow: var(--erp-shadow-xs);
+}
+
+.card-kpi {
+    border-radius: var(--erp-radius-md);
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.card-kpi:hover {
+    box-shadow: var(--erp-shadow-lg) !important;
+    border-color: var(--erp-primary-border) !important;
+    transform: translateY(-3px);
+}
+
+/* Form Controls with Flexible Sizing */
+.form-control, .form-select {
+    min-height: 40px;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: var(--erp-radius-md);
+    padding-block: 0.5rem;
+    padding-inline: 0.85rem;
+    font-size: 0.875rem;
+    background-color: #ffffff;
+    color: var(--erp-slate-800);
+    transition: all 0.15s ease;
+}
+.form-control:focus, .form-select:focus {
+    border-color: var(--erp-primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    outline: none;
+}
+
+.form-control-sm, .form-select-sm {
+    min-height: 32px;
+    padding-block: 0.25rem;
+    padding-inline: 0.65rem;
+    font-size: 0.8125rem;
+}
+
+.form-control-lg, .form-select-lg {
+    min-height: 48px;
+    padding-block: 0.65rem;
+    padding-inline: 1.15rem;
+    font-size: 1rem;
+}
+
+/* ==========================================================================
+   TABLE ARCHITECTURE
+   ========================================================================== */
+.table {
+    margin-bottom: 0;
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.table thead th {
+    background-color: var(--erp-slate-50);
+    color: var(--erp-slate-500);
+    font-size: 0.725rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--erp-slate-200);
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+}
+
+.table tbody td {
+    padding: 0.85rem 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--erp-slate-100);
+    color: var(--erp-slate-800);
+    font-size: 0.875rem;
+}
+
+.table tbody tr {
+    transition: background-color 0.15s ease;
+}
+
+.table-hover tbody tr:hover {
+    background-color: var(--erp-slate-50);
+}
+
+.table tfoot td, .table tfoot th {
+    padding: 0.85rem 1rem;
+    border-top: 1px solid var(--erp-slate-200);
+    vertical-align: middle;
+}
+
+/* Interactive Utility Helpers */
+.pointer { cursor: pointer; }
+.hover-bg:hover { background-color: var(--erp-slate-100) !important; }
+.hover-primary:hover { color: var(--erp-primary) !important; }
+
+/* Modal Cleanups */
+.modal-content {
+    border-radius: var(--erp-radius-lg);
+    border: none;
+    box-shadow: var(--erp-shadow-lg);
+}
+
+.modal-header {
+    border-bottom: 1px solid var(--erp-slate-100);
+}
+
+.modal-footer {
+    border-top: 1px solid var(--erp-slate-100);
+}

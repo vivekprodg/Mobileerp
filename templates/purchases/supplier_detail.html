@@ -1,0 +1,367 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}{{ supplier.company_name }} | Supplier Profile | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.supplier-profile-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: var(--erp-shadow-xs);
+    height: 100%;
+}
+
+.copy-badge-btn {
+    border: none;
+    background: transparent;
+    color: #64748b;
+    padding: 0 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.15s ease;
+}
+
+.copy-badge-btn:hover {
+    color: var(--erp-primary);
+    transform: scale(1.15);
+}
+
+.policy-quote-box {
+    background: #f8fafc;
+    border-left: 4px solid #2563eb;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 0.825rem;
+    line-height: 1.5;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+    
+    <!-- Top Action Header & Badges -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="badge bg-primary fs-xs font-monospace px-3 py-1 rounded-pill">{{ supplier.code }}</span>
+                <h4 class="fw-bold text-dark mb-0">{{ supplier.company_name }}</h4>
+                
+                <!-- Status Badge -->
+                {% if supplier.status == 'ACTIVE' %}
+                    <span class="badge bg-success bg-opacity-10 text-success fw-bold px-3 py-1 rounded-pill fs-xs">
+                        <i class="fas fa-check-circle me-1"></i> Active
+                    </span>
+                {% elif supplier.status == 'BLOCKED' %}
+                    <span class="badge bg-danger bg-opacity-10 text-danger fw-bold px-3 py-1 rounded-pill fs-xs">
+                        <i class="fas fa-ban me-1"></i> Blocked
+                    </span>
+                {% else %}
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold px-3 py-1 rounded-pill fs-xs">
+                        Inactive
+                    </span>
+                {% endif %}
+
+                <!-- Authorized Distributor Badge -->
+                {% if supplier.is_authorized_distributor %}
+                    <span class="badge bg-info bg-opacity-10 text-info fw-bold px-3 py-1 rounded-pill fs-xs">
+                        <i class="fas fa-shield-halved me-1"></i> {{ supplier.get_distributor_tier_display|default:"Authorized Distributor" }}
+                    </span>
+                {% endif %}
+
+                <!-- Rating Stars -->
+                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis px-2 py-1 rounded-pill fs-xs">
+                    ★ {{ supplier.rating }}.0
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Classification: <strong>{{ supplier.get_supplier_type_display }}</strong> &bull; 
+                Reg No: <strong class="font-monospace text-dark">{{ supplier.registration_number }}</strong> &bull; 
+                PAN: <strong class="font-monospace">{{ supplier.pan_number|default:"N/A" }}</strong>
+            </p>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <button type="button" class="btn btn-success btn-sm rounded-pill px-4 fw-bold shadow-sm" data-bs-toggle="modal" data-bs-target="#supplierPayoutModal">
+                <i class="fas fa-hand-holding-dollar me-1"></i> Record Payout
+            </button>
+            <a href="{% url 'purchases:supplier_edit' supplier.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                <i class="fas fa-edit me-1"></i> Edit Details
+            </a>
+            <a href="{% url 'purchases:supplier_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Suppliers
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 Key Financial & Overview KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-danger border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Current Outstanding Balance</span>
+                <h3 class="fw-bold text-danger font-monospace mt-1 mb-0">Rs. {{ supplier.current_balance|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">{% if supplier.current_balance > 0 %}Payable to supplier{% else %}Clear / Advance{% endif %}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Credit Limit</span>
+                <h3 class="fw-bold text-primary font-monospace mt-1 mb-0">Rs. {{ supplier.credit_limit|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">Credit Terms: {{ supplier.credit_period_days }} Days</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-success border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Primary Contact</span>
+                <h5 class="fw-bold text-dark mt-1 mb-0">{{ supplier.contact_person }}</h5>
+                <small class="text-muted fs-2xs">{{ supplier.phone_number }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-info border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Location &amp; Province</span>
+                <h6 class="fw-bold text-dark mt-1 mb-0">{{ supplier.city }}, {{ supplier.province }}</h6>
+                <small class="text-muted fs-2xs">{{ supplier.address }}</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Workspace Grid -->
+    <div class="row g-4 mb-4">
+        
+        <!-- LEFT (8 Cols): Policies, Banking & KYC Documents -->
+        <div class="col-12 col-lg-8">
+            
+            <!-- Mobile Distributor & Warranty Policies Card -->
+            <div class="supplier-profile-card mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-shield-halved text-warning-emphasis me-2"></i> Distributor RMA &amp; Warranty Policies
+                </h6>
+                <div class="row g-3 fs-xs">
+                    {% if supplier.doa_policy %}
+                    <div class="col-12">
+                        <strong class="text-dark d-block mb-1"><i class="fas fa-box-open text-primary me-1"></i> 7-Day DOA (Dead On Arrival) Replacement Policy:</strong>
+                        <div class="policy-quote-box">{{ supplier.doa_policy|linebreaks }}</div>
+                    </div>
+                    {% endif %}
+
+                    {% if supplier.warranty_claim_contact %}
+                    <div class="col-12 col-md-6">
+                        <strong class="text-dark d-block mb-1"><i class="fas fa-wrench text-success me-1"></i> Service Center / RMA Lab Location:</strong>
+                        <div class="policy-quote-box border-success" style="border-left-color: #10b981;">{{ supplier.warranty_claim_contact|linebreaks }}</div>
+                    </div>
+                    {% endif %}
+
+                    {% if supplier.defective_return_policy %}
+                    <div class="col-12 col-md-6">
+                        <strong class="text-dark d-block mb-1"><i class="fas fa-rotate-left text-danger me-1"></i> Defective Return Terms:</strong>
+                        <div class="policy-quote-box border-danger" style="border-left-color: #ef4444;">{{ supplier.defective_return_policy|linebreaks }}</div>
+                    </div>
+                    {% endif %}
+
+                    {% if not supplier.doa_policy and not supplier.warranty_claim_contact and not supplier.defective_return_policy %}
+                    <div class="col-12 text-muted py-2">
+                        No specific distributor warranty or DOA policies defined for this supplier.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Structured Banking & Settlement Details Card -->
+            <div class="supplier-profile-card mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-building-columns text-success me-2"></i> Structured Banking &amp; Payout Details
+                </h6>
+                <div class="row g-3 fs-xs">
+                    <div class="col-md-6">
+                        <span class="text-muted d-block">Bank Name:</span>
+                        <strong class="text-dark fs-sm">{{ supplier.bank_name|default:"Not configured" }}</strong>
+                    </div>
+
+                    <div class="col-md-6">
+                        <span class="text-muted d-block">Bank Account Number:</span>
+                        <div class="d-flex align-items-center gap-2">
+                            <strong class="font-monospace fs-sm text-primary" id="bankAccNoText">{{ supplier.bank_account_number|default:"-" }}</strong>
+                            {% if supplier.bank_account_number %}
+                            <button type="button" class="copy-badge-btn" onclick="navigator.clipboard.writeText('{{ supplier.bank_account_number }}'); this.innerText='Copied!';" title="Copy Account Number">
+                                <i class="far fa-copy"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <span class="text-muted d-block">Account Holder Name:</span>
+                        <strong class="text-dark">{{ supplier.account_holder_name|default:"-" }}</strong>
+                    </div>
+
+                    <div class="col-md-6">
+                        <span class="text-muted d-block">Bank Branch:</span>
+                        <strong class="text-dark">{{ supplier.bank_branch|default:"-" }}</strong>
+                    </div>
+
+                    {% if supplier.qr_payment_details %}
+                    <div class="col-12">
+                        <span class="text-muted d-block mb-1">FonePay / Merchant QR Transfer Details:</span>
+                        <div class="p-2 bg-light rounded border font-monospace fs-2xs">{{ supplier.qr_payment_details }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- KYC Document Verification Section -->
+            <div class="supplier-profile-card mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-file-shield text-secondary me-2"></i> KYC Verification Documents
+                </h6>
+                {% if supplier.kyc_document %}
+                    <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded-3 border">
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="badge bg-primary text-white p-3 rounded-circle fs-5"><i class="fas fa-file-pdf"></i></span>
+                            <div>
+                                <h6 class="fw-bold text-dark mb-0">Company Registration / PAN Certificate</h6>
+                                <small class="text-muted">Uploaded KYC compliance document file</small>
+                            </div>
+                        </div>
+                        <a href="{{ supplier.kyc_document.url }}" target="_blank" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-xs">
+                            <i class="fas fa-download me-1"></i> View / Download Document
+                        </a>
+                    </div>
+                {% else %}
+                    <div class="text-muted fs-xs py-2 text-center">
+                        <i class="fas fa-file-circle-xmark fs-2 text-secondary opacity-25 d-block mb-1"></i>
+                        No registration or PAN certificate document attached. 
+                        <a href="{% url 'purchases:supplier_edit' supplier.pk %}" class="text-primary fw-bold text-decoration-none ms-1">Upload Document &rarr;</a>
+                    </div>
+                {% endif %}
+            </div>
+
+        </div>
+
+        <!-- RIGHT (4 Cols): Catalog Coverage & Overview -->
+        <div class="col-12 col-lg-4">
+            
+            <div class="supplier-profile-card mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-tags text-primary me-2"></i> Catalog &amp; Brand Coverage
+                </h6>
+                <div class="mb-3">
+                    <span class="text-muted fs-2xs text-uppercase fw-bold d-block mb-1">Supplied Categories:</span>
+                    <p class="fs-xs text-dark fw-semibold mb-0">{{ supplier.product_categories_supplied|default:"General mobile inventory" }}</p>
+                </div>
+                <div class="mb-3">
+                    <span class="text-muted fs-2xs text-uppercase fw-bold d-block mb-1">Authorized Brands:</span>
+                    <p class="fs-xs text-dark fw-semibold mb-0">{{ supplier.brands_supplied|default:"Unspecified brands" }}</p>
+                </div>
+                {% if supplier.brand_authorization_details %}
+                <div class="mb-2">
+                    <span class="text-muted fs-2xs text-uppercase fw-bold d-block mb-1">Authorization Details:</span>
+                    <small class="text-secondary">{{ supplier.brand_authorization_details }}</small>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if supplier.notes %}
+            <div class="supplier-profile-card">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-2">Internal Notes</h6>
+                <p class="fs-xs text-secondary mb-0">{{ supplier.notes|linebreaks }}</p>
+            </div>
+            {% endif %}
+
+        </div>
+    </div>
+
+    <!-- Supplier Udhaari & Payout Statement Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-book-open text-primary me-2"></i> Supplier Udhaari &amp; Payout Statement</h6>
+            <span class="badge bg-primary rounded-pill">{{ ledger_entries.count }} Transactions</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Date &amp; Time</th>
+                        <th>Type</th>
+                        <th>Reference / GRN</th>
+                        <th>Purchased (+)</th>
+                        <th>Paid Out (-)</th>
+                        <th>Resulting Balance</th>
+                        <th>Payment Mode</th>
+                        <th>Recorded By</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in ledger_entries %}
+                    <tr>
+                        <td class="ps-4 text-nowrap">{{ entry.created_at|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            <span class="badge bg-{% if entry.transaction_type == 'PURCHASE_BILL' %}danger{% elif entry.transaction_type == 'PAYMENT' %}success{% else %}info{% endif %} fs-2xs">
+                                {{ entry.get_transaction_type_display }}
+                            </span>
+                        </td>
+                        <td class="font-monospace"><strong>{{ entry.reference_number|default:"-" }}</strong></td>
+                        <td class="fw-bold text-danger">{% if entry.transaction_type == 'PURCHASE_BILL' %}Rs. {{ entry.amount|floatformat:2 }}{% else %}-{% endif %}</td>
+                        <td class="fw-bold text-success">{% if entry.transaction_type == 'PAYMENT' or entry.transaction_type == 'PURCHASE_RETURN' %}Rs. {{ entry.amount|floatformat:2 }}{% else %}-{% endif %}</td>
+                        <td class="fw-bold text-dark font-monospace">Rs. {{ entry.resulting_balance|floatformat:2 }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ entry.get_payment_mode_display|default:"-" }}</span></td>
+                        <td>{{ entry.recorded_by.username|default:"System" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-4 text-muted">No ledger transactions recorded yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Record Supplier Payout -->
+<div class="modal fade" id="supplierPayoutModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <form action="{% url 'purchases:supplier_payment' supplier.pk %}" method="post">
+                {% csrf_token %}
+                <div class="modal-header bg-success text-white border-0 py-3">
+                    <h5 class="modal-title fs-6 fw-bold"><i class="fas fa-hand-holding-dollar me-2"></i> Record Supplier Payout</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Payout Amount (NPR) <span class="text-danger">*</span></label>
+                        {{ payment_form.amount }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Payment Mode <span class="text-danger">*</span></label>
+                        {{ payment_form.payment_mode }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Reference No. (Cheque / Bank Auth)</label>
+                        {{ payment_form.reference_number }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Cheque Date (If Applicable)</label>
+                        {{ payment_form.cheque_date }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Remarks / Payout Notes</label>
+                        {{ payment_form.remarks }}
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success btn-sm px-4 rounded-pill fw-bold">Post Payout</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

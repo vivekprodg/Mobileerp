@@ -1,0 +1,48 @@
+﻿{
+  "name": "mobile-shop-inventory-pos-nepal",
+  "version": "2.5.0",
+  "description": "Multi-Branch Mobile & Optical Inventory, Sales Estimation, Barcode Billing & PWA POS System (Nepal Context)",
+  "main": "static/js/pos_engine.js",
+  "author": "Smart Mobile & Optics Hub Engineering Team",
+  "license": "Proprietary",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "start": "python manage.py runserver 0.0.0.0:8000",
+    "dev": "concurrently \"python manage.py runserver 0.0.0.0:8000\" \"npm run watch:css\"",
+    "build:css": "sass static/scss/main.scss static/css/custom.css --style=compressed --no-source-map",
+    "watch:css": "sass --watch static/scss/main.scss:static/css/custom.css",
+    "build:pwa": "workbox generateSW workbox-config.js",
+    "lint:js": "eslint static/js/**/*.js",
+    "format": "prettier --write \"static/**/*.{js,css,json}\"",
+    "migrate": "python manage.py migrate",
+    "collectstatic": "python manage.py collectstatic --noinput"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "sass": "^1.72.0",
+    "workbox-cli": "^7.0.0"
+  },
+  "keywords": [
+    "nepal-pos",
+    "mobile-shop-inventory",
+    "pwa-pos",
+    "nepali-calendar-bs",
+    "estimation-slip-billing",
+    "multi-branch-erp",
+    "imei-serial-tracking",
+    "fonepay-esewa-khalti-qr",
+    "thermal-80mm-printer"
+  ],
+  "browserslist": [
+    "> 0.5%",
+    "last 2 versions",
+    "Firefox ESR",
+    "not dead"
+  ]
+}

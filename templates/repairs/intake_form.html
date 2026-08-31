@@ -1,0 +1,759 @@
+{% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Device Intake &amp; Diagnostic Audit | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/repair.css' %}">
+<style>
+/* Intake Form UX Enhancements */
+.intake-sticky-footer {
+    position: sticky;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--erp-slate-200);
+    z-index: 1020;
+    padding: 12px 24px;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+}
+
+.pattern-canvas-wrapper {
+    position: relative;
+    display: inline-block;
+    border-radius: 12px;
+    background: #f8fafc;
+    border: 2px dashed #cbd5e1;
+    padding: 10px;
+}
+
+#patternCanvas {
+    cursor: crosshair;
+    touch-action: none;
+    background: #ffffff;
+    border-radius: 8px;
+    display: block;
+}
+
+.camera-viewport-container {
+    position: relative;
+    background-color: #0f172a;
+    border-radius: 12px;
+    overflow: hidden;
+    z-index: 10;
+}
+
+#cameraVideo {
+    width: 100%;
+    max-height: 240px;
+    object-fit: cover;
+    display: block;
+}
+
+#snapshotCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: -1;
+    display: none;
+}
+
+.section-tag-badge {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+}
+
+.scan-focus-active {
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25) !important;
+    border-color: #2563eb !important;
+}
+
+/* ==========================================================================
+   REPAIR IMEI CAMERA SCANNER VIEWFINDER OVERLAY STYLES
+   ========================================================================== */
+.repair-scanner-modal-body {
+    background-color: #0b1120;
+    position: relative;
+    padding: 0;
+    overflow: hidden;
+    min-height: 380px;
+}
+
+.repair-scanner-video-feed {
+    width: 100%;
+    height: 100%;
+    max-height: 480px;
+    object-fit: cover;
+    display: block;
+}
+
+.repair-scanner-viewfinder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    padding: 20px;
+}
+
+.repair-aiming-reticle {
+    width: 270px;
+    height: 160px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 16px;
+    position: relative;
+    box-shadow: 0 0 0 9999px rgba(11, 17, 32, 0.65);
+}
+
+.repair-aiming-reticle::before,
+.repair-aiming-reticle::after {
+    content: '';
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    border-color: #f59e0b;
+    border-style: solid;
+}
+
+.repair-aiming-reticle::before {
+    top: -2px;
+    left: -2px;
+    border-width: 4px 0 0 4px;
+    border-top-left-radius: 14px;
+}
+
+.repair-aiming-reticle::after {
+    bottom: -2px;
+    right: -2px;
+    border-width: 0 4px 4px 0;
+    border-bottom-right-radius: 14px;
+}
+
+.repair-corner-tr {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 24px;
+    height: 24px;
+    border-top: 4px solid #f59e0b;
+    border-right: 4px solid #f59e0b;
+    border-top-right-radius: 14px;
+}
+
+.repair-corner-bl {
+    position: absolute;
+    bottom: -2px;
+    left: -2px;
+    width: 24px;
+    height: 24px;
+    border-bottom: 4px solid #f59e0b;
+    border-left: 4px solid #f59e0b;
+    border-bottom-left-radius: 14px;
+}
+
+.repair-laser-line {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, #fbbf24 50%, transparent 100%);
+    box-shadow: 0 0 8px #fbbf24;
+    animation: repairLaserScan 2s ease-in-out infinite alternate;
+}
+
+@keyframes repairLaserScan {
+    0% { top: 8%; opacity: 0.8; }
+    100% { top: 92%; opacity: 1; }
+}
+
+.repair-camera-banner {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    z-index: 10;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 10px 14px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1320px;">
+    <!-- Page Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-clipboard-check text-primary me-2"></i> Device Intake &amp; Physical Audit Inspection
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit device physical condition, record security unlock credentials, verify LDI status, and capture intake photos
+            </p>
+        </div>
+        <a href="{% url 'repairs:dashboard' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+            &larr; Back to Workshop
+        </a>
+    </div>
+
+    <!-- Error Summary Alert -->
+    {% if intake_form.errors or checklist_form.errors %}
+    <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="badge bg-danger text-white rounded-pill px-2 py-1 fs-2xs">
+                {{ intake_form.errors|length|add:checklist_form.errors|length }} Error(s)
+            </span>
+            <h6 class="fw-bold text-danger mb-0">Please resolve the following intake errors:</h6>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <ul class="mb-0 fs-xs ps-3">
+            {% for field in intake_form %}{% for err in field.errors %}<li><strong>Intake Form:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}
+            {% for field in checklist_form %}{% for err in field.errors %}<li><strong>Inspection Checklist:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <!-- Live Scanned Device Auto-Match Feedback Banner -->
+    <div id="repairImeiScanFeedbackBanner" class="d-none alert alert-success rounded-4 p-3 mb-4 border-0 shadow-sm">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge bg-success p-2 rounded-circle fs-5"><i class="fas fa-check"></i></span>
+                <div>
+                    <h6 class="fw-bold text-dark mb-0" id="feedbackBannerTitle">Device Recognized in Catalog</h6>
+                    <p class="text-muted fs-xs mb-0" id="feedbackBannerDetails">Details autofilled.</p>
+                </div>
+            </div>
+            <span class="badge bg-primary px-3 py-2 rounded-pill fs-xs" id="feedbackBannerWarrantyTag">
+                Active Warranty
+            </span>
+        </div>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" id="repairIntakeMasterForm" novalidate>
+        {% csrf_token %}
+
+        <div class="row g-4 mb-4">
+            <!-- Left Main Column (8 Cols): Device, Customer, Checklist & Photos -->
+            <div class="col-12 col-lg-8">
+                
+                <!-- 1. Customer & Device Profile -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-user-tag text-primary me-2"></i> 1. Customer &amp; Handset Profile
+                        </h6>
+                        <span class="section-tag-badge bg-primary bg-opacity-10 text-primary">Identity &amp; Contact</span>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Device Model <span class="text-danger">*</span></label>
+                            {{ intake_form.product }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">15-Digit IMEI or Serial Number <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                {{ intake_form.imei_or_serial }}
+                                <button type="button" class="btn btn-outline-primary btn-sm fw-bold px-2" id="scanRepairImeiBtn" title="Scan Barcode / Focus IMEI Gun">
+                                    <i class="fas fa-barcode"></i>
+                                </button>
+                                <!-- CAMERA SCANNER TRIGGER BUTTON -->
+                                <button type="button" class="btn btn-warning btn-sm fw-bold px-3 text-dark" id="cameraScanRepairImeiBtn" title="Scan IMEI using Device Camera">
+                                    <i class="fas fa-camera me-1"></i> Camera Scan
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Customer Name <span class="text-danger">*</span></label>
+                            {{ intake_form.customer_name_manual }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Customer Mobile Phone <span class="text-danger">*</span></label>
+                            {{ intake_form.customer_phone_manual }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Claimed Defective Component</label>
+                            {{ intake_form.claimed_component }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Device Color / Finish</label>
+                            {{ intake_form.device_color }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Assigned Technician</label>
+                            {{ intake_form.technician }}
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Accessories Received with Device</label>
+                            {{ intake_form.intake_accessories_received }}
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Customer Reported Fault / Problem Description <span class="text-danger">*</span></label>
+                            {{ intake_form.reported_fault }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Physical & Liquid Damage Audit Checklist -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-shield-halved text-danger me-2"></i> 2. Pre-Repair Physical &amp; Liquid Ingress Audit
+                        </h6>
+                        <span class="section-tag-badge bg-danger bg-opacity-10 text-danger">Warranty Shield</span>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Power State on Arrival</label>
+                            {{ checklist_form.power_status }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Liquid Damage Indicator (LDI)</label>
+                            {{ checklist_form.ldi_indicator_status }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Body Physical Grade</label>
+                            {{ checklist_form.body_physical_grade }}
+                        </div>
+                    </div>
+
+                    <div class="p-3 bg-light rounded-3 border mb-3">
+                        <div class="row g-2">
+                            <div class="col-6 col-md-4">
+                                <div class="form-check">
+                                    {{ checklist_form.is_front_glass_cracked }}
+                                    <label class="form-check-label fs-xs fw-semibold">Front Glass Cracked</label>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-4">
+                                <div class="form-check">
+                                    {{ checklist_form.is_back_cover_glass_broken }}
+                                    <label class="form-check-label fs-xs fw-semibold">Back Glass Shattered</label>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-4">
+                                <div class="form-check">
+                                    {{ checklist_form.is_chassis_frame_bent }}
+                                    <label class="form-check-label fs-xs fw-semibold">Bent Chassis Frame</label>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-4">
+                                <div class="form-check">
+                                    {{ checklist_form.is_camera_lens_cracked }}
+                                    <label class="form-check-label fs-xs fw-semibold">Camera Lens Cracked</label>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-4">
+                                <div class="form-check">
+                                    {{ checklist_form.has_display_lines_or_bleed }}
+                                    <label class="form-check-label fs-xs fw-semibold">Green Line / OLED Bleed</label>
+                                </div>
+                            </div>
+                            <div class="col-6 col-md-4">
+                                <div class="form-check">
+                                    {{ checklist_form.is_third_party_repaired_before }}
+                                    <label class="form-check-label fs-xs fw-semibold">Third-Party Seal Broken</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="form-label fw-bold text-dark fs-xs">Specific Scratches, Dents or Structural Observations</label>
+                        {{ checklist_form.intake_notes }}
+                    </div>
+                </div>
+
+                <!-- 3. Photo Evidence Vault & Live Camera Capture with Clear Fallback -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <div>
+                            <h6 class="fw-bold text-dark mb-0">
+                                <i class="fas fa-camera text-primary me-2"></i> 3. Photo Evidence Vault
+                            </h6>
+                            <small class="text-muted fs-2xs">Capture live snapshot or upload pre-existing defect images</small>
+                        </div>
+                        <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3" id="startCameraBtn">
+                            <i class="fas fa-video me-1"></i> Open Live Webcam
+                        </button>
+                    </div>
+
+                    <!-- Live Webcam Stream Viewport -->
+                    <div id="liveCameraContainer" class="camera-viewport-container d-none mb-3 p-3 text-center">
+                        <video id="cameraVideo" autoplay playsinline class="rounded border mb-2"></video>
+                        <div class="d-flex justify-content-center gap-2">
+                            <button type="button" class="btn btn-success btn-sm rounded-pill px-3 fw-bold" id="snapPhotoBtn">
+                                <i class="fas fa-camera-retro me-1"></i> Snap Photo
+                            </button>
+                            <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3" id="closeCameraBtn">
+                                Close Camera
+                            </button>
+                        </div>
+                        <canvas id="snapshotCanvas"></canvas>
+                    </div>
+
+                    <!-- Standard File Upload Fallback (Always Accessible) -->
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold fs-xs text-dark">
+                            <i class="fas fa-folder-open text-secondary me-1"></i> Upload Evidence Images (from PC / Phone Storage)
+                        </label>
+                        <input type="file" name="evidence_images" class="form-control" multiple accept="image/*" id="filePhotoInput">
+                        <small class="text-muted fs-2xs mt-1 d-block">
+                            Select photos of LDI stickers, screen glass cracks, motherboard corrosion, or housing dents.
+                        </small>
+                    </div>
+
+                    <div id="capturedPhotosPreview" class="d-flex flex-wrap gap-2"></div>
+                </div>
+
+            </div>
+
+            <!-- Right Column (4 Cols): Pattern Lock at TOP -> Scheduled Delivery -> Agreements -->
+            <div class="col-12 col-lg-4">
+                
+                <!-- 1. Security Pattern Lock & PIN Card -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-lock text-warning me-2"></i> Security Unlock Credentials
+                        </h6>
+                        <span class="section-tag-badge bg-warning bg-opacity-10 text-warning-emphasis">Lab Access</span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Screen Lock PIN / Alphanumeric Password</label>
+                        {{ intake_form.security_pin_code }}
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label fw-bold text-dark fs-xs mb-0">Draw 3x3 Unlock Pattern:</label>
+                            <button type="button" class="btn btn-link p-0 text-decoration-none fs-2xs text-danger fw-semibold" id="clearPatternBtn">
+                                <i class="fas fa-rotate-left me-1"></i> Reset
+                            </button>
+                        </div>
+                        <p class="text-muted fs-2xs mb-2">
+                            <i class="fas fa-hand-pointer text-primary me-1"></i> Touch/click and drag continuously across the 9 dots.
+                        </p>
+                        
+                        <div class="text-center">
+                            <div class="pattern-canvas-wrapper shadow-sm">
+                                <canvas id="patternCanvas" width="220" height="220"></canvas>
+                            </div>
+                        </div>
+                        {{ intake_form.pattern_lock_sequence }}
+                        <div class="text-center mt-2">
+                            <span class="badge bg-light text-primary border font-monospace fs-2xs px-2 py-1" id="patternSeqDisplay">
+                                No pattern recorded
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Delivery Schedule & Customer Terms Card -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                        <i class="fas fa-calendar-check text-success me-2"></i> Schedule &amp; Customer Terms
+                    </h6>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Expected Completion Date</label>
+                        {{ intake_form.expected_delivery_date }}
+                    </div>
+
+                    <div class="p-3 bg-light rounded-3 border">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="dataDisclaimerCheck" checked required>
+                            <label class="form-check-label fs-2xs text-secondary lh-sm" for="dataDisclaimerCheck">
+                                Customer acknowledges data backup policy and authorizes teardown inspection.
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- STICKY BOTTOM ACTION BAR -->
+        <div class="intake-sticky-footer d-flex align-items-center justify-content-between">
+            <div class="d-none d-md-block text-muted fs-xs">
+                <i class="fas fa-info-circle text-primary me-1"></i> Claim token (80mm thermal slip) will auto-generate upon saving.
+            </div>
+            <div class="d-flex align-items-center gap-2 w-100 w-md-auto justify-content-end">
+                <a href="{% url 'repairs:dashboard' %}" class="btn btn-outline-secondary px-3 rounded-pill">
+                    Cancel
+                </a>
+                <button type="submit" class="btn btn-primary px-4 py-2 rounded-pill fw-bold shadow-sm">
+                    <i class="fas fa-print me-1"></i> Book Intake &amp; Print Claim Slip
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- ==========================================================================
+     REPAIR INTAKE CAMERA IMEI / SERIAL SCANNER MODAL
+     ========================================================================== -->
+<div class="modal fade" id="repairImeiCameraModal" tabindex="-1" aria-labelledby="repairImeiCameraModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark text-white">
+            <div class="modal-header border-bottom border-secondary border-opacity-25 py-2 px-3 bg-dark">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-warning text-dark p-2 rounded-circle"><i class="fas fa-camera"></i></span>
+                    <div>
+                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="repairImeiCameraModalLabel">Intake IMEI / Serial Scanner</h6>
+                        <small class="text-white-50 fs-2xs">Aim barcode on customer phone box, receipt, or settings screen</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" id="closeRepairImeiCameraBtn"></button>
+            </div>
+            
+            <div class="modal-body repair-scanner-modal-body">
+                <!-- Live Video Feed -->
+                <video id="repairImeiCameraFeedVideo" class="repair-scanner-video-feed" playsinline autoplay muted></video>
+                
+                <!-- Dynamic Banner Overlay -->
+                <div class="repair-camera-banner shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-warning text-dark fs-2xs px-2 py-1">INTAKE IMEI SCAN</span>
+                        <span class="text-white-50 fs-2xs font-monospace">15 FPS Auto-Decoder</span>
+                    </div>
+                    <div class="text-info fs-2xs">
+                        Align <strong>IMEI / Serial barcode</strong> inside the yellow aiming frame.
+                    </div>
+                </div>
+
+                <!-- Aiming Reticle with Animated Laser -->
+                <div class="repair-scanner-viewfinder">
+                    <div class="repair-aiming-reticle">
+                        <div class="repair-corner-tr"></div>
+                        <div class="repair-corner-bl"></div>
+                        <div class="repair-laser-line"></div>
+                    </div>
+                </div>
+
+                <!-- Floating Toolbar Controls -->
+                <div class="position-absolute bottom-0 start-0 end-0 p-3 d-flex justify-content-center gap-2 z-3">
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="repairTorchToggleBtn" style="display: none;">
+                        <i class="fas fa-bolt me-1 text-warning"></i> Flashlight
+                    </button>
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="repairSwitchLensBtn">
+                        <i class="fas fa-camera-rotate me-1 text-info"></i> Switch Lens
+                    </button>
+                </div>
+            </div>
+
+            <div class="modal-footer border-top border-secondary border-opacity-25 py-2 px-3 bg-dark d-flex justify-content-between align-items-center">
+                <div class="fs-2xs text-white-50" id="repairCameraStatusText">
+                    <i class="fas fa-circle-notch fa-spin me-1 text-warning"></i> Camera Active
+                </div>
+                <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 py-1 fs-xs" data-bs-dismiss="modal">
+                    Cancel &amp; Close Camera
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'js/camera_barcode_scanner.js' %}"></script>
+<script src="{% static 'js/repair_pattern_lock.js' %}"></script>
+<script src="{% static 'js/repair_camera_capture.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const scanRepairImeiBtn = document.getElementById('scanRepairImeiBtn');
+    const cameraScanRepairImeiBtn = document.getElementById('cameraScanRepairImeiBtn');
+    const repairImeiInput = document.querySelector('[name="imei_or_serial"]');
+    const productSelect = document.getElementById('id_repair_product_select') || document.querySelector('[name="product"]');
+    const customerNameInput = document.querySelector('[name="customer_name_manual"]');
+    const customerPhoneInput = document.querySelector('[name="customer_phone_manual"]');
+
+    const feedbackBanner = document.getElementById('repairImeiScanFeedbackBanner');
+    const feedbackTitle = document.getElementById('feedbackBannerTitle');
+    const feedbackDetails = document.getElementById('feedbackBannerDetails');
+    const feedbackWarrantyTag = document.getElementById('feedbackBannerWarrantyTag');
+
+    // Focus Barcode Scanner on Click
+    if (scanRepairImeiBtn && repairImeiInput) {
+        scanRepairImeiBtn.addEventListener('click', () => {
+            repairImeiInput.focus();
+            repairImeiInput.select();
+            repairImeiInput.classList.add('scan-focus-active');
+            setTimeout(() => repairImeiInput.classList.remove('scan-focus-active'), 1500);
+        });
+    }
+
+    // Camera Scanner Initialization
+    const cameraModalEl = document.getElementById('repairImeiCameraModal');
+    const videoEl = document.getElementById('repairImeiCameraFeedVideo');
+    const torchBtn = document.getElementById('repairTorchToggleBtn');
+    const switchLensBtn = document.getElementById('repairSwitchLensBtn');
+    const statusText = document.getElementById('repairCameraStatusText');
+
+    let cameraScannerInstance = null;
+    let cameraModalInstance = null;
+
+    if (cameraModalEl) {
+        cameraModalInstance = new bootstrap.Modal(cameraModalEl);
+    }
+
+    // Auto-Lookup Function for Scanned IMEI
+    async function performImeiLookup(scannedImei) {
+        if (!scannedImei || scannedImei.length < 3) return;
+
+        try {
+            const resp = await fetch(`/products/api/search/?q=${encodeURIComponent(scannedImei)}`);
+            if (!resp.ok) return;
+
+            const data = await resp.json();
+            const results = data.results || [];
+
+            if (results.length > 0) {
+                const match = results[0];
+
+                // Auto-select product model in select dropdown
+                if (productSelect && match.product_id) {
+                    let optionExists = false;
+                    for (let opt of productSelect.options) {
+                        if (opt.value == match.product_id) {
+                            productSelect.value = match.product_id;
+                            optionExists = true;
+                            break;
+                        }
+                    }
+                    if (!optionExists) {
+                        const newOption = new Option(match.name, match.product_id, true, true);
+                        productSelect.add(newOption);
+                    }
+                }
+
+                // Autofill customer name and phone if historical sale record exists
+                if (customerNameInput && match.customer_name && !customerNameInput.value) {
+                    customerNameInput.value = match.customer_name;
+                }
+                if (customerPhoneInput && match.customer_phone && !customerPhoneInput.value) {
+                    customerPhoneInput.value = match.customer_phone;
+                }
+
+                // Show Live Feedback Banner
+                if (feedbackBanner) {
+                    feedbackBanner.classList.remove('d-none');
+                    feedbackTitle.innerText = `Recognized: ${match.name}`;
+                    feedbackDetails.innerText = `IMEI: ${match.imei_1 || scannedImei} &bull; Condition: ${match.condition || 'Registered'} &bull; Customer: ${match.customer_name || 'Counter Sale'}`;
+                    
+                    const isWarrantyValid = (match.component_warranties && match.component_warranties.some(w => w.is_valid));
+                    if (isWarrantyValid) {
+                        feedbackWarrantyTag.className = 'badge bg-success px-3 py-2 rounded-pill fs-xs';
+                        feedbackWarrantyTag.innerHTML = '<i class="fas fa-shield-check me-1"></i> Active Official Warranty';
+                    } else {
+                        feedbackWarrantyTag.className = 'badge bg-warning text-dark px-3 py-2 rounded-pill fs-xs';
+                        feedbackWarrantyTag.innerHTML = '<i class="fas fa-clock me-1"></i> Out of Warranty / Paid';
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('[RepairIntake] IMEI lookup error:', err);
+        }
+    }
+
+    if (cameraScanRepairImeiBtn && cameraModalEl && videoEl) {
+        cameraScannerInstance = new CameraBarcodeScanner({
+            facingMode: 'environment',
+            cooldown: 1200
+        });
+
+        // Open Camera Modal
+        cameraScanRepairImeiBtn.addEventListener('click', () => {
+            cameraModalInstance.show();
+        });
+
+        // Modal Shown -> Start Video Stream
+        cameraModalEl.addEventListener('shown.bs.modal', async () => {
+            if (statusText) {
+                statusText.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1 text-warning"></i> Starting camera feed...';
+            }
+
+            await cameraScannerInstance.start(
+                videoEl,
+                (scannedCode) => {
+                    const cleanCode = scannedCode.trim();
+                    if (statusText) {
+                        statusText.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> Scanned: <strong>${cleanCode}</strong>`;
+                    }
+
+                    if (repairImeiInput) {
+                        repairImeiInput.value = cleanCode;
+                        repairImeiInput.classList.add('scan-focus-active');
+                        setTimeout(() => repairImeiInput.classList.remove('scan-focus-active'), 1500);
+
+                        // Trigger instant warranty & catalog lookup
+                        performImeiLookup(cleanCode);
+                    }
+
+                    setTimeout(() => {
+                        cameraModalInstance.hide();
+                    }, 400);
+                },
+                (err) => {
+                    if (statusText) {
+                        statusText.innerHTML = `<i class="fas fa-triangle-exclamation text-danger me-1"></i> ${err.message}`;
+                    }
+                }
+            );
+
+            // Display flashlight if supported
+            if (cameraScannerInstance.hasTorch && torchBtn) {
+                torchBtn.style.display = 'inline-flex';
+            } else if (torchBtn) {
+                torchBtn.style.display = 'none';
+            }
+
+            if (statusText) {
+                statusText.innerHTML = '<i class="fas fa-check text-success me-1"></i> Scanner Active &bull; Align barcode';
+            }
+        });
+
+        // Modal Hidden -> Stop Camera Hardware
+        cameraModalEl.addEventListener('hidden.bs.modal', () => {
+            if (cameraScannerInstance) {
+                cameraScannerInstance.stop();
+            }
+            if (repairImeiInput) {
+                repairImeiInput.focus();
+            }
+        });
+
+        // Toggle Flashlight
+        if (torchBtn) {
+            torchBtn.addEventListener('click', async () => {
+                const state = await cameraScannerInstance.toggleTorch();
+                torchBtn.classList.toggle('btn-warning', state);
+                torchBtn.classList.toggle('btn-dark', !state);
+            });
+        }
+
+        // Switch Camera Lens
+        if (switchLensBtn) {
+            switchLensBtn.addEventListener('click', async () => {
+                await cameraScannerInstance.switchCamera();
+            });
+        }
+    }
+
+    // Input change event listener for hardware USB scanner
+    if (repairImeiInput) {
+        repairImeiInput.addEventListener('change', (e) => {
+            performImeiLookup(e.target.value.trim());
+        });
+    }
+});
+</script>
+{% endblock %}

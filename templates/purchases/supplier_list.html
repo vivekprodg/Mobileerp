@@ -1,0 +1,171 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Suppliers &amp; Brand Distributors Directory | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-building-user text-primary me-2"></i> Supplier &amp; Distributor Directory
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Manage authorized brand importers, regional wholesalers, trade terms, and outstanding payables
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'purchases:supplier_create' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-plus-circle me-1"></i> Register New Supplier
+            </a>
+        </div>
+    </div>
+
+    <!-- Search & Multi-Field Filter Bar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search by Supplier Code, Name, Phone, Reg No, or PAN...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Supplier Types</option>
+                    <option value="NATIONAL_DISTRIBUTOR" {% if request.GET.type == 'NATIONAL_DISTRIBUTOR' %}selected{% endif %}>National Importer / Distributor</option>
+                    <option value="REGIONAL_WHOLESALER" {% if request.GET.type == 'REGIONAL_WHOLESALER' %}selected{% endif %}>Regional Wholesaler</option>
+                    <option value="MANUFACTURER" {% if request.GET.type == 'MANUFACTURER' %}selected{% endif %}>Manufacturer</option>
+                    <option value="LOCAL_TRADER" {% if request.GET.type == 'LOCAL_TRADER' %}selected{% endif %}>Local Trader</option>
+                    <option value="SERVICE_PARTS_VENDOR" {% if request.GET.type == 'SERVICE_PARTS_VENDOR' %}selected{% endif %}>Parts &amp; Service Supplier</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Statuses</option>
+                    <option value="ACTIVE" {% if request.GET.status == 'ACTIVE' %}selected{% endif %}>Active Only</option>
+                    <option value="BLOCKED" {% if request.GET.status == 'BLOCKED' %}selected{% endif %}>Blocked Only</option>
+                    <option value="INACTIVE" {% if request.GET.status == 'INACTIVE' %}selected{% endif %}>Inactive Only</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="has_due" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Balances</option>
+                    <option value="true" {% if request.GET.has_due == 'true' %}selected{% endif %}>With Payable Due (> 0)</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.type or request.GET.status or request.GET.has_due %}
+                <a href="{% url 'purchases:supplier_list' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Enhanced Supplier Directory Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-xs">
+                    <tr>
+                        <th class="ps-4">Code &amp; Company Name</th>
+                        <th>Classification</th>
+                        <th>Registration No</th>
+                        <th>Primary Phone</th>
+                        <th>Distributor Authorization</th>
+                        <th>Outstanding Payable</th>
+                        <th>Status</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in suppliers %}
+                    <tr>
+                        <td class="ps-4">
+                            <span class="badge bg-primary bg-opacity-10 text-primary font-monospace fs-2xs px-2 py-0 mb-1 d-inline-block">{{ s.code }}</span>
+                            <a href="{% url 'purchases:supplier_detail' s.pk %}" class="fw-bold text-dark text-decoration-none d-block">
+                                {{ s.company_name }}
+                            </a>
+                            <small class="text-muted"><i class="fas fa-user-tie me-1"></i>{{ s.contact_person }}</small>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs">{{ s.get_supplier_type_display }}</span>
+                        </td>
+
+                        <td>
+                            <span class="font-monospace fw-semibold text-secondary">{{ s.registration_number }}</span>
+                            {% if s.pan_number %}<small class="text-muted d-block font-monospace">PAN: {{ s.pan_number }}</small>{% endif %}
+                        </td>
+
+                        <td>
+                            <span class="font-monospace fw-semibold">{{ s.phone_number }}</span>
+                            {% if s.city %}<small class="text-muted d-block">{{ s.city }}</small>{% endif %}
+                        </td>
+
+                        <td>
+                            {% if s.is_authorized_distributor %}
+                                <span class="badge bg-info bg-opacity-10 text-info fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-shield-halved me-1"></i> {{ s.get_distributor_tier_display|default:"Authorized" }}
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-muted border fs-2xs">Standard Vendor</span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if s.current_balance > 0 %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-xs px-2 py-1 font-monospace">
+                                    Rs. {{ s.current_balance|floatformat:2|intcomma }}
+                                </span>
+                            {% elif s.current_balance < 0 %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs px-2 py-1 font-monospace">
+                                    Advance: Rs. {{ s.current_balance|stringformat:".2f"|slice:"1:" }}
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-muted border fs-xs">Rs. 0.00 (Clear)</span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if s.status == 'ACTIVE' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">Active</span>
+                            {% elif s.status == 'BLOCKED' %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">Blocked</span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs px-2 py-1">Inactive</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-end pe-4">
+                            <div class="d-inline-flex gap-2">
+                                <a href="{% url 'purchases:supplier_detail' s.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                                    Ledger &amp; Payout
+                                </a>
+                                <a href="{% url 'purchases:supplier_edit' s.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3" title="Edit Supplier">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="fas fa-building-user fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No suppliers or distributors matched your query.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

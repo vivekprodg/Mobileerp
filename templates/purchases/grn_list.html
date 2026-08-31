@@ -1,0 +1,48 @@
+{% extends "core/base.html" %}
+
+{% block title %}Goods Received Notes (GRN){% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">Goods Received Notes (Stock Inward)</h4>
+            <p class="text-muted fs-xs mb-0">Inward inventory receipts and supplier bill matching</p>
+        </div>
+        <a href="{% url 'purchases:grn_create' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+            <i class="fas fa-truck-ramp-box me-1"></i> Receive Inward Goods
+        </a>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <table class="table table-hover align-middle mb-0 fs-sm">
+            <thead class="bg-light text-muted text-uppercase fs-xs">
+                <tr>
+                    <th class="ps-4">GRN No</th>
+                    <th>Supplier</th>
+                    <th>Challan / Bill Ref</th>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th>Net Amount</th>
+                    <th class="text-end pe-4">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for grn in grns %}
+                <tr>
+                    <td class="ps-4 font-monospace fw-bold">{{ grn.grn_number }}</td>
+                    <td>{{ grn.supplier.company_name }}</td>
+                    <td><code>{{ grn.supplier_bill_no }}</code></td>
+                    <td>{{ grn.bill_date }}</td>
+                    <td><span class="badge bg-{% if grn.status == 'RECEIVED' %}success{% else %}secondary{% endif %}">{{ grn.get_status_display }}</span></td>
+                    <td class="fw-bold text-primary">Rs. {{ grn.net_total_amount|floatformat:2 }}</td>
+                    <td class="text-end pe-4">
+                        <a href="{% url 'purchases:grn_detail' grn.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

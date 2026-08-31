@@ -1,0 +1,402 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Process Itemized Return for {{ estimate.estimate_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.return-item-card {
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+    background: #ffffff;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.return-item-card.selected-active {
+    border-color: #ef4444 !important;
+    background-color: #fffaf9 !important;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.08);
+}
+
+.return-summary-sidebar {
+    position: sticky;
+    top: calc(var(--erp-header-height, 62px) + 20px);
+}
+
+.defective-warning-badge {
+    background-color: #fff1f2;
+    color: #be123c;
+    border: 1px solid #fecdd3;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.working-restock-badge {
+    background-color: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1320px;">
+    
+    <!-- Header & Breadcrumbs -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-rotate-left text-danger me-2"></i> Process Customer Itemized Return &amp; Exchange
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Select items being returned from sales estimate <strong class="font-monospace text-primary">{{ estimate.estimate_number }}</strong>
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'sales:estimate_detail' estimate.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Bill Details
+            </a>
+        </div>
+    </div>
+
+    <!-- Original Sales Estimate Summary Bar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="row g-3 fs-xs align-items-center">
+            <div class="col-12 col-md-3">
+                <span class="text-muted d-block">Original Bill Slip:</span>
+                <strong class="font-monospace fs-sm text-primary">{{ estimate.estimate_number }}</strong>
+            </div>
+            <div class="col-12 col-md-3">
+                <span class="text-muted d-block">Customer Name:</span>
+                <strong class="text-dark fs-sm">{{ estimate.recipient_display_name }}</strong>
+                {% if estimate.customer_phone_manual %}
+                    <small class="text-muted d-block font-monospace"><i class="fas fa-phone fs-2xs me-1 text-success"></i>{{ estimate.customer_phone_manual }}</small>
+                {% endif %}
+            </div>
+            <div class="col-12 col-md-2">
+                <span class="text-muted d-block">Date of Invoicing:</span>
+                <strong class="text-dark">{{ estimate.bill_date_ad }}</strong>
+            </div>
+            <div class="col-12 col-md-2">
+                <span class="text-muted d-block">Store Outlet:</span>
+                <strong class="text-dark">{{ estimate.branch.name }}</strong>
+            </div>
+            <div class="col-12 col-md-2 text-md-end">
+                <span class="text-muted d-block">Original Grand Total:</span>
+                <strong class="font-monospace fs-sm text-dark">Rs. {{ estimate.grand_total|floatformat:2|intcomma }}</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Protocol Guidance Alert -->
+    <div class="alert bg-info bg-opacity-10 border border-info border-opacity-25 rounded-4 p-3 mb-4 fs-xs text-dark">
+        <div class="d-flex align-items-start gap-2">
+            <i class="fas fa-info-circle text-info fs-5 mt-1"></i>
+            <div>
+                <strong class="text-dark d-block mb-1">Return &amp; Inventory Restocking Protocol:</strong>
+                <ul class="mb-0 ps-3 text-muted">
+                    <li><strong>Working / Sellable Items:</strong> Restored immediately to <em>Sellable Active Stock</em> at {{ estimate.branch.name }}.</li>
+                    <li><strong>Defective Items:</strong> Routed automatically to <em>Quarantined Defective Stock</em> for Vendor RMA claims, preventing accidental resale.</li>
+                    <li><strong>Customer Udhaari &amp; Spend:</strong> Store credit reduces outstanding debt; refund values are deducted from customer lifetime spend history.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <form method="post" id="salesReturnMasterForm" novalidate>
+        {% csrf_token %}
+
+        <div class="row g-4 mb-4">
+            <!-- LEFT (8 Cols): Itemized Return Checkboxes, Quantities & Conditions -->
+            <div class="col-12 col-lg-8">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-boxes-stacked text-primary me-2"></i> Select Line Items to Return
+                        </h6>
+                        <span class="badge bg-primary rounded-pill">{{ items_data|length }} Eligible Line(s)</span>
+                    </div>
+
+                    {% for item_data in items_data %}
+                    {% with item=item_data.item %}
+                    <div class="return-item-card" id="card_item_{{ item.id }}">
+                        <div class="d-flex align-items-start gap-3">
+                            <!-- Checkbox -->
+                            <div class="form-check mt-1">
+                                <input class="form-check-input return-item-checkbox" 
+                                       type="checkbox" 
+                                       name="item_select_{{ item.id }}" 
+                                       id="item_select_{{ item.id }}" 
+                                       value="1" 
+                                       data-item-id="{{ item.id }}" 
+                                       data-unit-price="{{ item.unit_price }}"
+                                       {% if item_data.is_fully_returned %}disabled{% endif %}>
+                            </div>
+
+                            <!-- Description & Badges -->
+                            <div class="flex-grow-1">
+                                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-1">
+                                    <label class="form-check-label fw-bold text-dark fs-sm pointer" for="item_select_{{ item.id }}">
+                                        {{ item.product.name }}
+                                    </label>
+                                    <span class="font-monospace fw-bold text-primary fs-xs">
+                                        Rate: Rs. {{ item.unit_price|floatformat:2|intcomma }} / {{ item.product.base_unit.code }}
+                                    </span>
+                                </div>
+
+                                <!-- Dual-IMEI & Sold Quantity Badges -->
+                                <div class="d-flex flex-wrap align-items-center gap-1 mt-1">
+                                    {% if item.imei_number %}
+                                        <span class="badge bg-primary bg-opacity-10 text-primary font-monospace fs-2xs">
+                                            IMEI 1: {{ item.imei_number }}
+                                        </span>
+                                    {% endif %}
+                                    {% if item.secondary_imei %}
+                                        <span class="badge bg-info bg-opacity-10 text-info font-monospace fs-2xs">
+                                            IMEI 2: {{ item.secondary_imei }}
+                                        </span>
+                                    {% endif %}
+                                    {% if item.serial_number %}
+                                        <span class="badge bg-secondary bg-opacity-10 text-secondary font-monospace fs-2xs">
+                                            S/N: {{ item.serial_number }}
+                                        </span>
+                                    {% endif %}
+                                    <span class="badge bg-light text-muted border fs-2xs">
+                                        Billed Qty: {{ item.quantity|floatformat:0 }}
+                                    </span>
+                                    {% if item_data.already_returned_qty > 0 %}
+                                        <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs">
+                                            Previously Returned: {{ item_data.already_returned_qty|floatformat:0 }}
+                                        </span>
+                                    {% endif %}
+                                </div>
+
+                                {% if item_data.is_fully_returned %}
+                                    <div class="mt-2 text-danger fs-2xs fw-bold">
+                                        <i class="fas fa-circle-xmark me-1"></i> This line item has already been fully returned.
+                                    </div>
+                                {% else %}
+                                    <!-- Interactive Return Parameters Row -->
+                                    <div class="row g-2 mt-2 pt-2 border-top align-items-center return-item-controls" id="controls_item_{{ item.id }}" style="opacity: 0.6; pointer-events: none;">
+                                        <div class="col-6 col-md-3">
+                                            <label class="form-label fs-2xs fw-bold text-muted mb-1">Return Qty:</label>
+                                            <input type="number" 
+                                                   name="return_qty_{{ item.id }}" 
+                                                   id="return_qty_{{ item.id }}" 
+                                                   class="form-control form-control-sm font-monospace text-center return-qty-input" 
+                                                   value="{{ item_data.remaining_returnable_qty|floatformat:0 }}" 
+                                                   min="1" 
+                                                   max="{{ item_data.remaining_returnable_qty|floatformat:0 }}" 
+                                                   data-item-id="{{ item.id }}"
+                                                   data-unit-price="{{ item.unit_price }}">
+                                        </div>
+
+                                        <div class="col-6 col-md-4">
+                                            <label class="form-label fs-2xs fw-bold text-muted mb-1">Condition Status:</label>
+                                            <div class="form-check form-switch mt-1">
+                                                <input class="form-check-input defective-toggle" 
+                                                       type="checkbox" 
+                                                       name="is_defective_{{ item.id }}" 
+                                                       id="is_defective_{{ item.id }}" 
+                                                       value="1" 
+                                                       data-item-id="{{ item.id }}">
+                                                <label class="form-check-label fs-xs fw-bold text-dark" for="is_defective_{{ item.id }}">
+                                                    Defective / Faulty
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <div class="col-12 col-md-5">
+                                            <label class="form-label fs-2xs fw-bold text-muted mb-1">Defect Reason / Observation:</label>
+                                            <input type="text" 
+                                                   name="defect_reason_{{ item.id }}" 
+                                                   id="defect_reason_{{ item.id }}" 
+                                                   class="form-control form-control-sm" 
+                                                   placeholder="e.g. Swollen battery, green line display, dead board">
+                                        </div>
+
+                                        <!-- Live Restocking Destination Badge -->
+                                        <div class="col-12 mt-1">
+                                            <div class="d-none defective-notice" id="defective_notice_{{ item.id }}">
+                                                <span class="defective-warning-badge">
+                                                    <i class="fas fa-triangle-exclamation"></i>
+                                                    Route to Quarantined Defective Stock (For Vendor RMA Claim)
+                                                </span>
+                                            </div>
+                                            <div class="working-notice" id="working_notice_{{ item.id }}">
+                                                <span class="working-restock-badge">
+                                                    <i class="fas fa-boxes-stacked"></i>
+                                                    Restore directly to Sellable Live Stock counter
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endwith %}
+                    {% endfor %}
+                </div>
+
+                <!-- Return Reason & Diagnostic Observations -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                        <i class="fas fa-file-lines text-primary me-2"></i> Reason for Return &amp; Technician Findings
+                    </h6>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Reason for Customer Return <span class="text-danger">*</span></label>
+                        {{ form.reason }}
+                    </div>
+
+                    <div class="mb-0">
+                        <label class="form-label fw-bold text-dark fs-xs">Technician Diagnostic Findings / Inspection Notes</label>
+                        {{ form.technician_notes }}
+                        <small class="text-muted fs-2xs mt-1 d-block">Detail physical inspection findings or hardware test results before restocking.</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT (4 Cols): Settlement & Refund Mode -->
+            <div class="col-12 col-lg-4">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white return-summary-sidebar">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                        <i class="fas fa-calculator text-danger me-2"></i> Refund &amp; Settlement Summary
+                    </h6>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Refund / Settlement Mode <span class="text-danger">*</span></label>
+                        {{ form.refund_mode }}
+                        <small class="text-muted fs-2xs mt-1 d-block">
+                            &bull; <strong>Cash Refund:</strong> Direct cash handover from register<br>
+                            &bull; <strong>Store Credit:</strong> Deducts from customer Udhaari balance<br>
+                            &bull; <strong>Exchange Adjust:</strong> Credit applied to new replacement bill
+                        </small>
+                    </div>
+
+                    <div class="p-3 bg-light rounded-3 border mb-3">
+                        <div class="d-flex justify-content-between fs-xs mb-1">
+                            <span class="text-muted">Selected Lines:</span>
+                            <strong id="selectedItemsCountText">0 Lines</strong>
+                        </div>
+                        <div class="d-flex justify-content-between fs-xs mb-1">
+                            <span class="text-muted">Total Units Returned:</span>
+                            <strong id="totalReturnUnitsText" class="font-monospace">0 Pcs</strong>
+                        </div>
+                        <hr class="my-2 text-muted opacity-25">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="fw-bold text-dark fs-sm">Total Refund Value:</span>
+                            <h4 class="fw-extrabold text-danger font-monospace mb-0" id="totalRefundAmountDisplay">Rs. 0.00</h4>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2 mt-4">
+                        <button type="submit" class="btn btn-danger btn-lg rounded-pill fw-bold shadow-sm" id="submitReturnBtn" disabled>
+                            <i class="fas fa-check-circle me-1"></i> Finalize Return &amp; Restock
+                        </button>
+                        <a href="{% url 'sales:estimate_detail' estimate.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill">
+                            Cancel
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const checkboxes = document.querySelectorAll('.return-item-checkbox');
+    const qtyInputs = document.querySelectorAll('.return-qty-input');
+    const defectiveToggles = document.querySelectorAll('.defective-toggle');
+    const submitBtn = document.getElementById('submitReturnBtn');
+
+    const selectedCountText = document.getElementById('selectedItemsCountText');
+    const totalUnitsText = document.getElementById('totalReturnUnitsText');
+    const refundAmountDisplay = document.getElementById('totalRefundAmountDisplay');
+
+    function recalculateReturnSummary() {
+        let selectedCount = 0;
+        let totalUnits = 0;
+        let totalRefund = 0;
+
+        checkboxes.forEach(cb => {
+            const itemId = cb.dataset.itemId;
+            const controls = document.getElementById(`controls_item_${itemId}`);
+            const card = document.getElementById(`card_item_${itemId}`);
+
+            if (cb.checked) {
+                selectedCount += 1;
+                if (controls) {
+                    controls.style.opacity = '1';
+                    controls.style.pointerEvents = 'auto';
+                }
+                if (card) card.classList.add('selected-active');
+
+                const qtyInput = document.getElementById(`return_qty_${itemId}`);
+                const qty = parseFloat(qtyInput ? qtyInput.value : 1) || 0;
+                const rate = parseFloat(cb.dataset.unitPrice) || 0;
+
+                totalUnits += qty;
+                totalRefund += (qty * rate);
+            } else {
+                if (controls) {
+                    controls.style.opacity = '0.6';
+                    controls.style.pointerEvents = 'none';
+                }
+                if (card) card.classList.remove('selected-active');
+            }
+        });
+
+        if (selectedCountText) selectedCountText.innerText = `${selectedCount} Line(s)`;
+        if (totalUnitsText) totalUnitsText.innerText = `${totalUnits} Units`;
+        if (refundAmountDisplay) refundAmountDisplay.innerText = `Rs. ${totalRefund.toFixed(2)}`;
+
+        if (submitBtn) {
+            submitBtn.disabled = (selectedCount === 0 || totalRefund <= 0);
+        }
+    }
+
+    checkboxes.forEach(cb => {
+        cb.addEventListener('change', recalculateReturnSummary);
+    });
+
+    qtyInputs.forEach(input => {
+        input.addEventListener('input', recalculateReturnSummary);
+    });
+
+    defectiveToggles.forEach(toggle => {
+        toggle.addEventListener('change', (e) => {
+            const itemId = e.target.dataset.itemId;
+            const defectiveNotice = document.getElementById(`defective_notice_${itemId}`);
+            const workingNotice = document.getElementById(`working_notice_${itemId}`);
+
+            if (e.target.checked) {
+                if (defectiveNotice) defectiveNotice.classList.remove('d-none');
+                if (workingNotice) workingNotice.classList.add('d-none');
+            } else {
+                if (defectiveNotice) defectiveNotice.classList.add('d-none');
+                if (workingNotice) workingNotice.classList.remove('d-none');
+            }
+        });
+    });
+
+    recalculateReturnSummary();
+});
+</script>
+{% endblock %}

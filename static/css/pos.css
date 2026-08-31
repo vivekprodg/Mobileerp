@@ -1,0 +1,287 @@
+/* ==========================================================================
+   SMART POS COUNTER TERMINAL - ZERO-STORAGE STYLESHEET
+   ========================================================================== */
+
+:root {
+    --pos-primary: #2563eb;
+    --pos-primary-dark: #1d4ed8;
+    --pos-primary-light: #eff6ff;
+    --pos-success: #10b981;
+    --pos-warning: #f59e0b;
+    --pos-danger: #ef4444;
+    --pos-dark: #0f172a;
+    --pos-border: #e2e8f0;
+    --pos-bg: #f8fafc;
+}
+
+.pos-workspace-container {
+    height: calc(100vh - var(--erp-header-height, 62px) - 10px);
+    overflow: hidden;
+}
+
+/* Category Filter Pills */
+.cat-pill {
+    padding: 7px 16px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    border: 1px solid var(--pos-border);
+    background: #ffffff;
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    outline: none;
+}
+.cat-pill:hover, .cat-pill.active {
+    background-color: var(--pos-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--pos-primary) !important;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+}
+
+/* High-Density Zero-Image Product Cards Grid */
+.product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 10px;
+    overflow-y: auto;
+    max-height: calc(100vh - 180px);
+    padding-right: 4px;
+}
+
+.product-card {
+    background: #ffffff;
+    border: 1px solid var(--pos-border);
+    border-radius: 12px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+.product-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--pos-primary);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+    background-color: #fcfdfe;
+}
+
+/* Category Avatar Badges (Replaces Heavy Product Photos) */
+.cat-icon-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    font-size: 1.15rem;
+    flex-shrink: 0;
+}
+
+.avatar-phone   { background-color: #eff6ff; color: #2563eb; }
+.avatar-charger { background-color: #ecfdf5; color: #059669; }
+.avatar-glass   { background-color: #fffbeb; color: #d97706; }
+.avatar-audio   { background-color: #f5f3ff; color: #7c3aed; }
+.avatar-part    { background-color: #fef2f2; color: #dc2626; }
+
+/* Cart Bill Panel */
+.cart-panel {
+    background: #ffffff;
+    border: 1px solid var(--pos-border);
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.cart-items-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    max-height: calc(100vh - 430px);
+}
+
+.cart-row {
+    border-bottom: 1px solid #f1f5f9;
+    padding: 8px 12px;
+    transition: background-color 0.15s ease;
+}
+.cart-row:hover {
+    background-color: var(--pos-bg);
+}
+
+/* Large Grand Total Display Box */
+.total-display-box {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    border-radius: 14px;
+    padding: 12px 16px;
+    color: #ffffff;
+}
+
+.font-mono {
+    font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* Big Action Checkout Buttons */
+.btn-action-cash {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #ffffff !important;
+    border: none;
+    font-size: 1.1rem;
+    font-weight: 800;
+    padding: 12px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+    transition: transform 0.15s ease;
+}
+.btn-action-cash:hover {
+    transform: translateY(-2px);
+}
+
+.btn-action-digital {
+    background: #2563eb;
+    color: #ffffff !important;
+    border: none;
+    font-weight: 700;
+    padding: 10px;
+    border-radius: 10px;
+    transition: all 0.15s ease;
+}
+.btn-action-digital:hover {
+    background: var(--pos-primary-dark);
+}
+
+/* 80mm Thermal Receipt Slip Preview */
+.thermal-receipt-preview {
+    width: 320px;
+    background: #ffffff;
+    padding: 16px;
+    margin: 0 auto;
+    border: 1px dashed #cbd5e1;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    line-height: 1.25;
+    color: #000000;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+}
+
+/* ==========================================================================
+   CAMERA SCANNER VIEWFINDER OVERLAY STYLES
+   ========================================================================== */
+.pos-scanner-modal-body {
+    background-color: #0b1120;
+    position: relative;
+    padding: 0;
+    overflow: hidden;
+    min-height: 380px;
+}
+
+.scanner-video-feed {
+    width: 100%;
+    height: 100%;
+    max-height: 480px;
+    object-fit: cover;
+    display: block;
+}
+
+.scanner-viewfinder-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    padding: 20px;
+}
+
+.scanner-aiming-reticle {
+    width: 260px;
+    height: 160px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 16px;
+    position: relative;
+    box-shadow: 0 0 0 9999px rgba(11, 17, 32, 0.65);
+}
+
+.scanner-aiming-reticle::before,
+.scanner-aiming-reticle::after {
+    content: '';
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    border-color: #10b981;
+    border-style: solid;
+}
+
+.scanner-aiming-reticle::before {
+    top: -2px;
+    left: -2px;
+    border-width: 4px 0 0 4px;
+    border-top-left-radius: 14px;
+}
+
+.scanner-aiming-reticle::after {
+    bottom: -2px;
+    right: -2px;
+    border-width: 0 4px 4px 0;
+    border-bottom-right-radius: 14px;
+}
+
+.scanner-corner-tr {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 24px;
+    height: 24px;
+    border-top: 4px solid #10b981;
+    border-right: 4px solid #10b981;
+    border-top-right-radius: 14px;
+}
+
+.scanner-corner-bl {
+    position: absolute;
+    bottom: -2px;
+    left: -2px;
+    width: 24px;
+    height: 24px;
+    border-bottom: 4px solid #10b981;
+    border-left: 4px solid #10b981;
+    border-bottom-left-radius: 14px;
+}
+
+.scanner-laser-line {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%);
+    box-shadow: 0 0 8px #10b981;
+    animation: laserScan 2s ease-in-out infinite alternate;
+}
+
+@keyframes laserScan {
+    0% { top: 8%; opacity: 0.8; }
+    100% { top: 92%; opacity: 1; }
+}
+
+.scanner-controls-bar {
+    position: absolute;
+    bottom: 16px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    z-index: 10;
+}
+
+/* Flash Visual Effect on Barcode Scan */
+@keyframes scanFlashGreen {
+    0% { background-color: rgba(16, 185, 129, 0.4); }
+    100% { background-color: transparent; }
+}
+.scan-flash {
+    animation: scanFlashGreen 0.4s ease-out;
+}

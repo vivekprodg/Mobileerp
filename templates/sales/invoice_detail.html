@@ -1,0 +1,548 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Estimate {{ estimate.estimate_number }} | Bill Details | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.invoice-detail-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    box-shadow: var(--erp-shadow-xs);
+}
+
+.imei-badge-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background-color: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 3px 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: #1e293b;
+    margin-top: 3px;
+}
+
+.imei-copy-btn {
+    border: none;
+    background: transparent;
+    color: #64748b;
+    padding: 0 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: all 0.15s ease;
+}
+
+.imei-copy-btn:hover {
+    color: var(--erp-primary);
+    transform: scale(1.15);
+}
+
+.imei-copy-btn.copied {
+    color: #10b981 !important;
+}
+
+.financial-summary-table td, 
+.financial-summary-table th {
+    padding: 6px 12px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1320px;">
+    
+    <!-- Top Action & Navigation Bar -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0 font-monospace">{{ estimate.estimate_number }}</h4>
+                
+                <!-- Bill Status Badge -->
+                {% if estimate.status == 'COMPLETED' %}
+                    <span class="badge bg-success bg-opacity-10 text-success fw-bold px-3 py-1 rounded-pill fs-xs">
+                        <i class="fas fa-check-circle me-1"></i> Completed
+                    </span>
+                {% elif estimate.status == 'CANCELLED' %}
+                    <span class="badge bg-danger bg-opacity-10 text-danger fw-bold px-3 py-1 rounded-pill fs-xs">
+                        <i class="fas fa-ban me-1"></i> Cancelled / Voided
+                    </span>
+                {% elif estimate.status == 'PARTIALLY_RETURNED' %}
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold px-3 py-1 rounded-pill fs-xs">
+                        <i class="fas fa-rotate-left me-1"></i> Partially Returned
+                    </span>
+                {% else %}
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold px-3 py-1 rounded-pill fs-xs">
+                        {{ estimate.get_status_display }}
+                    </span>
+                {% endif %}
+
+                <!-- Payment Status Badge -->
+                {% if estimate.payment_status == 'PAID' %}
+                    <span class="badge bg-success text-white px-2 py-1 rounded-pill fs-2xs fw-bold">Fully Paid</span>
+                {% elif estimate.payment_status == 'PARTIAL' %}
+                    <span class="badge bg-warning text-dark px-2 py-1 rounded-pill fs-2xs fw-bold">Partial Payment</span>
+                {% else %}
+                    <span class="badge bg-danger text-white px-2 py-1 rounded-pill fs-2xs fw-bold">Full Due / Udhaari</span>
+                {% endif %}
+            </div>
+            
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Issued at <strong>{{ estimate.branch.name }}</strong> ({{ estimate.branch.code }}) on 
+                <strong>{{ estimate.bill_date_ad }}</strong> 
+                {% if estimate.bill_date_bs %}
+                    &bull; <span class="text-primary fw-semibold">{{ estimate.bill_date_bs }} BS</span>
+                {% endif %}
+            </p>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <!-- 80mm Thermal Receipt Print -->
+            <a href="{% url 'sales:estimate_thermal_slip' estimate.pk %}" 
+               target="_blank" 
+               class="btn btn-dark btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-print me-1"></i> Thermal Receipt (80mm)
+            </a>
+
+            <!-- Full A4 Estimate / Tax Invoice Print -->
+            <a href="{% url 'sales:estimate_detail' estimate.pk %}?format=a4" 
+               target="_blank" 
+               class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-file-invoice me-1"></i> Print A4 Bill
+            </a>
+
+            <!-- Itemized Return Action Button -->
+            {% if estimate.status != 'CANCELLED' and estimate.status != 'RETURNED' %}
+                <a href="{% url 'sales:return_create' estimate.pk %}" 
+                   class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs" 
+                   title="Return specific items from this invoice">
+                    <i class="fas fa-rotate-left me-1"></i> Return Items
+                </a>
+            {% endif %}
+
+            <!-- Restricted Bill Void Action -->
+            {% if estimate.status != 'CANCELLED' and estimate.status != 'RETURNED' %}
+                <a href="{% url 'sales:estimate_cancel' estimate.pk %}" 
+                   class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold" 
+                   onclick="return confirm('Are you sure you want to completely void this sales estimate? All inventory, debt, and trade-in balances will be reversed.');">
+                    <i class="fas fa-ban me-1"></i> Void Bill
+                </a>
+            {% endif %}
+
+            <a href="{% url 'sales:estimate_list' %}" 
+               class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Estimates
+            </a>
+        </div>
+    </div>
+
+    <!-- Non-IRD Estimation Notice Header -->
+    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 fs-xs text-dark">
+        <div class="d-flex align-items-center gap-2">
+            <i class="fas fa-info-circle text-warning fs-5"></i>
+            <div>
+                <strong>{{ SYS_CONFIG.bill_header_title }}:</strong> {{ SYS_CONFIG.bill_estimate_disclaimer }}
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Main Column (8 Cols): Line Items & Dual-IMEI Cards -->
+        <div class="col-12 col-lg-8">
+            
+            <!-- Metadata Cards Grid -->
+            <div class="row g-3 mb-4">
+                <div class="col-12 col-md-4">
+                    <div class="invoice-detail-card p-3 h-100">
+                        <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Customer / Recipient</span>
+                        <h6 class="fw-bold text-dark mb-0">{{ estimate.recipient_display_name }}</h6>
+                        {% if estimate.customer_phone_manual or estimate.customer.phone_number %}
+                            <small class="text-muted d-block font-monospace mt-1">
+                                <i class="fas fa-phone fs-2xs text-success me-1"></i>{{ estimate.customer_phone_manual|default:estimate.customer.phone_number }}
+                            </small>
+                        {% endif %}
+                        {% if estimate.customer_pan %}
+                            <small class="text-muted d-block font-monospace">PAN: {{ estimate.customer_pan }}</small>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <div class="invoice-detail-card p-3 h-100">
+                        <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Store Outlet &amp; Terminal</span>
+                        <h6 class="fw-bold text-dark mb-0">{{ estimate.branch.name }}</h6>
+                        <small class="text-muted d-block mt-1">{{ estimate.branch.address }}, {{ estimate.branch.city }}</small>
+                        <small class="text-muted d-block">Tel: {{ estimate.branch.phone_number }}</small>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <div class="invoice-detail-card p-3 h-100">
+                        <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Staff Scoping</span>
+                        <div class="fs-xs mb-1">
+                            <span class="text-muted">Cashier:</span> <strong>{{ estimate.cashier.get_full_name|default:estimate.cashier.username }}</strong>
+                        </div>
+                        <div class="fs-xs">
+                            <span class="text-muted">Salesperson:</span> 
+                            <strong>
+                                {% if estimate.salesperson %}
+                                    {{ estimate.salesperson.get_full_name|default:estimate.salesperson.username }}
+                                {% else %}
+                                    {{ estimate.cashier.get_full_name|default:estimate.cashier.username }}
+                                {% endif %}
+                            </strong>
+                        </div>
+                        {% if estimate.manager_override_by %}
+                            <div class="mt-1">
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs">
+                                    <i class="fas fa-key me-1"></i> Override: {{ estimate.manager_override_by.username }}
+                                </span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Line Items Table with Dedicated Dual-IMEI Rows & One-Click Copy -->
+            <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+                <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-boxes-stacked text-primary me-2"></i> Sold Items &amp; Handset Identification
+                    </h6>
+                    <span class="badge bg-primary rounded-pill">{{ items.count }} Line Items</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-sm">
+                        <thead class="bg-light text-muted text-uppercase fs-2xs">
+                            <tr>
+                                <th class="ps-4">Item &amp; Device Details</th>
+                                <th class="text-center" style="width: 75px;">Qty</th>
+                                <th class="text-end" style="width: 100px;">Rate (NPR)</th>
+                                <th class="text-end" style="width: 90px;">Discount</th>
+                                {% if estimate.vat_amount > 0 %}
+                                    <th class="text-end" style="width: 90px;">Tax / VAT</th>
+                                {% endif %}
+                                <th class="text-end pe-4" style="width: 110px;">Line Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                            <tr>
+                                <td class="ps-4 py-3">
+                                    <div class="fw-bold text-dark fs-sm">{{ item.product.name }}</div>
+                                    
+                                    <!-- RAM / ROM / Color Variant Tag -->
+                                    {% if item.product.ram and item.product.internal_storage %}
+                                        <div class="text-muted fs-2xs mt-1">
+                                            <span class="badge bg-light text-secondary border">
+                                                {{ item.product.ram }}/{{ item.product.internal_storage }}
+                                                {% if item.product.color_variant %}&bull; {{ item.product.color_variant }}{% endif %}
+                                            </span>
+                                            {% if item.product.network_type %}
+                                                <span class="badge bg-light text-dark border ms-1">{{ item.product.network_type }}</span>
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
+
+                                    <!-- DUAL-IMEI BADGES WITH ONE-CLICK CLIPBOARD COPY -->
+                                    {% if item.imei_number or item.secondary_imei %}
+                                    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                                        <!-- Primary IMEI 1 Badge -->
+                                        {% if item.imei_number %}
+                                        <div class="imei-badge-container bg-primary bg-opacity-10 border-primary border-opacity-25 text-primary">
+                                            <span><strong>IMEI 1:</strong> <span id="imei1_{{ item.id }}">{{ item.imei_number }}</span></span>
+                                            <button type="button" 
+                                                    class="imei-copy-btn" 
+                                                    onclick="copyToClipboard('{{ item.imei_number }}', this)" 
+                                                    title="Copy IMEI 1 to clipboard">
+                                                <i class="far fa-copy"></i>
+                                            </button>
+                                        </div>
+                                        {% endif %}
+
+                                        <!-- Secondary IMEI 2 Badge -->
+                                        {% if item.secondary_imei %}
+                                        <div class="imei-badge-container bg-info bg-opacity-10 border-info border-opacity-25 text-info">
+                                            <span><strong>IMEI 2:</strong> <span id="imei2_{{ item.id }}">{{ item.secondary_imei }}</span></span>
+                                            <button type="button" 
+                                                    class="imei-copy-btn" 
+                                                    onclick="copyToClipboard('{{ item.secondary_imei }}', this)" 
+                                                    title="Copy IMEI 2 to clipboard">
+                                                <i class="far fa-copy"></i>
+                                            </button>
+                                        </div>
+                                        {% endif %}
+
+                                        <!-- Serial Number -->
+                                        {% if item.serial_number %}
+                                        <div class="imei-badge-container bg-secondary bg-opacity-10 text-secondary border">
+                                            <span><strong>S/N:</strong> {{ item.serial_number }}</span>
+                                            <button type="button" 
+                                                    class="imei-copy-btn" 
+                                                    onclick="copyToClipboard('{{ item.serial_number }}', this)" 
+                                                    title="Copy Serial Number">
+                                                <i class="far fa-copy"></i>
+                                            </button>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% endif %}
+
+                                    <!-- NTA MDMS & Warranty Badges -->
+                                    <div class="d-flex flex-wrap align-items-center gap-1 mt-2">
+                                        {% if item.item_instance %}
+                                            {% if item.item_instance.mdms_status == 'REGISTERED_OFFICIAL' %}
+                                                <span class="badge bg-success bg-opacity-10 text-success fs-2xs fw-bold">
+                                                    <i class="fas fa-check-circle me-1"></i> NTA MDMS OK
+                                                </span>
+                                            {% elif item.item_instance.mdms_status == 'GRAY_UNREGISTERED' %}
+                                                <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs fw-bold">
+                                                    <i class="fas fa-triangle-exclamation me-1"></i> Gray Market
+                                                </span>
+                                            {% endif %}
+                                        {% endif %}
+
+                                        {% if item.warranty_terms %}
+                                            <span class="badge bg-light text-muted border fs-2xs">
+                                                <i class="fas fa-shield-alt text-success me-1"></i> {{ item.warranty_terms }}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                </td>
+
+                                <td class="text-center font-monospace">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</td>
+                                <td class="text-end font-monospace">Rs. {{ item.unit_price|floatformat:2|intcomma }}</td>
+                                <td class="text-end font-monospace text-muted">Rs. {{ item.discount_amount|floatformat:2|intcomma }}</td>
+                                
+                                {% if estimate.vat_amount > 0 %}
+                                    <td class="text-end font-monospace text-warning-emphasis">Rs. {{ item.tax_amount|floatformat:2|intcomma }}</td>
+                                {% endif %}
+
+                                <td class="text-end pe-4 font-monospace fw-bold text-dark">
+                                    Rs. {{ item.line_total|floatformat:2|intcomma }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Historical Sales Return Vouchers Linked to this Bill -->
+            {% if returns %}
+            <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+                <div class="p-3 border-bottom bg-danger bg-opacity-10 d-flex justify-content-between align-items-center">
+                    <h6 class="fw-bold text-danger mb-0">
+                        <i class="fas fa-rotate-left me-2"></i> Processed Customer Return Vouchers for this Bill
+                    </h6>
+                    <span class="badge bg-danger rounded-pill">{{ returns.count }} Return Record(s)</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-xs">
+                        <thead class="bg-light text-muted text-uppercase fs-2xs">
+                            <tr>
+                                <th class="ps-3">Return Voucher</th>
+                                <th>Processed Date</th>
+                                <th>Items Returned</th>
+                                <th>Refund Mode</th>
+                                <th>Refund Total</th>
+                                <th>Processed By</th>
+                                <th class="text-end pe-3">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ret in returns %}
+                            <tr>
+                                <td class="ps-3 font-monospace fw-bold">
+                                    <a href="{% url 'sales:return_detail' ret.pk %}" class="text-decoration-none text-danger">
+                                        {{ ret.return_number }}
+                                    </a>
+                                </td>
+                                <td>{{ ret.created_at|date:"M d, Y H:i" }}</td>
+                                <td>
+                                    {% for r_item in ret.items.all %}
+                                        <div class="text-truncate" style="max-width: 220px;">
+                                            &bull; {{ r_item.product.name }} (x{{ r_item.return_quantity|floatformat:0 }})
+                                            {% if r_item.is_defective %}
+                                                <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs">Defective</span>
+                                            {% else %}
+                                                <span class="badge bg-success bg-opacity-10 text-success fs-2xs">Restocked</span>
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                </td>
+                                <td>
+                                    <span class="badge bg-light text-dark border">{{ ret.get_refund_mode_display }}</span>
+                                </td>
+                                <td class="font-monospace fw-bold text-danger">Rs. {{ ret.total_refund_amount|floatformat:2|intcomma }}</td>
+                                <td>{{ ret.processed_by.username }}</td>
+                                <td class="text-end pe-3">
+                                    <a href="{% url 'sales:return_detail' ret.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-2 py-0 fs-2xs">
+                                        Details
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Linked Trade-In Buy-Back Voucher -->
+            {% if estimate.has_trade_in_exchange and estimate.trade_in_voucher_reference %}
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-warning bg-opacity-10 border border-warning border-opacity-25 mb-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="badge bg-warning text-dark px-3 py-1 rounded-pill fs-xs mb-1">Old Phone Exchange</span>
+                        <h6 class="fw-bold text-dark mb-1">
+                            Traded-In Handset Voucher: <code>{{ estimate.trade_in_voucher_reference }}</code>
+                        </h6>
+                        <small class="text-muted">Buy-back value was deducted directly from this bill's grand total.</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="text-muted fs-xs text-uppercase fw-bold d-block">Credit Deducted</span>
+                        <h4 class="fw-bold text-danger font-monospace mb-0">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2|intcomma }}</h4>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+        </div>
+
+        <!-- Right Column (4 Cols): Financial Settlement & Payments -->
+        <div class="col-12 col-lg-4">
+            
+            <!-- Grand Total Breakdown Card -->
+            <div class="invoice-detail-card p-4 mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-calculator text-primary me-2"></i> Financial Summary
+                </h6>
+
+                <table class="table table-borderless table-sm fs-xs mb-0 financial-summary-table">
+                    <tr>
+                        <td class="text-muted">Gross Subtotal:</td>
+                        <td class="text-end font-monospace fw-semibold">Rs. {{ estimate.subtotal|floatformat:2|intcomma }}</td>
+                    </tr>
+                    
+                    {% if estimate.item_discount_total > 0 or estimate.bill_discount_amount > 0 %}
+                    <tr>
+                        <td class="text-muted">Total Discounts:</td>
+                        <td class="text-end font-monospace text-danger">-Rs. {{ estimate.item_discount_total|add:estimate.bill_discount_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endif %}
+
+                    {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
+                    <tr>
+                        <td class="text-muted">Trade-In Buy-Back Credit:</td>
+                        <td class="text-end font-monospace text-danger">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endif %}
+
+                    {% if estimate.vat_amount > 0 %}
+                        {% if estimate.taxable_amount > 0 %}
+                        <tr>
+                            <td class="text-muted">Taxable Base Amount:</td>
+                            <td class="text-end font-monospace">Rs. {{ estimate.taxable_amount|floatformat:2|intcomma }}</td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <td class="text-muted">Output VAT ({{ DEFAULT_TAX_RATE }}%):</td>
+                            <td class="text-end font-monospace text-warning-emphasis">Rs. {{ estimate.vat_amount|floatformat:2|intcomma }}</td>
+                        </tr>
+                    {% endif %}
+
+                    <tr class="border-top">
+                        <td class="fw-bold fs-sm text-dark pt-2">Payable Grand Total:</td>
+                        <td class="text-end font-monospace fw-extrabold fs-5 text-primary pt-2">
+                            Rs. {{ estimate.grand_total|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td class="text-muted">Paid on Invoicing:</td>
+                        <td class="text-end font-monospace fw-bold text-success">Rs. {{ estimate.paid_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+
+                    {% if estimate.due_amount > 0 %}
+                    <tr class="bg-danger bg-opacity-10 rounded">
+                        <td class="fw-bold text-danger">Due Balance (Udhaari):</td>
+                        <td class="text-end font-monospace fw-bold text-danger">Rs. {{ estimate.due_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endif %}
+
+                    {% if estimate.change_returned > 0 %}
+                    <tr>
+                        <td class="text-muted">Change Returned:</td>
+                        <td class="text-end font-monospace">Rs. {{ estimate.change_returned|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endif %}
+                </table>
+            </div>
+
+            <!-- Payment Split Transactions Card -->
+            <div class="invoice-detail-card p-4 mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-layer-group text-success me-2"></i> Payment Split Breakdown
+                </h6>
+
+                {% for p in payments %}
+                <div class="d-flex justify-content-between align-items-center py-2 border-bottom fs-xs">
+                    <div>
+                        <span class="badge bg-light text-dark border me-1">{{ p.get_payment_mode_display }}</span>
+                        {% if p.transaction_ref %}
+                            <small class="text-muted font-monospace d-block mt-1">Ref: {{ p.transaction_ref }}</small>
+                        {% endif %}
+                    </div>
+                    <strong class="font-monospace text-dark">Rs. {{ p.amount|floatformat:2|intcomma }}</strong>
+                </div>
+                {% empty %}
+                <div class="text-center py-3 text-muted fs-xs">
+                    Paid via CASH: Rs. {{ estimate.paid_amount|floatformat:2|intcomma }}
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Notes & Audit Remarks -->
+            {% if estimate.notes or estimate.cancellation_reason %}
+            <div class="invoice-detail-card p-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-2 fs-xs">Audit &amp; Bill Remarks</h6>
+                {% if estimate.cancellation_reason %}
+                    <div class="p-2 bg-danger bg-opacity-10 rounded text-danger fs-2xs mb-2">
+                        <strong>Void Reason:</strong> {{ estimate.cancellation_reason }}
+                    </div>
+                {% endif %}
+                {% if estimate.notes %}
+                    <p class="fs-xs text-secondary mb-0">{{ estimate.notes }}</p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+        </div>
+    </div>
+</div>
+
+<script>
+function copyToClipboard(text, btnElement) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const icon = btnElement.querySelector('i');
+        if (icon) {
+            icon.className = 'fas fa-check text-success';
+            btnElement.classList.add('copied');
+            setTimeout(() => {
+                icon.className = 'far fa-copy';
+                btnElement.classList.remove('copied');
+            }, 1800);
+        }
+    }).catch(err => {
+        console.error('Could not copy text: ', err);
+    });
+}
+</script>
+{% endblock %}

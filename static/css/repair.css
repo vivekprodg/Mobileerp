@@ -1,0 +1,48 @@
+/* ==========================================================================
+   REPAIR & SERVICE WORKSHOP ENTERPRISE STYLES
+   ========================================================================== */
+
+.repair-intake-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    box-shadow: var(--erp-shadow-xs);
+}
+
+/* 3x3 Security Pattern Canvas */
+#patternCanvas {
+    cursor: crosshair;
+    touch-action: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* Diagnostic Evidence Gallery */
+.evidence-thumbnail {
+    width: 100%;
+    height: 110px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    transition: transform 0.15s ease;
+}
+
+.evidence-thumbnail:hover {
+    transform: scale(1.04);
+    box-shadow: var(--erp-shadow-md);
+}
+
+/* Webcam Preview */
+#cameraVideo {
+    background-color: #000;
+    border: 2px solid #3b82f6;
+}
+
+/* Status Badge Overrides */
+.badge-stage-received   { background: #94a3b8; color: #fff; }
+.badge-stage-diagnosing { background: #f59e0b; color: #fff; }
+.badge-stage-quote      { background: #ec4899; color: #fff; }
+.badge-stage-approved   { background: #06b6d4; color: #fff; }
+.badge-stage-repair     { background: #3b82f6; color: #fff; }
+.badge-stage-qc         { background: #8b5cf6; color: #fff; }
+.badge-stage-ready      { background: #10b981; color: #fff; }
+.badge-stage-delivered  { background: #059669; color: #fff; }

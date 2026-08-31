@@ -1,0 +1,60 @@
+{% extends "core/base.html" %}
+
+{% block title %}Live Repair Ticket Tracking | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container px-4 py-5" style="max-width: 850px;">
+    <div class="text-center mb-5">
+        <span class="badge bg-primary p-3 rounded-circle fs-4 mb-2"><i class="fas fa-magnifying-glass"></i></span>
+        <h3 class="fw-bold text-dark mb-1">Live Device Service & Repair Tracker</h3>
+        <p class="text-muted fs-xs">Enter your service ticket number and mobile phone to check real-time workshop progress</p>
+    </div>
+
+    <!-- Search Box -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-5">
+        <form method="get" class="row g-2">
+            <div class="col-12 col-md-6">
+                <input type="text" name="ticket_no" value="{{ searched_no }}" class="form-control form-control-lg bg-light border-0 fw-bold font-monospace" placeholder="e.g. SRV-MAIN-0001" required>
+            </div>
+            <div class="col-12 col-md-4">
+                <input type="text" name="phone" class="form-control form-control-lg bg-light border-0" placeholder="Mobile 98XXXXXXXX">
+            </div>
+            <div class="col-12 col-md-2">
+                <button type="submit" class="btn btn-primary btn-lg w-100 rounded-pill fw-bold">Track</button>
+            </div>
+        </form>
+    </div>
+
+    {% if ticket %}
+    <!-- Status Progress Display -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
+        <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4">
+            <div>
+                <h5 class="fw-bold text-dark mb-0 font-monospace">{{ ticket.ticket_number }}</h5>
+                <small class="text-muted">{{ ticket.product.name }} (IMEI: {{ ticket.imei_or_serial }})</small>
+            </div>
+            <span class="badge bg-primary fs-xs px-3 py-2 rounded-pill">
+                {{ ticket.get_service_status_display }}
+            </span>
+        </div>
+
+        <div class="p-3 bg-light rounded-3 mb-4">
+            <p class="fs-xs mb-1">Customer: <strong>{{ ticket.customer_name_manual }}</strong></p>
+            <p class="fs-xs mb-1">Branch Store: <strong>{{ ticket.branch.name }}</strong></p>
+            <p class="fs-xs mb-0">Total Payable: <strong class="text-primary font-monospace">Rs. {{ ticket.final_total_amount|floatformat:2 }}</strong></p>
+        </div>
+
+        <div class="text-center text-muted fs-xs">
+            <i class="fas fa-info-circle text-primary me-1"></i>
+            For inquiries or pickup updates, contact the store counter at <strong>{{ ticket.branch.phone_number }}</strong>.
+        </div>
+    </div>
+    {% elif searched_no %}
+    <div class="alert alert-danger rounded-4 p-4 text-center">
+        <i class="fas fa-exclamation-triangle fs-1 mb-2 d-block"></i>
+        <h6 class="fw-bold">No Service Ticket Found</h6>
+        <p class="fs-xs mb-0">Please verify the ticket number or contact the store counter directly.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

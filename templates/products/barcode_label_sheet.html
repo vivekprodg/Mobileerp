@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barcode Label Sheet - {{ product.name }}</title>
+    <style>
+        /* Exact Millimeter Page Calibration Derived Directly from Selected Label Template */
+        @page {
+            size: {{ template.width_mm|default:50 }}mm {{ template.height_mm|default:25 }}mm;
+            margin: 0 !important;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            color: #000000;
+            background-color: #ffffff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .sticker-page {
+            width: {{ template.width_mm|default:50 }}mm;
+            height: {{ template.height_mm|default:25 }}mm;
+            max-width: {{ template.width_mm|default:50 }}mm;
+            max-height: {{ template.height_mm|default:25 }}mm;
+            page-break-after: always;
+            page-break-inside: avoid;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            text-align: center;
+            overflow: hidden;
+            padding: 1mm 1.5mm;
+            background: #ffffff;
+        }
+
+        /* 1. Top Header Line: Store Title & Estimation Voucher Tag */
+        .shop-header {
+            font-size: {% if template.height_mm <= 25 %}7px{% else %}8.5px{% endif %};
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+            line-height: 1.1;
+        }
+
+        .estimate-tag {
+            font-size: 5.5px;
+            font-weight: 800;
+            border: 0.5px solid #000000;
+            border-radius: 2px;
+            padding: 0 2px;
+            margin-left: 2px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        /* 2. Product Title */
+        .product-title {
+            font-size: {% if template.height_mm <= 25 %}7.5px{% else %}9px{% endif %};
+            font-weight: 800;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+            line-height: 1.15;
+            margin-top: 0.3mm;
+        }
+
+        /* 3. Product Variant & Model Number */
+        .product-meta {
+            font-size: 6.5px;
+            font-weight: 700;
+            color: #222222;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 100%;
+            line-height: 1.1;
+        }
+
+        /* 4. High-Density Code128 Barcode Graphic */
+        .barcode-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0.3mm 0;
+            width: 100%;
+            flex-grow: 1;
+            overflow: hidden;
+        }
+
+        .barcode-img {
+            max-width: 98%;
+            height: {% if template.height_mm <= 25 %}8.5mm{% elif template.height_mm <= 35 %}13mm{% else %}17mm{% endif %};
+            object-fit: contain;
+            image-rendering: pixelated;
+            shape-rendering: crispEdges;
+        }
+
+        /* 5. Footer: Price, Warranty & Compliance Badges */
+        .footer-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            font-size: {% if template.height_mm <= 25 %}7px{% else %}8px{% endif %};
+            font-weight: 700;
+            line-height: 1.1;
+            margin-top: 0.2mm;
+        }
+
+        .price-badge {
+            font-size: {% if template.height_mm <= 25 %}8.5px{% else %}10px{% endif %};
+            font-weight: 800;
+            font-family: 'Courier New', Courier, monospace;
+            letter-spacing: -0.02em;
+        }
+
+        .warranty-tag {
+            font-size: 5.5px;
+            font-weight: 700;
+            border: 0.5px solid #000000;
+            border-radius: 2px;
+            padding: 0.5px 2px;
+            display: inline-block;
+        }
+
+        .custom-note {
+            font-size: 5.5px;
+            font-weight: 600;
+            color: #333333;
+            width: 100%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <!-- Top Action Toolbar (Hidden in Print Dialog) -->
+    <div class="no-print" style="background:#0f172a; color:#ffffff; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; font-family:sans-serif; font-size:13px;">
+        <div>
+            <strong>{{ template.name|default:"Standard Mobile Sticker" }}</strong> ({{ template.width_mm|default:50 }}mm &times; {{ template.height_mm|default:25 }}mm) &bull; <strong>{{ labels|length }}</strong> sticker(s) ready
+        </div>
+        <div style="display:flex; gap:8px;">
+            <button onclick="window.print()" style="background:#2563eb; color:#ffffff; border:none; padding:6px 18px; border-radius:999px; font-weight:700; cursor:pointer;">
+                Print Label Sheet
+            </button>
+            <button onclick="window.close()" style="background:#475569; color:#ffffff; border:none; padding:6px 14px; border-radius:999px; font-weight:700; cursor:pointer;">
+                Close
+            </button>
+        </div>
+    </div>
+
+    <!-- Printable Thermal Labels Loop -->
+    {% for label in labels %}
+    <div class="sticker-page">
+        <!-- 1. Store Header & Estimation Voucher Tag -->
+        <div class="shop-header">
+            {% if template.show_shop_name|default:True %}
+                {{ label.branch_name|default:SYS_CONFIG.company_name_en }}
+            {% endif %}
+            {% if template.show_estimate_tag|default:True %}
+                <span class="estimate-tag">EST</span>
+            {% endif %}
+        </div>
+
+        <!-- 2. Product Name -->
+        <div class="product-title">
+            {{ label.name }}
+        </div>
+
+        <!-- 3. Model Number, RAM/Storage Specs & SKU Code -->
+        <div class="product-meta">
+            {% if template.show_model_number|default:True and label.model_number %}
+                <span>{{ label.model_number }}</span>
+            {% endif %}
+            {% if template.show_variant_info|default:True and label.variant_tag %}
+                {% if template.show_model_number|default:True and label.model_number %}&bull;{% endif %}
+                <span>{{ label.variant_tag }}</span>
+            {% endif %}
+            {% if template.show_product_code|default:True and label.sku %}
+                {% if label.model_number or label.variant_tag %}&bull;{% endif %}
+                <span>{{ label.sku }}</span>
+            {% endif %}
+        </div>
+
+        <!-- 4. High-Resolution Code128 Barcode Graphic -->
+        <div class="barcode-container">
+            {% if label.barcode_png %}
+                <img src="{{ label.barcode_png }}" alt="Barcode {{ label.barcode }}" class="barcode-img">
+            {% elif label.barcode_svg %}
+                {{ label.barcode_svg|safe }}
+            {% endif %}
+        </div>
+
+        <!-- 5. Footer: Warranty Badge, MDMS Status & Retail MRP -->
+        <div class="footer-row">
+            <div>
+                {% if template.show_warranty_badge|default:True and label.warranty %}
+                    <span class="warranty-tag">{{ label.warranty }}</span>
+                {% endif %}
+                {% if product.requires_imei_tracking %}
+                    <span class="warranty-tag">[MDMS OK]</span>
+                {% endif %}
+            </div>
+
+            {% if template.show_mrp|default:True %}
+            <div class="price-badge">
+                Rs. {{ label.price }}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- 6. Custom Bottom Note / Tax Annotation -->
+        {% if template.custom_note %}
+        <div class="custom-note">
+            {{ template.custom_note }}
+        </div>
+        {% elif label.tax_note %}
+        <div class="custom-note">
+            {{ label.tax_note }}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</body>
+</html>

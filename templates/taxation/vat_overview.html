@@ -1,0 +1,116 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Taxation & Estimation Overview | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+    <!-- Collapsible Non-IRD Disclaimer Banner -->
+    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 shadow-sm">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-warning text-dark p-2 rounded-circle fs-6"><i class="fas fa-file-invoice"></i></span>
+                <div>
+                    <h6 class="fw-bold text-dark mb-0">{{ NON_IRD_NOTICE }}</h6>
+                    <small class="text-muted">
+                        Master Mode: <strong>{{ SHOP_TAX_MODE }}</strong> ({% if IS_VAT_MODE %}VAT Mode Active{% else %}PAN / Non-VAT Proforma{% endif %})
+                    </small>
+                </div>
+            </div>
+            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 py-1 fs-2xs fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#disclaimerDetails" aria-expanded="false">
+                <i class="fas fa-circle-info me-1"></i> Compliance Notice Details
+            </button>
+        </div>
+        <div class="collapse mt-2 pt-2 border-top border-warning border-opacity-25" id="disclaimerDetails">
+            <p class="fs-xs text-muted mb-0">
+                {{ SYS_CONFIG.bill_estimate_disclaimer }} Printed for internal accounting, quotation audit, and stock valuation only.
+            </p>
+        </div>
+    </div>
+
+    <!-- Page Header & Quick Export Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-calculator text-primary me-2"></i> Taxation & Proforma Register Overview
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Monthly Bikram Sambat tax estimation summaries, Annex 5 sales book, and Annex 7 purchase registers
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{% url 'taxation:sales_register' %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-book-open me-1"></i> Sales Book (Annex 5)
+            </a>
+            <a href="{% url 'taxation:purchase_register' %}" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-truck-ramp-box me-1"></i> Purchase Book (Annex 7)
+            </a>
+            <a href="{% url 'reports:export_csv' 'sales' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export Sales CSV
+            </a>
+        </div>
+    </div>
+
+    <!-- 3 Context-Rich Metric Cards with Detailed Explanatory Tooltips -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Output VAT / Sales Turnover -->
+        <div class="col-12 col-md-4">
+            <div class="card p-4 border-0 shadow-sm rounded-4 bg-white border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted fs-xs text-uppercase fw-bold">
+                        {% if IS_VAT_MODE %}Output Tax / VAT (Sales){% else %}Sales Turnover (Non-Taxable){% endif %}
+                    </span>
+                    <i class="fas fa-circle-question text-muted fs-xs" 
+                       data-bs-toggle="tooltip" 
+                       data-bs-placement="top" 
+                       title="{% if IS_VAT_MODE %}Total 13% tax collected on customer sales slips this month.{% else %}Gross sales revenue billed in non-taxable / PAN mode.{% endif %}"></i>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {% if IS_VAT_MODE %}Rs. {{ sales_summary.vat|floatformat:2|intcomma }}{% else %}Rs. {{ sales_summary.grand_total|floatformat:2|intcomma }}{% endif %}
+                </h3>
+                <small class="text-muted fs-xs mt-1 d-block">Outward sales volume for current period</small>
+            </div>
+        </div>
+
+        <!-- 2. Input VAT / Inward Purchases -->
+        <div class="col-12 col-md-4">
+            <div class="card p-4 border-0 shadow-sm rounded-4 bg-white border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted fs-xs text-uppercase fw-bold">
+                        {% if IS_VAT_MODE %}Input Tax / VAT (Purchases){% else %}Purchase Inward Total{% endif %}
+                    </span>
+                    <i class="fas fa-circle-question text-muted fs-xs" 
+                       data-bs-toggle="tooltip" 
+                       data-bs-placement="top" 
+                       title="{% if IS_VAT_MODE %}Total input tax claimed from supplier VAT purchase invoices this month.{% else %}Total landed expenditure on inward inventory receipts.{% endif %}"></i>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    {% if IS_VAT_MODE %}Rs. {{ purchase_summary.vat|floatformat:2|intcomma }}{% else %}Rs. {{ purchase_summary.net|floatformat:2|intcomma }}{% endif %}
+                </h3>
+                <small class="text-muted fs-xs mt-1 d-block">Inward GRN stock receipts for current period</small>
+            </div>
+        </div>
+
+        <!-- 3. Net Tax Assessment -->
+        <div class="col-12 col-md-4">
+            <div class="card p-4 border-0 shadow-sm rounded-4 bg-white border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted fs-xs text-uppercase fw-bold">
+                        {% if IS_VAT_MODE %}Net VAT Assessment (Payable){% else %}Net Operating Turnover{% endif %}
+                    </span>
+                    <i class="fas fa-circle-question text-muted fs-xs" 
+                       data-bs-toggle="tooltip" 
+                       data-bs-placement="top" 
+                       title="{% if IS_VAT_MODE %}Calculated as (Output VAT from Sales minus Input VAT from Purchases).{% else %}PAN stores operate with 0% VAT.{% endif %}"></i>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    {% if IS_VAT_MODE %}Rs. {{ net_vat|floatformat:2|intcomma }}{% else %}Rs. 0.00 (Exempt / PAN){% endif %}
+                </h3>
+                <small class="text-muted fs-xs mt-1 d-block">
+                    {% if IS_VAT_MODE %}Output VAT minus Input VAT{% else %}PAN store does not calculate VAT{% endif %}
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

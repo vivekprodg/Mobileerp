@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>JobSheet_A4_{{ ticket.ticket_number }}</title>
+    <style>
+        @page { 
+            size: A4 portrait; 
+            margin: 12mm 15mm; 
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            font-size: 12px; 
+            color: #1e293b; 
+            line-height: 1.35; 
+            background: #ffffff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .text-center { text-align: center; }
+        .text-end { text-align: right; }
+        .fw-bold { font-weight: bold; }
+        
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 10px; 
+        }
+        
+        th, td { 
+            border: 1px solid #cbd5e1; 
+            padding: 6px 8px; 
+            vertical-align: top; 
+        }
+        
+        th { 
+            background-color: #f8fafc; 
+            font-size: 11px; 
+            text-transform: uppercase; 
+        }
+
+        .a4-brand-logo {
+            max-height: 52px;
+            max-width: 200px;
+            object-fit: contain;
+            margin-bottom: 2px;
+        }
+
+        @media print { 
+            .no-print { display: none !important; } 
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <div class="no-print" style="margin-bottom: 15px; text-align: right;">
+        <button onclick="window.print()" style="padding: 6px 18px; font-weight: bold; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer;">
+            Print A4 Job Sheet
+        </button>
+    </div>
+
+    <!-- Header -->
+    <div class="text-center">
+        {% if ticket.branch.logo_url %}
+            <img src="{{ ticket.branch.logo_url }}" alt="{{ ticket.branch.display_company_name }}" class="a4-brand-logo">
+        {% elif COMPANY_LOGO_URL %}
+            <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="a4-brand-logo">
+        {% endif %}
+
+        <h2 style="margin: 0; color: #0f172a; font-size: 18px;">{{ ticket.branch.display_company_name|default:COMPANY_NAME }}</h2>
+        <div style="font-size: 13px; font-weight: bold; color: #2563eb;">TECHNICIAN LAB WORKSHOP JOB SHEET</div>
+        <small style="color: #64748b;">Attach to device tray in service laboratory &bull; {{ ticket.branch.name }}</small>
+    </div>
+
+    <table style="margin-top: 14px;">
+        <tr>
+            <td style="width: 50%;">
+                Ticket Number : <strong style="color: #2563eb; font-size: 13px;">{{ ticket.ticket_number }}</strong><br>
+                Date Received : {{ ticket.created_at|date:"Y-m-d H:i" }}<br>
+                Customer Name : <strong>{{ ticket.customer_name_manual }}</strong><br>
+                Contact Phone : {{ ticket.customer_phone_manual }}<br>
+            </td>
+            <td style="width: 50%;">
+                Device Model  : <strong>{{ ticket.product.name }}</strong><br>
+                IMEI / Serial : <code>{{ ticket.imei_or_serial }}</code><br>
+                Assigned Tech : {% if ticket.technician %}{{ ticket.technician.get_full_name|default:ticket.technician.username }}{% else %}Unassigned{% endif %}<br>
+                Claim Type    : <strong>{{ ticket.get_claim_type_display }}</strong><br>
+            </td>
+        </tr>
+    </table>
+
+    <h4 style="margin: 14px 0 5px 0; color: #1e3a8a; font-size: 12.5px;">1. INTAKE PHYSICAL AUDIT CHECKLIST</h4>
+    <table>
+        <tr>
+            <th>Power State</th>
+            <th>LDI Moisture Sticker</th>
+            <th>Body Grade</th>
+            <th>Cracks / Damage</th>
+        </tr>
+        <tr>
+            <td>{{ checklist.get_power_status_display }}</td>
+            <td>{{ checklist.get_ldi_indicator_status_display }}</td>
+            <td>{{ checklist.get_body_physical_grade_display }}</td>
+            <td>
+                {% if checklist.is_front_glass_cracked %}Front Glass Cracked; {% endif %}
+                {% if checklist.is_back_cover_glass_broken %}Back Glass Broken; {% endif %}
+                {% if checklist.is_chassis_frame_bent %}Bent Frame; {% endif %}
+                {% if checklist.has_display_lines_or_bleed %}Green Line; {% endif %}
+            </td>
+        </tr>
+    </table>
+
+    <h4 style="margin: 14px 0 5px 0; color: #1e3a8a; font-size: 12.5px;">2. CUSTOMER REPORTED FAULT</h4>
+    <div style="padding: 8px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 4px;">
+        {{ ticket.reported_fault }}
+    </div>
+
+    <h4 style="margin: 14px 0 5px 0; color: #1e3a8a; font-size: 12.5px;">3. SECURITY UNLOCK PATTERN / PIN</h4>
+    <table>
+        <tr>
+            <td style="width: 50%;">
+                PIN / Password Code: <strong>{{ ticket.security_pin_code|default:"None" }}</strong>
+            </td>
+            <td style="width: 50%;">
+                Pattern Sequence: <strong>{{ ticket.pattern_lock_sequence|default:"None" }}</strong>
+            </td>
+        </tr>
+    </table>
+
+    <h4 style="margin: 14px 0 5px 0; color: #1e3a8a; font-size: 12.5px;">4. TECHNICIAN DIAGNOSTIC &amp; QUALITY CHECK (QC)</h4>
+    <table>
+        <tr>
+            <th>QC Item</th>
+            <th class="text-center">Status</th>
+            <th>QC Item</th>
+            <th class="text-center">Status</th>
+        </tr>
+        <tr><td>Ear Speaker / Loudspeaker</td><td class="text-center">[ ] Pass</td><td>Microphone (Primary/Sub)</td><td class="text-center">[ ] Pass</td></tr>
+        <tr><td>Touch Digitizer Grid</td><td class="text-center">[ ] Pass</td><td>Front &amp; Rear Cameras</td><td class="text-center">[ ] Pass</td></tr>
+        <tr><td>Charging Current / Port</td><td class="text-center">[ ] Pass</td><td>Wi-Fi / Bluetooth / Network</td><td class="text-center">[ ] Pass</td></tr>
+    </table>
+
+    <div style="margin-top: 36px; display: flex; justify-content: space-between; text-align: center;">
+        <div style="width: 200px; border-top: 1px solid #000; padding-top: 4px;">Technician Sign-Off</div>
+        <div style="width: 200px; border-top: 1px solid #000; padding-top: 4px;">Final QC Quality Stamp</div>
+    </div>
+</body>
+</html>

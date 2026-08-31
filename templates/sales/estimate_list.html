@@ -1,0 +1,116 @@
+{% extends "core/base.html" %}
+
+{% block title %}Sales Estimation Slips | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">Sales Estimation Slips (Internal Vouchers)</h4>
+            <p class="text-muted fs-xs mb-0">Internal proforma slips, counter sales, and customer warranty estimation records</p>
+        </div>
+        <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning rounded-pill px-4 fw-bold shadow-sm text-dark">
+            <i class="fas fa-plus-circle me-1"></i> New POS Bill [F2]
+        </a>
+    </div>
+
+    <!-- Search & Filter Bar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2">
+            <div class="col-12 col-md-5">
+                <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control form-control-sm bg-light border-0" placeholder="Search by Slip No, Customer Name, or Phone...">
+            </div>
+            <div class="col-6 col-md-3">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Bill Statuses</option>
+                    <option value="COMPLETED" {% if request.GET.status == 'COMPLETED' %}selected{% endif %}>Completed (सम्पन्न)</option>
+                    <option value="CANCELLED" {% if request.GET.status == 'CANCELLED' %}selected{% endif %}>Cancelled (रद्द)</option>
+                    <option value="PARTIALLY_RETURNED" {% if request.GET.status == 'PARTIALLY_RETURNED' %}selected{% endif %}>Partially Returned</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <select name="payment_status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Payments</option>
+                    <option value="PAID" {% if request.GET.payment_status == 'PAID' %}selected{% endif %}>Fully Paid</option>
+                    <option value="PARTIAL" {% if request.GET.payment_status == 'PARTIAL' %}selected{% endif %}>Partial Payment</option>
+                    <option value="DUE" {% if request.GET.payment_status == 'DUE' %}selected{% endif %}>Full Udhaari</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Slips Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-xs">
+                    <tr>
+                        <th class="ps-4">Slip No</th>
+                        <th>Date (AD / BS)</th>
+                        <th>Customer</th>
+                        <th>Cashier</th>
+                        <th>Grand Total</th>
+                        <th>Paid</th>
+                        <th>Due (Udhaari)</th>
+                        <th>Status</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for est in estimates %}
+                    <tr>
+                        <td class="ps-4 font-monospace fw-bold">
+                            <a href="{% url 'sales:estimate_thermal_slip' est.pk %}" target="_blank" class="text-decoration-none text-dark">
+                                {{ est.estimate_number }}
+                            </a>
+                        </td>
+                        <td>
+                            {{ est.bill_date_ad }}
+                            {% if est.bill_date_bs %}<br><small class="text-muted">{{ est.bill_date_bs }} BS</small>{% endif %}
+                        </td>
+                        <td>
+                            <strong>{{ est.recipient_display_name }}</strong>
+                            {% if est.customer_phone_manual %}<br><small class="text-muted">{{ est.customer_phone_manual }}</small>{% endif %}
+                        </td>
+                        <td>{{ est.cashier.username }}</td>
+                        <td class="fw-bold text-primary">Rs. {{ est.grand_total|floatformat:2 }}</td>
+                        <td class="text-success fw-semibold">Rs. {{ est.paid_amount|floatformat:2 }}</td>
+                        <td>
+                            {% if est.due_amount > 0 %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold">
+                                    Rs. {{ est.due_amount|floatformat:2 }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted fs-xs"><i class="fas fa-check text-success me-1"></i> Clear</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-{% if est.status == 'COMPLETED' %}success{% elif est.status == 'CANCELLED' %}danger{% else %}warning text-dark{% endif %} fs-xs">
+                                {{ est.get_status_display }}
+                            </span>
+                        </td>
+                        <td class="text-end pe-4">
+                            <a href="{% url 'sales:estimate_thermal_slip' est.pk %}" class="btn btn-outline-dark btn-sm rounded-pill px-3" target="_blank">
+                                <i class="fas fa-print me-1"></i> Print Slip
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-receipt fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No sales estimation slips generated yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

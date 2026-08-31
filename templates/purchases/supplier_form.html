@@ -1,0 +1,448 @@
+{% extends "core/base.html" %}
+
+{% block title %}
+    {% if form.instance.pk %}Edit Supplier - {{ form.instance.company_name }}{% else %}Register Supplier / Distributor{% endif %} | {{ SYS_CONFIG.company_name_en }}
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.supplier-form-section {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.supplier-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--erp-slate-200);
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+}
+
+.supplier-section-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--erp-slate-900);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.form-label-required::after {
+    content: " *";
+    color: #ef4444;
+    font-weight: bold;
+}
+
+.supplier-sticky-footer {
+    position: sticky;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--erp-slate-200);
+    z-index: 1020;
+    padding: 14px 24px;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1320px;">
+    
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-building-user text-primary me-2"></i>
+                {% if form.instance.pk %}
+                    Edit Supplier: <span class="text-primary">{{ form.instance.company_name }}</span> 
+                    <span class="badge bg-light text-dark border font-monospace ms-2">{{ form.instance.code }}</span>
+                {% else %}
+                    Register New Supplier / Brand Distributor
+                {% endif %}
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Capture official registration numbers, structured banking, 7-day DOA policies, and KYC verification documents
+            </p>
+        </div>
+        <a href="{% url 'purchases:supplier_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+            &larr; Back to Suppliers Directory
+        </a>
+    </div>
+
+    <!-- Top Error Notification Banner -->
+    {% if form.errors %}
+    <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="badge bg-danger text-white rounded-pill px-2 py-1 fs-2xs">
+                {{ form.errors|length }} Form Error(s)
+            </span>
+            <h6 class="fw-bold text-danger mb-0">Please resolve the following submission errors:</h6>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <ul class="mb-0 fs-xs ps-3">
+            {% for field in form %}
+                {% for error in field.errors %}
+                    <li><strong>{{ field.label }}:</strong> {{ error }}</li>
+                {% endfor %}
+            {% endfor %}
+            {% for error in form.non_field_errors %}
+                <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <!-- Master Form Supporting File Uploads (enctype="multipart/form-data") -->
+    <form method="post" enctype="multipart/form-data" novalidate id="supplierMasterForm">
+        {% csrf_token %}
+
+        <!-- =========================================================================
+             SECTION 1: BASIC INFORMATION & 5 CORE MANDATORY FIELDS
+             ========================================================================= -->
+        <div class="supplier-form-section">
+            <div class="supplier-section-header">
+                <h6 class="supplier-section-title">
+                    <i class="fas fa-id-card text-primary"></i> Section 1: Basic Information &amp; Registration Identity
+                </h6>
+                <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs fw-bold">* 5 Core Fields Mandatory</span>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs form-label-required">Company / Firm Name</label>
+                    {{ form.company_name }}
+                    {% if form.company_name.errors %}<div class="text-danger fs-2xs mt-1">{{ form.company_name.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Supplier Classification</label>
+                    {{ form.supplier_type }}
+                    {% if form.supplier_type.errors %}<div class="text-danger fs-2xs mt-1">{{ form.supplier_type.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs form-label-required">Authorized Contact Person</label>
+                    {{ form.contact_person }}
+                    {% if form.contact_person.errors %}<div class="text-danger fs-2xs mt-1">{{ form.contact_person.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">Designation / Role</label>
+                    {{ form.designation }}
+                    {% if form.designation.errors %}<div class="text-danger fs-2xs mt-1">{{ form.designation.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs form-label-required">Primary Phone / Mobile Number</label>
+                    {{ form.phone_number }}
+                    {% if form.phone_number.errors %}<div class="text-danger fs-2xs mt-1">{{ form.phone_number.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">Alternate Phone / Landline</label>
+                    {{ form.alt_phone }}
+                    {% if form.alt_phone.errors %}<div class="text-danger fs-2xs mt-1">{{ form.alt_phone.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">Official Email Address</label>
+                    {{ form.email }}
+                    {% if form.email.errors %}<div class="text-danger fs-2xs mt-1">{{ form.email.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs form-label-required">Company Registrar / Govt Reg No.</label>
+                    {{ form.registration_number }}
+                    {% if form.registration_number.errors %}<div class="text-danger fs-2xs mt-1">{{ form.registration_number.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">PAN Number (9 Digits)</label>
+                    {{ form.pan_number }}
+                    {% if form.pan_number.errors %}<div class="text-danger fs-2xs mt-1">{{ form.pan_number.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">VAT Registration Number</label>
+                    {{ form.vat_number }}
+                    {% if form.vat_number.errors %}<div class="text-danger fs-2xs mt-1">{{ form.vat_number.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">Province (प्रदेश)</label>
+                    {{ form.province }}
+                    {% if form.province.errors %}<div class="text-danger fs-2xs mt-1">{{ form.province.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-8">
+                    <label class="form-label fw-bold text-dark fs-xs form-label-required">Street Address &amp; Market Location</label>
+                    {{ form.address }}
+                    {% if form.address.errors %}<div class="text-danger fs-2xs mt-1">{{ form.address.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label fw-bold text-dark fs-xs">City</label>
+                    {{ form.city }}
+                    {% if form.city.errors %}<div class="text-danger fs-2xs mt-1">{{ form.city.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label fw-bold text-dark fs-xs">Country</label>
+                    {{ form.country }}
+                    {% if form.country.errors %}<div class="text-danger fs-2xs mt-1">{{ form.country.errors.0 }}</div>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- =========================================================================
+             SECTION 2: CREDIT TERMS & STRUCTURED BANKING DETAILS
+             ========================================================================= -->
+        <div class="supplier-form-section">
+            <div class="supplier-section-header">
+                <h6 class="supplier-section-title">
+                    <i class="fas fa-building-columns text-success"></i> Section 2: Credit Terms &amp; Structured Banking Details
+                </h6>
+                <span class="badge bg-success bg-opacity-10 text-success fs-2xs fw-bold">Settlement Details</span>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Credit Terms (Days)</label>
+                    {{ form.credit_period_days }}
+                    {% if form.credit_period_days.errors %}<div class="text-danger fs-2xs mt-1">{{ form.credit_period_days.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Credit Limit (NPR)</label>
+                    {{ form.credit_limit }}
+                    {% if form.credit_limit.errors %}<div class="text-danger fs-2xs mt-1">{{ form.credit_limit.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Opening Balance (NPR)</label>
+                    {{ form.opening_balance }}
+                    {% if form.opening_balance.errors %}<div class="text-danger fs-2xs mt-1">{{ form.opening_balance.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Balance Nature</label>
+                    {{ form.balance_type }}
+                    {% if form.balance_type.errors %}<div class="text-danger fs-2xs mt-1">{{ form.balance_type.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12"><hr class="my-1 text-muted opacity-25"></div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Preferred Payment Mode</label>
+                    {{ form.preferred_payment_method }}
+                    {% if form.preferred_payment_method.errors %}<div class="text-danger fs-2xs mt-1">{{ form.preferred_payment_method.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Bank Name</label>
+                    {{ form.bank_name }}
+                    {% if form.bank_name.errors %}<div class="text-danger fs-2xs mt-1">{{ form.bank_name.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Bank Account Number</label>
+                    {{ form.bank_account_number }}
+                    {% if form.bank_account_number.errors %}<div class="text-danger fs-2xs mt-1">{{ form.bank_account_number.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Account Holder Name</label>
+                    {{ form.account_holder_name }}
+                    {% if form.account_holder_name.errors %}<div class="text-danger fs-2xs mt-1">{{ form.account_holder_name.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Bank Branch Location</label>
+                    {{ form.bank_branch }}
+                    {% if form.bank_branch.errors %}<div class="text-danger fs-2xs mt-1">{{ form.bank_branch.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">FonePay / Merchant QR Details</label>
+                    {{ form.qr_payment_details }}
+                    {% if form.qr_payment_details.errors %}<div class="text-danger fs-2xs mt-1">{{ form.qr_payment_details.errors.0 }}</div>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- =========================================================================
+             SECTION 3: CATALOG & BRAND COVERAGE
+             ========================================================================= -->
+        <div class="supplier-form-section">
+            <div class="supplier-section-header">
+                <h6 class="supplier-section-title">
+                    <i class="fas fa-boxes-stacked text-info"></i> Section 3: Catalog Coverage &amp; Vendor Evaluation
+                </h6>
+                <span class="badge bg-info bg-opacity-10 text-info fs-2xs fw-bold">Supplied Categories</span>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Product Categories Supplied</label>
+                    {{ form.product_categories_supplied }}
+                    <small class="text-muted fs-2xs d-block mt-1">e.g. Smartphones, Optical Frames, Tempered Glass, Chargers</small>
+                    {% if form.product_categories_supplied.errors %}<div class="text-danger fs-2xs mt-1">{{ form.product_categories_supplied.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Authorized Brands Supplied</label>
+                    {{ form.brands_supplied }}
+                    <small class="text-muted fs-2xs d-block mt-1">e.g. Samsung, Apple, Xiaomi, Vivo, Realme, Ray-Ban</small>
+                    {% if form.brands_supplied.errors %}<div class="text-danger fs-2xs mt-1">{{ form.brands_supplied.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6 d-flex align-items-center">
+                    <div class="form-check form-switch mt-2">
+                        {{ form.is_preferred }}
+                        <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.is_preferred.id_for_label }}">
+                            Set as Preferred / Regular Supplier
+                        </label>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Vendor Performance Rating</label>
+                    {{ form.rating }}
+                    {% if form.rating.errors %}<div class="text-danger fs-2xs mt-1">{{ form.rating.errors.0 }}</div>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- =========================================================================
+             SECTION 4: MOBILE DISTRIBUTOR & WARRANTY POLICIES
+             ========================================================================= -->
+        <div class="supplier-form-section">
+            <div class="supplier-section-header">
+                <h6 class="supplier-section-title">
+                    <i class="fas fa-shield-halved text-warning-emphasis"></i> Section 4: Mobile-Specific Distributor &amp; Warranty Policies
+                </h6>
+                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs fw-bold">7-Day DOA &amp; RMA</span>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-12 col-md-4 d-flex align-items-center">
+                    <div class="form-check form-switch mt-2">
+                        {{ form.is_authorized_distributor }}
+                        <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.is_authorized_distributor.id_for_label }}">
+                            Authorized Brand Distributor
+                        </label>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">Distributor / Dealer Tier</label>
+                    {{ form.distributor_tier }}
+                    {% if form.distributor_tier.errors %}<div class="text-danger fs-2xs mt-1">{{ form.distributor_tier.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-4 d-flex align-items-center">
+                    <div class="form-check form-switch mt-2">
+                        {{ form.warranty_support_available }}
+                        <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.warranty_support_available.id_for_label }}">
+                            Warranty Support Available
+                        </label>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Brand Authorization Details / Certificate No.</label>
+                    {{ form.brand_authorization_details }}
+                    {% if form.brand_authorization_details.errors %}<div class="text-danger fs-2xs mt-1">{{ form.brand_authorization_details.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Warranty Claim Lab / Service Center Location</label>
+                    {{ form.warranty_claim_contact }}
+                    {% if form.warranty_claim_contact.errors %}<div class="text-danger fs-2xs mt-1">{{ form.warranty_claim_contact.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">7-Day DOA (Dead On Arrival) Replacement Policy</label>
+                    {{ form.doa_policy }}
+                    {% if form.doa_policy.errors %}<div class="text-danger fs-2xs mt-1">{{ form.doa_policy.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">General Defective RMA Return Policy</label>
+                    {{ form.defective_return_policy }}
+                    {% if form.defective_return_policy.errors %}<div class="text-danger fs-2xs mt-1">{{ form.defective_return_policy.errors.0 }}</div>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- =========================================================================
+             SECTION 5: KYC DOCUMENTS, STATUS & REMARKS
+             ========================================================================= -->
+        <div class="supplier-form-section">
+            <div class="supplier-section-header">
+                <h6 class="supplier-section-title">
+                    <i class="fas fa-file-shield text-secondary"></i> Section 5: KYC Attachments, Account Status &amp; Remarks
+                </h6>
+                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs fw-bold">Compliance Documents</span>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Upload Registration / PAN Certificate (PDF, JPG, PNG)</label>
+                    {{ form.kyc_document }}
+                    <small class="text-muted fs-2xs mt-1 d-block">
+                        Upload scanned copy of Company Registration Certificate, PAN Card, or Distributor Agreement.
+                    </small>
+                    {% if form.instance.kyc_document %}
+                        <div class="mt-2 fs-xs">
+                            <i class="fas fa-paperclip text-primary me-1"></i> Current File: 
+                            <a href="{{ form.instance.kyc_document.url }}" target="_blank" class="fw-bold text-primary text-decoration-none">
+                                View Attached KYC Document &rarr;
+                            </a>
+                        </div>
+                    {% endif %}
+                    {% if form.kyc_document.errors %}<div class="text-danger fs-2xs mt-1">{{ form.kyc_document.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <label class="form-label fw-bold text-dark fs-xs">Account Status</label>
+                    {{ form.status }}
+                    {% if form.status.errors %}<div class="text-danger fs-2xs mt-1">{{ form.status.errors.0 }}</div>{% endif %}
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label fw-bold text-dark fs-xs">General Remarks &amp; Internal Notes</label>
+                    {{ form.notes }}
+                    {% if form.notes.errors %}<div class="text-danger fs-2xs mt-1">{{ form.notes.errors.0 }}</div>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- STICKY BOTTOM SUBMISSION BAR -->
+        <div class="supplier-sticky-footer d-flex align-items-center justify-content-between">
+            <div class="d-none d-md-block text-muted fs-xs">
+                <i class="fas fa-info-circle text-primary me-1"></i>
+                Supplier code and ledger opening balances will be generated automatically upon saving.
+            </div>
+            <div class="d-flex align-items-center gap-2 w-100 w-md-auto justify-content-end">
+                <a href="{% url 'purchases:supplier_list' %}" class="btn btn-outline-secondary px-4 rounded-pill">
+                    Cancel
+                </a>
+                <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm">
+                    <i class="fas fa-save me-2"></i> Save Supplier Profile
+                </button>
+            </div>
+        </div>
+
+    </form>
+</div>
+{% endblock %}

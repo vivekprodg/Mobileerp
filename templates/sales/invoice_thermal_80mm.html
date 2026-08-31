@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estimate_Slip_{{ estimate.estimate_number }}</title>
+    <style>
+        @page { 
+            size: 80mm auto; 
+            margin: 0; 
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 74mm;
+            max-width: 74mm;
+            margin: 0 auto;
+            padding: 3mm;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            line-height: 1.2;
+            color: #000000;
+            background: #ffffff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .text-center { text-align: center; }
+        .text-end { text-align: right; }
+        .text-start { text-align: left; }
+        .fw-bold { font-weight: bold; }
+        
+        .divider { 
+            border-top: 1px dashed #000000; 
+            margin: 4px 0; 
+            width: 100%;
+        }
+        
+        .double-divider { 
+            border-top: 1px solid #000000; 
+            border-bottom: 1px solid #000000; 
+            padding: 2px 0; 
+            margin: 4px 0; 
+        }
+
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 10px; 
+        }
+        
+        th, td { 
+            padding: 2px 0; 
+            vertical-align: top; 
+        }
+
+        .thermal-logo-img {
+            max-height: 48px;
+            max-width: 160px;
+            object-fit: contain;
+            filter: grayscale(100%) contrast(150%);
+            display: block;
+            margin: 0 auto 4px auto;
+        }
+
+        .imei-line {
+            font-size: 9.5px;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            letter-spacing: 0.02em;
+            padding-left: 4px;
+            white-space: nowrap;
+        }
+
+        .warranty-box {
+            border: 1px dotted #000000;
+            padding: 3px;
+            margin: 3px 0;
+            font-size: 9px;
+            background-color: #fafafa;
+        }
+
+        @media print {
+            .no-print { 
+                display: none !important; 
+            }
+            body {
+                padding: 1mm 0;
+            }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <!-- Top Action Toolbar -->
+    <div class="no-print" style="margin-bottom: 10px; text-align: center; background: #0f172a; padding: 8px; border-radius: 6px;">
+        <button onclick="window.print()" style="padding: 6px 16px; font-weight: bold; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer;">
+            PRINT 80mm THERMAL SLIP
+        </button>
+    </div>
+
+    <!-- Company Branding Header -->
+    <div class="text-center">
+        <!-- Optional Logo Upload Rendering -->
+        {% if estimate.branch.logo_url %}
+            <img src="{{ estimate.branch.logo_url }}" alt="{{ estimate.branch.display_company_name }}" class="thermal-logo-img">
+        {% elif COMPANY_LOGO_URL %}
+            <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="thermal-logo-img">
+        {% endif %}
+
+        <div class="fw-bold" style="font-size: 14px;">{{ estimate.branch.display_company_name|default:COMPANY_NAME|upper }}</div>
+        {% if estimate.branch.display_company_name_np or COMPANY_NAME_NP %}
+            <div style="font-size: 11px; font-weight: bold;">{{ estimate.branch.display_company_name_np|default:COMPANY_NAME_NP }}</div>
+        {% endif %}
+        
+        <div>{{ estimate.branch.address }}, {{ estimate.branch.city }}</div>
+        <div>Phone: {{ estimate.branch.phone_number }}</div>
+        
+        {% if SYS_CONFIG.pan_number %}
+            <div>PAN: {{ SYS_CONFIG.pan_number }}</div>
+        {% endif %}
+        {% if SYS_CONFIG.vat_number and SYS_CONFIG.tax_system_mode == 'VAT' %}
+            <div>VAT No: {{ SYS_CONFIG.vat_number }}</div>
+        {% endif %}
+    </div>
+
+    <div class="double-divider text-center fw-bold">
+        *** {{ SYS_CONFIG.bill_header_title }} ***<br>
+        {% if SYS_CONFIG.is_estimation_bill_only %}
+            <span style="font-size: 8.5px; font-weight: normal;">(Internal Estimation / Proforma Voucher)</span>
+        {% endif %}
+    </div>
+
+    <!-- Bill Metadata -->
+    <div>
+        Slip No    : <strong>{{ estimate.estimate_number }}</strong><br>
+        Date (AD)  : {{ estimate.bill_date_ad }} | BS: {{ estimate.bill_date_bs|default:"-" }}<br>
+        Customer   : <strong>{{ estimate.recipient_display_name }}</strong><br>
+        {% if estimate.customer_phone_manual %}Phone      : {{ estimate.customer_phone_manual }}<br>{% endif %}
+        {% if estimate.customer_pan %}Cust PAN   : {{ estimate.customer_pan }}<br>{% endif %}
+        Salesperson: {% if estimate.salesperson %}{{ estimate.salesperson.get_full_name|default:estimate.salesperson.username }}{% else %}{{ estimate.cashier.get_full_name|default:estimate.cashier.username }}{% endif %} | Cashier: {{ estimate.cashier.username }}
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Line Items Table -->
+    <table>
+        <thead>
+            <tr>
+                <th align="left">Item Description</th>
+                <th align="center">Qty</th>
+                <th align="right">Rate</th>
+                <th align="right">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td colspan="4">
+                    <strong>{{ item.product.name }}</strong>
+                    {% if item.product.ram and item.product.internal_storage %}
+                        <span>({{ item.product.ram }}/{{ item.product.internal_storage }}{% if item.product.color_variant %} - {{ item.product.color_variant }}{% endif %})</span>
+                    {% endif %}
+                    {% if estimate.vat_amount > 0 %}
+                        <span style="font-size: 8.5px; color: #555;">[{{ item.get_tax_pricing_type_display }}]</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td></td>
+                <td align="center">{{ item.quantity|floatformat:0 }}</td>
+                <td align="right">{{ item.unit_price|floatformat:2 }}</td>
+                <td align="right">{{ item.line_total|floatformat:2 }}</td>
+            </tr>
+
+            <!-- Dedicated Dual-IMEI Independent Print Lines -->
+            {% if item.imei_number %}
+            <tr>
+                <td colspan="4" class="imei-line">
+                    [IMEI 1: {{ item.imei_number }}]
+                </td>
+            </tr>
+            {% endif %}
+
+            {% if item.secondary_imei %}
+            <tr>
+                <td colspan="4" class="imei-line">
+                    [IMEI 2: {{ item.secondary_imei }}]
+                </td>
+            </tr>
+            {% endif %}
+
+            {% if item.item_instance %}
+            <tr>
+                <td colspan="4" style="font-size: 9px; padding-left: 4px; color: #333;">
+                    [NTA MDMS: {{ item.item_instance.get_mdms_status_display }}]
+                </td>
+            </tr>
+            {% endif %}
+
+            {% if item.warranty_terms %}
+            <tr>
+                <td colspan="4">
+                    <div class="warranty-box">
+                        <strong>Warranty Coverage:</strong><br>
+                        {{ item.warranty_terms }}
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="divider"></div>
+
+    <!-- Totals Breakdown -->
+    <table>
+        <tr>
+            <td>Subtotal (Gross):</td>
+            <td align="right">Rs. {{ estimate.subtotal|floatformat:2 }}</td>
+        </tr>
+        {% if estimate.item_discount_total > 0 or estimate.bill_discount_amount > 0 %}
+            <tr>
+                <td>Total Discount:</td>
+                <td align="right">-Rs. {{ estimate.item_discount_total|add:estimate.bill_discount_amount|floatformat:2 }}</td>
+            </tr>
+        {% endif %}
+        {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
+            <tr class="fw-bold">
+                <td>Trade-In Credit ({{ estimate.trade_in_voucher_reference }}):</td>
+                <td align="right">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2 }}</td>
+            </tr>
+        {% endif %}
+        {% if estimate.vat_amount > 0 %}
+            {% if estimate.taxable_amount > 0 %}
+                <tr>
+                    <td>Taxable Base:</td>
+                    <td align="right">Rs. {{ estimate.taxable_amount|floatformat:2 }}</td>
+                </tr>
+            {% endif %}
+            <tr>
+                <td>Tax / VAT:</td>
+                <td align="right">Rs. {{ estimate.vat_amount|floatformat:2 }}</td>
+            </tr>
+        {% endif %}
+        <tr class="fw-bold" style="font-size: 12.5px;">
+            <td>GRAND TOTAL:</td>
+            <td align="right">Rs. {{ estimate.grand_total|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <td>Paid Amount:</td>
+            <td align="right">Rs. {{ estimate.paid_amount|floatformat:2 }}</td>
+        </tr>
+        {% if estimate.due_amount > 0 %}
+            <tr class="fw-bold">
+                <td>Due (Udhaari Balance):</td>
+                <td align="right">Rs. {{ estimate.due_amount|floatformat:2 }}</td>
+            </tr>
+        {% endif %}
+        {% if estimate.change_returned > 0 %}
+            <tr>
+                <td>Change Returned:</td>
+                <td align="right">Rs. {{ estimate.change_returned|floatformat:2 }}</td>
+            </tr>
+        {% endif %}
+    </table>
+
+    <div class="divider"></div>
+
+    <!-- Payment Modes -->
+    <div style="font-size: 9.5px;">
+        {% for p in payments %}
+            Paid via {{ p.get_payment_mode_display }}{% if p.transaction_ref %} ({{ p.transaction_ref }}){% endif %}: Rs. {{ p.amount|floatformat:2 }}<br>
+        {% empty %}
+            Paid via CASH: Rs. {{ estimate.paid_amount|floatformat:2 }}<br>
+        {% endfor %}
+    </div>
+
+    <!-- Disclaimer & Policy Footer -->
+    <div class="text-center" style="font-size: 8.5px; margin-top: 6px; line-height: 1.3;">
+        {% if SYS_CONFIG.bill_estimate_disclaimer %}
+            {{ SYS_CONFIG.bill_estimate_disclaimer }}<br>
+        {% endif %}
+        {% if estimate.branch.footer_estimate_note %}
+            {{ estimate.branch.footer_estimate_note }}<br>
+        {% endif %}
+        *** Thank You For Visiting ***
+    </div>
+</body>
+</html>

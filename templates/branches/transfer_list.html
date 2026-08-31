@@ -1,0 +1,313 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Inter-Branch Stock Transfers | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.transfer-status-pill {
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+.transfer-action-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-dolly text-primary me-2"></i> Inter-Branch Stock Transfers &amp; Logistics
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Track inter-branch requisitions, physical stock dispatch from origin, and delivery acceptance verification at destination
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'branches:branch_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-store me-1"></i> Outlets List
+            </a>
+            <a href="{% url 'branches:transfer_create' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-plus-circle me-1"></i> New Transfer Request
+            </a>
+        </div>
+    </div>
+
+    <!-- Active Terminal Context Banner -->
+    <div class="alert bg-white border shadow-sm rounded-4 p-3 mb-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+        <div class="d-flex align-items-center gap-3">
+            <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-location-dot"></i></span>
+            <div>
+                <span class="fs-xs text-muted text-uppercase fw-bold d-block">Active Terminal Scoping</span>
+                <strong class="text-dark fs-sm">{{ ACTIVE_BRANCH.name|default:"Main Store" }} ({{ ACTIVE_BRANCH.code|default:"HQ" }})</strong>
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-light text-dark border fs-xs">
+                Showing transfers involving this branch
+            </span>
+        </div>
+    </div>
+
+    <!-- Transfers Registry Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Stock Movement Consignments
+            </h6>
+            <span class="badge bg-primary rounded-pill px-3">{{ transfers|length }} Transfer Records</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Transfer Requisition No</th>
+                        <th>Source (Origin)</th>
+                        <th>Destination (Target)</th>
+                        <th>Items Count</th>
+                        <th>Date Requested</th>
+                        <th>Status</th>
+                        <th>Personnel</th>
+                        <th class="text-end pe-4">Consignment Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trf in transfers %}
+                    <tr>
+                        <td class="ps-4 font-monospace fw-bold">
+                            <span class="text-primary">{{ trf.transfer_no }}</span>
+                            {% if trf.notes %}
+                                <small class="text-muted d-block font-sans fs-2xs">{{ trf.notes|truncatechars:35 }}</small>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ trf.source_branch.name }}</strong>
+                            <small class="text-muted d-block font-monospace">({{ trf.source_branch.code }})</small>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ trf.destination_branch.name }}</strong>
+                            <small class="text-muted d-block font-monospace">({{ trf.destination_branch.code }})</small>
+                        </td>
+
+                        <td>
+                            <button type="button" class="btn btn-link text-decoration-none p-0 text-dark fw-bold fs-xs" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#inspectModal_{{ trf.id }}">
+                                <span class="badge bg-light text-primary border font-monospace">
+                                    <i class="fas fa-boxes-stacked me-1"></i> {{ trf.items.count }} Line Item(s)
+                                </span>
+                            </button>
+                        </td>
+
+                        <td>
+                            <span class="text-dark fw-semibold">{{ trf.transfer_date }}</span>
+                            <small class="text-muted d-block">{{ trf.created_at|date:"H:i" }}</small>
+                        </td>
+
+                        <td>
+                            {% if trf.status == 'RECEIVED' %}
+                                <span class="transfer-status-pill bg-success bg-opacity-10 text-success border border-success border-opacity-25">
+                                    <i class="fas fa-check-circle me-1"></i> Received &amp; Stocked
+                                </span>
+                            {% elif trf.status == 'DISPATCHED' %}
+                                <span class="transfer-status-pill bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25">
+                                    <i class="fas fa-truck-moving me-1"></i> In-Transit / Dispatched
+                                </span>
+                            {% elif trf.status == 'CANCELLED' %}
+                                <span class="transfer-status-pill bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25">
+                                    <i class="fas fa-times-circle me-1"></i> Cancelled
+                                </span>
+                            {% else %}
+                                <span class="transfer-status-pill bg-secondary bg-opacity-10 text-secondary border">
+                                    <i class="fas fa-clock me-1"></i> Draft / Pending Dispatch
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <small class="text-muted d-block">Req: <strong>{{ trf.requested_by.username }}</strong></small>
+                            {% if trf.dispatched_by %}
+                                <small class="text-muted d-block">Disp: <strong>{{ trf.dispatched_by.username }}</strong></small>
+                            {% endif %}
+                            {% if trf.received_by %}
+                                <small class="text-success d-block">Recv: <strong>{{ trf.received_by.username }}</strong></small>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-end pe-4">
+                            <div class="d-inline-flex gap-2 align-items-center">
+                                <!-- Inspection Modal Trigger -->
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#inspectModal_{{ trf.id }}" 
+                                        title="View item breakdown & IMEI serials">
+                                    <i class="fas fa-eye me-1"></i> Inspect
+                                </button>
+
+                                <!-- DISPATCH ACTION BUTTON (Visible on DRAFT at Source Branch) -->
+                                {% if trf.status == 'DRAFT' and ACTIVE_BRANCH.id == trf.source_branch.id or trf.status == 'DRAFT' and user.is_superuser %}
+                                <form action="/branches/transfers/{{ trf.id }}/dispatch/" method="post" class="d-inline m-0">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs" 
+                                            onclick="return confirm('Execute physical stock dispatch for requisition {{ trf.transfer_no }}? Inventory will be deducted from {{ trf.source_branch.name }}.');">
+                                        <i class="fas fa-truck-fast me-1"></i> Dispatch Stock
+                                    </button>
+                                </form>
+                                {% endif %}
+
+                                <!-- ACCEPT & RECEIVE ACTION BUTTON (Visible on DISPATCHED at Destination Branch) -->
+                                {% if trf.status == 'DISPATCHED' and ACTIVE_BRANCH.id == trf.destination_branch.id or trf.status == 'DISPATCHED' and user.is_superuser %}
+                                <button type="button" class="btn btn-success btn-sm rounded-pill px-3 fw-bold shadow-xs" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#acceptDeliveryModal_{{ trf.id }}">
+                                    <i class="fas fa-check-circle me-1"></i> Inspect &amp; Accept Delivery
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- =========================================================
+                         MODAL 1: SHIPMENT INSPECTION MODAL (FOR ALL ROWS)
+                         ========================================================= -->
+                    <div class="modal fade" id="inspectModal_{{ trf.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-lg">
+                            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                                <div class="modal-header bg-dark text-white border-0 py-3 px-4">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-dolly"></i></span>
+                                        <div>
+                                            <h6 class="modal-title fs-sm fw-bold text-white mb-0 font-monospace">{{ trf.transfer_no }}</h6>
+                                            <small class="text-white-50 fs-2xs">{{ trf.source_branch.name }} &rarr; {{ trf.destination_branch.name }}</small>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body p-4">
+                                    <div class="p-3 bg-light rounded-3 border mb-3 fs-xs">
+                                        <div class="row g-2">
+                                            <div class="col-6">Status: <strong>{{ trf.get_status_display }}</strong></div>
+                                            <div class="col-6">Requested By: <strong>{{ trf.requested_by.username }}</strong></div>
+                                            <div class="col-6">Date: <strong>{{ trf.transfer_date }}</strong></div>
+                                            <div class="col-6">Notes: <strong>{{ trf.notes|default:"None" }}</strong></div>
+                                        </div>
+                                    </div>
+
+                                    <h6 class="fw-bold text-dark fs-xs mb-2">Itemized Products in Shipment:</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-bordered table-sm fs-xs mb-0">
+                                            <thead class="bg-light text-muted">
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Product Name</th>
+                                                    <th class="text-center">Quantity</th>
+                                                    <th>Scanned IMEI / Serial</th>
+                                                    <th>Notes</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for item in trf.items.all %}
+                                                <tr>
+                                                    <td class="text-center">{{ forloop.counter }}</td>
+                                                    <td><strong>{{ item.product.name }}</strong></td>
+                                                    <td class="text-center fw-bold">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</td>
+                                                    <td class="font-monospace text-primary">{{ item.scanned_imei_or_serial|default:"-" }}</td>
+                                                    <td><small class="text-muted">{{ item.notes|default:"-" }}</small></td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="modal-footer bg-light border-0">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- =========================================================
+                         MODAL 2: ACCEPT & RECEIVE DELIVERY CONFIRMATION MODAL
+                         ========================================================= -->
+                    {% if trf.status == 'DISPATCHED' %}
+                    <div class="modal fade" id="acceptDeliveryModal_{{ trf.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-lg">
+                            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                                <form action="/branches/transfers/{{ trf.id }}/receive/" method="post">
+                                    {% csrf_token %}
+                                    <div class="modal-header bg-success text-white border-0 py-3 px-4">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="badge bg-white text-success p-2 rounded-circle"><i class="fas fa-check-double"></i></span>
+                                            <div>
+                                                <h6 class="modal-title fs-sm fw-bold text-white mb-0">Accept Inward Stock Delivery</h6>
+                                                <small class="text-white-50 fs-2xs font-monospace">{{ trf.transfer_no }}</small>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <div class="modal-body p-4">
+                                        <div class="alert alert-success bg-opacity-10 border border-success border-opacity-25 rounded-3 p-3 fs-xs mb-3">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Confirming this shipment will automatically increment live sellable inventory at 
+                                            <strong>{{ trf.destination_branch.name }}</strong> and re-assign IMEI records to this store counter.
+                                        </div>
+
+                                        <h6 class="fw-bold text-dark fs-xs mb-2">Verify Received Physical Consignment Items:</h6>
+                                        <div class="table-responsive mb-3">
+                                            <table class="table table-bordered table-sm fs-xs mb-0">
+                                                <thead class="bg-light text-muted">
+                                                    <tr>
+                                                        <th>Product</th>
+                                                        <th class="text-center">Qty to Restock</th>
+                                                        <th>IMEI / Serial Serialized Unit</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in trf.items.all %}
+                                                    <tr>
+                                                        <td><strong>{{ item.product.name }}</strong></td>
+                                                        <td class="text-center fw-bold text-success">+{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</td>
+                                                        <td class="font-monospace text-primary">{{ item.scanned_imei_or_serial|default:"Standard Batch" }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer bg-light border-0 d-flex justify-content-between">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                                        <button type="submit" class="btn btn-success btn-sm px-4 rounded-pill fw-bold shadow-sm">
+                                            <i class="fas fa-boxes-packing me-1"></i> Confirm &amp; Add to Store Stock
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="fas fa-dolly fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No stock transfers recorded for this branch terminal.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

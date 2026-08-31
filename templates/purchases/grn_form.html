@@ -1,0 +1,1438 @@
+{% extends "core/base.html" %}
+{% load static humanize %}
+
+{% block title %}Receive Goods (GRN Inward) | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.grn-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    box-shadow: var(--erp-shadow-xs);
+}
+
+.grn-line-item-row {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    transition: all 0.2s ease;
+}
+
+.grn-line-item-row:hover {
+    border-color: var(--erp-primary-border);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.imei-scan-active-box {
+    background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%);
+    border: 2px dashed #0284c7;
+    border-radius: 12px;
+    padding: 14px;
+    margin-top: 10px;
+}
+
+.non-imei-notice-box {
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-top: 10px;
+}
+
+.imei-badge-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    letter-spacing: 0.02em;
+}
+
+.imei-input-field:focus {
+    border-color: #0284c7 !important;
+    box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.25) !important;
+    background-color: #ffffff !important;
+}
+
+.scan-indicator-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+}
+
+/* ==========================================================================
+   GRN CAMERA VIEWFINDER STYLES
+   ========================================================================== */
+.grn-camera-modal-body {
+    background-color: #0b1120;
+    position: relative;
+    padding: 0;
+    overflow: hidden;
+    min-height: 380px;
+}
+
+.grn-camera-video {
+    width: 100%;
+    height: 100%;
+    max-height: 480px;
+    object-fit: cover;
+    display: block;
+}
+
+.grn-scanner-viewfinder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    padding: 20px;
+}
+
+.grn-aiming-reticle {
+    width: 280px;
+    height: 170px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 16px;
+    position: relative;
+    box-shadow: 0 0 0 9999px rgba(11, 17, 32, 0.65);
+}
+
+.grn-aiming-reticle::before,
+.grn-aiming-reticle::after {
+    content: '';
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    border-color: #0284c7;
+    border-style: solid;
+}
+
+.grn-aiming-reticle::before {
+    top: -2px;
+    left: -2px;
+    border-width: 4px 0 0 4px;
+    border-top-left-radius: 14px;
+}
+
+.grn-aiming-reticle::after {
+    bottom: -2px;
+    right: -2px;
+    border-width: 0 4px 4px 0;
+    border-bottom-right-radius: 14px;
+}
+
+.grn-corner-tr {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 24px;
+    height: 24px;
+    border-top: 4px solid #0284c7;
+    border-right: 4px solid #0284c7;
+    border-top-right-radius: 14px;
+}
+
+.grn-corner-bl {
+    position: absolute;
+    bottom: -2px;
+    left: -2px;
+    width: 24px;
+    height: 24px;
+    border-bottom: 4px solid #0284c7;
+    border-left: 4px solid #0284c7;
+    border-bottom-left-radius: 14px;
+}
+
+.grn-laser-line {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, #38bdf8 50%, transparent 100%);
+    box-shadow: 0 0 8px #38bdf8;
+    animation: grnLaser 2s ease-in-out infinite alternate;
+}
+
+@keyframes grnLaser {
+    0% { top: 8%; opacity: 0.8; }
+    100% { top: 92%; opacity: 1; }
+}
+
+.grn-camera-step-banner {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    z-index: 10;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 10px 14px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+    <!-- Page Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-truck-ramp-box text-primary me-2"></i> Goods Received Note (GRN) Inward
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Stock physical intake with multi-unit packaging, proportional value-weighted shipping overhead distribution &amp; mandatory Dual-IMEI verification
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to GRN List
+            </a>
+        </div>
+    </div>
+
+    <!-- Error Alert Banner -->
+    {% if form.errors or formset.errors %}
+    <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="badge bg-danger text-white rounded-pill px-2 py-1 fs-2xs">Validation Error</span>
+            <h6 class="fw-bold text-danger mb-0">Please resolve the following errors:</h6>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <ul class="mb-0 fs-xs ps-3">
+            {% for field in form %}{% for err in field.errors %}<li><strong>Header:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}
+            {% for f in formset %}{% for field in f %}{% for err in field.errors %}<li><strong>Line Item {{ forloop.parentloop.counter }}:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}{% endfor %}
+            {% for err in form.non_field_errors %}<li>{{ err }}</li>{% endfor %}
+            {% for err in formset.non_form_errors %}<li>{{ err }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <form method="post" id="grnMasterForm" novalidate>
+        {% csrf_token %}
+
+        <!-- Top Header Card -->
+        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+            <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                <i class="fas fa-file-invoice text-primary me-2"></i> 1. Supplier &amp; Consignment Information
+            </h6>
+            
+            <div class="row g-3">
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">Supplier / Distributor <span class="text-danger">*</span></label>
+                    {{ form.supplier }}
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">Supplier Invoice / Challan Ref No. <span class="text-danger">*</span></label>
+                    {{ form.supplier_bill_no }}
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">Bill / Challan Date (AD) <span class="text-danger">*</span></label>
+                    {{ form.bill_date }}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Paid Amount (NPR)</label>
+                    {{ form.paid_amount }}
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Freight / Courier Charge (NPR)</label>
+                    {{ form.extra_freight_charge }}
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Customs / Duty (NPR)</label>
+                    {{ form.customs_import_charge }}
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Handling / Insurance (NPR)</label>
+                    {{ form.other_handling_charge }}
+                </div>
+
+                <div class="col-12 col-md-6 d-flex align-items-center">
+                    <div class="form-check form-switch mt-2">
+                        {{ form.is_vat_bill }}
+                        <label class="form-check-label fw-bold text-dark fs-xs">13% VAT Calculation Included in Invoice</label>
+                    </div>
+                </div>
+                <div class="col-12 col-md-6 d-flex align-items-center">
+                    <div class="form-check form-switch mt-2">
+                        {{ form.distributor_mdms_certified }}
+                        <label class="form-check-label fw-bold text-success fs-xs">Distributor NTA MDMS Certified Import</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Line Items Section with Dynamic Dual-IMEI Scanning -->
+        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 border-bottom pb-3 mb-3">
+                <div>
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-boxes-stacked text-primary me-2"></i> 2. Inward Line Items, Pricing &amp; Mandatory IMEIs
+                    </h6>
+                    <small class="text-muted fs-2xs">Overheads are dynamically allocated based on line value. Serialized phones require 100% exact IMEI pairing.</small>
+                </div>
+                <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold" id="addNewLineItemBtn">
+                    <i class="fas fa-plus me-1"></i> Add Another Line
+                </button>
+            </div>
+
+            {{ formset.management_form }}
+
+            <div id="grnFormsetContainer">
+                {% for item_form in formset %}
+                <div class="grn-line-item-row" data-row-index="{{ forloop.counter0 }}">
+                    {{ item_form.id }}
+                    <div class="row g-3 align-items-end">
+                        <div class="col-12 col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
+                            {{ item_form.product }}
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label fw-bold text-dark fs-xs">Quantity (Units) <span class="text-danger">*</span></label>
+                            {{ item_form.purchased_quantity }}
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label fw-bold text-dark fs-xs">Unit Purchase Rate <span class="text-danger">*</span></label>
+                            {{ item_form.purchase_rate }}
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label fw-bold text-dark fs-xs">Target Selling MRP (NPR)</label>
+                            {{ item_form.new_selling_price }}
+                        </div>
+                        <div class="col-6 col-md-1">
+                            <label class="form-label fw-bold text-dark fs-xs">Disc (%)</label>
+                            {{ item_form.discount_percent }}
+                        </div>
+                        <div class="col-6 col-md-2 text-end">
+                            {% if formset.can_delete %}
+                                <div class="form-check form-check-inline mt-4">
+                                    {{ item_form.DELETE }}
+                                    <label class="form-check-label text-danger fs-2xs fw-bold">Remove Line</label>
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Real-time Computed Overhead & Landed Cost Preview Badge -->
+                        <div class="col-12">
+                            <div class="p-2 bg-light rounded border d-flex flex-wrap justify-content-between align-items-center fs-2xs font-monospace">
+                                <span class="text-muted">
+                                    Line Value: <strong class="text-dark" id="lineValueText_{{ forloop.counter0 }}">Rs. 0.00</strong>
+                                </span>
+                                <span class="text-muted">
+                                    Allocated Freight/Customs: <strong class="text-warning-emphasis" id="lineOverheadText_{{ forloop.counter0 }}">+Rs. 0.00</strong>
+                                </span>
+                                <span class="text-primary fw-bold fs-xs">
+                                    Calculated Unit Landed Cost: <strong id="unitLandedCostText_{{ forloop.counter0 }}">Rs. 0.00</strong>
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Hidden serialized IMEI storage field synced with dual-box scanner -->
+                        <div class="col-12" style="display: none;">
+                            {{ item_form.scanned_imei_list }}
+                        </div>
+
+                        <!-- NON-IMEI BULK ACCESSORY NOTICE BANNER -->
+                        <div class="col-12">
+                            <div class="non-imei-notice-box d-none" id="nonImeiNoticeRow_{{ forloop.counter0 }}">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-secondary bg-opacity-10 text-secondary p-2 rounded-circle">
+                                            <i class="fas fa-boxes-stacked"></i>
+                                        </span>
+                                        <div>
+                                            <strong class="text-dark fs-xs d-block">Standard Non-Serialized Accessory / Item</strong>
+                                            <small class="text-muted fs-2xs">Stock will be received directly as quantity count. No individual IMEI scanning required.</small>
+                                        </div>
+                                    </div>
+                                    <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-3 py-2 rounded-pill">
+                                        <i class="fas fa-check-circle me-1"></i> Bulk Count Mode Active
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- DEDICATED DUAL-IMEI SCANNING WORKSPACE -->
+                        <div class="col-12">
+                            <div class="imei-scan-active-box d-none" id="imeiWorkspaceRow_{{ forloop.counter0 }}">
+                                <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-2 pb-2 border-bottom border-info border-opacity-25">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="scan-indicator-badge bg-primary text-white">
+                                            <i class="fas fa-barcode"></i> Dual-SIM Phone Scanner
+                                        </span>
+                                        <span class="fs-xs fw-bold text-dark" id="imeiProgressText_{{ forloop.counter0 }}">
+                                            Scanned: 0 / 0 Units
+                                        </span>
+                                    </div>
+                                    
+                                    <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-1 fs-2xs fw-bold row-camera-scan-btn shadow-xs" 
+                                            data-row-index="{{ forloop.counter0 }}" 
+                                            title="Scan Mobile Phone Box via Device Camera or Pick Picture">
+                                        <i class="fas fa-camera me-1"></i> Scan Phone Box (Camera / Image)
+                                    </button>
+                                </div>
+
+                                <!-- Dual Input Fields (IMEI 1 & IMEI 2 with 1-Tap Camera Buttons) -->
+                                <div class="row g-2 align-items-center">
+                                    <div class="col-12 col-md-5">
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text bg-primary text-white border-0 fw-bold fs-xs">IMEI 1</span>
+                                            <input type="text" class="form-control font-monospace fw-bold imei-input-field imei1-box" 
+                                                   id="inputImei1_{{ forloop.counter0 }}" 
+                                                   placeholder="Scan / Enter 15-digit Primary IMEI 1..." 
+                                                   maxlength="18" autocomplete="off">
+                                            <button type="button" class="btn btn-outline-primary btn-sm camera-single-scan-btn" 
+                                                    data-row-index="{{ forloop.counter0 }}" 
+                                                    data-target-slot="imei1" 
+                                                    title="Scan IMEI 1 with Camera">
+                                                <i class="fas fa-camera"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="col-12 col-md-5">
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text bg-info text-white border-0 fw-bold fs-xs">IMEI 2</span>
+                                            <input type="text" class="form-control font-monospace fw-bold imei-input-field imei2-box" 
+                                                   id="inputImei2_{{ forloop.counter0 }}" 
+                                                   placeholder="Scan / Enter 15-digit Secondary IMEI 2..." 
+                                                   maxlength="18" autocomplete="off">
+                                            <button type="button" class="btn btn-outline-info btn-sm camera-single-scan-btn" 
+                                                    data-row-index="{{ forloop.counter0 }}" 
+                                                    data-target-slot="imei2" 
+                                                    title="Scan IMEI 2 with Camera">
+                                                <i class="fas fa-camera"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="col-6 col-md-1">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm w-100 rounded-2 fs-2xs skip-imei2-btn" 
+                                                id="skipImei2Btn_{{ forloop.counter0 }}" title="Skip IMEI 2 for Single SIM phones">
+                                            Skip 2
+                                        </button>
+                                    </div>
+                                    <div class="col-6 col-md-1">
+                                        <button type="button" class="btn btn-primary btn-sm w-100 rounded-2 fs-2xs fw-bold add-imei-pair-btn" 
+                                                id="addPairBtn_{{ forloop.counter0 }}" title="Add Device Pair">
+                                            <i class="fas fa-plus"></i> Add
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Scanned IMEI Device List Table -->
+                                <div class="table-responsive mt-3" style="max-height: 180px; overflow-y: auto;">
+                                    <table class="table table-sm table-bordered bg-white mb-0 fs-xs" id="imeiTable_{{ forloop.counter0 }}">
+                                        <thead class="bg-light text-muted text-uppercase fs-2xs">
+                                            <tr>
+                                                <th style="width: 40px;" class="text-center">#</th>
+                                                <th>IMEI 1 (Primary SIM)</th>
+                                                <th>IMEI 2 (Secondary SIM)</th>
+                                                <th style="width: 50px;" class="text-center">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="imeiTableBody_{{ forloop.counter0 }}">
+                                            <tr>
+                                                <td colspan="4" class="text-center py-2 text-muted">
+                                                    No IMEIs scanned yet. Ready for barcode scanner, camera, or picture file.
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Real-time Financial Breakdown & Supplier Ledger Settlement Card -->
+        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+            <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                <i class="fas fa-calculator text-primary me-2"></i> 3. Inward Valuation &amp; Supplier Balance Reconciliation
+            </h6>
+            
+            <div class="row g-3">
+                <div class="col-12 col-md-3">
+                    <div class="p-3 bg-light rounded-3 border">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Gross Merchandise Value</span>
+                        <h4 class="fw-bold text-dark font-monospace mb-0" id="grnSummaryGrossText">Rs. 0.00</h4>
+                    </div>
+                </div>
+                <div class="col-12 col-md-3">
+                    <div class="p-3 bg-light rounded-3 border">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Total Overheads (Shipping/Duty)</span>
+                        <h4 class="fw-bold text-warning-emphasis font-monospace mb-0" id="grnSummaryOverheadText">Rs. 0.00</h4>
+                    </div>
+                </div>
+                <div class="col-12 col-md-3">
+                    <div class="p-3 bg-light rounded-3 border">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Total Landed Valuation (COGS)</span>
+                        <h4 class="fw-bold text-primary font-monospace mb-0" id="grnSummaryLandedText">Rs. 0.00</h4>
+                    </div>
+                </div>
+                <div class="col-12 col-md-3">
+                    <div class="p-3 bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded-3">
+                        <span class="text-danger fs-2xs text-uppercase fw-bold d-block">Added to Supplier Debt (Due)</span>
+                        <h4 class="fw-bold text-danger font-monospace mb-0" id="grnSummaryDueText">Rs. 0.00</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sticky Submit Footer -->
+        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white d-flex flex-column flex-md-row justify-content-between align-items-center gap-3">
+            <div class="text-muted fs-xs">
+                <i class="fas fa-shield-halved text-success me-1"></i>
+                Stock quantities, landed costs, and serialized IMEI instances will be updated atomically in the database.
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary px-4 rounded-pill">
+                    Cancel
+                </a>
+                <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm" id="grnSubmitBtn">
+                    <i class="fas fa-check-circle me-1"></i> Verify &amp; Update Warehouse Stock
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- ==========================================================================
+     GRN DEDICATED INWARD CAMERA & IMAGE SCANNER POPUP MODAL
+     ========================================================================== -->
+<div class="modal fade" id="grnCameraScannerModal" tabindex="-1" aria-labelledby="grnCameraScannerModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark text-white">
+            <div class="modal-header border-bottom border-secondary border-opacity-25 py-2 px-3 bg-dark">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-barcode"></i></span>
+                    <div>
+                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="grnCameraScannerModalLabel">GRN Box Barcode / IMEI Scanner</h6>
+                        <small class="text-white-50 fs-2xs" id="grnModalSubtitle">Inward Smartphone Registration</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" id="closeGrnCameraBtn"></button>
+            </div>
+
+            <div class="modal-body grn-camera-modal-body">
+                <!-- Video Stream Feed -->
+                <video id="grnCameraFeedVideo" class="grn-camera-video" playsinline autoplay muted></video>
+                
+                <!-- Dynamic Sequential Step Banner Overlay -->
+                <div class="grn-camera-step-banner shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-primary fs-2xs px-2 py-1" id="grnModalCurrentStepBadge">STEP 1: SCAN IMEI 1</span>
+                        <span class="text-white-50 fs-2xs font-monospace" id="grnModalProgressCount">0 / 0 Units</span>
+                    </div>
+                    <div class="text-white fs-xs fw-bold text-truncate" id="grnModalProductTitle">Product Name</div>
+                    <div class="text-info fs-2xs mt-1" id="grnModalStepInstruction">
+                        Align <strong>IMEI 1 barcode</strong> on phone packaging inside aiming reticle, or click <strong>Pick Box Picture</strong> below.
+                    </div>
+                </div>
+
+                <!-- Aiming Reticle with Animated Laser -->
+                <div class="grn-scanner-viewfinder">
+                    <div class="grn-aiming-reticle">
+                        <div class="grn-corner-tr"></div>
+                        <div class="grn-corner-bl"></div>
+                        <div class="grn-laser-line"></div>
+                    </div>
+                </div>
+
+                <!-- Floating Toolbar Controls with Picture Picker -->
+                <div class="position-absolute bottom-0 start-0 end-0 p-3 d-flex justify-content-center flex-wrap gap-2 z-3">
+                    <label class="btn btn-primary btn-sm rounded-pill px-3 py-1 bg-opacity-90 fs-xs fw-bold shadow-sm" style="cursor: pointer;">
+                        <i class="fas fa-image me-1"></i> Pick Box Picture
+                        <input type="file" id="grnModalImageFileInput" accept="image/*" style="display: none;">
+                    </label>
+
+                    <button type="button" class="btn btn-outline-warning btn-sm rounded-pill px-3 py-1 bg-dark bg-opacity-75 fs-xs fw-bold" id="grnModalSkipImei2Btn" style="display: none;">
+                        <i class="fas fa-forward me-1"></i> Single SIM (Skip IMEI 2)
+                    </button>
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="grnTorchToggleBtn" style="display: none;">
+                        <i class="fas fa-bolt me-1 text-warning"></i> Flash
+                    </button>
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="grnSwitchLensBtn">
+                        <i class="fas fa-camera-rotate me-1 text-info"></i> Flip Lens
+                    </button>
+                </div>
+            </div>
+
+            <div class="modal-footer border-top border-secondary border-opacity-25 py-2 px-3 bg-dark d-flex justify-content-between align-items-center">
+                <div class="fs-2xs text-white-50" id="grnCameraStatusText">
+                    <i class="fas fa-circle-notch fa-spin me-1 text-primary"></i> 15 FPS Active &bull; Ready
+                </div>
+                <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 py-1 fs-xs" data-bs-dismiss="modal">
+                    Finish &amp; Close Scanner
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Extra hidden empty form template for dynamic "+ Add Another Line" -->
+<div id="emptyFormTemplate" style="display: none;">
+    <div class="grn-line-item-row" data-row-index="__prefix__">
+        {{ formset.empty_form.id }}
+        <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-3">
+                <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
+                {{ formset.empty_form.product }}
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label fw-bold text-dark fs-xs">Quantity (Units) <span class="text-danger">*</span></label>
+                {{ formset.empty_form.purchased_quantity }}
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label fw-bold text-dark fs-xs">Unit Purchase Rate <span class="text-danger">*</span></label>
+                {{ formset.empty_form.purchase_rate }}
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label fw-bold text-dark fs-xs">Target Selling MRP (NPR)</label>
+                {{ formset.empty_form.new_selling_price }}
+            </div>
+            <div class="col-6 col-md-1">
+                <label class="form-label fw-bold text-dark fs-xs">Disc (%)</label>
+                {{ formset.empty_form.discount_percent }}
+            </div>
+            <div class="col-6 col-md-2 text-end">
+                <div class="form-check form-check-inline mt-4">
+                    {{ formset.empty_form.DELETE }}
+                    <label class="form-check-label text-danger fs-2xs fw-bold">Remove Line</label>
+                </div>
+            </div>
+
+            <!-- Real-time Computed Overhead & Landed Cost Preview Badge -->
+            <div class="col-12">
+                <div class="p-2 bg-light rounded border d-flex flex-wrap justify-content-between align-items-center fs-2xs font-monospace">
+                    <span class="text-muted">
+                        Line Value: <strong class="text-dark" id="lineValueText___prefix__">Rs. 0.00</strong>
+                    </span>
+                    <span class="text-muted">
+                        Allocated Freight/Customs: <strong class="text-warning-emphasis" id="lineOverheadText___prefix__">+Rs. 0.00</strong>
+                    </span>
+                    <span class="text-primary fw-bold fs-xs">
+                        Calculated Unit Landed Cost: <strong id="unitLandedCostText___prefix__">Rs. 0.00</strong>
+                    </span>
+                </div>
+            </div>
+
+            <div class="col-12" style="display: none;">
+                {{ formset.empty_form.scanned_imei_list }}
+            </div>
+
+            <!-- NON-IMEI BULK ACCESSORY NOTICE BANNER -->
+            <div class="col-12">
+                <div class="non-imei-notice-box d-none" id="nonImeiNoticeRow___prefix__">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-secondary bg-opacity-10 text-secondary p-2 rounded-circle">
+                                <i class="fas fa-boxes-stacked"></i>
+                            </span>
+                            <div>
+                                <strong class="text-dark fs-xs d-block">Standard Non-Serialized Accessory / Item</strong>
+                                <small class="text-muted fs-2xs">Stock will be received directly as quantity count. No individual IMEI scanning required.</small>
+                            </div>
+                        </div>
+                        <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-3 py-2 rounded-pill">
+                            <i class="fas fa-check-circle me-1"></i> Bulk Count Mode Active
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DEDICATED DUAL-IMEI SCANNING WORKSPACE -->
+            <div class="col-12">
+                <div class="imei-scan-active-box d-none" id="imeiWorkspaceRow___prefix__">
+                    <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-2 pb-2 border-bottom border-info border-opacity-25">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="scan-indicator-badge bg-primary text-white">
+                                <i class="fas fa-barcode"></i> Dual-SIM Phone Scanner
+                            </span>
+                            <span class="fs-xs fw-bold text-dark" id="imeiProgressText___prefix__">
+                                Scanned: 0 / 0 Units
+                            </span>
+                        </div>
+                        
+                        <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-1 fs-2xs fw-bold row-camera-scan-btn shadow-xs" 
+                                data-row-index="__prefix__" 
+                                title="Scan Mobile Phone Box via Device Camera or Pick Picture">
+                            <i class="fas fa-camera me-1"></i> Scan Phone Box (Camera / Image)
+                        </button>
+                    </div>
+
+                    <div class="row g-2 align-items-center">
+                        <div class="col-12 col-md-5">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-primary text-white border-0 fw-bold fs-xs">IMEI 1</span>
+                                <input type="text" class="form-control font-monospace fw-bold imei-input-field imei1-box" 
+                                       id="inputImei1___prefix__" 
+                                       placeholder="Scan / Enter 15-digit Primary IMEI 1..." 
+                                       maxlength="18" autocomplete="off">
+                                <button type="button" class="btn btn-outline-primary btn-sm camera-single-scan-btn" 
+                                        data-row-index="__prefix__" 
+                                        data-target-slot="imei1" 
+                                        title="Scan IMEI 1 with Camera">
+                                    <i class="fas fa-camera"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-info text-white border-0 fw-bold fs-xs">IMEI 2</span>
+                                <input type="text" class="form-control font-monospace fw-bold imei-input-field imei2-box" 
+                                       id="inputImei2___prefix__" 
+                                       placeholder="Scan / Enter 15-digit Secondary IMEI 2..." 
+                                       maxlength="18" autocomplete="off">
+                                <button type="button" class="btn btn-outline-info btn-sm camera-single-scan-btn" 
+                                        data-row-index="__prefix__" 
+                                        data-target-slot="imei2" 
+                                        title="Scan IMEI 2 with Camera">
+                                    <i class="fas fa-camera"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-1">
+                            <button type="button" class="btn btn-outline-secondary btn-sm w-100 rounded-2 fs-2xs skip-imei2-btn" 
+                                    id="skipImei2Btn___prefix__" title="Skip IMEI 2 for Single SIM phones">
+                                Skip 2
+                            </button>
+                        </div>
+                        <div class="col-6 col-md-1">
+                            <button type="button" class="btn btn-primary btn-sm w-100 rounded-2 fs-2xs fw-bold add-imei-pair-btn" 
+                                    id="addPairBtn___prefix__" title="Add Device Pair">
+                                <i class="fas fa-plus"></i> Add
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive mt-3" style="max-height: 180px; overflow-y: auto;">
+                        <table class="table table-sm table-bordered bg-white mb-0 fs-xs" id="imeiTable___prefix__">
+                            <thead class="bg-light text-muted text-uppercase fs-2xs">
+                                <tr>
+                                    <th style="width: 40px;" class="text-center">#</th>
+                                    <th>IMEI 1 (Primary SIM)</th>
+                                    <th>IMEI 2 (Secondary SIM)</th>
+                                    <th style="width: 50px;" class="text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="imeiTableBody___prefix__">
+                                <tr>
+                                    <td colspan="4" class="text-center py-2 text-muted">
+                                        No IMEIs scanned yet. Ready for barcode scanner, camera, or picture file.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Embedded Product Tracking Metadata Map -->
+<script id="productTrackingMeta" type="application/json">
+{
+    {% for prod in formset.empty_form.fields.product.queryset %}
+    "{{ prod.id }}": {
+        "requires_imei": {{ prod.requires_imei_tracking|yesno:"true,false" }},
+        "requires_serial": {{ prod.requires_serial_tracking|yesno:"true,false" }},
+        "sim_config": "{{ prod.sim_configuration|default:'DUAL_SIM' }}"
+    }{% if not forloop.last %},{% endif %}
+    {% endfor %}
+}
+</script>
+
+<script src="{% static 'js/camera_barcode_scanner.js' %}"></script>
+<script>
+/**
+ * Interactive Dual-IMEI Inward Scanner & Proportional Overhead Controller
+ */
+class GRNDualIMEIController {
+    constructor() {
+        this.deviceStore = {};
+        
+        // Camera Session State
+        this.activeCameraRow = null;
+        this.activeCameraSlot = 'dual_sequential';
+        this.tempImei1 = '';
+
+        // Load Embedded Product Tracking Metadata
+        this.productMeta = {};
+        try {
+            const metaScript = document.getElementById('productTrackingMeta');
+            if (metaScript) {
+                this.productMeta = JSON.parse(metaScript.textContent || '{}');
+            }
+        } catch (e) {
+            console.warn('[GRN] Could not parse product tracking metadata', e);
+        }
+        
+        this.cameraScanner = new CameraBarcodeScanner({
+            facingMode: 'environment',
+            cooldown: 1100
+        });
+
+        this.cameraModalEl = document.getElementById('grnCameraScannerModal');
+        this.cameraModal = this.cameraModalEl ? new bootstrap.Modal(this.cameraModalEl) : null;
+        this.cameraVideoEl = document.getElementById('grnCameraFeedVideo');
+
+        this.initRows();
+        this.bindEvents();
+        this.bindCameraEvents();
+        this.recalculateAllFinancials();
+    }
+
+    initRows() {
+        document.querySelectorAll('.grn-line-item-row').forEach(row => {
+            const idx = row.dataset.rowIndex;
+            if (idx !== '__prefix__') {
+                this.initRowState(idx);
+            }
+        });
+    }
+
+    initRowState(idx) {
+        this.deviceStore[idx] = [];
+
+        const hiddenField = document.querySelector(`[name="items-${idx}-scanned_imei_list"]`);
+        if (hiddenField && hiddenField.value.trim() !== '') {
+            const lines = hiddenField.value.trim().split(/[\n,;]+/);
+            lines.forEach(line => {
+                const parts = line.split('|');
+                const im1 = parts[0] ? parts[0].trim() : '';
+                const im2 = parts[1] ? parts[1].trim() : '';
+                if (im1 || im2) {
+                    this.deviceStore[idx].push({ imei1: im1, imei2: im2 });
+                }
+            });
+        }
+
+        this.updateRowTrackingMode(idx);
+    }
+
+    isProductTracked(productId) {
+        if (!productId) return false;
+        const meta = this.productMeta[String(productId)];
+        if (meta) {
+            return Boolean(meta.requires_imei || meta.requires_serial);
+        }
+        
+        const opt = document.querySelector(`select.grn-product-select option[value="${productId}"]`);
+        if (opt) {
+            const text = opt.text.toLowerCase();
+            if (text.includes('phone') || text.includes('mobile') || text.includes('smartphone') || text.includes('iphone') || text.includes('galaxy')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    updateRowTrackingMode(idx) {
+        const row = document.querySelector(`.grn-line-item-row[data-row-index="${idx}"]`);
+        if (!row) return;
+
+        const prodSelect = row.querySelector('.grn-product-select');
+        const prodId = prodSelect ? prodSelect.value : '';
+        const imeiWorkspace = document.getElementById(`imeiWorkspaceRow_${idx}`);
+        const nonImeiNotice = document.getElementById(`nonImeiNoticeRow_${idx}`);
+
+        if (!prodId) {
+            if (imeiWorkspace) imeiWorkspace.classList.add('d-none');
+            if (nonImeiNotice) nonImeiNotice.classList.add('d-none');
+            return;
+        }
+
+        const isTracked = this.isProductTracked(prodId);
+
+        if (isTracked) {
+            if (imeiWorkspace) imeiWorkspace.classList.remove('d-none');
+            if (nonImeiNotice) nonImeiNotice.classList.add('d-none');
+            this.renderRowTable(idx);
+        } else {
+            if (imeiWorkspace) imeiWorkspace.classList.add('d-none');
+            if (nonImeiNotice) nonImeiNotice.classList.remove('d-none');
+            this.deviceStore[idx] = [];
+            this.syncHiddenPayload(idx);
+        }
+    }
+
+    renderRowTable(idx) {
+        const tableBody = document.getElementById(`imeiTableBody_${idx}`);
+        const progressText = document.getElementById(`imeiProgressText_${idx}`);
+        const qtyInput = document.querySelector(`[name="items-${idx}-purchased_quantity"]`);
+        const targetQty = parseInt(qtyInput?.value || 0, 10);
+        const devices = this.deviceStore[idx] || [];
+
+        if (progressText) {
+            progressText.innerText = `Scanned: ${devices.length} / ${targetQty} Units`;
+            if (targetQty > 0 && devices.length === targetQty) {
+                progressText.className = 'fs-xs fw-bold text-success';
+                progressText.innerHTML = `<i class="fas fa-check-circle me-1"></i> All ${targetQty} Units Complete`;
+            } else if (devices.length > targetQty) {
+                progressText.className = 'fs-xs fw-bold text-danger';
+                progressText.innerHTML = `<i class="fas fa-triangle-exclamation me-1"></i> Over-scanned: ${devices.length} / ${targetQty}`;
+            } else {
+                progressText.className = 'fs-xs fw-bold text-dark';
+            }
+        }
+
+        if (!tableBody) return;
+
+        if (devices.length === 0) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center py-2 text-muted">
+                        No IMEIs scanned yet. Ready for barcode scanner, camera, or picture file.
+                    </td>
+                </tr>
+            `;
+        } else {
+            tableBody.innerHTML = devices.map((dev, i) => `
+                <tr>
+                    <td class="text-center fw-bold font-monospace">${i + 1}</td>
+                    <td>
+                        <span class="imei-badge-pill bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">
+                            ${dev.imei1 || '<em class="text-muted">None</em>'}
+                        </span>
+                    </td>
+                    <td>
+                        ${dev.imei2 ? `
+                            <span class="imei-badge-pill bg-info bg-opacity-10 text-info border border-info border-opacity-25">
+                                ${dev.imei2}
+                            </span>
+                        ` : '<span class="text-muted fs-2xs font-monospace">Single SIM / N/A</span>'}
+                    </td>
+                    <td class="text-center">
+                        <button type="button" class="btn btn-link text-danger p-0 border-0 remove-device-btn" 
+                                data-row="${idx}" data-device-index="${i}" title="Remove device">
+                            <i class="fas fa-trash-can"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        this.syncHiddenPayload(idx);
+    }
+
+    syncHiddenPayload(idx) {
+        const hiddenField = document.querySelector(`[name="items-${idx}-scanned_imei_list"]`);
+        if (!hiddenField) return;
+
+        const devices = this.deviceStore[idx] || [];
+        hiddenField.value = devices.map(d => {
+            if (d.imei2) return `${d.imei1}|${d.imei2}`;
+            return d.imei1;
+        }).join('\n');
+    }
+
+    addDevicePair(idx, imei1Val = null, imei2Val = null) {
+        const imei1Input = document.getElementById(`inputImei1_${idx}`);
+        const imei2Input = document.getElementById(`inputImei2_${idx}`);
+
+        const imei1 = (imei1Val !== null ? imei1Val : (imei1Input ? imei1Input.value : '')).trim();
+        const imei2 = (imei2Val !== null ? imei2Val : (imei2Input ? imei2Input.value : '')).trim();
+
+        if (!imei1 && !imei2) {
+            alert('Please scan or enter at least IMEI 1.');
+            if (imei1Input) imei1Input.focus();
+            return false;
+        }
+
+        if (imei1 && imei2 && imei1 === imei2) {
+            alert('Error: IMEI 1 and IMEI 2 cannot be identical.');
+            if (imei2Input) {
+                imei2Input.value = '';
+                imei2Input.focus();
+            }
+            return false;
+        }
+
+        const existsInRow = (this.deviceStore[idx] || []).some(d => 
+            (imei1 && (d.imei1 === imei1 || d.imei2 === imei1)) ||
+            (imei2 && (d.imei1 === imei2 || d.imei2 === imei2))
+        );
+
+        if (existsInRow) {
+            alert(`Warning: IMEI ${imei1 || imei2} has already been scanned in this consignment.`);
+            return false;
+        }
+
+        if (!this.deviceStore[idx]) this.deviceStore[idx] = [];
+        this.deviceStore[idx].push({ imei1: imei1, imei2: imei2 });
+
+        if (imei1Input) imei1Input.value = '';
+        if (imei2Input) imei2Input.value = '';
+
+        this.renderRowTable(idx);
+
+        if (imei1Input) imei1Input.focus();
+        return true;
+    }
+
+    removeDevice(idx, deviceIdx) {
+        if (this.deviceStore[idx] && this.deviceStore[idx][deviceIdx] !== undefined) {
+            this.deviceStore[idx].splice(deviceIdx, 1);
+            this.renderRowTable(idx);
+        }
+    }
+
+    // =========================================================================
+    // VALUE-BASED OVERHEAD DISTRIBUTION & REAL-TIME FINANCIALS
+    // =========================================================================
+
+    recalculateAllFinancials() {
+        const freight = parseFloat(document.querySelector('[name="extra_freight_charge"]')?.value || 0) || 0;
+        const customs = parseFloat(document.querySelector('[name="customs_import_charge"]')?.value || 0) || 0;
+        const handling = parseFloat(document.querySelector('[name="other_handling_charge"]')?.value || 0) || 0;
+        const totalOverheads = freight + customs + handling;
+
+        const paid = parseFloat(document.querySelector('[name="paid_amount"]')?.value || 0) || 0;
+
+        let totalMerchandiseValue = 0;
+        const lineValues = {};
+
+        document.querySelectorAll('.grn-line-item-row').forEach(row => {
+            const idx = row.dataset.rowIndex;
+            if (idx === '__prefix__') return;
+
+            const deleteCheck = row.querySelector(`[name="items-${idx}-DELETE"]`);
+            if (deleteCheck && deleteCheck.checked) return;
+
+            const qty = parseFloat(row.querySelector(`[name="items-${idx}-purchased_quantity"]`)?.value || 0) || 0;
+            const rate = parseFloat(row.querySelector(`[name="items-${idx}-purchase_rate"]`)?.value || 0) || 0;
+            const discPct = parseFloat(row.querySelector(`[name="items-${idx}-discount_percent"]`)?.value || 0) || 0;
+
+            const lineGross = qty * rate;
+            const lineDiscount = lineGross * (discPct / 100);
+            const lineNetValue = Math.max(0, lineGross - lineDiscount);
+
+            lineValues[idx] = { qty, lineNetValue };
+            totalMerchandiseValue += lineNetValue;
+        });
+
+        // Value-based overhead rate
+        const overheadRate = totalMerchandiseValue > 0 ? (totalOverheads / totalMerchandiseValue) : 0;
+
+        // Apply proportional overhead to each line preview
+        document.querySelectorAll('.grn-line-item-row').forEach(row => {
+            const idx = row.dataset.rowIndex;
+            if (idx === '__prefix__') return;
+
+            const lineValText = document.getElementById(`lineValueText_${idx}`);
+            const lineOverheadText = document.getElementById(`lineOverheadText_${idx}`);
+            const unitLandedText = document.getElementById(`unitLandedCostText_${idx}`);
+
+            if (lineValues[idx]) {
+                const { qty, lineNetValue } = lineValues[idx];
+                const allocatedLineOverhead = lineNetValue * overheadRate;
+                const totalLineLanded = lineNetValue + allocatedLineOverhead;
+                const unitLanded = qty > 0 ? (totalLineLanded / qty) : 0;
+
+                if (lineValText) lineValText.innerText = `Rs. ${lineNetValue.toFixed(2)}`;
+                if (lineOverheadText) lineOverheadText.innerText = `+Rs. ${allocatedLineOverhead.toFixed(2)}`;
+                if (unitLandedText) unitLandedText.innerText = `Rs. ${unitLanded.toFixed(2)}`;
+            }
+        });
+
+        const totalLanded = totalMerchandiseValue + totalOverheads;
+        const due = Math.max(0, totalLanded - paid);
+
+        // Update Summary Card Texts
+        const grossSummaryEl = document.getElementById('grnSummaryGrossText');
+        const overheadSummaryEl = document.getElementById('grnSummaryOverheadText');
+        const landedSummaryEl = document.getElementById('grnSummaryLandedText');
+        const dueSummaryEl = document.getElementById('grnSummaryDueText');
+
+        if (grossSummaryEl) grossSummaryEl.innerText = `Rs. ${totalMerchandiseValue.toFixed(2)}`;
+        if (overheadSummaryEl) overheadSummaryEl.innerText = `Rs. ${totalOverheads.toFixed(2)}`;
+        if (landedSummaryEl) landedSummaryEl.innerText = `Rs. ${totalLanded.toFixed(2)}`;
+        if (dueSummaryEl) dueSummaryEl.innerText = `Rs. ${due.toFixed(2)}`;
+    }
+
+    // =========================================================================
+    // CAMERA & IMAGE SEQUENTIAL SCANNING WORKFLOW
+    // =========================================================================
+    
+    openCameraForDualSequential(rowIdx) {
+        this.activeCameraRow = rowIdx;
+        this.activeCameraSlot = 'dual_sequential';
+        this.tempImei1 = '';
+        this.updateCameraModalState('STEP 1: SCAN IMEI 1', 'Align IMEI 1 barcode inside frame or click <strong>Pick Box Picture</strong>.');
+
+        const skipBtn = document.getElementById('grnModalSkipImei2Btn');
+        if (skipBtn) skipBtn.style.display = 'none';
+
+        if (this.cameraModal) this.cameraModal.show();
+    }
+
+    openCameraForSingleSlot(rowIdx, slot) {
+        this.activeCameraRow = rowIdx;
+        this.activeCameraSlot = slot;
+        this.tempImei1 = '';
+        
+        const label = slot === 'imei1' ? 'SCAN IMEI 1 ONLY' : 'SCAN IMEI 2 ONLY';
+        this.updateCameraModalState(label, `Align ${slot.toUpperCase()} barcode inside aiming frame or pick image.`);
+        
+        const skipBtn = document.getElementById('grnModalSkipImei2Btn');
+        if (skipBtn) skipBtn.style.display = 'none';
+
+        if (this.cameraModal) this.cameraModal.show();
+    }
+
+    updateCameraModalState(stepBadge, instruction) {
+        const badgeEl = document.getElementById('grnModalCurrentStepBadge');
+        const instEl = document.getElementById('grnModalStepInstruction');
+        const prodTitle = document.getElementById('grnModalProductTitle');
+        const progCount = document.getElementById('grnModalProgressCount');
+
+        const prodSelect = document.querySelector(`[name="items-${this.activeCameraRow}-product"]`);
+        const prodName = prodSelect && prodSelect.selectedIndex >= 0 ? prodSelect.options[prodSelect.selectedIndex].text : 'Phone Model';
+        
+        const qtyInput = document.querySelector(`[name="items-${this.activeCameraRow}-purchased_quantity"]`);
+        const targetQty = parseInt(qtyInput?.value || 0, 10);
+        const currentCount = (this.deviceStore[this.activeCameraRow] || []).length;
+
+        if (badgeEl) badgeEl.innerText = stepBadge;
+        if (instEl) instEl.innerHTML = instruction;
+        if (prodTitle) prodTitle.innerText = prodName;
+        if (progCount) progCount.innerText = `${currentCount} / ${targetQty} Units Scanned`;
+    }
+
+    handleCameraScanResult(scannedCode) {
+        const cleanCode = scannedCode.trim();
+        const rowIdx = this.activeCameraRow;
+        if (rowIdx === null) return;
+
+        const qtyInput = document.querySelector(`[name="items-${rowIdx}-purchased_quantity"]`);
+        const targetQty = parseInt(qtyInput?.value || 0, 10);
+
+        if (this.activeCameraSlot === 'imei1') {
+            const input1 = document.getElementById(`inputImei1_${rowIdx}`);
+            if (input1) input1.value = cleanCode;
+            this.cameraModal.hide();
+            return;
+        }
+        if (this.activeCameraSlot === 'imei2') {
+            const input2 = document.getElementById(`inputImei2_${rowIdx}`);
+            if (input2) input2.value = cleanCode;
+            this.cameraModal.hide();
+            return;
+        }
+
+        if (this.activeCameraSlot === 'dual_sequential') {
+            if (!this.tempImei1) {
+                this.tempImei1 = cleanCode;
+                this.updateCameraModalState(
+                    'STEP 2: SCAN IMEI 2 (SAME BOX)',
+                    `Captured IMEI 1: <strong class="text-warning">${cleanCode}</strong>. Now scan <strong>IMEI 2</strong> or pick image again.`
+                );
+
+                const skipBtn = document.getElementById('grnModalSkipImei2Btn');
+                if (skipBtn) skipBtn.style.display = 'inline-flex';
+
+            } else {
+                const imei2 = cleanCode;
+                if (imei2 === this.tempImei1) {
+                    alert('IMEI 2 cannot be identical to IMEI 1.');
+                    return;
+                }
+
+                const added = this.addDevicePair(rowIdx, this.tempImei1, imei2);
+                this.tempImei1 = '';
+
+                if (added) {
+                    const updatedCount = (this.deviceStore[rowIdx] || []).length;
+                    if (targetQty > 0 && updatedCount >= targetQty) {
+                        this.cameraModal.hide();
+                    } else {
+                        this.updateCameraModalState(
+                            `STEP 1: SCAN NEXT UNIT (${updatedCount + 1}/${targetQty})`,
+                            'Device paired! Scan <strong>IMEI 1</strong> for the next phone box.'
+                        );
+                        const skipBtn = document.getElementById('grnModalSkipImei2Btn');
+                        if (skipBtn) skipBtn.style.display = 'none';
+                    }
+                }
+            }
+        }
+    }
+
+    skipCameraImei2() {
+        if (!this.tempImei1 || this.activeCameraRow === null) return;
+        
+        const rowIdx = this.activeCameraRow;
+        const qtyInput = document.querySelector(`[name="items-${rowIdx}-purchased_quantity"]`);
+        const targetQty = parseInt(qtyInput?.value || 0, 10);
+
+        const added = this.addDevicePair(rowIdx, this.tempImei1, '');
+        this.tempImei1 = '';
+
+        const skipBtn = document.getElementById('grnModalSkipImei2Btn');
+        if (skipBtn) skipBtn.style.display = 'none';
+
+        if (added) {
+            const updatedCount = (this.deviceStore[rowIdx] || []).length;
+            if (targetQty > 0 && updatedCount >= targetQty) {
+                this.cameraModal.hide();
+            } else {
+                this.updateCameraModalState(
+                    `STEP 1: SCAN NEXT UNIT (${updatedCount + 1}/${targetQty})`,
+                    'Single-SIM unit added! Scan <strong>IMEI 1</strong> for the next phone box.'
+                );
+            }
+        }
+    }
+
+    bindCameraEvents() {
+        if (this.cameraModalEl && this.cameraVideoEl) {
+            this.cameraModalEl.addEventListener('shown.bs.modal', async () => {
+                await this.cameraScanner.start(
+                    this.cameraVideoEl,
+                    (code) => this.handleCameraScanResult(code),
+                    (err) => {
+                        const statusEl = document.getElementById('grnCameraStatusText');
+                        if (statusEl) statusEl.innerHTML = `<i class="fas fa-triangle-exclamation text-danger"></i> ${err.message}`;
+                    }
+                );
+
+                const torchBtn = document.getElementById('grnTorchToggleBtn');
+                if (torchBtn) {
+                    torchBtn.style.display = this.cameraScanner.hasTorch ? 'inline-flex' : 'none';
+                }
+            });
+
+            this.cameraModalEl.addEventListener('hidden.bs.modal', () => {
+                this.cameraScanner.stop();
+                this.tempImei1 = '';
+                this.activeCameraRow = null;
+            });
+
+            const fileInput = document.getElementById('grnModalImageFileInput');
+            if (fileInput) {
+                fileInput.addEventListener('change', async (e) => {
+                    if (e.target.files && e.target.files[0]) {
+                        const file = e.target.files[0];
+                        const statusEl = document.getElementById('grnCameraStatusText');
+                        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin me-1 text-warning"></i> Reading image...';
+                        
+                        try {
+                            const code = await this.cameraScanner.decodeFromImageFile(file);
+                            if (statusEl) statusEl.innerHTML = `<i class="fas fa-check-circle text-success"></i> Decoded: <strong>${code}</strong>`;
+                        } catch (err) {
+                            alert(err.message);
+                            if (statusEl) statusEl.innerHTML = `<i class="fas fa-triangle-exclamation text-danger me-1"></i> ${err.message}`;
+                        }
+                        fileInput.value = '';
+                    }
+                });
+            }
+
+            const skipBtn = document.getElementById('grnModalSkipImei2Btn');
+            if (skipBtn) {
+                skipBtn.addEventListener('click', () => this.skipCameraImei2());
+            }
+
+            const torchBtn = document.getElementById('grnTorchToggleBtn');
+            if (torchBtn) {
+                torchBtn.addEventListener('click', async () => {
+                    const state = await this.cameraScanner.toggleTorch();
+                    torchBtn.classList.toggle('btn-warning', state);
+                    torchBtn.classList.toggle('btn-dark', !state);
+                });
+            }
+
+            const flipBtn = document.getElementById('grnSwitchLensBtn');
+            if (flipBtn) {
+                flipBtn.addEventListener('click', async () => {
+                    await this.cameraScanner.switchCamera();
+                });
+            }
+        }
+    }
+
+    bindEvents() {
+        const container = document.getElementById('grnFormsetContainer');
+        const masterForm = document.getElementById('grnMasterForm');
+
+        container.addEventListener('change', (e) => {
+            if (e.target.classList.contains('grn-product-select')) {
+                const row = e.target.closest('.grn-line-item-row');
+                if (row) {
+                    this.updateRowTrackingMode(row.dataset.rowIndex);
+                }
+            }
+            this.recalculateAllFinancials();
+        });
+
+        document.querySelectorAll('input[name="extra_freight_charge"], input[name="customs_import_charge"], input[name="other_handling_charge"], input[name="paid_amount"]').forEach(inp => {
+            inp.addEventListener('input', () => this.recalculateAllFinancials());
+        });
+
+        container.addEventListener('click', (e) => {
+            const rowCamBtn = e.target.closest('.row-camera-scan-btn');
+            if (rowCamBtn) {
+                const rowIdx = rowCamBtn.dataset.rowIndex;
+                this.openCameraForDualSequential(rowIdx);
+                return;
+            }
+
+            const singleCamBtn = e.target.closest('.camera-single-scan-btn');
+            if (singleCamBtn) {
+                const rowIdx = singleCamBtn.dataset.rowIndex;
+                const slot = singleCamBtn.dataset.targetSlot;
+                this.openCameraForSingleSlot(rowIdx, slot);
+                return;
+            }
+
+            const addBtn = e.target.closest('.add-imei-pair-btn');
+            if (addBtn) {
+                const row = addBtn.closest('.grn-line-item-row');
+                if (row) this.addDevicePair(row.dataset.rowIndex);
+                return;
+            }
+
+            const skipBtn = e.target.closest('.skip-imei2-btn');
+            if (skipBtn) {
+                const row = skipBtn.closest('.grn-line-item-row');
+                if (row) {
+                    const idx = row.dataset.rowIndex;
+                    const imei1Input = document.getElementById(`inputImei1_${idx}`);
+                    if (imei1Input && imei1Input.value.trim() !== '') {
+                        this.addDevicePair(idx, imei1Input.value.trim(), '');
+                    } else {
+                        alert('Please scan or enter IMEI 1 first.');
+                        if (imei1Input) imei1Input.focus();
+                    }
+                }
+                return;
+            }
+
+            const removeBtn = e.target.closest('.remove-device-btn');
+            if (removeBtn) {
+                const rowIdx = removeBtn.dataset.row;
+                const devIdx = parseInt(removeBtn.dataset.deviceIndex, 10);
+                this.removeDevice(rowIdx, devIdx);
+                return;
+            }
+        });
+
+        container.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const target = e.target;
+                
+                if (target.classList.contains('imei1-box')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const row = target.closest('.grn-line-item-row');
+                    if (row) {
+                        const idx = row.dataset.rowIndex;
+                        const imei2Input = document.getElementById(`inputImei2_${idx}`);
+                        if (target.value.trim() !== '' && imei2Input) {
+                            imei2Input.focus();
+                            imei2Input.select();
+                        }
+                    }
+                    return;
+                }
+
+                if (target.classList.contains('imei2-box')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const row = target.closest('.grn-line-item-row');
+                    if (row) {
+                        const idx = row.dataset.rowIndex;
+                        this.addDevicePair(idx);
+                    }
+                    return;
+                }
+            }
+        });
+
+        container.addEventListener('input', (e) => {
+            if (e.target.name && e.target.name.includes('purchased_quantity')) {
+                const row = e.target.closest('.grn-line-item-row');
+                if (row) this.renderRowTable(row.dataset.rowIndex);
+            }
+            this.recalculateAllFinancials();
+        });
+
+        const addLineBtn = document.getElementById('addNewLineItemBtn');
+        const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+
+        if (addLineBtn && totalFormsInput) {
+            addLineBtn.addEventListener('click', () => {
+                const currentCount = parseInt(totalFormsInput.value, 10);
+                const template = document.getElementById('emptyFormTemplate').innerHTML;
+                const newRowHtml = template.replace(/__prefix__/g, currentCount);
+
+                const div = document.createElement('div');
+                div.innerHTML = newRowHtml;
+                const newRow = div.firstElementChild;
+                container.appendChild(newRow);
+
+                totalFormsInput.value = currentCount + 1;
+                this.initRowState(currentCount);
+
+                const newSelect = newRow.querySelector('.grn-product-select');
+                if (newSelect) newSelect.focus();
+                this.recalculateAllFinancials();
+            });
+        }
+
+        // Form Submit Validation: Enforce Exact IMEI Scanning
+        if (masterForm) {
+            masterForm.addEventListener('submit', (e) => {
+                let hasValidationErr = false;
+
+                document.querySelectorAll('.grn-line-item-row').forEach(row => {
+                    const idx = row.dataset.rowIndex;
+                    if (idx === '__prefix__') return;
+
+                    const deleteCheck = row.querySelector(`[name="items-${idx}-DELETE"]`);
+                    if (deleteCheck && deleteCheck.checked) return;
+
+                    const prodSelect = row.querySelector('.grn-product-select');
+                    const prodId = prodSelect ? prodSelect.value : '';
+                    if (!prodId) return;
+
+                    const isTracked = this.isProductTracked(prodId);
+                    if (isTracked) {
+                        const qtyInput = row.querySelector(`[name="items-${idx}-purchased_quantity"]`);
+                        const targetQty = parseInt(qtyInput?.value || 0, 10);
+                        const scannedCount = (this.deviceStore[idx] || []).length;
+
+                        if (scannedCount !== targetQty) {
+                            hasValidationErr = true;
+                            alert(`IMEI Count Incomplete on Line ${parseInt(idx, 10) + 1}: Required quantity is ${targetQty} unit(s), but exactly ${scannedCount} IMEI pair(s) were scanned.`);
+                            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                });
+
+                if (hasValidationErr) {
+                    e.preventDefault();
+                }
+            });
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    window.grnDualImeiController = new GRNDualIMEIController();
+});
+</script>
+{% endblock %}

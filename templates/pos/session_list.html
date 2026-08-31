@@ -1,0 +1,118 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Cash Drawer Sessions | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-cash-register text-primary me-2"></i> Cash Drawer Shift Registers
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Shift opening floats, physical cash reconciliation, digital collections, and discrepancy audit logs
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'pos:open_shift' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-key me-1"></i> Open New Shift
+            </a>
+            <a href="{% url 'pos:close_shift' %}" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-lock me-1"></i> Close Current Shift
+            </a>
+        </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2">
+            <div class="col-12 col-md-5">
+                <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control form-control-sm bg-light border-0" placeholder="Search by Session No, Cashier Username...">
+            </div>
+            <div class="col-6 col-md-3">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Shift Statuses</option>
+                    <option value="OPEN" {% if request.GET.status == 'OPEN' %}selected{% endif %}>Open (Active Shift)</option>
+                    <option value="CLOSED" {% if request.GET.status == 'CLOSED' %}selected{% endif %}>Closed &amp; Reconciled</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+            </div>
+            <div class="col-12 col-md-2">
+                <button type="submit" name="export" value="csv" class="btn btn-outline-success btn-sm w-100 rounded-3 fw-bold">
+                    <i class="fas fa-file-csv me-1"></i> Export CSV
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Sessions Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Session Number</th>
+                        <th>Outlet Branch</th>
+                        <th>Cashier</th>
+                        <th>Opening Time</th>
+                        <th>Opening Float</th>
+                        <th>Expected Cash</th>
+                        <th>Counted Cash</th>
+                        <th>Discrepancy</th>
+                        <th>Status</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in sessions %}
+                    <tr>
+                        <td class="ps-4 font-monospace fw-bold">
+                            <a href="{% url 'pos:session_detail' s.pk %}" class="text-decoration-none text-primary">
+                                {{ s.session_number }}
+                            </a>
+                        </td>
+                        <td>{{ s.branch.name }}</td>
+                        <td><strong>{{ s.cashier.username }}</strong></td>
+                        <td>{{ s.opening_time|date:"Y-m-d H:i" }}</td>
+                        <td class="font-monospace">Rs. {{ s.opening_cash|floatformat:2|intcomma }}</td>
+                        <td class="font-monospace">Rs. {{ s.expected_closing_cash|floatformat:2|intcomma }}</td>
+                        <td class="font-monospace fw-bold">Rs. {{ s.actual_closing_cash|floatformat:2|intcomma }}</td>
+                        <td>
+                            {% if s.cash_discrepancy < 0 %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-xs">
+                                    -Rs. {{ s.cash_discrepancy|stringformat:".2f"|slice:"1:" }} (Shortage)
+                                </span>
+                            {% elif s.cash_discrepancy > 0 %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs">
+                                    +Rs. {{ s.cash_discrepancy|floatformat:2 }} (Excess)
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-muted border fs-xs">Exact (0.00)</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-{% if s.status == 'OPEN' %}success{% else %}secondary{% endif %} fs-2xs px-2 py-1">
+                                {{ s.get_status_display }}
+                            </span>
+                        </td>
+                        <td class="text-end pe-4">
+                            <a href="{% url 'pos:session_detail' s.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                                Details
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center py-5 text-muted">No cash drawer shift registers recorded.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

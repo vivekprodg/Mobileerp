@@ -1,0 +1,54 @@
+{% extends "core/base.html" %}
+
+{% block title %}Audit Trail & Security Logs{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">Immutable Audit Logs</h4>
+            <p class="text-muted fs-xs mb-0">Full forensic log of prices overrides, bill voids, manual adjustments and discounts</p>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-xs">
+                    <tr>
+                        <th class="ps-4">Timestamp</th>
+                        <th>User</th>
+                        <th>Branch</th>
+                        <th>Action</th>
+                        <th>Module</th>
+                        <th>Object Ref</th>
+                        <th>IP Address</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td class="ps-4 text-nowrap fw-semibold">{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+                        <td>{{ log.user.username|default:"System" }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ log.branch.name|default:"All Branches" }}</span></td>
+                        <td>
+                            <span class="badge bg-{% if log.action_type == 'CREATE' %}success{% elif log.action_type == 'DELETE' or log.action_type == 'BILL_CANCEL' %}danger{% else %}info{% endif %}">
+                                {{ log.get_action_type_display }}
+                            </span>
+                        </td>
+                        <td class="fw-bold">{{ log.module }}</td>
+                        <td>{{ log.object_repr }}</td>
+                        <td><code class="text-muted">{{ log.ip_address|default:"127.0.0.1" }}</code></td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-4 text-muted">No audit logs recorded yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

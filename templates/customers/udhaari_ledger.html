@@ -1,0 +1,51 @@
+{% extends "core/base.html" %}
+
+{% block title %}Central Udhaari Ledger Book{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">Comprehensive Customer Udhaari Ledger</h4>
+            <p class="text-muted fs-xs mb-0">Master audit trail of all credit purchases and digital/cash collections</p>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-xs">
+                    <tr>
+                        <th class="ps-4">Date</th>
+                        <th>Customer</th>
+                        <th>Branch</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>New Balance</th>
+                        <th>Mode</th>
+                        <th>Recorded By</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in ledgers %}
+                    <tr>
+                        <td class="ps-4">{{ item.created_at|date:"Y-m-d H:i" }}</td>
+                        <td><strong>{{ item.customer.name }}</strong> ({{ item.customer.phone_number }})</td>
+                        <td>{{ item.branch.code }}</td>
+                        <td><span class="badge bg-{% if item.entry_type == 'DEBIT' %}danger{% else %}success{% endif %}">{{ item.get_entry_type_display }}</span></td>
+                        <td class="fw-bold">Rs. {{ item.amount|floatformat:2 }}</td>
+                        <td>Rs. {{ item.resulting_balance|floatformat:2 }}</td>
+                        <td>{{ item.payment_mode|default:"-" }}</td>
+                        <td>{{ item.recorded_by.username }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-4 text-muted">No ledger entries found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

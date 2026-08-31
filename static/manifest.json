@@ -1,0 +1,40 @@
+{
+  "name": "Mobile Shop & Optical ERP Nepal",
+  "short_name": "MobileERP",
+  "description": "Multi-Branch Mobile & Optical Inventory, Sales Estimation, Barcode Billing & PWA POS System (Nepal Context)",
+  "start_url": "/?utm_source=pwa&mode=standalone",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/static/images/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/images/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "POS Fast Billing",
+      "short_name": "POS",
+      "description": "Launch Fast Counter Billing Terminal",
+      "url": "/sales/pos/?utm_source=pwa_shortcut",
+      "icons": [{ "src": "/static/images/icons/icon-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Live Stock Inventory",
+      "short_name": "Stock",
+      "description": "View Live Warehouse Stock Levels",
+      "url": "/inventory/?utm_source=pwa_shortcut",
+      "icons": [{ "src": "/static/images/icons/icon-192x192.png", "sizes": "192x192" }]
+    }
+  ]
+}

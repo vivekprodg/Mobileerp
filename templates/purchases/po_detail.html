@@ -1,0 +1,185 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Purchase Order {{ order.po_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+    <!-- Top Action & Status Bar -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0 font-monospace">{{ order.po_number }}</h4>
+                <span class="badge bg-{% if order.status == 'COMPLETED' %}success{% elif order.status == 'ISSUED' %}primary{% elif order.status == 'PARTIALLY_RECEIVED' %}warning text-dark{% elif order.status == 'CANCELLED' %}danger{% else %}secondary{% endif %} fs-xs px-3 py-1 rounded-pill">
+                    {{ order.get_status_display }}
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Supplier: <strong>{{ order.supplier.company_name }}</strong> | 
+                Branch: <strong>{{ order.branch.name }}</strong> | 
+                Order Date: <strong>{{ order.order_date }}</strong>
+                {% if order.expected_delivery_date %}&bull; Expected Delivery: <strong class="text-primary">{{ order.expected_delivery_date }}</strong>{% endif %}
+            </p>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <!-- Convert to GRN Button (When active) -->
+            {% if order.status == 'ISSUED' or order.status == 'PARTIALLY_RECEIVED' or order.status == 'DRAFT' %}
+            <a href="{% url 'purchases:grn_create' %}?po_id={{ order.id }}" class="btn btn-success btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-truck-ramp-box me-1"></i> Receive Inward Stock (GRN)
+            </a>
+            {% endif %}
+
+            <!-- Print Button -->
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print PO
+            </button>
+
+            <a href="{% url 'purchases:po_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Orders
+            </a>
+        </div>
+    </div>
+
+    <!-- Summary Overview Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Total Estimated Value</span>
+                <h3 class="fw-bold text-primary font-monospace mt-1 mb-0">Rs. {{ order.total_amount|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">Subtotal: Rs. {{ order.subtotal|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-info border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Supplier Contact</span>
+                <h5 class="fw-bold text-dark mt-1 mb-0">{{ order.supplier.contact_person }}</h5>
+                <small class="text-muted fs-2xs font-monospace"><i class="fas fa-phone text-success me-1"></i>{{ order.supplier.phone_number }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-warning border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Requisition Origin</span>
+                <h6 class="fw-bold text-dark mt-1 mb-0">{{ order.branch.name }}</h6>
+                <small class="text-muted fs-2xs">
+                    Issued by: 
+                    {% if order.created_by %}
+                        {{ order.created_by.get_full_name|default:order.created_by.username }}
+                    {% else %}
+                        System / Automated
+                    {% endif %}
+                </small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-success border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Workflow Status</span>
+                <!-- Status Transition Dropdown -->
+                <form action="{% url 'purchases:po_status_update' order.pk %}" method="post" class="mt-1">
+                    {% csrf_token %}
+                    <div class="input-group input-group-sm">
+                        <select name="status" class="form-select form-select-sm fw-bold">
+                            <option value="DRAFT" {% if order.status == 'DRAFT' %}selected{% endif %}>Draft PO</option>
+                            <option value="ISSUED" {% if order.status == 'ISSUED' %}selected{% endif %}>Issued to Supplier</option>
+                            <option value="COMPLETED" {% if order.status == 'COMPLETED' %}selected{% endif %}>Completed &amp; Received</option>
+                            <option value="CANCELLED" {% if order.status == 'CANCELLED' %}selected{% endif %}>Cancelled</option>
+                        </select>
+                        <button type="submit" class="btn btn-dark btn-sm">Update</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Line Items Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-boxes-stacked text-primary me-2"></i> Ordered Line Items</h6>
+            <span class="badge bg-primary rounded-pill">{{ items.count }} Line Items</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4" style="width: 40px;">#</th>
+                        <th>Product / Handset Model</th>
+                        <th>Unit</th>
+                        <th class="text-center">Ordered Qty</th>
+                        <th class="text-center">Received Qty</th>
+                        <th class="text-end">Agreed Cost (NPR)</th>
+                        <th class="text-end pe-4">Line Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td class="ps-4 text-center text-muted fw-bold">{{ forloop.counter }}</td>
+                        <td>
+                            <strong class="text-dark">{{ item.product.name }}</strong>
+                            <small class="text-muted d-block font-monospace">SKU: {{ item.product.sku }}</small>
+                        </td>
+                        <td><span class="badge bg-light text-dark border">{{ item.unit.code }}</span></td>
+                        <td class="text-center font-monospace fw-bold">{{ item.ordered_quantity|floatformat:0 }}</td>
+                        <td class="text-center font-monospace">
+                            {% if item.received_quantity >= item.ordered_quantity %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold">{{ item.received_quantity|floatformat:0 }}</span>
+                            {% elif item.received_quantity > 0 %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold">{{ item.received_quantity|floatformat:0 }}</span>
+                            {% else %}
+                                <span class="text-muted">0</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end font-monospace">Rs. {{ item.unit_cost_price|floatformat:2|intcomma }}</td>
+                        <td class="text-end pe-4 font-monospace fw-bold text-primary">Rs. {{ item.line_total|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-4 text-muted">No line items attached to this purchase order.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot class="bg-light fw-bold fs-xs border-top">
+                    <tr>
+                        <td colspan="6" class="ps-4 text-end text-uppercase text-muted">Order Total Amount:</td>
+                        <td class="text-end pe-4 font-monospace text-primary fs-5">Rs. {{ order.total_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <!-- Notes & Linked Goods Received Notes (GRN) -->
+    <div class="row g-4">
+        {% if order.notes %}
+        <div class="col-12 col-lg-6">
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-2"><i class="fas fa-file-lines text-primary me-2"></i> Order Notes &amp; Consignment Remarks</h6>
+                <p class="fs-xs text-secondary mb-0">{{ order.notes|linebreaks }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if linked_grns %}
+        <div class="col-12 {% if order.notes %}col-lg-6{% else %}col-12{% endif %}">
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3"><i class="fas fa-truck-ramp-box text-success me-2"></i> Inward Goods Received Notes (GRN)</h6>
+                <ul class="list-group list-group-flush fs-xs">
+                    {% for grn in linked_grns %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                        <div>
+                            <a href="{% url 'purchases:grn_detail' grn.pk %}" class="fw-bold text-primary text-decoration-none font-monospace">{{ grn.grn_number }}</a>
+                            <small class="text-muted d-block">Received: {{ grn.bill_date }} (Bill: {{ grn.supplier_bill_no }})</small>
+                        </div>
+                        <span class="badge bg-success bg-opacity-10 text-success fw-bold font-monospace">Rs. {{ grn.net_total_amount|floatformat:2|intcomma }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

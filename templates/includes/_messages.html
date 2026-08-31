@@ -1,0 +1,48 @@
+{% if messages %}
+<div class="container-fluid px-4 pt-3 position-relative" style="z-index: 1040;" id="appMessageContainer">
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show shadow-sm border-0 d-flex align-items-center gap-3 mb-3 p-3 rounded-4 erp-toast-alert" role="alert" data-auto-dismiss="5000">
+        <div class="flex-shrink-0">
+            {% if message.tags == 'success' %}
+                <span class="badge bg-success text-white p-2 rounded-circle fs-6"><i class="fas fa-check"></i></span>
+            {% elif message.tags == 'error' or message.tags == 'danger' %}
+                <span class="badge bg-danger text-white p-2 rounded-circle fs-6"><i class="fas fa-exclamation"></i></span>
+            {% elif message.tags == 'warning' %}
+                <span class="badge bg-warning text-dark p-2 rounded-circle fs-6"><i class="fas fa-triangle-exclamation"></i></span>
+            {% else %}
+                <span class="badge bg-info text-white p-2 rounded-circle fs-6"><i class="fas fa-info"></i></span>
+            {% endif %}
+        </div>
+        <div class="flex-grow-1 fs-sm fw-semibold text-dark">{{ message }}</div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+</div>
+
+<style>
+@keyframes toastSlideDown {
+    from { opacity: 0; transform: translateY(-12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.erp-toast-alert {
+    animation: toastSlideDown 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    border-left: 4px solid currentColor !important;
+}
+.alert-success { background-color: #ecfdf5 !important; border-left-color: #10b981 !important; }
+.alert-danger, .alert-error { background-color: #fef2f2 !important; border-left-color: #ef4444 !important; }
+.alert-warning { background-color: #fffbeb !important; border-left-color: #f59e0b !important; }
+.alert-info { background-color: #eff6ff !important; border-left-color: #3b82f6 !important; }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.erp-toast-alert[data-auto-dismiss]').forEach(alertEl => {
+        const timeout = parseInt(alertEl.dataset.autoDismiss, 10) || 5000;
+        setTimeout(() => {
+            const bsAlert = bootstrap.Alert.getOrCreateInstance(alertEl);
+            if (bsAlert) bsAlert.close();
+        }, timeout);
+    });
+});
+</script>
+{% endif %}

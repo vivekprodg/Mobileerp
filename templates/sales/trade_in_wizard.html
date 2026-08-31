@@ -1,0 +1,866 @@
+{% extends "core/base.html" %}
+{% load static %}
+
+{% block title %}Old Phone Trade-In &amp; Buy-Back Wizard | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Wizard Sticky Header Stepper */
+.wizard-stepper-bar {
+    position: sticky;
+    top: var(--erp-header-height, 62px);
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    z-index: 1010;
+    border-bottom: 1px solid var(--erp-slate-200);
+    padding: 12px 20px;
+    border-radius: 14px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.wizard-step-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.wizard-step-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    font-size: 12px;
+}
+
+/* Collapsible Live Valuation Sidebar */
+.tradein-calc-sidebar {
+    position: sticky;
+    top: calc(var(--erp-header-height, 62px) + 70px);
+    max-height: calc(100vh - var(--erp-header-height, 62px) - 90px);
+    overflow-y: auto;
+}
+
+/* Responsive Digital Signature Canvas */
+.signature-canvas-container {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+#signatureCanvas {
+    cursor: crosshair;
+    touch-action: none;
+    border: 2px dashed #94a3b8;
+    border-radius: 8px;
+    background: #ffffff;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 140px;
+}
+
+/* Category Sections in 10-Point Checklist */
+.checklist-category-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+}
+
+/* Sticky Bottom Submission Bar */
+.wizard-sticky-footer {
+    position: sticky;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--erp-slate-200);
+    z-index: 1020;
+    padding: 12px 24px;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+}
+
+/* Scan Focus Visual Feedback */
+.scan-focus-active {
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25) !important;
+    border-color: #2563eb !important;
+}
+
+/* ==========================================================================
+   CAMERA SCANNER MODAL & VIEWFINDER RETICLE STYLES
+   ========================================================================== */
+.tradein-scanner-modal-body {
+    background-color: #0b1120;
+    position: relative;
+    padding: 0;
+    overflow: hidden;
+    min-height: 380px;
+}
+
+.tradein-scanner-video-feed {
+    width: 100%;
+    height: 100%;
+    max-height: 480px;
+    object-fit: cover;
+    display: block;
+}
+
+.tradein-scanner-viewfinder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    padding: 20px;
+}
+
+.tradein-aiming-reticle {
+    width: 270px;
+    height: 160px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 16px;
+    position: relative;
+    box-shadow: 0 0 0 9999px rgba(11, 17, 32, 0.65);
+}
+
+.tradein-aiming-reticle::before,
+.tradein-aiming-reticle::after {
+    content: '';
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    border-color: #2563eb;
+    border-style: solid;
+}
+
+.tradein-aiming-reticle::before {
+    top: -2px;
+    left: -2px;
+    border-width: 4px 0 0 4px;
+    border-top-left-radius: 14px;
+}
+
+.tradein-aiming-reticle::after {
+    bottom: -2px;
+    right: -2px;
+    border-width: 0 4px 4px 0;
+    border-bottom-right-radius: 14px;
+}
+
+.tradein-corner-tr {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 24px;
+    height: 24px;
+    border-top: 4px solid #2563eb;
+    border-right: 4px solid #2563eb;
+    border-top-right-radius: 14px;
+}
+
+.tradein-corner-bl {
+    position: absolute;
+    bottom: -2px;
+    left: -2px;
+    width: 24px;
+    height: 24px;
+    border-bottom: 4px solid #2563eb;
+    border-left: 4px solid #2563eb;
+    border-bottom-left-radius: 14px;
+}
+
+.tradein-laser-line {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, #38bdf8 50%, transparent 100%);
+    box-shadow: 0 0 8px #38bdf8;
+    animation: tradeinLaserScan 2s ease-in-out infinite alternate;
+}
+
+@keyframes tradeinLaserScan {
+    0% { top: 8%; opacity: 0.8; }
+    100% { top: 92%; opacity: 1; }
+}
+
+.tradein-camera-banner {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    z-index: 10;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 10px 14px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+
+    <form method="post" enctype="multipart/form-data" id="tradeInMasterForm" novalidate>
+        {% csrf_token %}
+
+        <!-- STICKY TOP STEPPER PROGRESS BAR -->
+        <div class="wizard-stepper-bar d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+            <div>
+                <h4 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-repeat text-primary me-2"></i> Old Phone Trade-In &amp; Buy-Back Wizard
+                </h4>
+                <p class="text-muted fs-xs mb-0">Step 1: Handset &amp; MDMS &rarr; Step 2: 10-Point Diagnosis &rarr; Step 3: Police KYC Undertaking</p>
+            </div>
+
+            <div class="d-flex align-items-center gap-3">
+                <div class="wizard-step-indicator text-primary">
+                    <span class="wizard-step-circle bg-primary text-white">1</span> Handset
+                </div>
+                <span class="text-muted">&rarr;</span>
+                <div class="wizard-step-indicator text-warning-emphasis">
+                    <span class="wizard-step-circle bg-warning text-dark">2</span> Audit
+                </div>
+                <span class="text-muted">&rarr;</span>
+                <div class="wizard-step-indicator text-danger">
+                    <span class="wizard-step-circle bg-danger text-white">3</span> KYC
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Summary Banner -->
+        {% if intake_form.errors or checklist_form.errors or undertaking_form.errors %}
+        <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
+            <h6 class="fw-bold mb-2"><i class="fas fa-triangle-exclamation me-2"></i> Please resolve the highlighted errors:</h6>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <ul class="mb-0 fs-xs ps-3">
+                {% for field in intake_form %}{% for err in field.errors %}<li><strong>Device Profile:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}
+                {% for field in checklist_form %}{% for err in field.errors %}<li><strong>10-Point Audit:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}
+                {% for field in undertaking_form %}{% for err in field.errors %}<li><strong>KYC Undertaking:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="row g-4 mb-4">
+            <!-- Left 8 Cols: The 3 Wizard Steps -->
+            <div class="col-12 col-lg-8">
+                
+                <!-- STEP 1: Device Profile & NTA MDMS Verification -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4" id="step1Card">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <span class="badge bg-primary me-2">Step 1</span> Device Profile &amp; Live NTA MDMS Verification
+                        </h6>
+                        <span class="badge bg-primary bg-opacity-10 text-primary fs-xs">Hardware Specs</span>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Brand Name <span class="text-danger">*</span></label>
+                            {{ intake_form.brand_name }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Model Name <span class="text-danger">*</span></label>
+                            {{ intake_form.model_name }}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">Storage Capacity <span class="text-danger">*</span></label>
+                            {{ intake_form.storage_capacity }}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold text-dark fs-xs">RAM Capacity</label>
+                            {{ intake_form.ram_capacity }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Color / Finish</label>
+                            {{ intake_form.color_variant }}
+                        </div>
+
+                        <!-- Primary IMEI 1 with Hardware Focus, Camera Scan & 1-Tap MDMS Verify -->
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Primary 15-Digit IMEI <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                {{ intake_form.imei_1 }}
+                                <button type="button" class="btn btn-outline-primary btn-sm fw-bold px-3" id="scanTradeInImei1Btn" title="Focus &amp; Scan Primary IMEI 1 via USB gun">
+                                    <i class="fas fa-barcode me-1"></i> Scan Gun
+                                </button>
+                                <button type="button" class="btn btn-primary btn-sm fw-bold px-3" id="cameraScanTradeInImei1Btn" title="Scan IMEI 1 using Device Camera">
+                                    <i class="fas fa-camera me-1"></i> Camera Scan
+                                </button>
+                                <button type="button" class="btn btn-dark btn-sm fw-bold px-3" id="verifyMdmsBtn">
+                                    <i class="fas fa-shield-halved me-1"></i> Verify NTA MDMS
+                                </button>
+                            </div>
+                            <!-- Result alert placed DIRECTLY under the verify group -->
+                            <div id="mdmsResultBanner" class="d-none mt-2"></div>
+                        </div>
+
+                        <!-- Secondary IMEI 2 with Camera Scan & Hardware Focus -->
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Secondary IMEI 2</label>
+                            <div class="input-group">
+                                {{ intake_form.imei_2 }}
+                                <button type="button" class="btn btn-outline-secondary btn-sm fw-bold px-2" id="scanTradeInImei2Btn" title="Focus &amp; Scan Secondary IMEI 2 via USB gun">
+                                    <i class="fas fa-barcode"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-info btn-sm fw-bold px-2" id="cameraScanTradeInImei2Btn" title="Scan IMEI 2 using Device Camera">
+                                    <i class="fas fa-camera"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">NTA MDMS Status Classification</label>
+                            {{ intake_form.mdms_status }}
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Benchmark Market Value (Pristine Condition) (NPR) <span class="text-danger">*</span></label>
+                            {{ intake_form.market_base_value }}
+                            <small class="text-muted fs-2xs mt-1 d-block">Benchmark market valuation for a 100% flawless device of this model.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STEP 2: 10-Point Technical Diagnostic Inspection (Organized into 3 Sub-sections) -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4" id="step2Card">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <span class="badge bg-warning text-dark me-2">Step 2</span> 10-Point Technical Diagnostic Audit
+                        </h6>
+                        <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-xs fw-bold">Automated Penalties</span>
+                    </div>
+
+                    <!-- 2.1 Display & Body Condition -->
+                    <div class="checklist-category-card">
+                        <h6 class="fw-bold text-dark fs-xs mb-2"><i class="fas fa-mobile text-primary me-1"></i> A. Display &amp; Housing Condition</h6>
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">1. Touch &amp; Screen Glass</label>
+                                {{ checklist_form.touch_and_display }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">2. Body Housing / Dents</label>
+                                {{ checklist_form.body_frame_condition }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">3. Liquid Damage (LDI)</label>
+                                {{ checklist_form.liquid_ingress_ldi }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2.2 Core Hardware & Functionality -->
+                    <div class="checklist-category-card">
+                        <h6 class="fw-bold text-dark fs-xs mb-2"><i class="fas fa-microchip text-primary me-1"></i> B. Hardware &amp; Component Tests</h6>
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">4. Front &amp; Rear Cameras</label>
+                                {{ checklist_form.front_and_back_cameras }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">5. Battery Health &amp; Charging</label>
+                                {{ checklist_form.charging_and_battery }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">6. Wi-Fi / Bluetooth / GPS</label>
+                                {{ checklist_form.wifi_bluetooth_gps }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">7. Calling, Mic &amp; Speakers</label>
+                                {{ checklist_form.cellular_calling_mic_speaker }}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">8. Biometrics (Fingerprint/FaceID)</label>
+                                {{ checklist_form.biometrics_security }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2.3 Accessories & Reset -->
+                    <div class="checklist-category-card">
+                        <h6 class="fw-bold text-dark fs-xs mb-2"><i class="fas fa-box-open text-primary me-1"></i> C. In-Box Accessories &amp; Account Reset</h6>
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">9. In-Box Items Included</label>
+                                {{ checklist_form.original_accessories_available }}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">10. Factory Reset / Cloud Account</label>
+                                {{ checklist_form.account_lock_factory_reset }}
+                            </div>
+                            <div class="col-12 mt-2">
+                                <label class="form-label fs-2xs fw-bold text-muted mb-1">Diagnostic Observations / Technician Remarks</label>
+                                {{ checklist_form.technician_remarks }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STEP 3: Customer KYC & Police Ownership Undertaking -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4" id="step3Card">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <span class="badge bg-danger text-white me-2">Step 3</span> Customer Ownership Undertaking (जिम्मानामा)
+                        </h6>
+                        <span class="badge bg-danger bg-opacity-10 text-danger fs-xs fw-bold">Police Anti-Theft Form</span>
+                    </div>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Customer Full Name (as in Citizenship) <span class="text-danger">*</span></label>
+                            {{ undertaking_form.customer_full_name }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Father / Spouse Full Name</label>
+                            {{ undertaking_form.customer_father_or_spouse_name }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Identity Document Type <span class="text-danger">*</span></label>
+                            {{ undertaking_form.id_type }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Citizenship / NID Number <span class="text-danger">*</span></label>
+                            {{ undertaking_form.id_number }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Issued District</label>
+                            {{ undertaking_form.id_issued_district }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Permanent Address (District, Ward, Municipality) <span class="text-danger">*</span></label>
+                            {{ undertaking_form.permanent_address }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Current Residence Address</label>
+                            {{ undertaking_form.current_address }}
+                        </div>
+
+                        <!-- ID Documents Upload -->
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Citizenship / ID Front Photo</label>
+                            {{ undertaking_form.id_front_image }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Citizenship / ID Back Photo</label>
+                            {{ undertaking_form.id_back_image }}
+                        </div>
+
+                        <!-- Live Customer Snapshot -->
+                        <div class="col-12">
+                            <div class="p-3 bg-light rounded-3 border">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <label class="form-label fw-bold text-dark fs-xs mb-0">Customer Live Webcam Snapshot (Holding Device)</label>
+                                    <button type="button" class="btn btn-outline-primary btn-sm rounded-pill" id="startCameraBtn">
+                                        <i class="fas fa-camera me-1"></i> Open Camera
+                                    </button>
+                                </div>
+                                <div id="liveCameraContainer" class="d-none text-center p-2 bg-dark rounded-3 mb-2">
+                                    <video id="cameraVideo" width="300" height="200" autoplay playsinline class="rounded border mb-2"></video>
+                                    <div>
+                                        <button type="button" class="btn btn-success btn-sm rounded-pill px-3" id="snapPhotoBtn">Snap Photo</button>
+                                        <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3" id="closeCameraBtn">Close</button>
+                                    </div>
+                                    <canvas id="snapshotCanvas" class="d-none"></canvas>
+                                </div>
+                                {{ undertaking_form.customer_live_photo }}
+                                <div id="capturedPhotosPreview" class="mt-2 d-flex gap-2"></div>
+                            </div>
+                        </div>
+
+                        <!-- Digital Signature (Responsive Canvas) -->
+                        <div class="col-12">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label fw-bold text-dark fs-xs mb-0">Customer Digital Signature / Thumbprint:</label>
+                                <button type="button" class="btn btn-link p-0 text-decoration-none fs-2xs text-danger fw-semibold" id="clearSignatureBtn">
+                                    <i class="fas fa-rotate-left me-1"></i> Clear Signature
+                                </button>
+                            </div>
+                            <div class="signature-canvas-container">
+                                <canvas id="signatureCanvas" width="500" height="140"></canvas>
+                            </div>
+                            {{ undertaking_form.customer_digital_signature }}
+                        </div>
+
+                        <!-- Legal Declaration Acceptance -->
+                        <div class="col-12">
+                            <div class="p-3 bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded-3">
+                                <p class="fs-2xs text-danger fw-semibold mb-2">
+                                    {{ config.undertaking_declaration_text_np }}
+                                </p>
+                                <div class="form-check">
+                                    {{ undertaking_form.declaration_accepted }}
+                                    <label class="form-check-label fw-bold fs-xs text-dark" for="{{ undertaking_form.declaration_accepted.id_for_label }}">
+                                        Customer has verified the above legal declaration and accepts full ownership responsibility.
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Right 4 Cols: Live Valuation Breakdown Card -->
+            <div class="col-12 col-lg-4">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white tradein-calc-sidebar mb-4">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                        <i class="fas fa-calculator text-success me-2"></i> Live Valuation Breakdown
+                    </h6>
+
+                    <div class="d-flex justify-content-between fs-xs py-1">
+                        <span class="text-muted">Benchmark Market Price:</span>
+                        <strong class="text-dark" id="calcBaseValue">Rs. 0.00</strong>
+                    </div>
+
+                    <div class="d-flex justify-content-between fs-xs py-1 text-danger">
+                        <span>Defect / Penalty Deductions:</span>
+                        <strong id="calcTotalDeductions">-Rs. 0.00</strong>
+                    </div>
+
+                    <div class="d-flex justify-content-between fs-xs py-1 text-muted border-bottom pb-2">
+                        <span>Shop Margin Buffer ({{ config.default_trade_in_margin_percent }}%):</span>
+                        <strong id="calcMarginDeduction">-Rs. 0.00</strong>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center py-3">
+                        <span class="fw-bold fs-6 text-dark">Final Buy-Back Offer:</span>
+                        <h4 class="fw-bold text-primary font-monospace mb-0" id="calcFinalOffer">Rs. 0.00</h4>
+                    </div>
+
+                    <div class="p-2 bg-light rounded-3 text-center border mb-3">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Recommended Stock Grade:</span>
+                        <span class="badge bg-primary fs-xs px-3 py-1 rounded-pill mt-1" id="calcConditionGrade">USED GRADE B</span>
+                    </div>
+
+                    <!-- Itemized Deductions Feed -->
+                    <div class="mb-3">
+                        <span class="fw-bold fs-2xs text-muted text-uppercase d-block mb-1">Deductions Breakdown:</span>
+                        <ul class="list-unstyled mb-0" id="calcDeductionList">
+                            <li class="text-muted fs-xs">Complete checklist to evaluate deductions.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STICKY BOTTOM SUBMISSION BAR -->
+        <div class="wizard-sticky-footer d-flex align-items-center justify-content-between">
+            <div class="d-none d-md-block text-muted fs-xs">
+                <i class="fas fa-shield-halved text-success me-1"></i> A4 Police Undertaking document will be generated upon confirmation.
+            </div>
+            <div class="d-flex align-items-center gap-2 w-100 w-md-auto justify-content-end">
+                <a href="{% url 'sales:trade_in_list' %}" class="btn btn-outline-secondary px-3 rounded-pill">
+                    Cancel
+                </a>
+                <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm">
+                    <i class="fas fa-check-circle me-2"></i> Complete Trade-In &amp; Generate Voucher
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- ==========================================================================
+     TRADE-IN CAMERA BARCODE / IMEI SCANNER MODAL
+     ========================================================================== -->
+<div class="modal fade" id="tradeInCameraScannerModal" tabindex="-1" aria-labelledby="tradeInCameraScannerModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark text-white">
+            <div class="modal-header border-bottom border-secondary border-opacity-25 py-2 px-3 bg-dark">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-camera"></i></span>
+                    <div>
+                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="tradeInCameraScannerModalLabel">Trade-In Handset IMEI Scanner</h6>
+                        <small class="text-white-50 fs-2xs" id="tradeInModalTargetSlotText">Scanning Primary IMEI 1</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" id="closeTradeInCameraScannerBtn"></button>
+            </div>
+            
+            <div class="modal-body tradein-scanner-modal-body">
+                <!-- Live Video Feed -->
+                <video id="tradeInCameraFeedVideo" class="tradein-scanner-video-feed" playsinline autoplay muted></video>
+                
+                <!-- Dynamic Banner Overlay -->
+                <div class="tradein-camera-banner shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-primary fs-2xs px-2 py-1" id="tradeInModalTargetBadge">PRIMARY IMEI 1</span>
+                        <span class="text-white-50 fs-2xs font-monospace">High-Speed Scanner</span>
+                    </div>
+                    <div class="text-info fs-2xs" id="tradeInModalInstruction">
+                        Align <strong>IMEI barcode</strong> from old phone box or settings screen inside reticle.
+                    </div>
+                </div>
+
+                <!-- Aiming Reticle with Animated Laser -->
+                <div class="tradein-scanner-viewfinder">
+                    <div class="tradein-aiming-reticle">
+                        <div class="tradein-corner-tr"></div>
+                        <div class="tradein-corner-bl"></div>
+                        <div class="tradein-laser-line"></div>
+                    </div>
+                </div>
+
+                <!-- Floating Toolbar Controls -->
+                <div class="position-absolute bottom-0 start-0 end-0 p-3 d-flex justify-content-center gap-2 z-3">
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="tradeInTorchToggleBtn" style="display: none;">
+                        <i class="fas fa-bolt me-1 text-warning"></i> Flashlight
+                    </button>
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="tradeInSwitchLensBtn">
+                        <i class="fas fa-camera-rotate me-1 text-info"></i> Switch Lens
+                    </button>
+                </div>
+            </div>
+
+            <div class="modal-footer border-top border-secondary border-opacity-25 py-2 px-3 bg-dark d-flex justify-content-between align-items-center">
+                <div class="fs-2xs text-white-50" id="tradeInCameraStatusText">
+                    <i class="fas fa-circle-notch fa-spin me-1 text-primary"></i> Camera Active (15 FPS)
+                </div>
+                <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 py-1 fs-xs" data-bs-dismiss="modal">
+                    Cancel &amp; Close Camera
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'js/camera_barcode_scanner.js' %}"></script>
+<script src="{% static 'js/trade_in_calculator.js' %}"></script>
+<script src="{% static 'js/repair_camera_capture.js' %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // =========================================================================
+    // 1. DIGITAL SIGNATURE CANVAS HANDLER
+    // =========================================================================
+    const canvas = document.getElementById('signatureCanvas');
+    const signatureInput = document.getElementById('id_signature_data');
+    const clearBtn = document.getElementById('clearSignatureBtn');
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        let isDrawing = false;
+
+        function resizeCanvas() {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        }
+
+        function start(e) {
+            isDrawing = true;
+            ctx.beginPath();
+            const pos = getPos(e);
+            ctx.moveTo(pos.x, pos.y);
+        }
+
+        function move(e) {
+            if (!isDrawing) return;
+            const pos = getPos(e);
+            ctx.lineTo(pos.x, pos.y);
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 2.5;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
+
+        function end() {
+            if (!isDrawing) return;
+            isDrawing = false;
+            if (signatureInput) {
+                signatureInput.value = canvas.toDataURL('image/png');
+            }
+        }
+
+        canvas.addEventListener('mousedown', start);
+        canvas.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', end);
+
+        canvas.addEventListener('touchstart', start);
+        canvas.addEventListener('touchmove', move);
+        window.addEventListener('touchend', end);
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (signatureInput) signatureInput.value = '';
+            });
+        }
+    }
+
+    // =========================================================================
+    // 2. HARDWARE USB BARCODE SCAN BUTTONS FOCUS LISTENERS
+    // =========================================================================
+    const scanImei1Btn = document.getElementById('scanTradeInImei1Btn');
+    const imei1Input = document.querySelector('[name="imei_1"]');
+    if (scanImei1Btn && imei1Input) {
+        scanImei1Btn.addEventListener('click', () => {
+            imei1Input.focus();
+            imei1Input.select();
+            imei1Input.classList.add('scan-focus-active');
+            setTimeout(() => imei1Input.classList.remove('scan-focus-active'), 1500);
+        });
+    }
+
+    const scanImei2Btn = document.getElementById('scanTradeInImei2Btn');
+    const imei2Input = document.querySelector('[name="imei_2"]');
+    if (scanImei2Btn && imei2Input) {
+        scanImei2Btn.addEventListener('click', () => {
+            imei2Input.focus();
+            imei2Input.select();
+            imei2Input.classList.add('scan-focus-active');
+            setTimeout(() => imei2Input.classList.remove('scan-focus-active'), 1500);
+        });
+    }
+
+    // =========================================================================
+    // 3. CAMERA BARCODE / IMEI SCANNER INTEGRATION & AUTO MDMS TRIGGER
+    // =========================================================================
+    const cameraModalEl = document.getElementById('tradeInCameraScannerModal');
+    const videoEl = document.getElementById('tradeInCameraFeedVideo');
+    const torchBtn = document.getElementById('tradeInTorchToggleBtn');
+    const switchLensBtn = document.getElementById('tradeInSwitchLensBtn');
+    const statusText = document.getElementById('tradeInCameraStatusText');
+    const targetSlotBadge = document.getElementById('tradeInModalTargetBadge');
+    const targetSlotText = document.getElementById('tradeInModalTargetSlotText');
+
+    let activeScanTarget = 'imei_1'; // 'imei_1' | 'imei_2'
+    let cameraScannerInstance = null;
+    let cameraModalInstance = null;
+
+    if (cameraModalEl) {
+        cameraModalInstance = new bootstrap.Modal(cameraModalEl);
+    }
+
+    if (cameraModalEl && videoEl) {
+        cameraScannerInstance = new CameraBarcodeScanner({
+            facingMode: 'environment',
+            cooldown: 1200
+        });
+
+        // Trigger Camera for IMEI 1
+        const camBtn1 = document.getElementById('cameraScanTradeInImei1Btn');
+        if (camBtn1) {
+            camBtn1.addEventListener('click', () => {
+                activeScanTarget = 'imei_1';
+                if (targetSlotBadge) targetSlotBadge.innerText = 'PRIMARY IMEI 1';
+                if (targetSlotText) targetSlotText.innerText = 'Scanning Primary IMEI 1';
+                cameraModalInstance.show();
+            });
+        }
+
+        // Trigger Camera for IMEI 2
+        const camBtn2 = document.getElementById('cameraScanTradeInImei2Btn');
+        if (camBtn2) {
+            camBtn2.addEventListener('click', () => {
+                activeScanTarget = 'imei_2';
+                if (targetSlotBadge) targetSlotBadge.innerText = 'SECONDARY IMEI 2';
+                if (targetSlotText) targetSlotText.innerText = 'Scanning Secondary IMEI 2';
+                cameraModalInstance.show();
+            });
+        }
+
+        // Modal Shown -> Start Hardware Camera Stream
+        cameraModalEl.addEventListener('shown.bs.modal', async () => {
+            if (statusText) {
+                statusText.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1 text-primary"></i> Initializing camera feed...';
+            }
+
+            await cameraScannerInstance.start(
+                videoEl,
+                (scannedCode) => {
+                    // Success Callback
+                    const cleanCode = scannedCode.trim();
+                    if (statusText) {
+                        statusText.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> Scanned: <strong>${cleanCode}</strong>`;
+                    }
+
+                    if (activeScanTarget === 'imei_1' && imei1Input) {
+                        imei1Input.value = cleanCode;
+                        imei1Input.classList.add('scan-focus-active');
+                        setTimeout(() => imei1Input.classList.remove('scan-focus-active'), 1500);
+
+                        // AUTOMATIC 1-TAP NTA MDMS VERIFICATION TRIGGER
+                        const verifyBtn = document.getElementById('verifyMdmsBtn');
+                        if (verifyBtn) {
+                            verifyBtn.click();
+                        }
+                    } else if (activeScanTarget === 'imei_2' && imei2Input) {
+                        imei2Input.value = cleanCode;
+                        imei2Input.classList.add('scan-focus-active');
+                        setTimeout(() => imei2Input.classList.remove('scan-focus-active'), 1500);
+                    }
+
+                    setTimeout(() => {
+                        cameraModalInstance.hide();
+                    }, 400);
+                },
+                (err) => {
+                    if (statusText) {
+                        statusText.innerHTML = `<i class="fas fa-triangle-exclamation text-danger me-1"></i> ${err.message}`;
+                    }
+                }
+            );
+
+            // Display torch button if supported
+            if (cameraScannerInstance.hasTorch && torchBtn) {
+                torchBtn.style.display = 'inline-flex';
+            } else if (torchBtn) {
+                torchBtn.style.display = 'none';
+            }
+
+            if (statusText) {
+                statusText.innerHTML = '<i class="fas fa-check text-success me-1"></i> Ready &bull; Align barcode inside box';
+            }
+        });
+
+        // Modal Hidden -> Stop Camera Hardware
+        cameraModalEl.addEventListener('hidden.bs.modal', () => {
+            if (cameraScannerInstance) {
+                cameraScannerInstance.stop();
+            }
+            if (activeScanTarget === 'imei_1' && imei1Input) {
+                imei1Input.focus();
+            } else if (activeScanTarget === 'imei_2' && imei2Input) {
+                imei2Input.focus();
+            }
+        });
+
+        // Toggle Flashlight
+        if (torchBtn) {
+            torchBtn.addEventListener('click', async () => {
+                const state = await cameraScannerInstance.toggleTorch();
+                torchBtn.classList.toggle('btn-warning', state);
+                torchBtn.classList.toggle('btn-dark', !state);
+            });
+        }
+
+        // Switch Camera Lens
+        if (switchLensBtn) {
+            switchLensBtn.addEventListener('click', async () => {
+                await cameraScannerInstance.switchCamera();
+            });
+        }
+    }
+});
+</script>
+{% endblock %}

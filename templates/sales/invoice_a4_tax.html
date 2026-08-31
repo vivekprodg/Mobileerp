@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estimate_A4_{{ estimate.estimate_number }}</title>
+    <style>
+        @page { 
+            size: A4 portrait; 
+            margin: 12mm 15mm; 
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            font-size: 12px; 
+            color: #1e293b; 
+            line-height: 1.35; 
+            background: #ffffff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .text-center { text-align: center; }
+        .text-end { text-align: right; }
+        .text-start { text-align: left; }
+        .fw-bold { font-weight: bold; }
+        
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 12px; 
+        }
+        
+        th, td { 
+            border: 1px solid #cbd5e1; 
+            padding: 6px 8px; 
+            vertical-align: middle; 
+        }
+        
+        th { 
+            background-color: #f8fafc; 
+            font-size: 11px; 
+            text-transform: uppercase; 
+        }
+
+        .warranty-cert-table th { 
+            background-color: #eff6ff; 
+            color: #1d4ed8; 
+        }
+        
+        .disclaimer-box { 
+            border: 1px dashed #64748b; 
+            background-color: #f8fafc; 
+            padding: 8px; 
+            font-size: 10px; 
+            text-align: center; 
+            margin-top: 16px; 
+        }
+
+        .imei-box {
+            margin-top: 4px;
+            padding: 4px 8px;
+            background-color: #f1f5f9;
+            border-left: 3px solid #2563eb;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+
+        .a4-brand-logo {
+            max-height: 60px;
+            max-width: 220px;
+            object-fit: contain;
+            margin-bottom: 4px;
+        }
+
+        @media print { 
+            .no-print { display: none !important; } 
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <!-- Top Action Toolbar -->
+    <div class="no-print" style="margin-bottom: 15px; text-align: right;">
+        <button onclick="window.print()" style="padding: 6px 18px; font-weight: bold; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer;">
+            Print A4 Invoice Slip
+        </button>
+    </div>
+
+    <!-- Company Branding Header -->
+    <div class="text-center">
+        {% if estimate.branch.logo_url %}
+            <img src="{{ estimate.branch.logo_url }}" alt="{{ estimate.branch.display_company_name }}" class="a4-brand-logo">
+        {% elif COMPANY_LOGO_URL %}
+            <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="a4-brand-logo">
+        {% endif %}
+
+        <h2 style="margin:0; font-size: 20px; color: #0f172a;">{{ estimate.branch.display_company_name|default:COMPANY_NAME }}</h2>
+        {% if estimate.branch.display_company_name_np or COMPANY_NAME_NP %}
+            <div style="font-size: 14px; font-weight: bold; color: #334155;">{{ estimate.branch.display_company_name_np|default:COMPANY_NAME_NP }}</div>
+        {% endif %}
+        
+        <div>{{ estimate.branch.address }}, {{ estimate.branch.city }} | Phone: {{ estimate.branch.phone_number }}</div>
+        {% if SYS_CONFIG.pan_number %}<div>PAN Number: <strong>{{ SYS_CONFIG.pan_number }}</strong></div>{% endif %}
+        {% if SYS_CONFIG.vat_number and SYS_CONFIG.tax_system_mode == 'VAT' %}<div>VAT Registration No: <strong>{{ SYS_CONFIG.vat_number }}</strong></div>{% endif %}
+        
+        <h3 style="margin: 8px 0 2px 0; text-decoration: underline; font-size: 15px;">{{ SYS_CONFIG.bill_header_title }}</h3>
+        {% if SYS_CONFIG.is_estimation_bill_only %}
+            <small style="color: #64748b;">(Internal Proforma Quotation &amp; Customer Estimation Slip)</small>
+        {% endif %}
+    </div>
+
+    <!-- Bill Metadata -->
+    <div style="margin-top: 16px; display: flex; justify-content: space-between;">
+        <div>
+            <strong>Recipient / Customer Details:</strong><br>
+            Name : <strong>{{ estimate.recipient_display_name }}</strong><br>
+            Phone: {{ estimate.customer_phone_manual|default:estimate.customer.phone_number|default:"-" }}<br>
+            PAN  : {{ estimate.customer_pan|default:"-" }}
+        </div>
+        <div style="text-align: right;">
+            Estimate Slip No: <strong style="font-size: 13px; color: #2563eb;">{{ estimate.estimate_number }}</strong><br>
+            Date (AD)  : {{ estimate.bill_date_ad }} | BS: {{ estimate.bill_date_bs|default:"-" }} BS<br>
+            Sales Rep  : {% if estimate.salesperson %}{{ estimate.salesperson.get_full_name|default:estimate.salesperson.username }}{% else %}{{ estimate.cashier.get_full_name|default:estimate.cashier.username }}{% endif %} | Cashier: {{ estimate.cashier.username }}
+        </div>
+    </div>
+
+    <!-- Line Items Table -->
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 30px;" class="text-center">SN</th>
+                <th>Item Description &amp; Handset Details</th>
+                <th style="width: 110px;" class="text-center">NTA MDMS</th>
+                <th style="width: 50px;" class="text-center">Qty</th>
+                <th style="width: 90px;" class="text-end">Rate (NPR)</th>
+                <th style="width: 80px;" class="text-end">Discount</th>
+                {% if estimate.vat_amount > 0 %}
+                    <th style="width: 80px;" class="text-end">Tax / VAT</th>
+                {% endif %}
+                <th style="width: 100px;" class="text-end">Total (NPR)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td class="text-center">{{ forloop.counter }}</td>
+                <td>
+                    <strong style="font-size: 12.5px;">{{ item.product.name }}</strong>
+                    {% if item.product.ram and item.product.internal_storage %}
+                        <span>({{ item.product.ram }}/{{ item.product.internal_storage }}{% if item.product.color_variant %} - {{ item.product.color_variant }}{% endif %})</span>
+                    {% endif %}
+                    
+                    <!-- DUAL-IMEI LINE ITEM DISPLAY -->
+                    {% if item.imei_number or item.secondary_imei %}
+                    <div class="imei-box">
+                        {% if item.imei_number %}
+                            <div><strong>IMEI 1 (Primary SIM):</strong> {{ item.imei_number }}</div>
+                        {% endif %}
+                        {% if item.secondary_imei %}
+                            <div><strong>IMEI 2 (Secondary SIM / eSIM):</strong> {{ item.secondary_imei }}</div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td class="text-center">
+                    {% if item.item_instance %}
+                        <small style="font-size: 10px; font-weight: bold; color: {% if item.item_instance.mdms_status == 'REGISTERED_OFFICIAL' %}#059669{% else %}#dc2626{% endif %};">
+                            {{ item.item_instance.get_mdms_status_display }}
+                        </small>
+                    {% else %}
+                        <small style="color: #64748b;">{{ item.product.get_default_mdms_status_display }}</small>
+                    {% endif %}
+                </td>
+                <td class="text-center">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</td>
+                <td class="text-end">{{ item.unit_price|floatformat:2|intcomma }}</td>
+                <td class="text-end">{{ item.discount_amount|floatformat:2|intcomma }}</td>
+                {% if estimate.vat_amount > 0 %}
+                    <td class="text-end">{{ item.tax_amount|floatformat:2|intcomma }}</td>
+                {% endif %}
+                <td class="text-end fw-bold">{{ item.line_total|floatformat:2|intcomma }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            {% with col_span=estimate.vat_amount|yesno:"7,6" %}
+            <tr>
+                <th colspan="{{ col_span }}" class="text-end">Gross Subtotal:</th>
+                <td class="text-end font-monospace">Rs. {{ estimate.subtotal|floatformat:2|intcomma }}</td>
+            </tr>
+            {% if estimate.item_discount_total > 0 or estimate.bill_discount_amount > 0 %}
+            <tr>
+                <th colspan="{{ col_span }}" class="text-end">Total Discounts:</th>
+                <td class="text-end font-monospace text-danger">-Rs. {{ estimate.item_discount_total|add:estimate.bill_discount_amount|floatformat:2|intcomma }}</td>
+            </tr>
+            {% endif %}
+            {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
+            <tr>
+                <th colspan="{{ col_span }}" class="text-end" style="color: #b45309;">Old Phone Trade-In Buy-Back Credit ({{ estimate.trade_in_voucher_reference }}):</th>
+                <td class="text-end fw-bold font-monospace" style="color: #b45309;">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2|intcomma }}</td>
+            </tr>
+            {% endif %}
+            {% if estimate.vat_amount > 0 %}
+            <tr>
+                <th colspan="{{ col_span }}" class="text-end">Output Tax / VAT Breakdown:</th>
+                <td class="text-end font-monospace">Rs. {{ estimate.vat_amount|floatformat:2|intcomma }}</td>
+            </tr>
+            {% endif %}
+            <tr>
+                <th colspan="{{ col_span }}" class="text-end">Grand Total (Payable):</th>
+                <td class="text-end fw-bold font-monospace" style="font-size: 14px; color: #2563eb;">Rs. {{ estimate.grand_total|floatformat:2|intcomma }}</td>
+            </tr>
+            <tr>
+                <th colspan="{{ col_span }}" class="text-end">Paid Amount:</th>
+                <td class="text-end fw-bold font-monospace text-success">Rs. {{ estimate.paid_amount|floatformat:2|intcomma }}</td>
+            </tr>
+            {% if estimate.due_amount > 0 %}
+            <tr>
+                <th colspan="{{ col_span }}" class="text-end" style="color: #dc2626;">Due Balance (Udhaari):</th>
+                <td class="text-end fw-bold font-monospace" style="color: #dc2626;">Rs. {{ estimate.due_amount|floatformat:2|intcomma }}</td>
+            </tr>
+            {% endif %}
+            {% endwith %}
+        </tfoot>
+    </table>
+
+    <!-- COMPONENT-LEVEL WARRANTY SCHEDULE -->
+    <h4 style="margin: 20px 0 6px 0; font-size: 12.5px; color: #1e3a8a;">
+        OFFICIAL COMPONENT-LEVEL WARRANTY SCHEDULE
+    </h4>
+    <table class="warranty-cert-table">
+        <thead>
+            <tr>
+                <th style="width: 35%;">Item / Handset Identification</th>
+                <th style="width: 30%;">Component Coverage Terms</th>
+                <th style="width: 15%;" class="text-center">Start Date</th>
+                <th style="width: 20%;" class="text-center">Claim Policy</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>
+                    <strong style="font-size: 12px;">{{ item.product.name }}</strong>
+                    {% if item.imei_number %}
+                        <div style="font-family: monospace; font-size: 10.5px; margin-top: 2px;">
+                            <strong>IMEI 1:</strong> {{ item.imei_number }}
+                        </div>
+                    {% endif %}
+                    {% if item.secondary_imei %}
+                        <div style="font-family: monospace; font-size: 10.5px;">
+                            <strong>IMEI 2:</strong> {{ item.secondary_imei }}
+                        </div>
+                    {% endif %}
+                </td>
+                <td>
+                    <strong style="color: #1d4ed8;">{{ item.warranty_terms|default:"12 Months Official Brand Warranty" }}</strong>
+                </td>
+                <td class="text-center">{{ estimate.bill_date_ad }}</td>
+                <td style="font-size: 10px; color: #475569;">
+                    Covers genuine manufacturing defects. Void if physical drop cracks or liquid ingress found.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Signatures -->
+    <div style="margin-top: 28px; display: flex; justify-content: space-between; text-align: center;">
+        <div style="width: 200px; border-top: 1px solid #94a3b8; padding-top: 4px;">
+            Customer Signature
+        </div>
+        <div style="width: 200px; border-top: 1px solid #94a3b8; padding-top: 4px;">
+            Authorized Stamp &amp; Sign
+        </div>
+    </div>
+
+    <!-- Disclaimers -->
+    <div class="disclaimer-box">
+        {% if SYS_CONFIG.bill_estimate_disclaimer %}{{ SYS_CONFIG.bill_estimate_disclaimer }}<br>{% endif %}
+        {{ estimate.branch.footer_estimate_note }}
+    </div>
+</body>
+</html>

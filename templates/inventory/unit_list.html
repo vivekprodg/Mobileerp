@@ -1,0 +1,442 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Units of Measurement (UOM) | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+:root {
+    --uom-primary: #175cd3;
+    --uom-primary-dark: #1849a9;
+    --uom-border: #e4e7ec;
+    --uom-surface: #ffffff;
+    --uom-text: #101828;
+    --uom-text-secondary: #667085;
+}
+
+.uom-content {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 24px 20px;
+}
+
+.uom-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 24px;
+}
+
+.uom-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--uom-primary);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 6px;
+}
+
+.uom-eyebrow-line {
+    width: 24px;
+    height: 2px;
+    background: var(--uom-primary);
+    border-radius: 999px;
+}
+
+.uom-page-title {
+    margin: 0;
+    font-size: clamp(24px, 2.3vw, 32px);
+    letter-spacing: -.035em;
+    font-weight: 800;
+    color: var(--uom-text);
+}
+
+.uom-page-description {
+    max-width: 680px;
+    margin: 6px 0 0;
+    color: var(--uom-text-secondary);
+    font-size: 13.5px;
+    line-height: 1.5;
+}
+
+.uom-btn {
+    min-height: 42px !important;
+    border-radius: 10px !important;
+    border: 1px solid var(--uom-border) !important;
+    background: white !important;
+    color: #344054 !important;
+    padding: 0 18px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    box-shadow: 0 1px 2px rgba(16,24,40,.05) !important;
+    text-decoration: none !important;
+    transition: all 0.15s ease !important;
+    cursor: pointer;
+}
+
+.uom-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(16,24,40,.08) !important;
+}
+
+.uom-btn-primary {
+    background: var(--uom-primary) !important;
+    border-color: var(--uom-primary) !important;
+    color: white !important;
+}
+
+.uom-btn-primary:hover {
+    background: var(--uom-primary-dark) !important;
+    color: white !important;
+}
+
+.uom-card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-bottom: 22px;
+}
+
+.uom-kpi {
+    background: white;
+    border: 1px solid var(--uom-border);
+    border-radius: 14px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 3px rgba(16,24,40,.04);
+}
+
+.uom-panel {
+    background: white;
+    border: 1px solid var(--uom-border);
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(16,24,40,.05);
+    overflow: hidden;
+}
+
+.uom-toolbar {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--uom-border);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    background: #ffffff;
+}
+
+.uom-search {
+    flex: 1;
+    position: relative;
+}
+
+.uom-search input {
+    width: 100%;
+    min-height: 40px;
+    border: 1px solid var(--uom-border);
+    border-radius: 9px;
+    padding: 0 14px 0 38px;
+    font-size: 13px;
+    color: var(--uom-text);
+    outline: none;
+}
+
+.uom-search input::placeholder {
+    color: #98a2b3 !important;
+}
+
+.uom-search input:focus {
+    border-color: #84adff;
+    box-shadow: 0 0 0 3px rgba(23,92,211,.08);
+}
+
+.uom-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #98a2b3;
+}
+
+.uom-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.uom-table thead th {
+    padding: 12px 18px;
+    color: #667085;
+    background: #fcfcfd;
+    border-bottom: 1px solid var(--uom-border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font-weight: 800;
+}
+
+.uom-table tbody td {
+    padding: 14px 18px;
+    border-bottom: 1px solid #f2f4f7;
+    vertical-align: middle;
+    font-size: 13px;
+    color: var(--uom-text);
+}
+
+.uom-table tbody tr:hover {
+    background: #fafcff;
+}
+
+.uom-icon-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: #eff8ff;
+    color: #175cd3;
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+    flex: 0 0 auto;
+    font-weight: 800;
+}
+
+.uom-action-btn {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 8px;
+    border: 1px solid var(--uom-border);
+    background: white;
+    color: #344054;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+    transition: all 0.15s ease;
+}
+
+.uom-action-btn:hover {
+    border-color: var(--uom-primary);
+    color: var(--uom-primary);
+    background: #eff8ff;
+}
+
+@media (max-width: 900px) {
+    .uom-card-grid { grid-template-columns: 1fr; }
+    .uom-page-header { flex-direction: column; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="uom-content">
+
+    <!-- PAGE HEADER -->
+    <div class="uom-page-header">
+        <div>
+            <div class="uom-eyebrow">
+                <span class="uom-eyebrow-line"></span>
+                Atomic Inventory Units
+            </div>
+            <h1 class="uom-page-title">Units of Measurement (UOM)</h1>
+            <p class="uom-page-description">
+                Configure primary atomic measurement units (Piece, Set, Pair, Box, Meter, Kilogram) used for POS billing, packaging conversions, and inventory tracking.
+            </p>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <a href="{% url 'inventory:product_list' %}" class="uom-btn">
+                <i class="fas fa-boxes-stacked text-secondary"></i> Inventory Catalog
+            </a>
+            <button type="button" class="uom-btn uom-btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#addUnitModal">
+                <i class="fas fa-plus-circle"></i> Add New Unit
+            </button>
+        </div>
+    </div>
+
+    <!-- STATS OVERVIEW -->
+    <div class="uom-card-grid">
+        <div class="uom-kpi">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="text-uppercase fw-bold text-muted fs-2xs" style="letter-spacing: .06em;">Configured Units</span>
+                <span class="uom-icon-badge"><i class="fas fa-scale-balanced fs-6"></i></span>
+            </div>
+            <h3 class="fw-bold text-dark mt-2 mb-0">{{ units.paginator.count|default:units|length }}</h3>
+            <small class="text-muted fs-xs">Base atomic units registered in ERP</small>
+        </div>
+
+        <div class="uom-kpi">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="text-uppercase fw-bold text-muted fs-2xs" style="letter-spacing: .06em;">Decimal Support</span>
+                <span class="uom-icon-badge" style="background:#ecfdf3; color:#079455;"><i class="fas fa-divide fs-6"></i></span>
+            </div>
+            <h3 class="fw-bold text-dark mt-2 mb-0">Fractional / Weight</h3>
+            <small class="text-muted fs-xs">Supports meters, rolls, kg</small>
+        </div>
+
+        <div class="uom-kpi">
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="text-uppercase fw-bold text-muted fs-2xs" style="letter-spacing: .06em;">Active Outlet</span>
+                <span class="uom-icon-badge" style="background:#f4f3ff; color:#6941c6;"><i class="fas fa-store fs-6"></i></span>
+            </div>
+            <h3 class="fw-bold text-dark mt-2 mb-0">{{ ACTIVE_BRANCH.name|default:"Main Counter" }}</h3>
+            <small class="text-muted fs-xs">Code: {{ ACTIVE_BRANCH.code|default:"HQ" }}</small>
+        </div>
+    </div>
+
+    <!-- MAIN PANEL -->
+    <div class="uom-panel">
+        
+        <!-- SEARCH & FILTER TOOLBAR -->
+        <form method="get" class="uom-toolbar">
+            <div class="uom-search">
+                <i class="fas fa-search uom-search-icon"></i>
+                <input type="text" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Search by Unit Name (Piece, Pair), Code (PCS, BOX), or Nepali Name...">
+            </div>
+            <button type="submit" class="uom-btn" style="min-height:40px;">Filter</button>
+            {% if request.GET.q %}
+            <a href="{% url 'inventory:unit_list' %}" class="uom-btn" title="Reset filter">↺ Clear</a>
+            {% endif %}
+        </form>
+
+        <!-- TABLE -->
+        <div class="table-responsive">
+            <table class="uom-table">
+                <thead>
+                    <tr>
+                        <th>Unit Name</th>
+                        <th>Short Code</th>
+                        <th>Nepali Name</th>
+                        <th>Products Linked</th>
+                        <th>Decimal Fractions</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for unit in units %}
+                    <tr>
+                        <td>
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="uom-icon-badge">
+                                    {{ unit.code|slice:":2" }}
+                                </div>
+                                <div>
+                                    <div class="fw-bold text-dark fs-sm">{{ unit.name }}</div>
+                                    <small class="text-muted font-monospace">Code: {{ unit.code }}</small>
+                                </div>
+                            </div>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace fw-bold px-2 py-1 fs-xs">
+                                {{ unit.code }}
+                            </span>
+                        </td>
+
+                        <td>
+                            <span class="fw-semibold text-secondary fs-sm">{{ unit.name_np|default:"—" }}</span>
+                        </td>
+
+                        <td>
+                            <a href="{% url 'inventory:product_list' %}" class="badge bg-primary bg-opacity-10 text-primary text-decoration-none fw-bold px-3 py-2 fs-xs">
+                                <i class="fas fa-boxes-stacked me-1"></i> {{ unit.product_count|default:unit.base_products.count }} Products
+                            </a>
+                        </td>
+
+                        <td>
+                            {% if unit.allow_decimal %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold px-2 py-1 fs-xs">
+                                    <i class="fas fa-check-circle me-1"></i> Allowed (e.g. 1.50)
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold px-2 py-1 fs-xs">
+                                    Integer Only (1, 2, 3...)
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-end">
+                            <div class="d-inline-flex gap-2">
+                                <a href="{% url 'inventory:unit_edit' unit.pk %}" class="uom-action-btn" title="Edit Unit Details">
+                                    <i class="fas fa-pen-to-square text-secondary"></i> Edit
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center py-5 text-muted w-100">
+                            <div class="py-4 mx-auto text-center" style="max-width: 400px;">
+                                <i class="fas fa-scale-balanced fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                                <h6 class="fw-bold text-dark mb-1">No Units of Measurement Found</h6>
+                                <p class="text-muted fs-xs mb-3">Click below to register base units like Piece, Set, Pair, or Box.</p>
+                                <button type="button" class="uom-btn uom-btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#addUnitModal">
+                                    <i class="fas fa-plus-circle me-1"></i> Register Base Unit
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- PAGINATION -->
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================
+     REGISTER NEW UNIT MODAL
+     ========================================================= -->
+<div class="modal fade" id="addUnitModal" tabindex="-1" aria-labelledby="addUnitModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <form action="{% url 'inventory:unit_create' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-header bg-primary text-white border-0 py-3">
+                    <h5 class="modal-title fs-6 fw-bold" id="addUnitModalLabel">
+                        <i class="fas fa-scale-balanced me-2"></i> Register Unit of Measurement
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Unit Name <span class="text-danger">*</span></label>
+                        {{ unit_form.name }}
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Short Code <span class="text-danger">*</span></label>
+                            {{ unit_form.code }}
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Nepali Name (वैकल्पिक)</label>
+                            {{ unit_form.name_np }}
+                        </div>
+                    </div>
+                    <div class="form-check form-switch mt-3">
+                        {{ unit_form.allow_decimal }}
+                        <label class="form-check-label fw-semibold fs-xs" for="{{ unit_form.allow_decimal.id_for_label }}">
+                            Allow Decimal / Fractional Quantities (e.g. 1.25 kg, 0.5 meter)
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="uom-btn" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="uom-btn uom-btn-primary">
+                        <i class="fas fa-save me-1"></i> Save Unit
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

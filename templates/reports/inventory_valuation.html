@@ -1,0 +1,173 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Inventory Valuation Report | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-warehouse text-primary me-2"></i> Inventory Valuation &amp; Asset Analysis
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Point-in-time stock valuation comparing historical acquisition landed costs against active retail counter MRP
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <!-- Lock Valuation Snapshot Button -->
+            <form method="post" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold" onclick="return confirm('Lock historical valuation audit snapshot for today?');">
+                    <i class="fas fa-lock me-1"></i> Lock Audit Snapshot
+                </button>
+            </form>
+            <a href="{% url 'reports:export_csv' 'valuation' %}" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-file-csv me-1"></i> Export Valuation CSV
+            </a>
+            <button class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+        </div>
+    </div>
+
+    <!-- Summary KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-md-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-secondary border-4 h-100">
+                <span class="text-muted text-uppercase fw-semibold fs-xs">Total Stock Units</span>
+                <h3 class="fw-extrabold text-dark mt-1 mb-0 font-monospace">{{ total_units_count|floatformat:0|intcomma }}</h3>
+                <small class="text-muted fs-xs">Active sellable inventory items</small>
+            </div>
+        </div>
+        <div class="col-12 col-md-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-dark border-4 h-100">
+                <span class="text-muted text-uppercase fw-semibold fs-xs">Total Asset Value (Cost)</span>
+                <h3 class="fw-extrabold text-dark mt-1 mb-0 font-monospace">Rs. {{ total_cost|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-xs">Capital invested at landed cost</small>
+            </div>
+        </div>
+        <div class="col-12 col-md-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
+                <span class="text-muted text-uppercase fw-semibold fs-xs">Total Asset Value (Retail MRP)</span>
+                <h3 class="fw-extrabold text-primary mt-1 mb-0 font-monospace">Rs. {{ total_retail|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-xs">Gross realizable sales turnover</small>
+            </div>
+        </div>
+        <div class="col-12 col-md-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-success bg-opacity-10 border border-success border-opacity-25 border-4 h-100">
+                <span class="text-success text-uppercase fw-bold fs-xs">Projected Realizable Margin</span>
+                <h3 class="fw-extrabold text-success mt-1 mb-0 font-monospace">Rs. {{ projected_profit|floatformat:2|intcomma }}</h3>
+                <small class="text-success fs-xs fw-bold">{{ average_margin_percent }}% Expected Gross Profit</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-5">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search by Product Name, SKU, Barcode...">
+                </div>
+            </div>
+            <div class="col-6 col-md-4">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Product Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if request.GET.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.category %}
+                <a href="{% url 'reports:inventory_valuation' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Inventory Valuation Table (UI-02 Fixed) -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-boxes-stacked text-primary me-2"></i> Detailed Warehouse Asset Ledger
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:stocks|length }} Stock Lines</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-xs">
+                    <tr>
+                        <th class="ps-4">Product Name / Identifier</th>
+                        <th>Category</th>
+                        <th>Branch</th>
+                        <th class="text-center">Stock Units</th>
+                        <th class="text-end">Cost Rate (NPR)</th>
+                        <th class="text-end">Selling MRP (NPR)</th>
+                        <th class="text-end">Total Cost Value</th>
+                        <th class="text-end pe-4">Total Retail Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stock in stocks %}
+                    <tr>
+                        <td class="ps-4">
+                            <a href="{% url 'inventory:product_detail' stock.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                {{ stock.product.name }}
+                            </a>
+                            <small class="text-muted d-block font-monospace">
+                                SKU: {{ stock.product.sku }}{% if stock.product.barcode %} &bull; {{ stock.product.barcode }}{% endif %}
+                            </small>
+                        </td>
+                        <td><span class="badge bg-light text-dark border">{{ stock.product.category.name|default:"General" }}</span></td>
+                        <td>{{ stock.branch.name }}</td>
+                        <td class="text-center">
+                            <span class="badge bg-{% if stock.is_low_stock %}warning text-dark{% else %}success bg-opacity-10 text-success{% endif %} fw-bold fs-xs font-monospace px-2 py-1">
+                                {{ stock.quantity|floatformat:2 }} {{ stock.product.base_unit.code }}
+                            </span>
+                        </td>
+                        <td class="text-end font-monospace">Rs. {{ stock.product.purchase_price|floatformat:2|intcomma }}</td>
+                        <td class="text-end font-monospace fw-semibold text-primary">Rs. {{ stock.product.selling_price|floatformat:2|intcomma }}</td>
+                        <td class="text-end font-monospace fw-bold text-dark">
+                            Rs. {{ stock.cost_valuation|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-end pe-4 font-monospace fw-bold text-primary">
+                            Rs. {{ stock.retail_valuation|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="fas fa-boxes-stacked fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No stock records found matching the current search and filter parameters.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if stocks %}
+                <tfoot class="bg-light fw-bold fs-xs border-top">
+                    <tr>
+                        <td colspan="3" class="ps-4 text-end text-uppercase text-muted">Total Valuation Summary:</td>
+                        <td class="text-center font-monospace">{{ total_units_count|floatformat:2 }}</td>
+                        <td colspan="2"></td>
+                        <td class="text-end font-monospace text-dark">Rs. {{ total_cost|floatformat:2|intcomma }}</td>
+                        <td class="text-end pe-4 font-monospace text-primary fs-6">Rs. {{ total_retail|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+</div>
+{% endblock %}

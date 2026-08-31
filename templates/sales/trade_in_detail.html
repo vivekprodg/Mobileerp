@@ -1,0 +1,304 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Trade-In Voucher {{ trade_in.voucher_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Circular Diagnostic Score Indicator */
+.score-circle-container {
+    width: 90px;
+    height: 90px;
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+}
+
+.score-circle-svg {
+    transform: rotate(-90deg);
+}
+
+.score-circle-bg {
+    fill: none;
+    stroke: #e2e8f0;
+    stroke-width: 8;
+}
+
+.score-circle-progress {
+    fill: none;
+    stroke: var(--erp-primary);
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s ease;
+}
+
+/* Enlarged KYC Image Gallery (200x200) */
+.kyc-enlarged-img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 1px solid var(--erp-slate-200);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
+}
+.kyc-enlarged-img:hover {
+    transform: scale(1.03);
+    box-shadow: var(--erp-shadow-md);
+}
+
+/* Timeline Stepper */
+.timeline-step {
+    position: relative;
+    padding-bottom: 20px;
+    padding-left: 24px;
+    border-left: 2px solid var(--erp-slate-200);
+}
+.timeline-step:last-child {
+    border-left: 2px solid transparent;
+    padding-bottom: 0;
+}
+.timeline-dot {
+    position: absolute;
+    left: -7px;
+    top: 0;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--erp-primary);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+    <!-- Breadcrumb Navigation -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb fs-xs">
+            <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'sales:trade_in_list' %}" class="text-decoration-none">Phone Exchange Directory</a></li>
+            <li class="breadcrumb-item active font-monospace" aria-current="page">{{ trade_in.voucher_number }}</li>
+        </ol>
+    </nav>
+
+    <!-- Top Header Bar -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0 font-monospace">{{ trade_in.voucher_number }}</h4>
+                <span class="badge bg-{% if trade_in.status == 'RESTOCKED' %}success{% elif trade_in.status == 'ATTACHED_TO_BILL' %}warning text-dark{% else %}primary{% endif %} fs-xs px-3 py-1 rounded-pill">
+                    {{ trade_in.get_status_display }}
+                </span>
+                <span class="badge bg-dark fs-xs px-3 py-1 rounded-pill">
+                    {{ trade_in.get_recommended_condition_grade_display }}
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Device: <strong>{{ trade_in.brand_name }} {{ trade_in.model_name }} ({{ trade_in.storage_capacity }})</strong> | 
+                Customer: <strong>{{ trade_in.customer_name_manual }}</strong> ({{ trade_in.customer_phone_manual }})
+            </p>
+        </div>
+
+        <div class="d-flex gap-2">
+            <a href="{% url 'sales:trade_in_undertaking_print' trade_in.pk %}" target="_blank" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-pdf me-1"></i> Print Police Undertaking (A4)
+            </a>
+            <a href="{% url 'sales:trade_in_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Directory
+            </a>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="row g-4">
+        <!-- Left 8 Cols: Device Profile, Score & Diagnostics -->
+        <div class="col-12 col-lg-8">
+            
+            <!-- Valuation & Device Card -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-mobile-screen text-primary me-2"></i> Traded-In Device & Valuation Summary
+                </h6>
+                <div class="row g-3 fs-sm">
+                    <div class="col-md-6">
+                        <span class="text-muted d-block fs-xs">Device Model:</span>
+                        <strong class="text-dark">{{ trade_in.brand_name }} {{ trade_in.model_name }}</strong>
+                    </div>
+                    <div class="col-md-6">
+                        <span class="text-muted d-block fs-xs">RAM / Storage / Color:</span>
+                        <strong>{{ trade_in.ram_capacity|default:"-" }} / {{ trade_in.storage_capacity }} ({{ trade_in.color_variant|default:"Standard" }})</strong>
+                    </div>
+                    <div class="col-md-6">
+                        <span class="text-muted d-block fs-xs">Primary IMEI 1:</span>
+                        <strong class="font-monospace text-primary">{{ trade_in.imei_1 }}</strong>
+                    </div>
+                    <div class="col-md-6">
+                        <span class="text-muted d-block fs-xs">NTA MDMS Status:</span>
+                        <strong>{{ trade_in.get_mdms_status_display }}</strong>
+                    </div>
+                </div>
+
+                <hr class="my-3 text-muted">
+
+                <div class="row g-3 text-center">
+                    <div class="col-4 p-2 bg-light rounded-3">
+                        <span class="text-muted fs-2xs text-uppercase d-block">Benchmark Market Value</span>
+                        <strong class="fs-6 text-dark font-monospace">Rs. {{ trade_in.market_base_value|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <div class="col-4 p-2 bg-light rounded-3">
+                        <span class="text-muted fs-2xs text-uppercase d-block">Defect Penalties</span>
+                        <strong class="fs-6 text-danger font-monospace">-Rs. {{ trade_in.total_deductions|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <div class="col-4 p-2 bg-primary bg-opacity-10 rounded-3 text-primary">
+                        <span class="fs-2xs text-uppercase fw-bold d-block">Final Buy-Back Credit</span>
+                        <strong class="fs-5 fw-bold font-monospace">Rs. {{ trade_in.final_trade_in_value|floatformat:2|intcomma }}</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 10-Point Technical Diagnostic Audit with Visual Circular Meter -->
+            {% if checklist %}
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <!-- Circular Score Meter -->
+                        <div class="score-circle-container">
+                            <svg class="score-circle-svg" width="80" height="80">
+                                <circle class="score-circle-bg" cx="40" cy="40" r="32" />
+                                <circle class="score-circle-progress" cx="40" cy="40" r="32"
+                                        stroke-dasharray="201.06"
+                                        stroke-dashoffset="{{ 201.06|floatformat:2 }}"
+                                        id="scoreProgressSvg" />
+                            </svg>
+                            <span class="position-absolute fw-bold fs-6 font-monospace" id="scoreValueText">
+                                {{ checklist.diagnostic_score_percent|floatformat:0 }}%
+                            </span>
+                        </div>
+                        <div>
+                            <h6 class="fw-bold text-dark mb-0">10-Point Diagnostic Condition Score</h6>
+                            <small class="text-muted fs-xs">Automated hardware and visual test performance</small>
+                        </div>
+                    </div>
+                    <span class="badge bg-primary fs-xs px-3 py-1 rounded-pill">{{ trade_in.get_recommended_condition_grade_display }}</span>
+                </div>
+
+                <div class="row g-2 fs-xs">
+                    <div class="col-md-6 p-2 border-bottom">1. Touch / Display: <strong>{{ checklist.get_touch_and_display_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">2. Cameras: <strong>{{ checklist.get_front_and_back_cameras_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">3. Battery / Charging: <strong>{{ checklist.get_charging_and_battery_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">4. Wi-Fi / Bluetooth: <strong>{{ checklist.get_wifi_bluetooth_gps_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">5. Mic & Speakers: <strong>{{ checklist.get_cellular_calling_mic_speaker_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">6. Biometrics: <strong>{{ checklist.get_biometrics_security_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">7. Body Frame: <strong>{{ checklist.get_body_frame_condition_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">8. Liquid LDI: <strong>{{ checklist.get_liquid_ingress_ldi_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">9. In-Box Items: <strong>{{ checklist.get_original_accessories_available_display }}</strong></div>
+                    <div class="col-md-6 p-2 border-bottom">10. Account Reset: <strong>{{ checklist.get_account_lock_factory_reset_display }}</strong></div>
+                </div>
+            </div>
+            {% endif %}
+
+        </div>
+
+        <!-- Right 4 Cols: Enlarged KYC Photos (200x200), POS Link & Timeline -->
+        <div class="col-12 col-lg-4">
+            
+            <!-- Prominent Linked Sales Estimate Card -->
+            {% if trade_in.pos_estimate %}
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-success bg-opacity-10 border border-success border-opacity-25 mb-4">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="badge bg-success text-white p-2 rounded-circle fs-6"><i class="fas fa-check"></i></span>
+                    <h6 class="fw-bold text-dark mb-0">Attached to POS Estimate</h6>
+                </div>
+                <p class="fs-xs mb-1">Estimate Number: <strong class="font-monospace text-primary">{{ trade_in.pos_estimate.estimate_number }}</strong></p>
+                <p class="fs-xs mb-2">Credit Deducted: <strong class="text-success font-monospace">Rs. {{ trade_in.final_trade_in_value|floatformat:2|intcomma }}</strong></p>
+                <a href="{% url 'sales:estimate_thermal_slip' trade_in.pos_estimate.pk %}" target="_blank" class="btn btn-outline-success btn-sm w-100 rounded-pill fw-bold">
+                    <i class="fas fa-print me-1"></i> View Thermal Receipt
+                </a>
+            </div>
+            {% endif %}
+
+            <!-- Police-Compliant Customer KYC Card with 200x200 Photos -->
+            {% if undertaking %}
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-id-card text-danger me-2"></i> Police-Compliant KYC Documents
+                </h6>
+                <div class="fs-xs mb-3">
+                    <div class="mb-1">Customer: <strong>{{ undertaking.customer_full_name }}</strong></div>
+                    <div class="mb-1">ID Document: <strong>{{ undertaking.get_id_type_display }} ({{ undertaking.id_number }})</strong></div>
+                    <div class="mb-1">District: <strong>{{ undertaking.id_issued_district }}</strong></div>
+                    <div>Address: <strong>{{ undertaking.permanent_address }}</strong></div>
+                </div>
+
+                <!-- 200x200 KYC Gallery -->
+                <div class="row g-2 mb-3">
+                    {% if undertaking.customer_live_photo %}
+                    <div class="col-6">
+                        <small class="text-muted d-block fs-2xs mb-1">Customer Live Photo:</small>
+                        <img src="{{ undertaking.customer_live_photo.url }}" class="kyc-enlarged-img" onclick="window.open(this.src)">
+                    </div>
+                    {% endif %}
+                    {% if undertaking.id_front_image %}
+                    <div class="col-6">
+                        <small class="text-muted d-block fs-2xs mb-1">Citizenship / NID Front:</small>
+                        <img src="{{ undertaking.id_front_image.url }}" class="kyc-enlarged-img" onclick="window.open(this.src)">
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="d-grid">
+                    <a href="{% url 'sales:trade_in_undertaking_print' trade_in.pk %}" target="_blank" class="btn btn-danger btn-sm rounded-pill fw-bold shadow-xs">
+                        <i class="fas fa-print me-1"></i> Print Legal Undertaking Form
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Trade-In Status Timeline -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-timeline text-secondary me-2"></i> Transaction Progress Timeline
+                </h6>
+                <div class="ps-2">
+                    <div class="timeline-step">
+                        <div class="timeline-dot"></div>
+                        <strong class="fs-xs text-dark d-block">1. Diagnostic Intake & Inspection</strong>
+                        <small class="text-muted fs-2xs">{{ trade_in.created_at|date:"M d, Y H:i" }}</small>
+                    </div>
+                    <div class="timeline-step">
+                        <div class="timeline-dot" style="background: {% if trade_in.status != 'DRAFT' %}#2563eb{% else %}#cbd5e1{% endif %};"></div>
+                        <strong class="fs-xs text-dark d-block">2. Valuation Offer Generated</strong>
+                        <small class="text-muted fs-2xs">Rs. {{ trade_in.final_trade_in_value|floatformat:2 }}</small>
+                    </div>
+                    <div class="timeline-step">
+                        <div class="timeline-dot" style="background: {% if trade_in.status == 'ATTACHED_TO_BILL' or trade_in.status == 'RESTOCKED' %}#10b981{% else %}#cbd5e1{% endif %};"></div>
+                        <strong class="fs-xs text-dark d-block">3. Deducted on POS Cart</strong>
+                        <small class="text-muted fs-2xs">{% if trade_in.pos_estimate %}{{ trade_in.pos_estimate.estimate_number }}{% else %}Pending POS sale{% endif %}</small>
+                    </div>
+                    <div class="timeline-step">
+                        <div class="timeline-dot" style="background: {% if trade_in.status == 'RESTOCKED' %}#10b981{% else %}#cbd5e1{% endif %};"></div>
+                        <strong class="fs-xs text-dark d-block">4. Added to Pre-Owned Stock</strong>
+                        <small class="text-muted fs-2xs">{% if trade_in.status == 'RESTOCKED' %}Active In-Stock{% else %}Awaiting restock{% endif %}</small>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Dynamic circular progress animation
+    const scoreVal = parseFloat("{{ checklist.diagnostic_score_percent|default:'100' }}") || 0;
+    const circle = document.getElementById('scoreProgressSvg');
+    if (circle) {
+        const radius = 32;
+        const circumference = 2 * Math.PI * radius;
+        const offset = circumference - (scoreVal / 100) * circumference;
+        circle.style.strokeDasharray = `${circumference} ${circumference}`;
+        circle.style.strokeDashoffset = offset;
+    }
+});
+</script>
+{% endblock %}

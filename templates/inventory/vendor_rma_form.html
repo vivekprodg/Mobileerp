@@ -1,0 +1,112 @@
+{% extends "core/base.html" %}
+
+{% block title %}New Vendor RMA Claim Dispatch | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1200px;">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-truck-ramp-box text-primary me-2"></i> Batch Defective Parts for Vendor RMA
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Select defective spare parts in quarantine and generate an official distributor delivery challan
+            </p>
+        </div>
+        <a href="{% url 'inventory:vendor_rma_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+            &larr; Back to RMA List
+        </a>
+    </div>
+
+    <form method="post" id="rmaDispatchForm">
+        {% csrf_token %}
+        <div class="row g-4">
+            <div class="col-12 col-lg-5">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">Distributor Information</h6>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Distributor / Supplier <span class="text-danger">*</span></label>
+                        {{ form.supplier }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Distributor Service Center Lab</label>
+                        {{ form.distributor_service_center }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Courier AWB / Delivery Challan Ref</label>
+                        {{ form.distributor_tracking_ref }}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Dispatch Notes</label>
+                        {{ form.resolution_notes }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-7">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">Select Defective Quarantine Items</h6>
+                    <div class="p-3 bg-light rounded-3 border mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="selectAllRmaItems">
+                            <label class="form-check-label fw-bold fs-xs text-dark" for="selectAllRmaItems">Select All Defective Parts in Quarantine</label>
+                        </div>
+                    </div>
+                    <div class="table-responsive" style="max-height: 420px; overflow-y: auto;">
+                        <table class="table table-hover align-middle mb-0 fs-xs">
+                            <thead class="bg-light text-muted text-uppercase">
+                                <tr>
+                                    <th style="width: 40px;"></th>
+                                    <th>Part / Product</th>
+                                    <th>Serial / Barcode</th>
+                                    <th>Defect Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for part in pending_defective_parts %}
+                                <tr>
+                                    <td>
+                                        <!-- Transmits unique RepairReplacedPart instance ID -->
+                                        <input type="checkbox" name="selected_parts" value="{{ part.id }}" class="form-check-input rma-item-check" checked>
+                                    </td>
+                                    <td>
+                                        <strong>{{ part.spare_part_product.name }}</strong>
+                                        <small class="text-muted d-block">Ticket: {{ part.ticket.ticket_number }}</small>
+                                    </td>
+                                    <td>
+                                        <input type="text" name="serial_{{ part.id }}" value="{{ part.old_part_serial_or_batch|default:part.ticket.imei_or_serial }}" class="form-control form-control-sm font-monospace">
+                                    </td>
+                                    <td>
+                                        <input type="text" name="defect_{{ part.id }}" value="Genuine Factory Defect under Warranty" class="form-control form-control-sm">
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="4" class="text-center py-4 text-muted">No defective quarantined parts currently available.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-grid mt-4">
+                        <button type="submit" class="btn btn-primary btn-lg rounded-pill fw-bold shadow-sm">
+                            <i class="fas fa-paper-plane me-1"></i> Generate RMA Challan &amp; Dispatch
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const selectAll = document.getElementById('selectAllRmaItems');
+    if (selectAll) {
+        selectAll.addEventListener('change', (e) => {
+            document.querySelectorAll('.rma-item-check').forEach(cb => cb.checked = e.target.checked);
+        });
+    }
+});
+</script>
+{% endblock %}

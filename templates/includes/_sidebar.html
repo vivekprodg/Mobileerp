@@ -1,0 +1,266 @@
+<div class="p-3 d-flex flex-column h-100 w-100 overflow-hidden">
+    <!-- Sidebar Meta Header (Desktop only) -->
+    <div class="d-flex align-items-center justify-content-between pb-2 mb-2 border-bottom flex-shrink-0 nav-header">
+        <span class="text-uppercase fs-2xs fw-bold text-muted tracking-wider text-truncate" title="{{ COMPANY_NAME }}">
+            {{ COMPANY_NAME|truncatechars:18 }}
+        </span>
+        <span class="badge bg-success bg-opacity-10 text-success rounded-pill px-2 py-1 fs-2xs">
+            <i class="fas fa-circle fs-2xs me-1"></i> Live
+        </span>
+    </div>
+
+    <!-- Navigation Scroll Container -->
+    <ul class="nav nav-pills d-flex flex-column flex-nowrap w-100 gap-1 flex-grow-1 overflow-y-auto overflow-x-hidden list-unstyled m-0 p-0">
+        
+        <!-- 1. Central Dashboard -->
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'core:dashboard' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'core' and request.resolver_match.url_name == 'dashboard' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm fw-semibold w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Dashboard">
+                <i class="fas fa-chart-pie fa-fw text-primary"></i> 
+                <span class="nav-text">Dashboard</span>
+            </a>
+        </li>
+
+        <!-- 2. Fast POS Terminal Hero Item -->
+        <li class="nav-item w-100 flex-shrink-0 my-1">
+            <a href="{% url 'sales:pos_terminal' %}" 
+               class="nav-link text-dark bg-warning bg-opacity-25 fw-bold d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100 border border-warning border-opacity-50 shadow-xs"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="POS Billing Terminal">
+                <i class="fas fa-cash-register fa-fw text-warning-emphasis"></i> 
+                <span class="nav-text">POS Billing</span>
+                <span class="badge bg-warning text-dark ms-auto fs-2xs badge-hide-collapsed">FAST</span>
+            </a>
+        </li>
+
+        <!-- SECTION: Trade-In & Exchange -->
+        <li class="nav-item w-100 flex-shrink-0 mt-2">
+            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Trade-In &amp; Exchange</h6>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'sales:trade_in_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'sales' and 'trade_in' in request.resolver_match.url_name and request.resolver_match.url_name != 'trade_in_wizard' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Trade-In Vouchers">
+                <i class="fas fa-repeat fa-fw text-warning-emphasis"></i> 
+                <span class="nav-text">Phone Exchange / Trade-In</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'sales:trade_in_wizard' %}" 
+               class="nav-link {% if request.resolver_match.url_name == 'trade_in_wizard' %}active text-white bg-primary{% else %}text-dark bg-primary bg-opacity-10{% endif %} fw-semibold d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Valuation Wizard">
+                <i class="fas fa-calculator fa-fw text-primary"></i> 
+                <span class="nav-text">Buy-Back Wizard</span>
+            </a>
+        </li>
+
+        <!-- SECTION: Service Workshop & Warranty -->
+        <li class="nav-item w-100 flex-shrink-0 mt-2">
+            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Service Workshop</h6>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'repairs:dashboard' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'dashboard' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Repair Workshop Queue">
+                <i class="fas fa-screwdriver-wrench fa-fw text-warning-emphasis"></i> 
+                <span class="nav-text">Repair Workshop Queue</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'repairs:ticket_create' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'ticket_create' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Intake Inspection Desk">
+                <i class="fas fa-clipboard-check fa-fw text-primary"></i> 
+                <span class="nav-text">Intake Inspection Desk</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'repairs:optical_desk' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'optical_desk' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Optical Prescription Desk">
+                <i class="fas fa-glasses fa-fw text-info"></i> 
+                <span class="nav-text">Optical &amp; Eyewear Desk</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'inventory:vendor_rma_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'inventory' and 'rma' in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Vendor RMA Claims">
+                <i class="fas fa-truck-ramp-box fa-fw text-danger"></i> 
+                <span class="nav-text">Vendor RMA Claims</span>
+            </a>
+        </li>
+
+        <!-- SECTION: Catalog & Contacts -->
+        <li class="nav-item w-100 flex-shrink-0 mt-2">
+            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Catalog &amp; Contacts</h6>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'inventory:product_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'inventory' and 'category' not in request.resolver_match.url_name and 'rma' not in request.resolver_match.url_name and 'unit' not in request.resolver_match.url_name and 'imei_registry' not in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Inventory Catalog">
+                <i class="fas fa-boxes-stacked fa-fw text-secondary"></i> 
+                <span class="nav-text">Inventory Catalog</span>
+            </a>
+        </li>
+
+        <!-- Central IMEI & Serial Registry -->
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'inventory:imei_registry' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'inventory' and request.resolver_match.url_name == 'imei_registry' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="IMEI &amp; Serial Registry">
+                <i class="fas fa-barcode fa-fw text-primary"></i> 
+                <span class="nav-text">IMEI &amp; Serial Registry</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'inventory:unit_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'inventory' and 'unit' in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Units of Measurement">
+                <i class="fas fa-scale-balanced fa-fw text-secondary"></i> 
+                <span class="nav-text">Units of Measurement (UOM)</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'inventory:category_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'inventory' and 'category' in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Categories">
+                <i class="fas fa-tags fa-fw text-secondary"></i> 
+                <span class="nav-text">Product Categories</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'customers:customer_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'customers' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Customers &amp; Udhaari">
+                <i class="fas fa-users fa-fw text-secondary"></i> 
+                <span class="nav-text">Customers &amp; Udhaari</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'purchases:grn_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'purchases' and request.resolver_match.url_name == 'grn_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Purchases &amp; GRN">
+                <i class="fas fa-truck-ramp-box fa-fw text-secondary"></i> 
+                <span class="nav-text">Purchases &amp; GRN</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'purchases:supplier_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'purchases' and request.resolver_match.url_name == 'supplier_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Suppliers">
+                <i class="fas fa-building-user fa-fw text-secondary"></i> 
+                <span class="nav-text">Suppliers Directory</span>
+            </a>
+        </li>
+
+        <!-- SECTION: Operations & Registers -->
+        <li class="nav-item w-100 flex-shrink-0 mt-2">
+            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Operations &amp; Reports</h6>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'sales:estimate_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'sales' and request.resolver_match.url_name == 'estimate_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Estimation Slips">
+                <i class="fas fa-receipt fa-fw text-secondary"></i> 
+                <span class="nav-text">Estimation Slips</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'sales:return_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'sales' and 'return' in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Sales Returns &amp; Exchanges">
+                <i class="fas fa-rotate-left fa-fw text-danger"></i> 
+                <span class="nav-text">Sales Returns &amp; Exchanges</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'branches:transfer_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'branches' and request.resolver_match.url_name == 'transfer_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Branch Transfers">
+                <i class="fas fa-dolly fa-fw text-secondary"></i> 
+                <span class="nav-text">Branch Transfers</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'reports:daily_sales' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'reports' and request.resolver_match.url_name == 'daily_sales' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Daily Sales &amp; Gross Profit">
+                <i class="fas fa-chart-line fa-fw text-secondary"></i> 
+                <span class="nav-text">Sales &amp; Margin Reports</span>
+            </a>
+        </li>
+
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'taxation:dashboard' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'taxation' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Tax &amp; Proforma Books">
+                <i class="fas fa-calculator fa-fw text-secondary"></i> 
+                <span class="nav-text">Proforma / Tax Books</span>
+            </a>
+        </li>
+
+        <!-- Administrator Controls (Accessible to Super Admin, Owners, and Branch Managers) -->
+        {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
+        <li class="nav-item w-100 flex-shrink-0 mt-2">
+            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Administration</h6>
+        </li>
+
+        <!-- Store Outlets: Accessible to Central Super Admins & Owners -->
+        {% if user.is_superuser or user.role == 'OWNER' %}
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'branches:branch_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'branches' and request.resolver_match.url_name == 'branch_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Store Outlets &amp; Branding">
+                <i class="fas fa-store fa-fw text-primary"></i> 
+                <span class="nav-text">Store Outlets</span>
+            </a>
+        </li>
+
+        <!-- Forensic Security Audit Logs -->
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'core:audit_logs' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'core' and request.resolver_match.url_name == 'audit_logs' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Security Audit Logs">
+                <i class="fas fa-fingerprint fa-fw text-danger"></i> 
+                <span class="nav-text">Security Audit Logs</span>
+            </a>
+        </li>
+        {% endif %}
+
+        <!-- Staff Accounts -->
+        <li class="nav-item w-100 flex-shrink-0">
+            <a href="{% url 'users:user_list' %}" 
+               class="nav-link {% if request.resolver_match.app_name == 'users' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
+               data-bs-toggle="tooltip" data-bs-placement="right" title="Staff Accounts">
+                <i class="fas fa-user-shield fa-fw text-secondary"></i> 
+                <span class="nav-text">Staff &amp; Roles</span>
+            </a>
+        </li>
+        {% endif %}
+    </ul>
+
+    <!-- Non-IRD Disclaimer Footer Badge -->
+    <div class="mt-auto pt-2 border-top text-center flex-shrink-0 w-100 sidebar-footer-disclaimer">
+        <div class="badge bg-warning bg-opacity-10 text-dark border border-warning border-opacity-25 w-100 py-2 fs-2xs lh-sm text-wrap">
+            <i class="fas fa-file-invoice text-warning me-1"></i> Proforma Mode<br>
+            <span class="text-muted" style="font-size: 0.65rem;">Non-IRD Estimate Voucher</span>
+        </div>
+    </div>
+</div>

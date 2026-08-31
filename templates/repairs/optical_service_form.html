@@ -1,0 +1,411 @@
+{% extends "core/base.html" %}
+{% load static humanize %}
+
+{% block title %}Optical &amp; Eyewear Prescription Service Desk | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.prescription-matrix-card {
+    background: linear-gradient(145deg, #f8fafc 0%, #eff6ff 100%);
+    border: 2px solid #bfdbfe;
+    border-radius: 16px;
+    padding: 20px;
+}
+
+.prescription-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+.prescription-table th {
+    background: #1e293b;
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 10px 8px;
+    text-align: center;
+}
+
+.prescription-table td {
+    padding: 8px;
+    vertical-align: middle;
+    border: 1px solid #e2e8f0;
+}
+
+.eye-label-badge {
+    font-weight: 800;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    display: inline-block;
+    min-width: 65px;
+    text-align: center;
+}
+
+.rx-num-input {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.optical-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 14px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+    
+    <!-- Top Action Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-glasses text-primary me-2"></i> Optical &amp; Eyewear Prescription Service Desk
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Ophthalmic prescription power entry (OD/OS SPH, CYL, AXIS, ADD, PD), lens cutting &amp; fitting, frame alignments, and coating claims
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'repairs:dashboard' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Workshop Queue
+            </a>
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs">
+                <i class="fas fa-cash-register me-1"></i> Open POS Terminal
+            </a>
+        </div>
+    </div>
+
+    <!-- 3 High-Priority Optical KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-md-4">
+            <div class="optical-kpi-card h-100 border-start border-primary border-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Active Eyewear Jobs</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle"><i class="fas fa-glasses fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">{{ kpi_active_jobs|default:"0" }}</h3>
+                <small class="text-muted fs-xs">In-lab lens fitting or alignment</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <div class="optical-kpi-card h-100 border-start border-warning border-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Lens Cutting &amp; Fitting</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle"><i class="fas fa-screwdriver fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">{{ kpi_fitting_jobs|default:"0" }}</h3>
+                <small class="text-muted fs-xs">Prescription cutting queued</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <div class="optical-kpi-card h-100 border-start border-success border-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Ready for Customer Pickup</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle"><i class="fas fa-check-double fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">{{ kpi_ready_jobs|default:"0" }}</h3>
+                <small class="text-muted fs-xs">Assembled &amp; verified</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Validation Banner -->
+    {% if form.errors %}
+    <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
+        <h6 class="fw-bold text-danger mb-2"><i class="fas fa-exclamation-triangle me-2"></i> Please correct the form submission errors:</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <ul class="mb-0 fs-xs ps-3">
+            {% for field in form %}{% for err in field.errors %}<li><strong>{{ field.label }}:</strong> {{ err }}</li>{% endfor %}{% endfor %}
+            {% for err in form.non_field_errors %}<li>{{ err }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <!-- =========================================================================
+         SECTION 1: NEW OPTICAL PRESCRIPTION ORDER FORM
+         ========================================================================= -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4">
+            <div>
+                <h5 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-file-prescription text-primary me-2"></i> Book New Eyewear &amp; Prescription Lens Job
+                </h5>
+                <small class="text-muted">Enter ophthalmic prescription values (OD/OS), lens coating type, and frame information.</small>
+            </div>
+            <span class="badge bg-primary px-3 py-2 rounded-pill fs-xs">
+                Outlet: {{ active_branch.name }}
+            </span>
+        </div>
+
+        <form method="post" id="opticalServiceMasterForm" novalidate>
+            {% csrf_token %}
+
+            <div class="row g-4 mb-4">
+                <!-- Customer Details & Service Mode -->
+                <div class="col-12 col-lg-6">
+                    <div class="p-3 bg-light rounded-3 border h-100">
+                        <h6 class="fw-bold text-dark fs-xs mb-3 text-uppercase" style="letter-spacing: .05em;">
+                            <i class="fas fa-user text-primary me-1"></i> Customer &amp; Service Type
+                        </h6>
+
+                        <div class="row g-3">
+                            <div class="col-12 col-md-6">
+                                <label class="form-label fw-bold text-dark fs-xs">Customer Name <span class="text-danger">*</span></label>
+                                <input type="text" name="customer_name_manual" class="form-control" placeholder="e.g. Anil Shrestha" required>
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label fw-bold text-dark fs-xs">Mobile Number <span class="text-danger">*</span></label>
+                                <input type="text" name="customer_phone_manual" class="form-control font-monospace" placeholder="98XXXXXXXX" required>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-bold text-dark fs-xs">Eyewear Service Type <span class="text-danger">*</span></label>
+                                {{ form.service_type }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Frame & Lens Details -->
+                <div class="col-12 col-lg-6">
+                    <div class="p-3 bg-light rounded-3 border h-100">
+                        <h6 class="fw-bold text-dark fs-xs mb-3 text-uppercase" style="letter-spacing: .05em;">
+                            <i class="fas fa-glasses text-info me-1"></i> Frame &amp; Lens Specifications
+                        </h6>
+
+                        <div class="row g-3">
+                            <div class="col-12 col-md-6">
+                                <label class="form-label fw-bold text-dark fs-xs">Frame Brand &amp; Model</label>
+                                {{ form.frame_brand_and_model }}
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label fw-bold text-dark fs-xs">Or Select Frame from Stock</label>
+                                <select name="frame_product_id" class="form-select">
+                                    <option value="">-- Customer Provided Frame --</option>
+                                    {% for opt_prod in optical_products %}
+                                        <option value="{{ opt_prod.id }}">{{ opt_prod.name }} (Rs. {{ opt_prod.selling_price }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-bold text-dark fs-xs">Lens Coating / Material Description</label>
+                                {{ form.lens_type_description }}
+                                <small class="text-muted fs-2xs mt-1 d-block">e.g. 1.56 BlueCut Anti-Glare Green ARC / 1.61 Polycarbonate Progressive</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OPHTHALMIC PRESCRIPTION POWER MATRIX (OD / OS) -->
+            <div class="prescription-matrix-card mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-eye text-primary me-2"></i> Ophthalmic Prescription Power Matrix
+                    </h6>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="form-label fw-bold text-dark fs-xs mb-0">Pupillary Distance (PD):</label>
+                        <div style="width: 100px;">
+                            {{ form.pupillary_distance_pd }}
+                        </div>
+                        <span class="text-muted fs-xs fw-bold">mm</span>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="prescription-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 15%;">Eye</th>
+                                <th style="width: 21%;">Sphere (SPH)</th>
+                                <th style="width: 21%;">Cylinder (CYL)</th>
+                                <th style="width: 21%;">Axis (&deg;)</th>
+                                <th style="width: 22%;">Addition (ADD)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Right Eye (OD) Row -->
+                            <tr>
+                                <td class="text-center">
+                                    <span class="eye-label-badge bg-primary text-white">
+                                        OD (Right)
+                                    </span>
+                                </td>
+                                <td>{{ form.right_eye_sph }}</td>
+                                <td>{{ form.right_eye_cyl }}</td>
+                                <td>{{ form.right_eye_axis }}</td>
+                                <td>{{ form.right_eye_add }}</td>
+                            </tr>
+
+                            <!-- Left Eye (OS) Row -->
+                            <tr>
+                                <td class="text-center">
+                                    <span class="eye-label-badge bg-info text-white">
+                                        OS (Left)
+                                    </span>
+                                </td>
+                                <td>{{ form.left_eye_sph }}</td>
+                                <td>{{ form.left_eye_cyl }}</td>
+                                <td>{{ form.left_eye_axis }}</td>
+                                <td>{{ form.left_eye_add }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Financial Charges & Optician Allocation -->
+            <div class="row g-3 mb-4">
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Lens Price (NPR)</label>
+                    <input type="number" step="0.01" name="lens_price" id="opticalLensPriceInput" class="form-control font-monospace" placeholder="e.g. 1200.00" value="0.00">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Fitting / Service Charge (NPR)</label>
+                    <input type="number" step="0.01" name="service_charge" id="opticalServiceFeeInput" class="form-control font-monospace" placeholder="e.g. 300.00" value="0.00">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Expected Delivery Date</label>
+                    <input type="date" name="expected_delivery_date" class="form-control">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Assigned Optometrist / Technician</label>
+                    <select name="technician_id" class="form-select">
+                        <option value="">-- Assign Technician --</option>
+                        {% for tech in technicians %}
+                            <option value="{{ tech.id }}">{{ tech.get_full_name|default:tech.username }} ({{ tech.get_role_display }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-bold text-dark fs-xs">Additional Service Remarks / Customer Notes</label>
+                    <textarea name="reported_fault" class="form-control" rows="2" placeholder="Frame fitting adjustments, bridge tightening, or specific coating instructions..."></textarea>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2">
+                <button type="reset" class="btn btn-outline-secondary px-4 rounded-pill">Reset</button>
+                <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm">
+                    <i class="fas fa-check-circle me-1"></i> Book Optical Prescription Order
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- =========================================================================
+         SECTION 2: COMPREHENSIVE OPTICAL ORDERS REGISTRY TABLE
+         ========================================================================= -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-book-open text-primary me-2"></i> Optical Service &amp; Prescription Records
+            </h6>
+            <span class="badge bg-primary rounded-pill">{{ optical_tickets|length }} Orders Registered</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-xs">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-3">Ticket No</th>
+                        <th>Customer</th>
+                        <th>Service Type</th>
+                        <th>Frame &amp; Lens Profile</th>
+                        <th>Right Eye (OD) Rx</th>
+                        <th>Left Eye (OS) Rx</th>
+                        <th>PD (mm)</th>
+                        <th>Total Fee</th>
+                        <th>Status</th>
+                        <th class="text-end pe-3">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for opt in optical_tickets %}
+                    <tr>
+                        <td class="ps-3 font-monospace fw-bold">
+                            <a href="{% url 'repairs:ticket_detail' opt.ticket.pk %}" class="text-decoration-none text-primary">
+                                {{ opt.ticket.ticket_number }}
+                            </a>
+                            <small class="text-muted d-block" style="font-size: 0.65rem;">{{ opt.ticket.created_at|date:"M d, H:i" }}</small>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ opt.ticket.customer_name_manual }}</strong>
+                            <small class="text-muted d-block"><i class="fas fa-phone fs-2xs me-1"></i>{{ opt.ticket.customer_phone_manual }}</small>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border">{{ opt.get_service_type_display }}</span>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ opt.frame_brand_and_model|default:opt.ticket.product.name }}</strong>
+                            {% if opt.lens_type_description %}
+                                <small class="text-muted d-block">{{ opt.lens_type_description|truncatechars:30 }}</small>
+                            {% endif %}
+                        </td>
+
+                        <td class="font-monospace">
+                            <span class="text-primary fw-bold">SPH: {{ opt.right_eye_sph }}</span><br>
+                            CYL: {{ opt.right_eye_cyl }} &bull; {{ opt.right_eye_axis }}&deg;
+                            {% if opt.right_eye_add %}<br><span class="text-muted">ADD: +{{ opt.right_eye_add }}</span>{% endif %}
+                        </td>
+
+                        <td class="font-monospace">
+                            <span class="text-info fw-bold">SPH: {{ opt.left_eye_sph }}</span><br>
+                            CYL: {{ opt.left_eye_cyl }} &bull; {{ opt.left_eye_axis }}&deg;
+                            {% if opt.left_eye_add %}<br><span class="text-muted">ADD: +{{ opt.left_eye_add }}</span>{% endif %}
+                        </td>
+
+                        <td class="fw-bold font-monospace text-center">{{ opt.pupillary_distance_pd }}</td>
+
+                        <td class="fw-bold font-monospace">
+                            Rs. {{ opt.ticket.final_total_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <td>
+                            <span class="badge bg-{% if opt.ticket.service_status == 'READY_FOR_PICKUP' %}success{% elif opt.ticket.service_status == 'DELIVERED' %}secondary{% else %}primary{% endif %} fs-2xs px-2 py-1 rounded-pill">
+                                {{ opt.ticket.get_service_status_display }}
+                            </span>
+                        </td>
+
+                        <td class="text-end pe-3">
+                            <div class="d-inline-flex gap-1">
+                                <a href="{% url 'repairs:ticket_detail' opt.ticket.pk %}" class="btn btn-primary btn-sm rounded-pill px-3 shadow-xs" title="Open Technician Workbench">
+                                    <i class="fas fa-wrench me-1"></i> Workbench
+                                </a>
+                                <a href="{% url 'repairs:claim_token_print' opt.ticket.pk %}" target="_blank" class="btn btn-outline-dark btn-sm rounded-circle p-2" title="Print Claim Token (80mm)">
+                                    <i class="fas fa-print"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center py-5 text-muted">
+                            <i class="fas fa-glasses fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No optical eyewear jobs registered yet. Use the form above to book a new prescription order.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,269 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Sales, Revenue &amp; Gross Profit Realization | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.report-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.growth-badge {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1560px;">
+    <!-- Page Header & Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-chart-line text-primary me-2"></i> Sales, Revenue &amp; Gross Profit Realization
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Calculates net sales revenue, returns deductions, landed COGS, and realized gross profit over custom date ranges
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{% url 'reports:export_csv' 'sales' %}?start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-file-csv me-1"></i> Export Sales CSV
+            </a>
+            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Report
+            </button>
+        </div>
+    </div>
+
+    <!-- Date Range & Growth Comparison Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-xs fw-bold text-dark mb-1">Start Date (AD) <span class="text-danger">*</span></label>
+                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm bg-light border-0 fw-semibold" required>
+            </div>
+
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-xs fw-bold text-dark mb-1">End Date (AD) <span class="text-danger">*</span></label>
+                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm bg-light border-0 fw-semibold" required>
+            </div>
+
+            <div class="col-12 col-md-3">
+                <div class="form-check form-switch pb-1">
+                    <input class="form-check-input" type="checkbox" name="compare" value="true" id="comparePeriodCheck" {% if compare_period %}checked{% endif %}>
+                    <label class="form-check-label fs-xs fw-bold text-dark" for="comparePeriodCheck">
+                        Compare with Previous Period
+                    </label>
+                </div>
+                <small class="text-muted fs-2xs d-block">Evaluates sales &amp; margin growth against preceding days</small>
+            </div>
+
+            <div class="col-12 col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm w-100 rounded-3 fw-bold py-2 shadow-xs">
+                    <i class="fas fa-filter me-1"></i> Calculate Analytics
+                </button>
+                <a href="{% url 'reports:daily_sales' %}" class="btn btn-outline-secondary btn-sm rounded-3 py-2" title="Reset to Today">↺ Today</a>
+            </div>
+        </form>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-3 border-top fs-2xs text-muted">
+            <div>
+                Query Scope: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong> 
+                &bull; BS: <strong>{{ start_date_bs }}</strong> to <strong>{{ end_date_bs }} BS</strong>
+            </div>
+            <div>
+                Active Outlet: <strong class="text-dark">{{ ACTIVE_BRANCH.name|default:"All Outlets" }}</strong>
+                <span class="badge bg-light text-dark border ms-2">Mode: {{ SHOP_TAX_MODE }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Comparative Growth Banner (Rendered when compare=true) -->
+    {% if comparison_data %}
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-primary bg-opacity-10 border border-primary border-opacity-25 mb-4">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+            <div>
+                <span class="badge bg-primary text-white px-2 py-1 rounded-pill fs-2xs mb-1">Comparative Growth Analysis</span>
+                <h5 class="fw-bold text-dark mb-1">
+                    Compared against Previous Period ({{ comparison_data.prev_start }} to {{ comparison_data.prev_end }})
+                </h5>
+                <div class="fs-xs text-muted">
+                    Previous Net Turnover: <strong class="font-monospace text-dark">Rs. {{ comparison_data.prev_sales|floatformat:2|intcomma }}</strong> &bull; 
+                    Previous Invoices: <strong class="text-dark">{{ comparison_data.prev_bill_count }}</strong>
+                </div>
+            </div>
+            <div class="text-md-end">
+                <span class="text-muted fs-xs text-uppercase fw-bold d-block">Period-over-Period Growth</span>
+                {% if comparison_data.growth_pct >= 0 %}
+                    <span class="growth-badge bg-success text-white fs-6">
+                        <i class="fas fa-arrow-trend-up me-1"></i> +{{ comparison_data.growth_pct }}%
+                    </span>
+                {% else %}
+                    <span class="growth-badge bg-danger text-white fs-6">
+                        <i class="fas fa-arrow-trend-down me-1"></i> {{ comparison_data.growth_pct }}%
+                    </span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 4 High-Precision Financial KPI Metric Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-primary border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Net Turnover Billed</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">Rs. {{ totals.sales|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">
+                    Gross: Rs. {{ totals.gross_sales|floatformat:2|intcomma }} ({{ totals.count }} Bills)
+                </small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-dark border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Cost of Goods Sold (COGS)</span>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">Rs. {{ totals.cogs|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">True FIFO &amp; IMEI acquisition landed cost</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-success border-4 h-100">
+                <span class="text-success text-uppercase fw-bold fs-2xs">Realized Gross Profit</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">Rs. {{ totals.gross_profit|floatformat:2|intcomma }}</h3>
+                <small class="text-success fs-xs fw-bold">{{ totals.margin_percent }}% Gross Profit Margin</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-danger border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Pending Debt (Udhaari Added)</span>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">Rs. {{ totals.due|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">Collected Cash: Rs. {{ totals.cash|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Estimation Slips Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Estimation Invoices in Period ({{ start_date }} to {{ end_date }})
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:estimates|length }} Slips</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Slip No</th>
+                        <th>Date (AD/BS)</th>
+                        <th>Customer</th>
+                        <th>Cashier / Staff</th>
+                        <th>Gross Subtotal</th>
+                        <th>Discounts</th>
+                        {% if totals.vat > 0 %}
+                            <th>Tax / VAT</th>
+                        {% endif %}
+                        <th>Grand Total</th>
+                        <th>COGS Cost</th>
+                        <th>Gross Profit</th>
+                        <th>Paid</th>
+                        <th>Due (Udhaari)</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for est in estimates %}
+                    <tr>
+                        <td class="ps-4 font-monospace fw-bold">
+                            <a href="{% url 'sales:estimate_detail' est.pk %}" class="text-decoration-none text-primary">
+                                {{ est.estimate_number }}
+                            </a>
+                        </td>
+
+                        <td>
+                            <span class="text-dark">{{ est.bill_date_ad }}</span>
+                            {% if est.bill_date_bs %}<br><small class="text-muted fs-2xs font-monospace">{{ est.bill_date_bs }} BS</small>{% endif %}
+                        </td>
+
+                        <td>
+                            <strong>{{ est.recipient_display_name }}</strong>
+                            {% if est.customer_phone_manual %}
+                                <br><small class="text-muted font-monospace"><i class="fas fa-phone fs-2xs me-1"></i>{{ est.customer_phone_manual }}</small>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <span>{{ est.cashier.username }}</span>
+                            {% if est.salesperson and est.salesperson != est.cashier %}
+                                <br><small class="text-muted">Rep: {{ est.salesperson.username }}</small>
+                            {% endif %}
+                        </td>
+
+                        <td class="font-monospace">Rs. {{ est.subtotal|floatformat:2|intcomma }}</td>
+                        <td class="font-monospace text-muted">-Rs. {{ est.item_discount_total|add:est.bill_discount_amount|floatformat:2|intcomma }}</td>
+
+                        {% if totals.vat > 0 %}
+                            <td class="font-monospace text-warning-emphasis">Rs. {{ est.vat_amount|floatformat:2|intcomma }}</td>
+                        {% endif %}
+
+                        <td class="fw-bold font-monospace text-dark">Rs. {{ est.grand_total|floatformat:2|intcomma }}</td>
+                        <td class="font-monospace text-muted">Rs. {{ est.total_cost_amount|floatformat:2|intcomma }}</td>
+                        
+                        <td class="font-monospace fw-bold text-success">
+                            Rs. {{ est.total_gross_profit|floatformat:2|intcomma }}
+                        </td>
+
+                        <td class="font-monospace text-success">Rs. {{ est.paid_amount|floatformat:2|intcomma }}</td>
+
+                        <td>
+                            {% if est.due_amount > 0 %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace">
+                                    Rs. {{ est.due_amount|floatformat:2|intcomma }}
+                                </span>
+                            {% else %}
+                                <span class="badge bg-success bg-opacity-10 text-success fs-2xs">Paid</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-end pe-4">
+                            <div class="d-inline-flex gap-1">
+                                <a href="{% url 'sales:estimate_detail' est.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-2 py-0 fs-2xs">
+                                    Details
+                                </a>
+                                <a href="{% url 'sales:estimate_thermal_slip' est.pk %}" class="btn btn-outline-dark btn-sm rounded-circle p-1" target="_blank" title="Print Slip (80mm)">
+                                    <i class="fas fa-print"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="13" class="text-center py-5 text-muted">
+                            <i class="fas fa-receipt fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No sales transactions found in the selected date range.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+</div>
+{% endblock %}

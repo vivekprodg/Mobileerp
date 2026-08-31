@@ -1,0 +1,44 @@
+/* ==========================================================================
+   STANDARD A4 ESTIMATION QUOTATION / SLIP PRINT STYLES
+   ========================================================================== */
+
+@page {
+    size: A4 portrait;
+    margin: 12mm 15mm;
+}
+
+@media print {
+    body {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 12px;
+        line-height: 1.3;
+    }
+
+    .no-print, header, aside, footer, nav, .btn, #sidebarOffcanvas {
+        display: none !important;
+    }
+
+    .a4-invoice-container {
+        width: 100%;
+        max-width: 100%;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    .table-bordered th, .table-bordered td {
+        border: 1px solid #94a3b8 !important;
+        padding: 6px 8px !important;
+    }
+
+    .a4-disclaimer-box {
+        border: 1px dashed #64748b;
+        background-color: #f8fafc !important;
+        padding: 8px;
+        font-size: 10px;
+        text-align: center;
+        margin-top: 20px;
+    }
+}

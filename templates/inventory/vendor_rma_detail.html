@@ -1,0 +1,137 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}RMA {{ rma_claim.rma_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0 font-monospace">{{ rma_claim.rma_number }}</h4>
+                <span class="badge bg-{% if rma_claim.status == 'COMPLETED' %}success{% elif rma_claim.status == 'DISPATCHED_TO_VENDOR' %}warning text-dark{% else %}secondary{% endif %} fs-xs px-3 py-1 rounded-pill">
+                    {{ rma_claim.get_status_display }}
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Supplier: <strong>{{ rma_claim.supplier.company_name }}</strong> | 
+                Tracking Ref: <strong class="font-monospace text-primary">{{ rma_claim.distributor_tracking_ref|default:"-" }}</strong> | 
+                Dispatch Date: <strong>{{ rma_claim.dispatch_date }}</strong>
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'inventory:vendor_rma_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to RMA List
+            </a>
+        </div>
+    </div>
+
+    <!-- Claimed Items Settlement Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-list-check text-primary me-2"></i> Claim Line Items &amp; Settlement Actions</h6>
+            <span class="badge bg-primary rounded-pill">{{ rma_claim.claimed_items.count }} Parts Claimed</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Product Name</th>
+                        <th>Defective Serial / IMEI</th>
+                        <th>Defect Note</th>
+                        <th>Resolution Status</th>
+                        <th>Replacement S/N</th>
+                        <th>Credit (NPR)</th>
+                        <th class="text-end pe-4">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in rma_claim.claimed_items.all %}
+                    <tr>
+                        <td class="ps-4"><strong>{{ item.product.name }}</strong></td>
+                        <td class="font-monospace text-danger">{{ item.defective_serial_or_imei }}</td>
+                        <td><small class="text-muted">{{ item.defect_description|truncatechars:35 }}</small></td>
+                        <td>
+                            <span class="badge bg-{% if item.resolution == 'REPLACED_WITH_NEW_PART' %}success{% elif item.resolution == 'CREDIT_NOTE_ISSUED' %}info{% elif item.resolution == 'PENDING' %}warning text-dark{% else %}danger{% endif %} fs-2xs">
+                                {{ item.get_resolution_display }}
+                            </span>
+                        </td>
+                        <td class="font-monospace text-primary">{{ item.replacement_batch_or_serial|default:"-" }}</td>
+                        <td class="fw-bold font-monospace">Rs. {{ item.credit_amount|floatformat:2 }}</td>
+                        <td class="text-end pe-4">
+                            {% if item.resolution == 'PENDING' %}
+                            <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#settleItemModal" 
+                                    data-item-id="{{ item.id }}"
+                                    data-prod-name="{{ item.product.name }}">
+                                Settle Item
+                            </button>
+                            {% else %}
+                            <span class="text-muted fs-xs"><i class="fas fa-check text-success"></i> Settled</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Settle RMA Item -->
+<div class="modal fade" id="settleItemModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="item_id" id="modalItemId">
+                <div class="modal-header bg-primary text-white border-0 py-3">
+                    <h5 class="modal-title fs-6 fw-bold"><i class="fas fa-handshake me-2"></i> Settle Distributor Warranty Item</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="fs-xs text-muted mb-3">Item: <strong class="text-dark" id="modalItemProdName">Product</strong></p>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Distributor Resolution Decision <span class="text-danger">*</span></label>
+                        <select name="resolution" class="form-select" required>
+                            <option value="REPLACED_WITH_NEW_PART" selected>Replaced with New Factory Spare Part (Auto-Restock)</option>
+                            <option value="CREDIT_NOTE_ISSUED">Credit Note Issued (Deduct from Supplier Ledger)</option>
+                            <option value="RETURNED_UNREPAIRED">Rejected / Warranty Voided by Lab</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Replacement Part Serial / Batch Barcode</label>
+                        <input type="text" name="replacement_batch_or_serial" class="form-control font-monospace" placeholder="Scan new part barcode...">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Reimbursed Credit Amount (NPR)</label>
+                        <input type="number" step="0.01" name="credit_amount" class="form-control" value="0.00">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Distributor Settlement Notes</label>
+                        <input type="text" name="vendor_notes" class="form-control" placeholder="Challan / lab report note...">
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold">Commit Settlement</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const settleModal = document.getElementById('settleItemModal');
+    if (settleModal) {
+        settleModal.addEventListener('show.bs.modal', (e) => {
+            const btn = e.relatedTarget;
+            document.getElementById('modalItemId').value = btn.dataset.itemId;
+            document.getElementById('modalItemProdName').innerText = btn.dataset.prodName;
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+
+{% block title %}Close & Reconcile Shift | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-5" style="max-width: 700px;">
+    <div class="card border-0 shadow-lg rounded-4 overflow-hidden bg-white">
+        <div class="bg-dark p-4 text-white text-center">
+            <div class="badge bg-warning text-dark rounded-pill px-3 py-1 fs-xs mb-2">End of Shift Reconciliation</div>
+            <h4 class="fw-bold mb-1"><i class="fas fa-lock me-2"></i> Close Cash Register</h4>
+            <p class="text-white-50 fs-xs mb-0">Session: <strong class="font-monospace text-warning">{{ session.session_number }}</strong></p>
+        </div>
+        <div class="p-4 p-md-5">
+            <div class="p-3 bg-light rounded-4 border mb-4">
+                <div class="d-flex justify-content-between fs-xs mb-2">
+                    <span class="text-muted">Opening Cash Float:</span>
+                    <strong class="font-monospace">Rs. {{ session.opening_cash|floatformat:2|intcomma }}</strong>
+                </div>
+                <div class="d-flex justify-content-between fs-xs mb-2">
+                    <span class="text-muted">Cashier Account:</span>
+                    <strong>{{ request.user.get_full_name|default:request.user.username }}</strong>
+                </div>
+                <div class="d-flex justify-content-between fs-xs">
+                    <span class="text-muted">Shift Started:</span>
+                    <strong>{{ session.opening_time|date:"Y-m-d H:i" }}</strong>
+                </div>
+            </div>
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-4">
+                    <label class="form-label fw-bold text-dark fs-sm">Counted Physical Cash in Drawer (NPR) <span class="text-danger">*</span></label>
+                    {{ form.actual_closing_cash }}
+                    <small class="text-muted fs-xs mt-1 d-block">Count physical currency notes and coins before closing register.</small>
+                </div>
+                <div class="mb-4">
+                    <label class="form-label fw-bold text-dark fs-sm">End of Shift Remarks / Shortage Explanation</label>
+                    {{ form.remarks }}
+                </div>
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-danger btn-lg rounded-pill fw-bold shadow-sm">
+                        <i class="fas fa-lock me-2"></i> Finalize Reconciliation &amp; Close Shift
+                    </button>
+                    <a href="{% url 'sales:pos_terminal' %}" class="btn btn-outline-secondary rounded-pill">
+                        Return to POS Terminal
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

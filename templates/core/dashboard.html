@@ -1,0 +1,171 @@
+{% extends "core/base.html" %}
+{% load static humanize %}
+
+{% block title %}Dashboard | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.dashboard-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200) !important;
+    border-radius: 16px;
+    padding: 20px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+.dashboard-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+    border-color: var(--erp-slate-400) !important;
+}
+.launch-btn-card {
+    border-radius: 14px;
+    padding: 20px 16px;
+    font-weight: 700;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+}
+.launch-btn-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Non-IRD Proforma Disclaimer & White-Label Header Banner -->
+    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 shadow-sm">
+        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+            <div class="d-flex align-items-center gap-3">
+                {% if HAS_COMPANY_LOGO %}
+                    <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="rounded-3 bg-white p-1 shadow-xs" style="height: 44px; width: auto; object-fit: contain;">
+                {% else %}
+                    <span class="badge bg-warning text-dark p-2 rounded-circle fs-5"><i class="fas fa-file-invoice"></i></span>
+                {% endif %}
+                <div>
+                    <h6 class="fw-bold text-dark mb-0">{{ COMPANY_NAME }} &bull; {{ SYS_CONFIG.bill_header_title }}</h6>
+                    <p class="text-muted fs-xs mb-0">{{ SYS_CONFIG.bill_estimate_disclaimer }}</p>
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                <span class="badge bg-primary text-white px-3 py-2 rounded-pill fs-xs">
+                    Mode: {{ SHOP_TAX_MODE }}
+                </span>
+                <span class="badge bg-dark text-white px-3 py-2 rounded-pill fs-xs font-monospace">
+                    <i class="far fa-calendar-alt text-warning me-1"></i> {{ CURRENT_BS_DATE_EN }} BS
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="dashboard-kpi-card h-100">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <span class="text-muted text-uppercase fw-bold fs-2xs">Today's Sales (Estimate)</span>
+                        <h3 class="fw-extrabold text-primary font-monospace mt-1 mb-0">
+                            Rs. {{ daily_sales_total|floatformat:2|intcomma }}
+                        </h3>
+                        <small class="text-success fs-xs fw-semibold"><i class="fas fa-arrow-trend-up me-1"></i> Live Active Counter</small>
+                    </div>
+                    <div class="bg-primary bg-opacity-10 p-3 rounded-4 text-primary">
+                        <i class="fas fa-wallet fs-4"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="dashboard-kpi-card h-100">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <span class="text-muted text-uppercase fw-bold fs-2xs">Total Customer Udhaari</span>
+                        <h3 class="fw-extrabold text-danger font-monospace mt-1 mb-0">
+                            Rs. {{ total_udhaari|floatformat:2|intcomma }}
+                        </h3>
+                        <small class="text-danger fs-xs fw-semibold"><i class="fas fa-hand-holding-dollar me-1"></i> Outstanding Receivable</small>
+                    </div>
+                    <div class="bg-danger bg-opacity-10 p-3 rounded-4 text-danger">
+                        <i class="fas fa-file-invoice-dollar fs-4"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="dashboard-kpi-card h-100">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <span class="text-muted text-uppercase fw-bold fs-2xs">Low Stock Alert</span>
+                        <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-1 mb-0">
+                            {{ low_stock_count }} <span class="fs-6 fw-normal text-muted">Items</span>
+                        </h3>
+                        <a href="{% url 'inventory:product_list' %}?stock_status=low" class="text-warning-emphasis text-decoration-none fs-xs fw-bold">
+                            View Reorder List &rarr;
+                        </a>
+                    </div>
+                    <div class="bg-warning bg-opacity-10 p-3 rounded-4 text-warning-emphasis">
+                        <i class="fas fa-boxes-packing fs-4"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="dashboard-kpi-card h-100">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <span class="text-muted text-uppercase fw-bold fs-2xs">Active Workshop Queue</span>
+                        <h3 class="fw-extrabold text-info font-monospace mt-1 mb-0">
+                            {{ active_repair_count }} <span class="fs-6 fw-normal text-muted">Jobs</span>
+                        </h3>
+                        <a href="{% url 'repairs:dashboard' %}" class="text-info text-decoration-none fs-xs fw-bold">
+                            View Repair Queue &rarr;
+                        </a>
+                    </div>
+                    <div class="bg-info bg-opacity-10 p-3 rounded-4 text-info">
+                        <i class="fas fa-screwdriver-wrench fs-4"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Action Launchpad -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4 p-4 bg-white">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-rocket text-primary me-2"></i> Quick Action Launchpad</h6>
+            <span class="text-muted fs-xs">Active Counter: <strong class="text-primary">{{ STORE_OUTLET_NAME }} ({{ STORE_OUTLET_CODE }})</strong></span>
+        </div>
+        <div class="row g-3">
+            <div class="col-6 col-md-3">
+                <a href="{% url 'sales:pos_terminal' %}" class="launch-btn-card bg-warning text-dark d-flex flex-column align-items-center justify-content-center text-decoration-none shadow-sm h-100">
+                    <i class="fas fa-cash-register fs-3 mb-2 text-dark"></i>
+                    <span class="fs-sm">Open POS Terminal</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-3">
+                <a href="{% url 'sales:trade_in_wizard' %}" class="launch-btn-card bg-primary text-white d-flex flex-column align-items-center justify-content-center text-decoration-none shadow-sm h-100">
+                    <i class="fas fa-repeat fs-3 mb-2"></i>
+                    <span class="fs-sm">Old Phone Trade-In</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-3">
+                <a href="{% url 'repairs:ticket_create' %}" class="launch-btn-card bg-info text-white d-flex flex-column align-items-center justify-content-center text-decoration-none shadow-sm h-100">
+                    <i class="fas fa-clipboard-check fs-3 mb-2"></i>
+                    <span class="fs-sm">Service Intake Desk</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-3">
+                <a href="{% url 'purchases:grn_create' %}" class="launch-btn-card bg-dark text-white d-flex flex-column align-items-center justify-content-center text-decoration-none shadow-sm h-100">
+                    <i class="fas fa-truck-ramp-box fs-3 mb-2 text-warning"></i>
+                    <span class="fs-sm">Receive Goods (GRN)</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

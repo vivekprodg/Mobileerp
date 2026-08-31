@@ -1,0 +1,367 @@
+{% extends "core/base.html" %}
+{% load core_tags %}
+
+{% block title %}Match Columns &amp; Conflict Resolution | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1200px;">
+    <!-- Page Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-shuffle text-primary me-2"></i> Match Columns &amp; Configure Conflict Rules
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Verify that your spreadsheet columns map accurately to system fields before committing records to the database.
+            </p>
+        </div>
+        <a href="{% url 'inventory:excel_import' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+            &larr; Re-upload File
+        </a>
+    </div>
+
+    <!-- Step Progress Tracker -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="d-flex justify-content-around align-items-center text-center">
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-success rounded-circle p-2"><i class="fas fa-check"></i></span>
+                <span class="text-muted fs-sm">Spreadsheet Uploaded</span>
+            </div>
+            <div class="text-muted opacity-50">&rarr;</div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-primary rounded-circle p-2">2</span>
+                <strong class="text-primary fs-sm">Match Columns &amp; Rules</strong>
+            </div>
+            <div class="text-muted opacity-50">&rarr;</div>
+            <div class="d-flex align-items-center gap-2 opacity-50">
+                <span class="badge bg-secondary rounded-circle p-2">3</span>
+                <span class="text-muted fs-sm">Final Summary</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- LEFT: Column Mapping Table (8 Cols) -->
+        <div class="col-12 col-lg-8">
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-table-columns text-primary me-2"></i> Column Alignments
+                </h6>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-sm">
+                        <thead class="bg-light text-muted fs-xs text-uppercase">
+                            <tr>
+                                <th style="width: 45%;">System Field</th>
+                                <th style="width: 55%;">Your Excel Header</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mappingTableBody">
+                            {% for field_key, field_label in system_fields %}
+                            <tr>
+                                <td>
+                                    <strong class="text-dark">{{ field_label }}</strong>
+                                    {% if '*' in field_label %}<span class="text-danger">*</span>{% endif %}
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm header-mapping-select" data-field="{{ field_key }}">
+                                        <option value="">-- Ignore / Not in File --</option>
+                                        {% for h in headers %}
+                                            <option value="{{ h }}" {% for mk, mv in auto_mappings.items %}{% if mk == field_key and mv == h %}selected{% endif %}{% endfor %}>
+                                                {{ h }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Target Branch & Duplicate Strategy (4 Cols) -->
+        <div class="col-12 col-lg-4">
+            <!-- Target Store Branch Destination Card -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-3">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-store text-primary me-2"></i> Destination Outlet / Store
+                </h6>
+                <label class="form-label fw-semibold text-muted fs-xs">Target Store for Stock Receipt:</label>
+                <select id="targetBranchSelect" class="form-select form-select-sm fw-bold">
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if ACTIVE_BRANCH.id == br.id %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% empty %}
+                        <option value="{{ ACTIVE_BRANCH.id }}" selected>{{ ACTIVE_BRANCH.name|default:"Main Central Branch" }}</option>
+                    {% endfor %}
+                </select>
+                <small class="text-muted fs-2xs mt-2 d-block">All imported opening quantities will be allocated to this store counter.</small>
+            </div>
+
+            <!-- Duplicate Conflict Strategy Card -->
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-shield-cat text-warning me-2"></i> Duplicate Conflict Strategy
+                </h6>
+                <p class="text-muted fs-xs mb-3">
+                    How should the system resolve matching barcodes, duplicate SKUs, or identical models found in file or database?
+                </p>
+
+                <div class="d-flex flex-column gap-3">
+                    <div class="form-check p-3 border rounded-3 bg-light">
+                        <input class="form-check-input" type="radio" name="conflict_strategy" id="stratMerge" value="MERGE" checked>
+                        <label class="form-check-label fw-bold text-dark fs-xs d-block" for="stratMerge">
+                            Consolidate &amp; Add Stock (अनुशंसा गरिएको)
+                        </label>
+                        <small class="text-muted" style="font-size: 0.72rem;">Combines quantities for duplicate rows into a single stock pool and updates cost.</small>
+                    </div>
+
+                    <div class="form-check p-3 border rounded-3 bg-light">
+                        <input class="form-check-input" type="radio" name="conflict_strategy" id="stratOverwrite" value="OVERWRITE">
+                        <label class="form-check-label fw-bold text-dark fs-xs d-block" for="stratOverwrite">
+                            Overwrite Existing Details
+                        </label>
+                        <small class="text-muted" style="font-size: 0.72rem;">Updates existing catalog products with the new rates and sets stock to sheet count.</small>
+                    </div>
+
+                    <div class="form-check p-3 border rounded-3 bg-light">
+                        <input class="form-check-input" type="radio" name="conflict_strategy" id="stratSkip" value="SKIP">
+                        <label class="form-check-label fw-bold text-dark fs-xs d-block" for="stratSkip">
+                            Skip Duplicates
+                        </label>
+                        <small class="text-muted" style="font-size: 0.72rem;">Keeps first occurrence and ignores any conflicting duplicate row.</small>
+                    </div>
+
+                    <div class="form-check p-3 border rounded-3 bg-light">
+                        <input class="form-check-input" type="radio" name="conflict_strategy" id="stratVariant" value="NEW_VARIANT">
+                        <label class="form-check-label fw-bold text-dark fs-xs d-block" for="stratVariant">
+                            Generate New SKU Variant
+                        </label>
+                        <small class="text-muted" style="font-size: 0.72rem;">Appends a unique identifier suffix and creates distinct records.</small>
+                    </div>
+                </div>
+
+                <div class="d-grid mt-4">
+                    <button type="button" class="btn btn-primary btn-lg rounded-pill fw-bold shadow-sm" id="executeImportBtn">
+                        <i class="fas fa-bolt me-1"></i> Start Import Process
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sample 5 Rows Preview Card -->
+    {% if preview_rows %}
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mt-4">
+        <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+            <i class="fas fa-eye text-primary me-2"></i> First 5 Rows Preview from Spreadsheet
+        </h6>
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm fs-xs">
+                <thead class="bg-light text-muted">
+                    <tr>
+                        {% for h in headers %}
+                            <th>{{ h }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in preview_rows %}
+                    <tr>
+                        {% for h in headers %}
+                            <td>{{ row|get_item:h|default:"-" }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Modal: Import Processing & Detailed Summary with Placeholder IMEI Alerts -->
+<div class="modal fade" id="importSummaryModal" data-bs-backdrop="static" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-primary text-white border-0 py-3">
+                <h5 class="modal-title fs-6 fw-bold"><i class="fas fa-clipboard-check me-2"></i> Import Results &amp; Inventory Status</h5>
+            </div>
+            <div class="modal-body p-4 text-center" id="modalProgressBody">
+                <div class="spinner-border text-primary my-3" role="status" style="width: 3rem; height: 3rem;"></div>
+                <h6 class="fw-bold text-dark mb-1">Committing records atomically...</h6>
+                <p class="text-muted fs-xs">Creating products, auto-generating barcodes, and setting branch stock levels.</p>
+            </div>
+            <div class="modal-footer bg-light border-0 justify-content-center d-none" id="modalFooterActions">
+                <a href="{% url 'inventory:product_list' %}" class="btn btn-primary px-4 rounded-pill fw-bold">
+                    Go to Inventory Catalog &rarr;
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const executeBtn = document.getElementById('executeImportBtn');
+    const summaryModalEl = document.getElementById('importSummaryModal');
+    const summaryModal = new bootstrap.Modal(summaryModalEl);
+    const modalBody = document.getElementById('modalProgressBody');
+    const modalFooter = document.getElementById('modalFooterActions');
+    const branchSelector = document.getElementById('targetBranchSelect');
+
+    executeBtn.addEventListener('click', async () => {
+        const mapping = {};
+        document.querySelectorAll('.header-mapping-select').forEach(sel => {
+            const field = sel.dataset.field;
+            const headerVal = sel.value;
+            if (headerVal) {
+                mapping[field] = headerVal;
+            }
+        });
+
+        if (!mapping['name']) {
+            alert('Product / Phone Name mapping is mandatory. Please match the Name column.');
+            return;
+        }
+
+        const strategyRadio = document.querySelector('input[name="conflict_strategy"]:checked');
+        const conflictStrategy = strategyRadio ? strategyRadio.value : 'MERGE';
+        const targetBranchId = branchSelector ? branchSelector.value : '';
+
+        summaryModal.show();
+
+        const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
+        const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
+
+        try {
+            const response = await fetch("{% url 'inventory:excel_process' %}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({
+                    mapping: mapping,
+                    conflict_strategy: conflictStrategy,
+                    branch_id: targetBranchId
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                const s = data.summary;
+
+                // Build Placeholder IMEI Alert Banner if applicable
+                let placeholderAlertHtml = '';
+                if (s.placeholder_imei_units_created && s.placeholder_imei_units_created > 0) {
+                    let productListHtml = '';
+                    if (s.serialized_products_needing_imeis && s.serialized_products_needing_imeis.length > 0) {
+                        productListHtml = `
+                            <div class="mt-2 pt-2 border-top border-warning border-opacity-25 fs-2xs">
+                                <strong>Affected Phone Models:</strong>
+                                <ul class="mb-0 ps-3 mt-1">
+                                    ${s.serialized_products_needing_imeis.map(p => `<li><strong>${p.product}</strong> (${p.sku}): ${p.pending_units} unit(s) pending physical IMEI assignment</li>`).join('')}
+                                </ul>
+                            </div>
+                        `;
+                    }
+
+                    placeholderAlertHtml = `
+                        <div class="alert alert-warning bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-3 p-3 text-start fs-xs mb-3 shadow-xs">
+                            <div class="d-flex align-items-center gap-2 mb-1">
+                                <i class="fas fa-triangle-exclamation text-warning-emphasis fs-6"></i>
+                                <strong class="text-warning-emphasis">Notice: ${s.placeholder_imei_units_created} Serialized Handset(s) Imported with Placeholder Identifiers</strong>
+                            </div>
+                            <p class="mb-1 text-dark fs-2xs">
+                                Opening stock for serialized smartphone models was imported without explicit 15-digit IMEI numbers. 
+                                The system generated indexed placeholder device records indexed by product box barcode.
+                            </p>
+                            <div class="p-2 bg-white rounded border fs-2xs text-secondary mt-2">
+                                <i class="fas fa-barcode text-primary me-1"></i>
+                                <strong>Counter Action:</strong> Cashiers can scan the box barcode at the POS terminal and will be prompted to capture/link the real physical handset IMEI on checkout.
+                            </div>
+                            ${productListHtml}
+                        </div>
+                    `;
+                }
+
+                // Build Warnings HTML
+                let warningsHtml = '';
+                if (s.warnings && s.warnings.length > 0 && (!s.placeholder_imei_units_created || s.placeholder_imei_units_created === 0)) {
+                    warningsHtml = `
+                        <div class="alert alert-info bg-info bg-opacity-10 border border-info border-opacity-25 rounded-3 p-3 text-start fs-xs mb-3">
+                            <strong class="d-block mb-1"><i class="fas fa-info-circle text-info me-1"></i> Import Notices:</strong>
+                            <ul class="mb-0 ps-3 fs-2xs">
+                                ${s.warnings.map(w => `<li>${w}</li>`).join('')}
+                            </ul>
+                        </div>
+                    `;
+                }
+
+                // Build Errors HTML
+                let errorsHtml = '';
+                if (s.errors && s.errors.length > 0) {
+                    errorsHtml = `
+                        <div class="alert alert-danger bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded-3 p-3 text-start fs-xs mb-0">
+                            <strong class="d-block mb-1"><i class="fas fa-circle-xmark text-danger me-1"></i> Skipped / Error Rows:</strong>
+                            <div style="max-height: 120px; overflow-y: auto;">
+                                <ul class="mb-0 ps-3 fs-2xs">
+                                    ${s.errors.map(err => `<li>${err}</li>`).join('')}
+                                </ul>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                modalBody.innerHTML = `
+                    <div class="text-success fs-1 mb-2"><i class="fas fa-circle-check"></i></div>
+                    <h5 class="fw-bold text-dark mb-3">Import Completed Successfully!</h5>
+                    
+                    <div class="row g-2 text-start fs-xs mb-3">
+                        <div class="col-6 col-sm-3 p-2 bg-light border rounded">
+                            <span class="text-muted d-block fs-2xs">Total Rows</span>
+                            <strong class="fs-6">${s.total_rows}</strong>
+                        </div>
+                        <div class="col-6 col-sm-3 p-2 bg-success bg-opacity-10 border border-success border-opacity-25 rounded text-success">
+                            <span class="d-block fs-2xs">New Products</span>
+                            <strong class="fs-6">${s.imported}</strong>
+                        </div>
+                        <div class="col-6 col-sm-3 p-2 bg-info bg-opacity-10 border border-info border-opacity-25 rounded text-info">
+                            <span class="d-block fs-2xs">Updated Rates</span>
+                            <strong class="fs-6">${s.updated}</strong>
+                        </div>
+                        <div class="col-6 col-sm-3 p-2 bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded text-warning-emphasis">
+                            <span class="d-block fs-2xs">Merged Stock</span>
+                            <strong class="fs-6">${s.merged}</strong>
+                        </div>
+                    </div>
+
+                    ${placeholderAlertHtml}
+                    ${warningsHtml}
+                    ${errorsHtml}
+                `;
+                modalFooter.classList.remove('d-none');
+            } else {
+                modalBody.innerHTML = `
+                    <div class="text-danger fs-1 mb-2"><i class="fas fa-circle-exclamation"></i></div>
+                    <h5 class="fw-bold text-danger mb-2">Import Failed</h5>
+                    <p class="text-muted fs-xs">${data.message || 'The server encountered an error processing the spreadsheet.'}</p>
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-4" data-bs-dismiss="modal">Close &amp; Fix</button>
+                `;
+            }
+        } catch (err) {
+            modalBody.innerHTML = `
+                <div class="text-danger fs-1 mb-2"><i class="fas fa-circle-exclamation"></i></div>
+                <h5 class="fw-bold text-danger mb-2">Communication Error</h5>
+                <p class="text-muted fs-xs">Could not reach the server. Please verify network connectivity and retry.</p>
+                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-4" data-bs-dismiss="modal">Close</button>
+            `;
+        }
+    });
+});
+</script>
+{% endblock %}

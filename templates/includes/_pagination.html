@@ -1,0 +1,76 @@
+{% if is_paginated %}
+<nav aria-label="Page navigation" class="mt-4 pt-2">
+    <div class="d-flex flex-column flex-md-row align-items-center justify-content-between gap-3">
+        <!-- Page Count Summary -->
+        <div class="text-muted fs-xs">
+            Showing Page <strong class="text-dark">{{ page_obj.number }}</strong> of <strong class="text-dark">{{ page_obj.paginator.num_pages }}</strong> 
+            (<strong class="text-primary">{{ page_obj.paginator.count }}</strong> total records)
+        </div>
+
+        <!-- Navigation Buttons Preserving All Query Parameters -->
+        <ul class="pagination pagination-sm justify-content-center m-0 gap-1 flex-wrap">
+            {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <a class="page-link rounded-3 border-0 bg-light text-dark fw-semibold" 
+                       href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page=1" 
+                       title="First Page">
+                        <i class="fas fa-angles-left fs-2xs"></i> First
+                    </a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link rounded-3 border-0 bg-light text-dark fw-semibold" 
+                       href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}" 
+                       title="Previous Page">
+                        <i class="fas fa-chevron-left fs-2xs"></i> Prev
+                    </a>
+                </li>
+            {% else %}
+                <li class="page-item disabled"><span class="page-link rounded-3 border-0 bg-light opacity-50"><i class="fas fa-angles-left fs-2xs"></i></span></li>
+                <li class="page-item disabled"><span class="page-link rounded-3 border-0 bg-light opacity-50"><i class="fas fa-chevron-left fs-2xs"></i></span></li>
+            {% endif %}
+
+            <!-- Active Page Badge -->
+            <li class="page-item active">
+                <span class="page-link rounded-3 border-0 bg-primary text-white fw-bold px-3 shadow-xs">
+                    {{ page_obj.number }}
+                </span>
+            </li>
+
+            {% if page_obj.has_next %}
+                <li class="page-item">
+                    <a class="page-link rounded-3 border-0 bg-light text-dark fw-semibold" 
+                       href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}" 
+                       title="Next Page">
+                        Next <i class="fas fa-chevron-right fs-2xs"></i>
+                    </a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link rounded-3 border-0 bg-light text-dark fw-semibold" 
+                       href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.paginator.num_pages }}" 
+                       title="Last Page">
+                        Last <i class="fas fa-angles-right fs-2xs"></i>
+                    </a>
+                </li>
+            {% else %}
+                <li class="page-item disabled"><span class="page-link rounded-3 border-0 bg-light opacity-50"><i class="fas fa-chevron-right fs-2xs"></i></span></li>
+                <li class="page-item disabled"><span class="page-link rounded-3 border-0 bg-light opacity-50"><i class="fas fa-angles-right fs-2xs"></i></span></li>
+            {% endif %}
+        </ul>
+
+        <!-- Jump to Page Form -->
+        <form method="get" class="d-flex align-items-center gap-1">
+            {% for key, value in request.GET.items %}
+                {% if key != 'page' %}
+                    <input type="hidden" name="{{ key }}" value="{{ value }}">
+                {% endif %}
+            {% endfor %}
+            <span class="text-muted fs-xs">Jump:</span>
+            <input type="number" name="page" min="1" max="{{ page_obj.paginator.num_pages }}" 
+                   value="{{ page_obj.number }}" 
+                   class="form-control form-control-sm text-center p-1 font-monospace" 
+                   style="width: 55px; min-height: 30px;">
+            <button type="submit" class="btn btn-outline-secondary btn-sm py-0 px-2" style="min-height: 30px;" title="Go to Page">Go</button>
+        </form>
+    </div>
+</nav>
+{% endif %}

@@ -1,0 +1,105 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Store Outlets &amp; Multi-Branch Network | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4">
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-store text-primary me-2"></i> Store Outlets &amp; Multi-Branch Network
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Configure white-label company branding, uploaded logos, isolated stock counters, and slip prefixes
+            </p>
+        </div>
+        {% if user.is_superuser or user.role == 'OWNER' %}
+        <a href="{% url 'branches:branch_create' %}" class="btn btn-primary rounded-pill px-4 fw-bold shadow-sm">
+            <i class="fas fa-plus-circle me-1"></i> Register New Outlet
+        </a>
+        {% endif %}
+    </div>
+
+    <!-- Outlets Grid -->
+    <div class="row g-4">
+        {% for branch in branches %}
+        <div class="col-12 col-md-6 col-xl-4">
+            <div class="card border-0 shadow-sm rounded-4 h-100 bg-white p-4 position-relative overflow-hidden">
+                {% if branch.is_main_branch %}
+                <span class="position-absolute top-0 end-0 bg-primary text-white fs-2xs fw-bold px-3 py-1 rounded-bottom-start shadow-xs">
+                    CENTRAL HEAD OFFICE
+                </span>
+                {% endif %}
+
+                <!-- Brand Logo & Header -->
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    {% if branch.logo_url %}
+                        <img src="{{ branch.logo_url }}" alt="{{ branch.display_company_name }}" class="rounded-3 bg-light p-2 border" style="height: 52px; width: 52px; object-fit: contain;">
+                    {% else %}
+                        <div class="bg-primary bg-opacity-10 p-3 rounded-4 text-primary" style="width: 52px; height: 52px; display: grid; place-items: center;">
+                            <i class="fas fa-store fs-4"></i>
+                        </div>
+                    {% endif %}
+
+                    <div class="overflow-hidden">
+                        <h6 class="fw-bold text-dark mb-0 text-truncate">{{ branch.display_company_name }}</h6>
+                        <strong class="text-primary fs-xs d-block">{{ branch.name }}</strong>
+                        <small class="text-muted font-monospace fs-2xs">Code: <strong>{{ branch.code }}</strong> &bull; Prefix: <code>{{ branch.invoice_prefix }}</code></small>
+                    </div>
+                </div>
+
+                <ul class="list-unstyled fs-xs text-muted mb-4 d-flex flex-column gap-2 border-top pt-3">
+                    <li><i class="fas fa-map-marker-alt text-danger me-2"></i> {{ branch.address }}, {{ branch.city }} ({{ branch.province }})</li>
+                    <li><i class="fas fa-phone text-success me-2"></i> {{ branch.phone_number }}</li>
+                    <li>
+                        <i class="fas fa-user-tie text-info me-2"></i> Manager: 
+                        <strong>
+                            {% if branch.manager %}
+                                {{ branch.manager.get_full_name|default:branch.manager.username }}
+                            {% else %}
+                                <span class="text-muted">Unassigned</span>
+                            {% endif %}
+                        </strong>
+                    </li>
+                    <li>
+                        <i class="fas fa-circle-check {% if branch.is_active %}text-success{% else %}text-danger{% endif %} me-2"></i>
+                        Status: <strong>{% if branch.is_active %}Active Outlet{% else %}Inactive / Suspended{% endif %}</strong>
+                    </li>
+                </ul>
+
+                <div class="mt-auto d-flex gap-2 border-top pt-3">
+                    <!-- Switch Context Button -->
+                    <form action="{% url 'branches:switch_branch' %}" method="post" class="flex-grow-1 m-0">
+                        {% csrf_token %}
+                        <input type="hidden" name="branch" value="{{ branch.id }}">
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="btn btn-sm {% if ACTIVE_BRANCH.id == branch.id %}btn-success fw-bold text-white{% else %}btn-outline-primary{% endif %} w-100 rounded-pill">
+                            {% if ACTIVE_BRANCH.id == branch.id %}
+                                <i class="fas fa-check-circle me-1"></i> Active Terminal
+                            {% else %}
+                                Switch Context
+                            {% endif %}
+                        </button>
+                    </form>
+
+                    <!-- Edit Details -->
+                    {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
+                    <a href="{% url 'branches:branch_edit' branch.pk %}" class="btn btn-outline-secondary btn-sm rounded-circle p-2" title="Edit Outlet Details">
+                        <i class="fas fa-edit"></i>
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-12 text-center py-5">
+            <i class="fas fa-store fs-1 text-secondary opacity-25 d-block mb-3"></i>
+            <h5 class="fw-bold text-dark">No Store Outlets Found</h5>
+            <p class="text-muted fs-xs">Register your primary store location to begin managing inventory and POS billing.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

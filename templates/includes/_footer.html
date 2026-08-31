@@ -1,0 +1,82 @@
+{% load static %}
+<footer class="bg-white border-top py-3 mt-auto text-muted fs-xs w-100 position-relative z-1">
+    <div class="container-fluid px-4">
+        <div class="row align-items-center gy-2">
+            <!-- Left: Dynamic White-Label Copyright & Legal Entity (Text Only) -->
+            <div class="col-12 col-md-4 text-center text-md-start">
+                <span class="text-secondary">
+                    &copy; {% now "Y" %} <strong class="text-dark">{{ COMPANY_NAME }}</strong>
+                </span>
+                {% if COMPANY_NAME_NP %}
+                <span class="text-muted d-block d-sm-inline ms-sm-1">
+                    &bull; {{ COMPANY_NAME_NP }}
+                </span>
+                {% endif %}
+            </div>
+
+            <!-- Middle: Quick Navigation & Help Links -->
+            <div class="col-12 col-md-4 text-center">
+                <ul class="list-inline mb-0 fs-2xs fw-semibold">
+                    <li class="list-inline-item">
+                        <a href="{% url 'sales:pos_terminal' %}" class="text-decoration-none text-muted hover-primary">
+                            <i class="fas fa-cash-register me-1 text-warning-emphasis"></i>POS Terminal
+                        </a>
+                    </li>
+                    <li class="list-inline-item text-muted">&bull;</li>
+                    <li class="list-inline-item">
+                        <a href="{% url 'repairs:public_tracking' %}" target="_blank" class="text-decoration-none text-muted hover-primary">
+                            <i class="fas fa-magnifying-glass me-1 text-info"></i>Track Repair
+                        </a>
+                    </li>
+                    <li class="list-inline-item text-muted">&bull;</li>
+                    <li class="list-inline-item">
+                        <a href="tel:{{ ACTIVE_BRANCH.phone_number|default:'01-4220000' }}" class="text-decoration-none text-muted hover-primary">
+                            <i class="fas fa-headset me-1 text-success"></i>Support: {{ ACTIVE_BRANCH.phone_number|default:"01-4220000" }}
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Right: Interactive Terminal Context Badge & Dynamic System Version -->
+            <div class="col-12 col-md-4 text-center text-md-end d-flex flex-wrap align-items-center justify-content-center justify-content-md-end gap-2">
+                <!-- Clickable Interactive Terminal Badge -->
+                <div class="dropdown d-inline-block">
+                    <button type="button" 
+                            class="btn btn-outline-primary btn-sm rounded-pill py-0 px-2 fs-2xs fw-bold d-inline-flex align-items-center gap-1 shadow-xs" 
+                            data-bs-toggle="dropdown" 
+                            aria-expanded="false" 
+                            title="Click to switch store outlet context">
+                        <span class="rounded-circle bg-success" style="width: 6px; height: 6px; display: inline-block;"></span>
+                        <i class="fas fa-store text-primary"></i>
+                        <span>Terminal: <strong>{{ ACTIVE_BRANCH.name|default:"Main Counter" }} ({{ ACTIVE_BRANCH.code|default:"HQ" }})</strong></span>
+                        <i class="fas fa-chevron-up fs-2xs text-muted ms-1"></i>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end shadow-lg border-0 bg-white p-2 rounded-4" style="min-width: 250px;">
+                        <div class="px-3 py-2 border-bottom">
+                            <span class="text-uppercase text-muted fw-bold fs-2xs d-block">Switch Counter Outlet</span>
+                            <small class="text-secondary fs-xs">Choose terminal context</small>
+                        </div>
+                        <form action="{% url 'branches:switch_branch' %}" method="post" class="m-0">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <div class="p-1">
+                                {% for br in AVAILABLE_BRANCHES %}
+                                <button type="submit" name="branch" value="{{ br.id }}" 
+                                        class="dropdown-item d-flex align-items-center justify-content-between py-2 px-3 rounded-3 fs-xs {% if ACTIVE_BRANCH.id == br.id %}bg-primary bg-opacity-10 text-primary fw-bold{% else %}text-dark{% endif %}">
+                                    <span>{{ br.name }}</span>
+                                    <span class="badge bg-light text-muted border font-monospace">{{ br.code }}</span>
+                                </button>
+                                {% endfor %}
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Overridable Dynamic Version Tag -->
+                <span class="badge bg-secondary bg-opacity-10 text-secondary border px-2 py-1 fs-2xs">
+                    {% block app_version %}v2.5.0 (Enterprise Proforma){% endblock %}
+                </span>
+            </div>
+        </div>
+    </div>
+</footer>

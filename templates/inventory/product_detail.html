@@ -1,0 +1,678 @@
+{% extends "core/base.html" %}
+{% load humanize static core_tags %}
+
+{% block title %}{{ product.name }} | Specification &amp; Inventory{% endblock %}
+
+{% block extra_head %}
+<style>
+.product-hero-image-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    height: 100%;
+    min-height: 160px;
+    box-shadow: var(--erp-shadow-xs);
+}
+
+.product-showcase-img {
+    max-height: 140px;
+    max-width: 100%;
+    width: auto;
+    object-fit: contain;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.product-showcase-img:hover {
+    transform: scale(1.05);
+}
+
+.image-zoom-badge {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(15, 23, 42, 0.75);
+    color: #ffffff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    backdrop-filter: blur(4px);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.image-zoom-badge:hover {
+    background: var(--erp-primary);
+}
+
+.product-image-fallback-icon {
+    width: 65px;
+    height: 65px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    font-size: 28px;
+    margin-bottom: 8px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0">{{ product.name }}</h4>
+                {% if product.requires_imei_tracking %}
+                    <span class="badge bg-primary px-3 py-1 rounded-pill fs-xs">
+                        <i class="fas fa-barcode me-1"></i> IMEI Tracked Phone
+                    </span>
+                {% endif %}
+                {% if product.network_type %}
+                    <span class="badge bg-dark px-2 py-1 fs-xs">{{ product.network_type }}</span>
+                {% endif %}
+                {% if product.is_spare_part %}
+                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 px-2 py-1 fs-xs">
+                        <i class="fas fa-wrench me-1"></i> Spare Part
+                    </span>
+                {% endif %}
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Model: <strong>{{ product.model_name|default:product.name }}</strong> ({{ product.model_number|default:"N/A" }}) &bull; 
+                SKU: <code>{{ product.sku }}</code>
+                {% if product.barcode %} &bull; Barcode: <code>{{ product.barcode }}</code>{% endif %}
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="{% url 'repairs:ticket_create' %}" class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs">
+                <i class="fas fa-screwdriver-wrench me-1"></i> Service Intake Desk
+            </a>
+            {% if IS_MANAGER %}
+            <a href="{% url 'inventory:product_edit' product.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-edit me-1"></i> Edit Specifications
+            </a>
+            {% endif %}
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- TOP SECTION: PRODUCT IMAGE SHOWCASE + KEY METRICS ROW -->
+    <div class="row g-3 mb-4">
+        
+        <!-- 1. Dedicated Product Image Showcase Card -->
+        <div class="col-12 col-lg-3 col-xl-3">
+            <div class="product-hero-image-card">
+                {% if product.image %}
+                    <div class="position-relative w-100 h-100 d-flex align-items-center justify-content-center">
+                        <img src="{{ product.image.url }}" 
+                             alt="{{ product.name }}" 
+                             class="product-showcase-img"
+                             onclick="window.open('{{ product.image.url }}', '_blank')"
+                             title="Click to view full-resolution photo">
+                        <span class="image-zoom-badge" onclick="window.open('{{ product.image.url }}', '_blank')">
+                            <i class="fas fa-magnifying-glass-plus me-1"></i> Full Size
+                        </span>
+                    </div>
+                {% else %}
+                    <div class="py-2 w-100 d-flex flex-column align-items-center justify-content-center">
+                        <div class="product-image-fallback-icon {% if product.requires_imei_tracking %}bg-primary bg-opacity-10 text-primary{% elif product.is_spare_part %}bg-danger bg-opacity-10 text-danger{% else %}bg-secondary bg-opacity-10 text-secondary{% endif %}">
+                            {% if product.requires_imei_tracking %}
+                                <i class="fas fa-mobile-screen"></i>
+                            {% elif product.is_spare_part %}
+                                <i class="fas fa-screwdriver-wrench"></i>
+                            {% else %}
+                                <i class="fas fa-box"></i>
+                            {% endif %}
+                        </div>
+                        <span class="text-muted fs-2xs fw-semibold">No Image Uploaded</span>
+                        {% if IS_MANAGER %}
+                        <a href="{% url 'inventory:product_edit' product.pk %}" class="btn btn-link text-primary p-0 fs-2xs text-decoration-none mt-1">
+                            <i class="fas fa-camera me-1"></i> Add Product Photo
+                        </a>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 2. The 4 Financial & Specification KPI Cards -->
+        <div class="col-12 col-lg-9 col-xl-9">
+            <div class="row g-3 h-100">
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-primary border-4">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold">Selling Price (MRP)</span>
+                        <h3 class="fw-bold text-primary font-monospace mt-1 mb-0">Rs. {{ product.selling_price|floatformat:2|intcomma }}</h3>
+                        {% if IS_MANAGER or IS_ACCOUNTANT %}
+                        <small class="text-muted fs-2xs">Wholesale: Rs. {{ product.wholesale_price|default:product.selling_price|floatformat:2|intcomma }}</small>
+                        {% else %}
+                        <small class="text-muted fs-2xs">Base Unit: {{ product.base_unit.name }} ({{ product.base_unit.code }})</small>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-dark border-4">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold">Purchase / Landed Cost</span>
+                        {% if IS_MANAGER or IS_ACCOUNTANT %}
+                        <h3 class="fw-bold text-dark font-monospace mt-1 mb-0">Rs. {{ product.purchase_price|floatformat:2|intcomma }}</h3>
+                        <small class="text-muted fs-2xs">Base Unit: {{ product.base_unit.name }}</small>
+                        {% else %}
+                        <h4 class="fw-bold text-muted mt-2 mb-0"><i class="fas fa-lock me-1 fs-xs"></i> Restricted</h4>
+                        <small class="text-muted fs-2xs">Manager access required</small>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-info border-4">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold">Variant &amp; Memory</span>
+                        <h4 class="fw-bold text-dark mt-1 mb-0">{{ product.ram|default:"Standard" }} / {{ product.internal_storage|default:"Standard" }}</h4>
+                        <small class="text-muted fs-2xs">{{ product.color_variant|default:"Standard Color" }}</small>
+                    </div>
+                </div>
+
+                <div class="col-12 col-sm-6 col-md-3">
+                    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-success border-4">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold">Warehouse Location</span>
+                        <h4 class="fw-bold text-success mt-1 mb-0">{{ product.rack_number|default:"Unassigned" }}</h4>
+                        <small class="text-muted fs-2xs">Shelf: {{ product.shelf_identifier|default:"-" }} &bull; Bin: {{ product.bin_location|default:"-" }}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Complete Technical Hardware Specifications Card -->
+    {% if product.operating_system or product.processor_chipset or product.display_size or product.rear_camera or product.battery_capacity or product.size_dimension or product.wifi_spec or product.bluetooth_version %}
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+            <i class="fas fa-microchip text-primary me-2"></i> Smartphone Hardware Specifications &amp; Performance Profile
+        </h6>
+        <div class="row g-3 fs-xs">
+            <div class="col-md-4">
+                <span class="text-muted d-block">Operating System:</span>
+                <strong class="text-dark">{{ product.operating_system|default:"-" }}</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Processor / Chipset:</span>
+                <strong class="text-dark">{{ product.processor_chipset|default:"-" }}</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Display Profile:</span>
+                <strong class="text-dark">{{ product.display_size|default:"" }} {{ product.display_type|default:"" }} ({{ product.refresh_rate|default:"60Hz" }})</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Resolution:</span>
+                <strong class="text-dark">{{ product.display_resolution|default:"-" }}</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Rear Camera Setup:</span>
+                <strong class="text-dark">{{ product.rear_camera|default:"-" }}</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Front Selfie Camera:</span>
+                <strong class="text-dark">{{ product.front_camera|default:"-" }}</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Battery &amp; Charging:</span>
+                <strong class="text-dark">{{ product.battery_capacity|default:"-" }} ({{ product.fast_charging|default:"Standard" }})</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Biometrics &amp; Security:</span>
+                <strong class="text-dark">
+                    {{ product.fingerprint_sensor|default:"-" }}
+                    {% if product.face_unlock %}
+                        <span class="badge bg-success bg-opacity-10 text-success ms-1"><i class="fas fa-check me-1"></i>Face Unlock</span>
+                    {% endif %}
+                </strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Audio &amp; Headphone Port:</span>
+                <strong class="text-dark">
+                    {% if product.headphone_jack_35mm %}
+                        <span class="badge bg-success bg-opacity-10 text-success"><i class="fas fa-headphones me-1"></i>3.5mm Jack Available</span>
+                    {% else %}
+                        <span class="badge bg-light text-muted border">No 3.5mm Jack</span>
+                    {% endif %}
+                </strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">USB Port Standard:</span>
+                <strong class="text-dark">{{ product.usb_port_type|default:"Type-C 2.0" }}</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Storage Expansion:</span>
+                <strong class="text-dark">
+                    {% if product.expandable_storage %}
+                        <span class="badge bg-success bg-opacity-10 text-success me-1"><i class="fas fa-sd-card me-1"></i>Supported</span>
+                        {{ product.max_memory_card|default:"Up to 1TB" }}
+                    {% else %}
+                        <span class="badge bg-light text-muted border">No MicroSD Slot</span>
+                    {% endif %}
+                </strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Wireless &amp; Bluetooth:</span>
+                <strong class="text-dark">{{ product.wifi_spec|default:"Wi-Fi" }} &bull; {{ product.bluetooth_version|default:"Bluetooth" }}</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">NFC Support:</span>
+                <strong class="text-dark">
+                    {% if product.nfc_available %}
+                        <span class="badge bg-success bg-opacity-10 text-success"><i class="fas fa-check-circle me-1"></i>NFC Available</span>
+                    {% else %}
+                        <span class="badge bg-light text-muted border">No NFC</span>
+                    {% endif %}
+                </strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">GPS &amp; Positioning:</span>
+                <strong class="text-dark">{{ product.gps_capabilities|default:"GPS, GLONASS" }}</strong>
+            </div>
+            <div class="col-md-4">
+                <span class="text-muted d-block">Physical Dimensions &amp; Region:</span>
+                <strong class="text-dark">{{ product.size_dimension|default:"-" }} ({{ product.region_variant|default:"Global/Nepal" }})</strong>
+            </div>
+            <div class="col-12">
+                <span class="text-muted d-block">Official Overall Warranty:</span>
+                <strong class="text-success">{{ product.warranty_months }} Months ({{ product.warranty_provider|default:"Official Distributor" }})</strong>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- PACKAGING CONVERSIONS & TIERED WHOLESALE PRICING ROW -->
+    <div class="row g-4 mb-4">
+        <!-- Packaging Unit Conversions Card -->
+        <div class="col-12 col-lg-6">
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-boxes-packing text-primary me-2"></i> Packaging Unit Conversions
+                    </h6>
+                    <span class="badge bg-primary bg-opacity-10 text-primary fs-xs">Outer Packages</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-xs">
+                        <thead class="bg-light text-muted text-uppercase fs-2xs">
+                            <tr>
+                                <th>Package Unit</th>
+                                <th>Conversion Ratio</th>
+                                <th>Package Price</th>
+                                <th>Outer Barcode</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for conv in conversions %}
+                            <tr>
+                                <td class="fw-bold text-dark">{{ conv.unit_name }}</td>
+                                <td>1 {{ conv.unit_name }} = <strong>{{ conv.conversion_factor }}</strong> {{ product.base_unit.code }}</td>
+                                <td class="font-monospace fw-bold text-primary">
+                                    {% if conv.selling_price_per_unit %}
+                                        Rs. {{ conv.selling_price_per_unit|floatformat:2|intcomma }}
+                                    {% else %}
+                                        <span class="text-muted">Calculated</span>
+                                    {% endif %}
+                                </td>
+                                <td><code class="text-muted">{{ conv.barcode|default:"-" }}</code></td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center py-3 text-muted">
+                                    No bulk packaging conversions configured for this item.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Volume & Wholesale Tiered Pricing Card -->
+        <div class="col-12 col-lg-6">
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-layer-group text-warning-emphasis me-2"></i> Volume &amp; Wholesale Price Tiers
+                        </h6>
+                        <small class="text-muted fs-2xs">Automatic volume pricing rules for Wholesale, Dealers &amp; VIPs</small>
+                    </div>
+                    {% if IS_MANAGER %}
+                    <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold" data-bs-toggle="modal" data-bs-target="#addPriceTierModal">
+                        <i class="fas fa-plus me-1"></i> Add Price Tier
+                    </button>
+                    {% endif %}
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-xs">
+                        <thead class="bg-light text-muted text-uppercase fs-2xs">
+                            <tr>
+                                <th>Tier Type</th>
+                                <th>Min Quantity</th>
+                                <th>Applicable Rate (NPR)</th>
+                                <th>Discount vs MRP</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for tier in product.price_tiers.all %}
+                            <tr>
+                                <td>
+                                    <span class="badge bg-{% if tier.tier_type == 'WHOLESALE' %}info{% elif tier.tier_type == 'DEALER' %}primary{% elif tier.tier_type == 'SPECIAL' %}warning text-dark{% else %}secondary{% endif %} fs-2xs">
+                                        {{ tier.get_tier_type_display }}
+                                    </span>
+                                </td>
+                                <td class="font-monospace fw-bold">&ge; {{ tier.min_quantity|floatformat:0 }} {{ product.base_unit.code }}</td>
+                                <td class="font-monospace fw-bold text-primary">Rs. {{ tier.price_per_unit|floatformat:2|intcomma }}</td>
+                                <td class="text-muted fs-2xs">
+                                    Save Rs. {{ product.selling_price|sub:tier.price_per_unit|floatformat:2 }} / unit
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center py-3 text-muted">
+                                    No volume pricing tiers configured. Standard MRP Rs. {{ product.selling_price|floatformat:2|intcomma }} applies to all orders.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- COMPONENT-LEVEL WARRANTY SCHEDULE MATRIX -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-shield-halved text-success me-2"></i> Official Component Warranty Schedule Breakdown
+            </h6>
+            <span class="badge bg-primary rounded-pill fs-xs">Provider: {{ product.warranty_provider|default:"Authorized Distributor" }}</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-xs">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-3">Component Type</th>
+                        <th>Component Description</th>
+                        <th>Warranty Period</th>
+                        <th>Coverage Conditions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rule in component_rules %}
+                    <tr>
+                        <td class="ps-3 fw-bold text-dark">{{ rule.get_component_type_display }}</td>
+                        <td>{{ rule.component_name }}</td>
+                        <td>
+                            <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs px-2 py-1">
+                                {{ rule.warranty_months }} Months Coverage
+                            </span>
+                        </td>
+                        <td class="text-muted">{{ rule.coverage_conditions }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center py-3 text-muted">
+                            Overall Handset Warranty: <strong>{{ product.warranty_months }} Months</strong> (No separate sub-component splits defined).
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- In-Stock Physical IMEI Handsets & Active Warranties Table -->
+    {% if product.requires_imei_tracking or tracked_units %}
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-barcode text-primary me-2"></i> Handset IMEI Registry &amp; Active Customer Warranties
+            </h6>
+            <span class="badge bg-primary rounded-pill">{{ tracked_units.count }} Units Logged</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-xs">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-3">Primary IMEI 1</th>
+                        <th>Secondary IMEI 2</th>
+                        <th>Condition</th>
+                        <th>Status</th>
+                        <th>Branch</th>
+                        {% if IS_MANAGER or IS_ACCOUNTANT %}
+                        <th>Landed Cost</th>
+                        {% endif %}
+                        <th>Customer / Sold Bill</th>
+                        <th>Component Warranties Active</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for unit in tracked_units %}
+                    <tr>
+                        <td class="ps-3 font-monospace fw-bold text-primary">{{ unit.imei_1|default:"-" }}</td>
+                        <td class="font-monospace text-muted">{{ unit.imei_2|default:"-" }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ unit.get_condition_display }}</span></td>
+                        <td>
+                            <span class="badge bg-{% if unit.status == 'IN_STOCK' %}success{% elif unit.status == 'SOLD' %}secondary{% else %}warning text-dark{% endif %}">
+                                {{ unit.get_status_display }}
+                            </span>
+                        </td>
+                        <td>{{ unit.branch.name }}</td>
+                        {% if IS_MANAGER or IS_ACCOUNTANT %}
+                        <td class="font-monospace">Rs. {{ unit.landed_cost|floatformat:2|intcomma }}</td>
+                        {% endif %}
+                        <td>
+                            {% if unit.sold_invoice_reference %}
+                                <strong>{{ unit.customer_name|default:"Customer" }}</strong>
+                                <small class="text-muted d-block">Bill: {{ unit.sold_invoice_reference }} ({{ unit.sale_date }})</small>
+                            {% else %}
+                                <span class="text-muted">Unsold Inventory</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% for cw in unit.component_warranties.all %}
+                                <span class="badge bg-{% if cw.is_currently_valid %}success{% else %}danger{% endif %} bg-opacity-10 text-{% if cw.is_currently_valid %}success{% else %}danger{% endif %} me-1 mb-1">
+                                    {{ cw.component_name }}: Till {{ cw.warranty_expiry_date }}
+                                </span>
+                            {% empty %}
+                                <span class="text-muted">-</span>
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="{% if IS_MANAGER or IS_ACCOUNTANT %}8{% else %}7{% endif %}" class="text-center py-4 text-muted">
+                            No individual IMEI units registered for this model yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Service & Repair History Table -->
+    {% if service_tickets %}
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-wrench text-warning me-2"></i> Service &amp; Repair Log for this Model
+            </h6>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-xs">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-3">Ticket No</th>
+                        <th>IMEI / Serial</th>
+                        <th>Customer</th>
+                        <th>Reported Defect</th>
+                        <th>Technician</th>
+                        <th>Service Status</th>
+                        <th>Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for srv in service_tickets %}
+                    <tr>
+                        <td class="ps-3 font-monospace fw-bold">{{ srv.ticket_number }}</td>
+                        <td class="font-monospace">{{ srv.imei_or_serial }}</td>
+                        <td><strong>{{ srv.customer_name }}</strong> ({{ srv.customer_phone }})</td>
+                        <td>{{ srv.complaint_description|truncatechars:40 }}</td>
+                        <td>{{ srv.technician.username|default:"Unassigned" }}</td>
+                        <td><span class="badge bg-info text-dark">{{ srv.get_service_status_display }}</span></td>
+                        <td class="fw-bold">Rs. {{ srv.total_service_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Branch Stock & Stock Correction / IMEI Management Section -->
+    <div class="row g-3">
+        <div class="col-12 col-lg-6">
+            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3"><i class="fas fa-store text-primary me-2"></i> Branch Stock Availability</h6>
+                <ul class="list-group list-group-flush">
+                    {% for bs in stock_levels %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                        <div>
+                            <strong class="text-dark">{{ bs.branch.name }}</strong>
+                            <small class="text-muted d-block">Reserved: {{ bs.reserved_quantity }} | Alert Level: {{ bs.low_stock_threshold }}</small>
+                        </div>
+                        <span class="badge bg-{% if bs.is_low_stock %}warning text-dark{% else %}success bg-opacity-10 text-success{% endif %} fs-6 px-3 py-2">
+                            {{ bs.quantity }} {{ product.base_unit.code }}
+                        </span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN: SMART ADJUSTMENT VS SERIALIZED PHONE NOTICE -->
+        <div class="col-12 col-lg-6">
+            {% if product.requires_imei_tracking or product.requires_serial_tracking %}
+                <!-- SERIALIZED PHONE NOTICE -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100 border-start border-primary border-4">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-barcode"></i></span>
+                        <h6 class="fw-bold text-dark mb-0">Serialized Handset Stock Management</h6>
+                    </div>
+                    <div class="alert alert-info border-0 rounded-3 p-3 fs-xs mb-3">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Manual stock adjustment is disabled for serialized devices (IMEI/Serial tracked) to maintain audit integrity.
+                    </div>
+                    <ul class="text-muted fs-xs mb-4 ps-3">
+                        <li><strong>Inward Stock:</strong> Receive new stock with scanned IMEIs via <strong>Goods Received Notes (GRN)</strong>.</li>
+                        <li><strong>Outward Stock:</strong> Deducted in real time upon barcode scan on the <strong>POS Terminal</strong>.</li>
+                        <li><strong>Customer Returns:</strong> Process via <strong>Sales Returns</strong> to re-verify IMEI condition.</li>
+                    </ul>
+                    <div class="mt-auto d-flex flex-wrap gap-2">
+                        <a href="{% url 'purchases:grn_create' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                            <i class="fas fa-truck-ramp-box me-1"></i> Receive Inward (GRN)
+                        </a>
+                        <a href="{% url 'inventory:imei_registry' %}?q={{ product.sku }}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                            <i class="fas fa-list me-1"></i> Filter in IMEI Registry
+                        </a>
+                    </div>
+                </div>
+            {% else %}
+                <!-- STANDARD ACCESSORY MANUAL STOCK ADJUSTMENT FORM -->
+                {% if IS_MANAGER %}
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3"><i class="fas fa-sliders text-danger me-2"></i> Manual Stock Adjustment</h6>
+                    <form action="{% url 'inventory:product_stock_adjust' product.pk %}" method="post">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold fs-xs">Adjustment Type</label>
+                            {{ adjustment_form.adjustment_type }}
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold fs-xs">Quantity (Base Units)</label>
+                            {{ adjustment_form.quantity }}
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold fs-xs">Mandatory Reason / Note</label>
+                            {{ adjustment_form.remarks }}
+                        </div>
+                        <button type="submit" class="btn btn-danger btn-sm w-100 rounded-pill fw-bold">
+                            Apply Stock Correction
+                        </button>
+                    </form>
+                </div>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+
+<!-- =========================================================
+     ADD PRICE TIER MODAL (FOR WHOLESALE & VOLUME DISCOUNTS)
+     ========================================================= -->
+{% if IS_MANAGER %}
+<div class="modal fade" id="addPriceTierModal" tabindex="-1" aria-labelledby="addPriceTierModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <form action="{% url 'products:add_price_tier' product.id %}" method="post">
+                {% csrf_token %}
+                <div class="modal-header bg-primary text-white border-0 py-3">
+                    <h5 class="modal-title fs-6 fw-bold" id="addPriceTierModalLabel">
+                        <i class="fas fa-layer-group me-2"></i> Add Volume Price Tier for {{ product.name|truncatechars:25 }}
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Customer Tier Classification <span class="text-danger">*</span></label>
+                        <select name="tier_type" class="form-select" required>
+                            <option value="WHOLESALE" selected>Wholesale Buyer (थोक मूल्य)</option>
+                            <option value="DEALER">Dealer / Regional Sub-Stockist</option>
+                            <option value="SPECIAL">Special VIP Customer</option>
+                            <option value="RETAIL">Standard Retail Volume Break</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Minimum Qualifying Quantity (Units) <span class="text-danger">*</span></label>
+                        <input type="number" step="1" min="1" name="min_quantity" class="form-control font-monospace" value="5" required>
+                        <small class="text-muted fs-2xs mt-1 d-block">Order must meet or exceed this quantity to trigger the discounted unit rate.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Discounted Rate Per Unit (NPR) <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" min="0.00" name="price_per_unit" class="form-control font-monospace" placeholder="e.g. 18500.00" required>
+                        <small class="text-muted fs-2xs mt-1 d-block">Current Counter MRP is Rs. {{ product.selling_price|floatformat:2|intcomma }}.</small>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold">
+                        <i class="fas fa-save me-1"></i> Save Price Tier
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
