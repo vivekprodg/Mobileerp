@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Sum, Q
 from django.utils import timezone
 
 from apps.accounting.models import JournalEntry, JournalItem, Account, AccountingFiscalYear
@@ -111,7 +111,7 @@ class Command(BaseCommand):
         reversed_amount = Decimal('0.00')
 
         for bill_no in cancelled_bills:
-            grns = GoodsReceivedNote.objects.filter(bill_number=bill_no)
+            grns = GoodsReceivedNote.objects.filter(Q(supplier_bill_no=bill_no) | Q(grn_number=bill_no))
             for grn in grns:
                 if grn.status != 'CANCELLED':
                     grn.status = 'CANCELLED'
