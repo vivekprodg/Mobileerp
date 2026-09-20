@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}General Journal Entries Registry (लेखा भौचर सूची) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Journal Entries</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-book-journal-whills text-primary"></i>
+                <span>General Journal Entries Registry</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(दोहोरो लेखा भौचर सूची)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Master financial audit log of all automated POS, GRN, and manual double-entry vouchers</p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <a href="{% url 'accounting:journal_create' %}" class="btn btn-primary btn-sm rounded-pill px-3 shadow-xs fw-bold">
+                <i class="fas fa-plus-circle me-1"></i> New Journal Entry
+            </a>
+        </div>
+    </div>
+
+    <!-- Filter & Search Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-end-0 text-muted"><i class="fas fa-search"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q }}" class="form-control bg-light border-start-0 ps-0" 
+                           placeholder="Search voucher #, ref doc, narration...">
+                </div>
+            </div>
+            <div class="col-12 col-md-3">
+                <select name="voucher_type" class="form-select form-select-sm">
+                    <option value="">All Voucher Types (सबै प्रकारका भौचर)</option>
+                    {% for code, label in voucher_types %}
+                    <option value="{{ code }}" {% if request.GET.voucher_type == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">All Statuses (सबै अवस्था)</option>
+                    <option value="POSTED" {% if request.GET.status == 'POSTED' %}selected{% endif %}>Posted &amp; Settled</option>
+                    <option value="DRAFT" {% if request.GET.status == 'DRAFT' %}selected{% endif %}>Draft</option>
+                    <option value="CANCELLED" {% if request.GET.status == 'CANCELLED' %}selected{% endif %}>Cancelled</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-2">
+                <select name="fiscal_year" class="form-select form-select-sm">
+                    <option value="">All Fiscal Years (सबै आ.व.)</option>
+                    {% for fy in fiscal_years %}
+                    <option value="{{ fy.name }}" {% if request.GET.fiscal_year == fy.name %}selected{% endif %}>FY {{ fy.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-center gap-2">
+                <button type="submit" class="btn btn-dark btn-sm rounded-pill px-3 w-100">
+                    <i class="fas fa-filter me-1"></i> Filter
+                </button>
+                <a href="{% url 'accounting:journal_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                    Reset
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Journal Vouchers Table -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-slate-900 text-white text-uppercase fs-2xs tracking-wider">
+                    <tr>
+                        <th class="ps-3 py-3" style="width: 150px;">Voucher No.</th>
+                        <th style="width: 110px;">Date (AD/BS)</th>
+                        <th>Type</th>
+                        <th>Reference Doc</th>
+                        <th>Operational Narration</th>
+                        <th class="text-end">Total Debit (Dr)</th>
+                        <th class="text-end">Total Credit (Cr)</th>
+                        <th class="text-center">Status</th>
+                        <th>Posted By</th>
+                        <th class="text-center" style="width: 60px;">Inspect</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for j in journals %}
+                    <tr>
+                        <td class="ps-3">
+                            <span class="font-mono fw-bold text-primary fs-xs">{{ j.voucher_number }}</span>
+                            <small class="text-muted d-block fs-2xs font-mono">{{ j.branch.code }}</small>
+                        </td>
+                        <td>
+                            <div class="fw-semibold text-dark">{{ j.entry_date|date:"Y-m-d" }}</div>
+                            {% if j.entry_date_bs %}
+                                <small class="text-muted fs-2xs font-nepali">{{ j.entry_date_bs }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge {% if j.voucher_type == 'SALES' %}bg-success{% elif j.voucher_type == 'PURCHASE' %}bg-primary{% elif j.voucher_type == 'PAYMENT' %}bg-danger{% elif j.voucher_type == 'RECEIPT' %}bg-info text-dark{% else %}bg-secondary{% endif %} bg-opacity-10 text-{% if j.voucher_type == 'SALES' %}success{% elif j.voucher_type == 'PURCHASE' %}primary{% elif j.voucher_type == 'PAYMENT' %}danger{% elif j.voucher_type == 'RECEIPT' %}info{% else %}secondary{% endif %} fs-2xs">
+                                {{ j.get_voucher_type_display }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="font-mono fs-xs">{{ j.reference_document|default:"-" }}</span>
+                        </td>
+                        <td>
+                            <div class="text-dark fs-xs text-truncate" style="max-width: 250px;" title="{{ j.narration }}">
+                                {{ j.narration }}
+                            </div>
+                        </td>
+                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+                            Rs. {{ j.total_debit|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+                            Rs. {{ j.total_credit|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-center">
+                            {% if j.status == 'POSTED' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fs-2xs">Posted</span>
+                            {% elif j.status == 'DRAFT' %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs">Draft</span>
+                            {% else %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs">Cancelled</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small class="text-muted d-block fs-2xs">
+                                <i class="fas fa-user-circle me-1"></i>{{ j.created_by.username }}
+                            </small>
+                            {% if j.fiscal_year %}
+                                <small class="badge bg-light text-muted border font-mono fs-2xs">FY {{ j.fiscal_year }}</small>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            <button type="button" class="btn btn-outline-secondary btn-sm p-1 px-2 rounded-pill fs-2xs" 
+                                    data-bs-toggle="modal" data-bs-target="#voucherModal_{{ j.id }}" title="View Double-Entry Lines">
+                                <i class="fas fa-eye text-primary"></i>
+                            </button>
+                        </td>
+                    </tr>
+
+                    <!-- Voucher Inspection Modal -->
+                    <div class="modal fade" id="voucherModal_{{ j.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-lg">
+                            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                                <div class="modal-header bg-slate-900 text-white px-4 py-3">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <i class="fas fa-book-open text-warning"></i>
+                                        <h5 class="modal-title fs-sm fw-bold mb-0">Double-Entry Voucher: {{ j.voucher_number }}</h5>
+                                    </div>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body p-4">
+                                    <div class="row g-2 mb-3 bg-light p-3 rounded-3 fs-xs">
+                                        <div class="col-6 col-md-3"><strong>Type:</strong> {{ j.get_voucher_type_display }}</div>
+                                        <div class="col-6 col-md-3"><strong>Date:</strong> {{ j.entry_date }} ({{ j.entry_date_bs }} BS)</div>
+                                        <div class="col-6 col-md-3"><strong>Branch:</strong> {{ j.branch.name }}</div>
+                                        <div class="col-6 col-md-3"><strong>Ref Doc:</strong> {{ j.reference_document|default:"None" }}</div>
+                                        <div class="col-12 mt-2"><strong>Narration:</strong> {{ j.narration }}</div>
+                                    </div>
+
+                                    <div class="table-responsive border rounded-3 overflow-hidden">
+                                        <table class="table table-sm table-striped align-middle mb-0 fs-xs">
+                                            <thead class="bg-slate-800 text-white text-uppercase fs-2xs">
+                                                <tr>
+                                                    <th class="ps-3 py-2">General Ledger Account</th>
+                                                    <th>Sub-Ledger Party</th>
+                                                    <th class="text-end">Debit (Dr)</th>
+                                                    <th class="text-end pe-3">Credit (Cr)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for item in j.items.all %}
+                                                <tr>
+                                                    <td class="ps-3">
+                                                        <div class="fw-bold font-mono text-primary">{{ item.account.code }}</div>
+                                                        <div>{{ item.account.name }}</div>
+                                                        {% if item.line_narration %}
+                                                            <small class="text-muted d-block fs-2xs">{{ item.line_narration }}</small>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {% if item.customer %}
+                                                            <span class="badge bg-info bg-opacity-10 text-info">Customer: {{ item.customer.name }}</span>
+                                                        {% elif item.supplier %}
+                                                            <span class="badge bg-warning bg-opacity-10 text-warning-emphasis">Vendor: {{ item.supplier.company_name }}</span>
+                                                        {% else %}
+                                                            <span class="text-muted">-</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td class="text-end font-mono fw-bold text-dark">
+                                                        {% if item.debit_amount > 0 %}
+                                                            Rs. {{ item.debit_amount|floatformat:2|intcomma }}
+                                                        {% else %}
+                                                            -
+                                                        {% endif %}
+                                                    </td>
+                                                    <td class="text-end pe-3 font-mono fw-bold text-dark">
+                                                        {% if item.credit_amount > 0 %}
+                                                            Rs. {{ item.credit_amount|floatformat:2|intcomma }}
+                                                        {% else %}
+                                                            -
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                            <tfoot class="bg-light fw-extrabold font-mono fs-xs border-top">
+                                                <tr>
+                                                    <td colspan="2" class="text-end pe-3">Voucher Balance Totals:</td>
+                                                    <td class="text-end text-primary">Rs. {{ j.total_debit|floatformat:2|intcomma }}</td>
+                                                    <td class="text-end pe-3 text-primary">Rs. {{ j.total_credit|floatformat:2|intcomma }}</td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="modal-footer bg-light px-4 py-2 border-top">
+                                    <button type="button" class="btn btn-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center py-5 text-muted">
+                            <i class="fas fa-book-journal-whills fs-1 opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold mb-1">No Journal Entries Found</h6>
+                            <p class="fs-xs mb-3">No double-entry vouchers match your filter criteria.</p>
+                            <a href="{% url 'accounting:journal_create' %}" class="btn btn-primary btn-sm rounded-pill px-3">
+                                <i class="fas fa-plus-circle me-1"></i> Post New Journal Entry
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if is_paginated %}
+        <div class="card-footer bg-white border-top py-3 px-4">
+            {% include "includes/_pagination.html" %}
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

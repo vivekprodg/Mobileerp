@@ -6,142 +6,144 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     
-    <title>{% block title %}{{ COMPANY_NAME }} | Store ERP{% endblock %}</title>
+    <title>{% block title %}{{ COMPANY_NAME|default:"Smart Mobile & Optics Hub" }} | Enterprise ERP{% endblock %}</title>
 
     <!-- PWA Manifest & Icons -->
     <link rel="manifest" href="{% static 'manifest.json' %}">
-    <meta name="theme-color" content="#0f172a">
-    <link rel="icon" type="image/png" href="{% if HAS_COMPANY_LOGO %}{{ COMPANY_LOGO_URL }}{% else %}{% static 'images/icons/icon-192x192.png' %}{% endif %}">
+    <meta name="theme-color" content="#060b18">
+    <link rel="icon" type="image/png" href="{% if HAS_COMPANY_LOGO and COMPANY_LOGO_URL %}{{ COMPANY_LOGO_URL }}{% else %}{% static 'images/icons/icon-192x192.png' %}{% endif %}">
 
     <!-- Fonts & Core Vendor CSS -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Nepali Datepicker (Bikram Sambat Visual Calendar) CSS -->
+    <link rel="stylesheet" href="https://nepalidatepicker.sajanmaharjan.com.np/nepali.datepicker/css/nepali.datepicker.v4.0.7.min.css">
+
+    <!-- Core ERP Custom CSS -->
     <link rel="stylesheet" href="{% static 'css/custom.css' %}">
 
-    <!-- High-Performance Layout & Sidebar Collapse Engine -->
+    <!-- Explicit Layout Offset Rules: 36px (Top-Bar) + 58px (Main-Bar) = 94px -->
     <style>
         :root {
-            --erp-bg: #f8fafc;
-            --erp-surface: #ffffff;
-            --erp-border: #e2e8f0;
-            --erp-primary: #2563eb;
-            --erp-primary-hover: #1d4ed8;
-            --erp-dark: #0f172a;
-            --erp-sidebar-width: 260px;
-            --erp-sidebar-collapsed-width: 72px;
-            --erp-header-height: 62px;
+            --erp-header-total-height: 94px;
         }
 
-        body {
-            font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-            background-color: var(--erp-bg);
-            color: #0f172a;
-            letter-spacing: -0.015em;
-            margin: 0;
-            padding: 0;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow-x: hidden;
-        }
-
-        /* Fluid Master Layout */
         .app-layout {
-            display: flex;
-            flex: 1 1 auto;
-            width: 100%;
-            min-height: calc(100vh - var(--erp-header-height));
-            position: relative;
+            min-height: calc(100vh - var(--erp-header-total-height));
         }
 
-        /* Desktop Sidebar Navigation */
         .app-sidebar-wrapper {
-            width: var(--erp-sidebar-width);
-            min-width: var(--erp-sidebar-width);
-            max-width: var(--erp-sidebar-width);
-            background: #ffffff;
-            border-right: 1px solid var(--erp-border);
-            height: calc(100vh - var(--erp-header-height));
-            position: sticky;
-            top: var(--erp-header-height);
-            display: flex;
-            flex-direction: column;
-            transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-                        min-width 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-                        max-width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 1020;
+            top: var(--erp-header-total-height);
+            height: calc(100vh - var(--erp-header-total-height));
         }
 
-        /* Collapsed Icon-Only Desktop Mode */
-        .app-layout.sidebar-collapsed .app-sidebar-wrapper {
-            width: var(--erp-sidebar-collapsed-width);
-            min-width: var(--erp-sidebar-collapsed-width);
-            max-width: var(--erp-sidebar-collapsed-width);
-        }
-        .app-layout.sidebar-collapsed .nav-text,
-        .app-layout.sidebar-collapsed .nav-header,
-        .app-layout.sidebar-collapsed .sidebar-footer-disclaimer,
-        .app-layout.sidebar-collapsed .badge-hide-collapsed {
-            display: none !important;
-        }
-        .app-layout.sidebar-collapsed .nav-link {
-            justify-content: center !important;
-            padding: 0.65rem 0 !important;
-        }
-        .app-layout.sidebar-collapsed .nav-link i {
-            margin: 0 !important;
-            font-size: 1.15rem !important;
+        /* ==========================================================================
+           NEPALI DATEPICKER DESIGN SYSTEM & ELEVATION ALIGNMENT
+           ========================================================================== */
+        #ndp-nepali-box, .ndp-nepali-box {
+            font-family: var(--erp-font-sans, 'Plus Jakarta Sans', system-ui, sans-serif) !important;
+            border-radius: 14px !important;
+            border: 1px solid #cbd5e1 !important;
+            box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16) !important;
+            z-index: 99999 !important;
+            overflow: hidden;
+            padding: 8px !important;
+            background: #ffffff !important;
         }
 
-        /* Main Scrollable Viewport with Integrated Sticky Footer */
-        .app-content-wrapper {
-            flex: 1 1 0%;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-            background-color: var(--erp-bg);
-            position: relative;
-        }
-        .app-main-body {
-            flex: 1 0 auto;
-            width: 100%;
+        .ndp-header {
+            background-color: var(--erp-slate-900, #0f172a) !important;
+            color: #ffffff !important;
+            border-radius: 10px !important;
+            padding: 8px 10px !important;
+            margin-bottom: 6px !important;
         }
 
-        /* Tablet & Small Desktop Scaling */
-        @media (max-width: 1200px) and (min-width: 992px) {
-            :root {
-                --erp-sidebar-width: 220px;
-            }
+        .ndp-header select {
+            background: #1e293b !important;
+            color: #ffffff !important;
+            border: 1px solid #475569 !important;
+            border-radius: 6px !important;
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            padding: 2px 6px !important;
+            outline: none !important;
+            cursor: pointer;
+        }
+
+        .ndp-header select:focus {
+            border-color: #38bdf8 !important;
+        }
+
+        .ndp-days th {
+            color: #64748b !important;
+            font-size: 10.5px !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+            padding: 4px 0 !important;
+        }
+
+        .ndp-days td a {
+            border-radius: 6px !important;
+            font-size: 11.5px !important;
+            font-weight: 600 !important;
+            transition: all 0.15s ease !important;
+            color: #0f172a !important;
+            text-decoration: none !important;
+        }
+
+        .ndp-days td a:hover {
+            background-color: #eff6ff !important;
+            color: var(--erp-primary, #2563eb) !important;
+        }
+
+        .ndp-current-day a, 
+        .ndp-selected a {
+            background-color: var(--erp-primary, #2563eb) !important;
+            color: #ffffff !important;
+            font-weight: 800 !important;
+            border-radius: 6px !important;
+        }
+
+        /* Highlight visual focus on inputs bound to Nepali Calendar */
+        .nepali-datepicker-active,
+        [data-ndp-initialized="true"]:focus {
+            border-color: #2563eb !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
         }
     </style>
     {% block extra_head %}{% endblock %}
 </head>
 <body class="d-flex flex-column min-vh-100">
 
-    <!-- Top Navigation Header -->
+    <!-- Stacked Two-Tier Header Architecture (Top-Bar + Main-Bar) -->
     {% include "includes/_header.html" %}
 
     <div class="app-layout" id="appLayout">
-        <!-- Desktop Fixed Sidebar -->
+        
+        <!-- Desktop Fixed Collapsible Sidebar -->
         <aside class="app-sidebar-wrapper d-none d-lg-flex" id="desktopSidebar">
             {% include "includes/_sidebar.html" %}
         </aside>
 
-        <!-- Mobile Offcanvas Sidebar -->
-        <div class="offcanvas offcanvas-start p-0 d-lg-none" tabindex="-1" id="sidebarOffcanvas" style="width: 280px;">
+        <!-- Mobile Offcanvas Drawer (< 992px) -->
+        <div class="offcanvas offcanvas-start p-0 d-lg-none" tabindex="-1" id="sidebarOffcanvas" style="width: 290px;">
             <div class="offcanvas-header bg-dark text-white border-bottom border-secondary px-3 py-3">
                 <div class="d-flex align-items-center gap-2">
-                    {% if HAS_COMPANY_LOGO %}
+                    {% if HAS_COMPANY_LOGO and COMPANY_LOGO_URL %}
                         <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="rounded-3 bg-white p-1" style="height: 32px; width: auto; object-fit: contain;">
                     {% else %}
-                        <span class="badge bg-primary p-2 rounded-3 fs-6"><i class="fas fa-mobile-screen"></i></span>
+                        <div class="header-brand-icon" style="width: 32px; height: 32px; font-size: 0.9rem;">
+                            <i class="fas fa-mobile-screen"></i>
+                        </div>
                     {% endif %}
                     <div>
-                        <h6 class="fw-bold text-white mb-0 fs-sm text-truncate" style="max-width: 170px;">{{ COMPANY_NAME }}</h6>
-                        <small class="text-white-50 fs-2xs">{{ STORE_OUTLET_NAME }}</small>
+                        <h6 class="fw-bold text-white mb-0 fs-sm text-truncate" style="max-width: 170px;">{{ COMPANY_NAME|default:"Smart Mobile Hub" }}</h6>
+                        <small class="text-white-50 fs-2xs">{{ STORE_OUTLET_NAME|default:"New Road Branch" }}</small>
                     </div>
                 </div>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
@@ -151,44 +153,145 @@
             </div>
         </div>
 
-        <!-- Main Content Viewport -->
+        <!-- Main Content Viewport with Dual-Tier Sticky Footer -->
         <main class="app-content-wrapper" id="mainContent">
             <div class="app-main-body">
                 {% include "includes/_messages.html" %}
                 {% block content %}{% endblock %}
             </div>
-            <!-- Sticky Seamless Footer -->
+            
+            <!-- Two-Tier Footers: Tier 1 (Main Action) + Tier 2 (Sub-Footer) -->
             {% include "includes/_footer.html" %}
         </main>
     </div>
 
-    <!-- Bootstrap 5.3 & App JS Bundle -->
+    <!-- Bootstrap 5.3.3 JS Bundle -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- PWA Service Worker Registration -->
     <script src="{% static 'js/pwa_register.js' %}"></script>
 
-    <!-- Sidebar Desktop Collapse & Tooltip Initializer -->
+    <!-- Nepali Datepicker (Bikram Sambat Visual Calendar) JS -->
+    <script src="https://nepalidatepicker.sajanmaharjan.com.np/nepali.datepicker/js/nepali.datepicker.v4.0.7.min.js"></script>
+
+    <!-- Master Layout & Global Nepali Datepicker Auto-Initializer -->
     <script>
+        // Desktop Sidebar Collapse Functionality
+        function toggleSidebarCollapse() {
+            const layout = document.getElementById('appLayout');
+            if (!layout) return;
+            layout.classList.toggle('sidebar-collapsed');
+            const isCollapsed = layout.classList.contains('sidebar-collapsed');
+            localStorage.setItem('erp_sidebar_collapsed', isCollapsed ? 'true' : 'false');
+        }
+
+        // Subgroup Accordion Toggle for Reports
+        function toggleSubgroup(groupId, toggleElement) {
+            const content = document.getElementById(groupId);
+            if (!content) return;
+            
+            const isHidden = content.classList.contains('d-none');
+            const arrow = toggleElement.querySelector('.accordion-arrow');
+
+            if (isHidden) {
+                content.classList.remove('d-none');
+                if (arrow) arrow.style.transform = 'rotate(90deg)';
+            } else {
+                content.classList.add('d-none');
+                if (arrow) arrow.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        /**
+         * Global Nepali Datepicker Auto-Initializer
+         * Automatically binds interactive Bikram Sambat (BS) visual calendar popup
+         * to any input field designated for Nepali dates throughout the entire software.
+         */
+        function initNepaliDatepickers(root = document) {
+            if (typeof HTMLElement.prototype.nepaliDatePicker === 'undefined') {
+                return;
+            }
+
+            const selectors = [
+                '.nepali-datepicker',
+                '.bs-datepicker',
+                '.nepali-date',
+                '[data-nepali-datepicker]',
+                'input[name*="date_bs"]',
+                'input[name*="dob_bs"]',
+                'input[name*="_bs"]',
+                'input[id*="date_bs"]',
+                'input[id*="_bs"]',
+                'input[placeholder*="(BS)"]',
+                'input[placeholder*="BS"]',
+                'input[placeholder*="YYYY-MM-DD (BS)"]'
+            ];
+
+            const inputs = root.querySelectorAll(selectors.join(', '));
+            inputs.forEach(el => {
+                if (el.dataset.ndpInitialized === 'true') return;
+                
+                // Switch type="date" to type="text" to prevent browser native Gregorian pickers from overlapping
+                if (el.type === 'date') {
+                    el.type = 'text';
+                }
+
+                try {
+                    if (typeof el.nepaliDatePicker === 'function') {
+                        el.nepaliDatePicker({
+                            ndpYear: true,
+                            ndpMonth: true,
+                            ndpYearCount: 25,
+                            readOnlyInput: false,
+                            dateFormat: 'YYYY-MM-DD',
+                            language: 'english'
+                        });
+                        el.dataset.ndpInitialized = 'true';
+                        el.classList.add('nepali-datepicker-active');
+                    }
+                } catch (err) {
+                    console.warn('[NepaliDatePicker] Auto-init skipped on:', el, err);
+                }
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             const layout = document.getElementById('appLayout');
             const toggleBtn = document.getElementById('sidebarToggleBtn');
 
-            // Restore sidebar state from LocalStorage
-            if (localStorage.getItem('erp_sidebar_collapsed') === 'true') {
+            // Restore Sidebar Compact State from LocalStorage
+            if (layout && localStorage.getItem('erp_sidebar_collapsed') === 'true') {
                 layout.classList.add('sidebar-collapsed');
             }
 
             if (toggleBtn) {
-                toggleBtn.addEventListener('click', () => {
-                    layout.classList.toggle('sidebar-collapsed');
-                    const isCollapsed = layout.classList.contains('sidebar-collapsed');
-                    localStorage.setItem('erp_sidebar_collapsed', isCollapsed ? 'true' : 'false');
-                });
+                toggleBtn.addEventListener('click', toggleSidebarCollapse);
             }
+
+            // Keyboard Shortcut Ctrl+B / Cmd+B for Sidebar Collapse
+            document.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+                    e.preventDefault();
+                    toggleSidebarCollapse();
+                }
+            });
 
             // Initialize Bootstrap Tooltips
             const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
             tooltipTriggerList.map(el => new bootstrap.Tooltip(el));
+
+            // Initialize Global Nepali Datepickers on initial page load
+            initNepaliDatepickers(document);
+
+            // Observe dynamically created DOM elements (Bootstrap Modals, Formset rows, Quick Add dialogs)
+            const observer = new MutationObserver(() => {
+                initNepaliDatepickers(document);
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
         });
+
+        // Expose globally so custom views can re-trigger on demand
+        window.initNepaliDatepickers = initNepaliDatepickers;
     </script>
     {% block extra_scripts %}{% endblock %}
 </body>

@@ -1,0 +1,285 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Stock Detail Report (Bin Card) | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.stock-detail-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 14px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.table-stock-detail th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+
+.table-stock-detail td {
+    font-size: 0.78rem;
+    padding: 8px 10px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.opening-balance-row td {
+    background-color: #f8fafc !important;
+    font-weight: bold;
+    border-top: 1.5px solid #0f172a;
+    border-bottom: 1.5px solid #0f172a;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1600px;">
+    
+    <!-- Header & Action Controls -->
+    <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-ol text-primary me-2"></i> Stock Detail Report (Bin Card / वस्तुको मौज्दात खाता)
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Item-specific running movement ledger displaying chronological In-Stock, Out-Stock, and Running Balance.
+            </p>
+        </div>
+
+        {% if product %}
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'format' and k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}format=print" target="_blank" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </a>
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' and k != 'format' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' and k != 'format' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=excel" class="btn btn-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-excel me-1"></i> Export Excel (.xlsx)
+            </a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Filter Bar (Product Search, Branch & Dates) -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-end" id="stockDetailFilterForm">
+            <!-- 1. Product Search Dropdown -->
+            <div class="col-12 col-md-4">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Select Product / Phone <span class="text-danger">*</span></label>
+                <select name="product_id" class="form-select form-select-sm bg-light border-0 fw-bold" id="productSelectDropdown" onchange="document.getElementById('stockDetailFilterForm').submit()">
+                    <option value="">-- Choose Product / Phone --</option>
+                    {% for p in all_products %}
+                        <option value="{{ p.id }}" {% if product and product.id == p.id %}selected{% endif %}>
+                            {{ p.name }} (SKU: {{ p.sku }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 2. Branch Selector -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Outlet / Branch</label>
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>{{ br.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 3. Start Date -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Start Date (AD)</label>
+                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm bg-light border-0 font-monospace">
+            </div>
+
+            <!-- 4. End Date -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">End Date (AD)</label>
+                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm bg-light border-0 font-monospace">
+            </div>
+
+            <!-- 5. Submit / Reset -->
+            <div class="col-6 col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-primary btn-sm w-100 rounded-3 fw-bold shadow-xs">
+                    <i class="fas fa-filter me-1"></i> Generate Ledger
+                </button>
+                <a href="{% url 'reports:stock_detail' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+            </div>
+        </form>
+    </div>
+
+    {% if product %}
+    <!-- 4 Overview Metric Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="stock-detail-kpi-card border-start border-secondary border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Opening Balance (Before {{ start_date }})</span>
+                <h3 class="fw-extrabold text-dark font-monospace mt-1 mb-0">{{ opening_balance|floatformat:1 }} <span class="fs-6 text-muted">{{ product.base_unit.code }}</span></h3>
+                <small class="text-muted fs-2xs">Historical stock before window</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="stock-detail-kpi-card border-start border-success border-4 h-100">
+                <span class="text-success text-uppercase fw-bold fs-2xs">Total Inward (+)</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-1 mb-0">+{{ total_in|floatformat:1 }} <span class="fs-6 text-muted">{{ product.base_unit.code }}</span></h3>
+                <small class="text-muted fs-2xs">Purchases, Returns, Transfers in</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="stock-detail-kpi-card border-start border-danger border-4 h-100">
+                <span class="text-danger text-uppercase fw-bold fs-2xs">Total Outward (-)</span>
+                <h3 class="fw-extrabold text-danger font-monospace mt-1 mb-0">-{{ total_out|floatformat:1 }} <span class="fs-6 text-muted">{{ product.base_unit.code }}</span></h3>
+                <small class="text-muted fs-2xs">Sales, Transfers out, Write-offs</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="stock-detail-kpi-card border-start border-primary border-4 h-100">
+                <span class="text-primary text-uppercase fw-bold fs-2xs">Closing Balance (Ending)</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-1 mb-0">{{ closing_balance|floatformat:1 }} <span class="fs-6 text-muted">{{ product.base_unit.code }}</span></h3>
+                <small class="text-muted fs-2xs">As of {{ end_date }} ({{ end_date_bs }} BS)</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- The 10-Column Running Ledger Table Matching Client Excel -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <div>
+                <h6 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-boxes-stacked text-primary me-2"></i> {{ product.name }}
+                    <span class="badge bg-light text-dark border font-monospace ms-2">{{ product.sku }}</span>
+                </h6>
+                <small class="text-muted fs-2xs">Category: <strong>{{ product.category.name }}</strong> | Brand: <strong>{{ product.brand.name|default:"-" }}</strong></small>
+            </div>
+            <span class="badge bg-primary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Movements</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover table-bordered align-middle mb-0 table-stock-detail">
+                <thead>
+                    <tr>
+                        <th class="ps-3 text-center" style="width: 50px;">S.N.</th>
+                        <th style="width: 140px;">Date (AD / BS)</th>
+                        <th>Invoice Type</th>
+                        <th>Invoice number</th>
+                        <th class="text-end" style="width: 100px;">In Stock</th>
+                        <th class="text-end" style="width: 100px;">Out Stock</th>
+                        <th class="text-center" style="width: 70px;">Unit</th>
+                        <th class="text-end" style="width: 120px;">Price (NPR)</th>
+                        <th class="text-end" style="width: 120px;">Balance</th>
+                        <th class="pe-3">Remarks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Row 0: Opening Balance -->
+                    <tr class="opening-balance-row">
+                        <td class="ps-3 text-center text-muted font-monospace">-</td>
+                        <td>{{ start_date }}<br><small class="text-muted font-monospace">{{ start_date_bs }} BS</small></td>
+                        <td><span class="badge bg-secondary text-white">OPENING BALANCE</span></td>
+                        <td class="font-monospace text-muted">-</td>
+                        <td class="col-num text-muted">0.00</td>
+                        <td class="col-num text-muted">0.00</td>
+                        <td class="text-center font-monospace">{{ product.base_unit.code }}</td>
+                        <td class="col-num text-muted">0.00</td>
+                        <td class="col-num fw-bold text-dark">{{ opening_balance|floatformat:1 }}</td>
+                        <td class="pe-3 text-muted">Opening Stock Balance as of {{ start_date }}</td>
+                    </tr>
+
+                    <!-- Movements Rows -->
+                    {% for r in records %}
+                    <tr>
+                        <td class="ps-3 text-center font-monospace">{{ r.sn }}</td>
+                        <td>
+                            <span class="fw-semibold text-dark">{{ r.date_ad }}</span>
+                            <small class="text-muted d-block font-monospace fs-2xs">{{ r.date_bs }} BS</small>
+                        </td>
+                        <td>
+                            {% if 'Inward' in r.invoice_type or 'Purchase' in r.invoice_type %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold">{{ r.invoice_type }}</span>
+                            {% elif 'Sales' in r.invoice_type or 'Sale' in r.invoice_type %}
+                                <span class="badge bg-primary bg-opacity-10 text-primary fw-bold">{{ r.invoice_type }}</span>
+                            {% elif 'Return' in r.invoice_type %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold">{{ r.invoice_type }}</span>
+                            {% elif 'Transfer' in r.invoice_type %}
+                                <span class="badge bg-info bg-opacity-10 text-info fw-bold">{{ r.invoice_type }}</span>
+                            {% else %}
+                                <span class="badge bg-light text-dark border">{{ r.invoice_type }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="font-monospace fw-bold text-dark">
+                            {{ r.invoice_number }}
+                        </td>
+                        <td class="col-num text-success fw-bold">
+                            {% if r.in_stock > 0 %}+{{ r.in_stock|floatformat:1 }}{% else %}-{% endif %}
+                        </td>
+                        <td class="col-num text-danger fw-bold">
+                            {% if r.out_stock > 0 %}-{{ r.out_stock|floatformat:1 }}{% else %}-{% endif %}
+                        </td>
+                        <td class="text-center font-monospace">{{ r.unit }}</td>
+                        <td class="col-num">Rs. {{ r.price|floatformat:2|intcomma }}</td>
+                        <td class="col-num fw-bold text-primary fs-xs">
+                            {{ r.balance|floatformat:1 }}
+                        </td>
+                        <td class="pe-3">
+                            <small class="text-muted">{{ r.remarks }}</small>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center py-4 text-muted">
+                            No movements recorded for {{ product.name }} between {{ start_date }} and {{ end_date }}.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                <!-- Totals Summary Row -->
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top">
+                    <tr style="background-color: #0f172a; color: #ffffff;">
+                        <td colspan="4" class="ps-3 text-end text-uppercase">TOTAL MOVEMENTS:</td>
+                        <td class="col-num text-success fs-6">+{{ total_in|floatformat:1 }}</td>
+                        <td class="col-num text-danger fs-6">-{{ total_out|floatformat:1 }}</td>
+                        <td class="text-center font-monospace">{{ product.base_unit.code }}</td>
+                        <td></td>
+                        <td class="col-num text-warning fs-6">{{ closing_balance|floatformat:1 }}</td>
+                        <td class="pe-3 text-white-50">Closing Balance</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+    {% else %}
+    <!-- Initial Prompt to Pick a Product -->
+    <div class="card border-0 shadow-sm rounded-4 p-5 text-center bg-white">
+        <i class="fas fa-hand-pointer fs-1 text-primary opacity-25 d-block mb-3"></i>
+        <h5 class="fw-bold text-dark mb-1">Please select a product above</h5>
+        <p class="text-muted fs-xs mb-0">Choose any phone model or accessory from the dropdown to load its item-wise stock ledger.</p>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}

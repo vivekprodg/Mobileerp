@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Create Double-Entry Journal Voucher (लेखा भौचर) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:journal_list' %}" class="text-decoration-none text-muted">Journal Entries</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">New Voucher</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-book-journal-whills text-primary"></i>
+                <span>Create Double-Entry Journal Voucher</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(दोहोरो लेखा भौचर प्रविष्टि)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">General manual adjustments, Contra bank-cash transfers, and depreciation entries ($\sum\text{Dr} = \sum\text{Cr}$)</p>
+        </div>
+        <div>
+            <a href="{% url 'accounting:journal_list' %}" class="btn btn-outline-dark btn-sm rounded-pill px-3">
+                <i class="fas fa-arrow-left me-1"></i> Back to Journal Register
+            </a>
+        </div>
+    </div>
+
+    <!-- Main Entry Form -->
+    <form action="" method="post" id="journalEntryForm">
+        {% csrf_token %}
+
+        <!-- Voucher Header Parameters Card -->
+        <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+            <div class="card-header bg-slate-900 text-white px-4 py-3 d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fas fa-receipt text-warning"></i>
+                    <span class="fw-bold fs-sm text-uppercase tracking-wider">Voucher Header Specifications</span>
+                </div>
+                <span class="badge bg-secondary bg-opacity-25 text-white fs-2xs font-mono">Status: POSTED ON SAVE</span>
+            </div>
+
+            <div class="p-4">
+                {% if form.non_field_errors %}
+                <div class="alert alert-danger rounded-3 p-3 mb-3 fs-xs">
+                    {{ form.non_field_errors }}
+                </div>
+                {% endif %}
+
+                <div class="row g-3">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">Voucher Type * (भौचर प्रकार)</label>
+                        {{ form.voucher_type }}
+                        {% if form.voucher_type.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.voucher_type.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">Store Branch * (शाखा)</label>
+                        {{ form.branch }}
+                        {% if form.branch.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.branch.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">Voucher Date (AD) *</label>
+                        {{ form.entry_date }}
+                        {% if form.entry_date.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.entry_date.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">Reference Doc / Cheque No.</label>
+                        {{ form.reference_document }}
+                        {% if form.reference_document.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.reference_document.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">Voucher Narration / Operational Memo * (कैफियत)</label>
+                        {{ form.narration }}
+                        {% if form.narration.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.narration.errors }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dynamic Double-Entry Line Items Grid -->
+        <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+            <div class="card-header bg-slate-800 text-white px-4 py-3 d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fas fa-list-check text-info"></i>
+                    <span class="fw-bold fs-sm text-uppercase tracking-wider">Debit &amp; Credit Ledger Allocations</span>
+                </div>
+                <button type="button" class="btn btn-warning btn-sm rounded-pill px-3 py-1 fw-bold fs-2xs" id="addJournalRowBtn">
+                    <i class="fas fa-plus me-1"></i> Add Another Row
+                </button>
+            </div>
+
+            {{ formset.management_form }}
+
+            <div class="table-responsive">
+                <table class="table table-bordered align-middle mb-0" id="journalLinesTable">
+                    <thead class="bg-light text-muted fs-2xs text-uppercase">
+                        <tr>
+                            <th style="width: 40px;" class="text-center">#</th>
+                            <th style="min-width: 250px;">General Ledger Account * (खाता)</th>
+                            <th style="min-width: 170px;">Sub-Ledger Entity (Customer / Supplier)</th>
+                            <th style="width: 160px;" class="text-end">Debit (Dr) Amount *</th>
+                            <th style="width: 160px;" class="text-end">Credit (Cr) Amount *</th>
+                            <th style="min-width: 180px;">Line Note (Optional)</th>
+                            <th style="width: 50px;" class="text-center">Del</th>
+                        </tr>
+                    </thead>
+                    <tbody id="journalFormsetBody">
+                        {% for item_form in formset %}
+                        <tr class="journal-form-row">
+                            <td class="text-center font-mono fs-xs text-muted row-index">{{ forloop.counter }}</td>
+                            <td>
+                                {{ item_form.id }}
+                                {{ item_form.account }}
+                                {% if item_form.account.errors %}
+                                    <div class="text-danger fs-2xs">{{ item_form.account.errors }}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="d-flex flex-column gap-1">
+                                    {{ item_form.customer }}
+                                    {{ item_form.supplier }}
+                                </div>
+                            </td>
+                            <td>
+                                {{ item_form.debit_amount }}
+                                {% if item_form.debit_amount.errors %}
+                                    <div class="text-danger fs-2xs">{{ item_form.debit_amount.errors }}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {{ item_form.credit_amount }}
+                                {% if item_form.credit_amount.errors %}
+                                    <div class="text-danger fs-2xs">{{ item_form.credit_amount.errors }}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {{ item_form.line_narration }}
+                            </td>
+                            <td class="text-center">
+                                {% if item_form.instance.pk %}
+                                    {{ item_form.DELETE }}
+                                {% else %}
+                                    <button type="button" class="btn btn-outline-danger btn-sm p-1 rounded-circle border-0 remove-row-btn" title="Remove Line">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Mathematical Balance Audit Footer Bar -->
+            <div class="p-3 bg-slate-900 text-white">
+                <div class="row g-2 align-items-center">
+                    <div class="col-12 col-md-3">
+                        <span class="fs-2xs fw-bold text-uppercase text-slate-400 d-block">Total Debits ($\sum\text{Dr}$):</span>
+                        <h4 class="fw-extrabold text-info font-mono mb-0" id="totalDebitDisplay">Rs. 0.00</h4>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <span class="fs-2xs fw-bold text-uppercase text-slate-400 d-block">Total Credits ($\sum\text{Cr}$):</span>
+                        <h4 class="fw-extrabold text-warning font-mono mb-0" id="totalCreditDisplay">Rs. 0.00</h4>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <span class="fs-2xs fw-bold text-uppercase text-slate-400 d-block">Balance Variance (अन्तर):</span>
+                        <h4 class="fw-extrabold font-mono mb-0 text-success" id="varianceDisplay">Rs. 0.00</h4>
+                    </div>
+                    <div class="col-12 col-md-3 text-md-end">
+                        <div id="balanceStatusBadge" class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 p-2 fs-xs fw-bold d-inline-block">
+                            <i class="fas fa-check-double me-1"></i> VOUCHER IS BALANCED
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card-footer bg-light px-4 py-3 border-top d-flex align-items-center justify-content-between">
+                <a href="{% url 'accounting:journal_list' %}" class="btn btn-outline-secondary btn-sm px-4 rounded-pill">
+                    Discard
+                </a>
+                <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill shadow-sm fw-bold" id="submitVoucherBtn">
+                    <i class="fas fa-check-circle me-1"></i> Post Double-Entry Voucher
+                </button>
+            </div>
+        </div>
+    </form>
+
+</div>
+
+<script>
+    function calculateVoucherBalances() {
+        let totalDr = 0.0;
+        let totalCr = 0.0;
+
+        const debitInputs = document.querySelectorAll('.debit-input');
+        const creditInputs = document.querySelectorAll('.credit-input');
+
+        debitInputs.forEach(input => {
+            const row = input.closest('tr');
+            if (row && row.style.display !== 'none') {
+                const val = parseFloat(input.value) || 0.0;
+                totalDr += val;
+            }
+        });
+
+        creditInputs.forEach(input => {
+            const row = input.closest('tr');
+            if (row && row.style.display !== 'none') {
+                const val = parseFloat(input.value) || 0.0;
+                totalCr += val;
+            }
+        });
+
+        const variance = Math.abs(totalDr - totalCr);
+
+        document.getElementById('totalDebitDisplay').textContent = `Rs. ${totalDr.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        document.getElementById('totalCreditDisplay').textContent = `Rs. ${totalCr.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        
+        const varianceEl = document.getElementById('varianceDisplay');
+        varianceEl.textContent = `Rs. ${variance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+        const statusBadge = document.getElementById('balanceStatusBadge');
+        const submitBtn = document.getElementById('submitVoucherBtn');
+
+        if (totalDr > 0 && totalCr > 0 && variance < 0.005) {
+            varianceEl.className = 'fw-extrabold font-mono mb-0 text-success';
+            statusBadge.className = 'badge bg-success bg-opacity-20 text-success border border-success border-opacity-50 p-2 fs-xs fw-bold d-inline-block';
+            statusBadge.innerHTML = '<i class="fas fa-check-double me-1"></i> VOUCHER IS BALANCED (भौचर मिल्यो)';
+            submitBtn.disabled = false;
+        } else {
+            varianceEl.className = 'fw-extrabold font-mono mb-0 text-danger';
+            statusBadge.className = 'badge bg-danger bg-opacity-20 text-danger border border-danger border-opacity-50 p-2 fs-xs fw-bold d-inline-block';
+            statusBadge.innerHTML = `<i class="fas fa-triangle-exclamation me-1"></i> OUT OF BALANCE (Diff: Rs. ${variance.toFixed(2)})`;
+            submitBtn.disabled = true;
+        }
+    }
+
+    // Dynamic Formset Row Cloning
+    document.addEventListener('DOMContentLoaded', () => {
+        const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+        const formsetBody = document.getElementById('journalFormsetBody');
+        const addRowBtn = document.getElementById('addJournalRowBtn');
+
+        function bindRowListeners(row) {
+            const dr = row.querySelector('.debit-input');
+            const cr = row.querySelector('.credit-input');
+
+            if (dr && cr) {
+                dr.addEventListener('input', () => {
+                    if (parseFloat(dr.value) > 0) {
+                        cr.value = '0.00';
+                    }
+                    calculateVoucherBalances();
+                });
+                cr.addEventListener('input', () => {
+                    if (parseFloat(cr.value) > 0) {
+                        dr.value = '0.00';
+                    }
+                    calculateVoucherBalances();
+                });
+            }
+
+            const removeBtn = row.querySelector('.remove-row-btn');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', () => {
+                    row.remove();
+                    renumberRows();
+                    calculateVoucherBalances();
+                });
+            }
+        }
+
+        function renumberRows() {
+            const rows = document.querySelectorAll('.journal-form-row');
+            rows.forEach((r, idx) => {
+                const idxSpan = r.querySelector('.row-index');
+                if (idxSpan) idxSpan.textContent = idx + 1;
+            });
+        }
+
+        if (addRowBtn && totalFormsInput && formsetBody) {
+            addRowBtn.addEventListener('click', () => {
+                const rows = document.querySelectorAll('.journal-form-row');
+                const formIdx = rows.length;
+                const lastRow = rows[rows.length - 1];
+
+                if (!lastRow) return;
+
+                const newRow = lastRow.cloneNode(true);
+                const regex = new RegExp(`items-(\\d+)-`, 'g');
+                newRow.innerHTML = newRow.innerHTML.replace(regex, `items-${formIdx}-`);
+
+                // Clear input values
+                newRow.querySelectorAll('input').forEach(inp => {
+                    if (inp.type === 'number' || inp.type === 'text') inp.value = '';
+                });
+                newRow.querySelectorAll('select').forEach(sel => {
+                    sel.selectedIndex = 0;
+                });
+
+                formsetBody.appendChild(newRow);
+                totalFormsInput.value = formIdx + 1;
+
+                bindRowListeners(newRow);
+                renumberRows();
+                calculateVoucherBalances();
+            });
+        }
+
+        document.querySelectorAll('.journal-form-row').forEach(bindRowListeners);
+        calculateVoucherBalances();
+    });
+</script>
+{% endblock %}

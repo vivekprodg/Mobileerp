@@ -1,0 +1,457 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Cancelled &amp; Voided Purchases Forensic Audit | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.purchase-suite-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.purchase-suite-pill:hover, .purchase-suite-pill.active {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    border-color: #0f172a !important;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.25);
+}
+.report-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.table-cancelled-purchases th {
+    font-size: 0.70rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-cancelled-purchases td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1760px;">
+
+    <!-- Procurement Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap">
+            <i class="fas fa-truck-ramp-box text-primary me-1"></i> Purchases Suite:
+        </span>
+        <a href="{% url 'reports:purchase_register' %}" class="purchase-suite-pill text-nowrap">
+            <i class="fas fa-book-bookmark text-secondary"></i> Purchase Register
+        </a>
+        <a href="{% url 'reports:supplier_purchases' %}" class="purchase-suite-pill text-nowrap">
+            <i class="fas fa-building text-secondary"></i> Supplier Turnover
+        </a>
+        <a href="{% url 'reports:product_purchases' %}" class="purchase-suite-pill text-nowrap">
+            <i class="fas fa-boxes-packing text-secondary"></i> Product Purchases
+        </a>
+        <a href="{% url 'reports:supplier_outstanding' %}" class="purchase-suite-pill text-nowrap">
+            <i class="fas fa-hand-holding-dollar text-secondary"></i> Supplier Payables
+        </a>
+        <a href="{% url 'reports:cancelled_purchases' %}" class="purchase-suite-pill active text-nowrap">
+            <i class="fas fa-ban text-danger"></i> Cancelled Purchases
+        </a>
+    </div>
+
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-ban text-danger me-2"></i> Cancelled &amp; Voided Purchase Bills (GRN) Forensic Audit
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Forensic audit ledger of cancelled supplier inward consignments: Supplier details, PAN, invoice numbers, reversing Accounts Payable entries, and inventory rollback
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Audit Sheet
+            </button>
+            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Active GRNs
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Procurement Audit KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-danger border-4 h-100">
+                <span class="text-danger text-uppercase fw-bold fs-2xs">Total Cancelled GRNs</span>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    {{ totals.total_cancelled_bills|default:0 }} <span class="fs-6 fw-normal text-muted">Bills</span>
+                </h3>
+                <small class="text-muted fs-2xs">Voided procurement consignments</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-warning border-4 h-100">
+                <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Total Cancelled Procurement Outlay</span>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_cancelled_amount|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Gross purchase spend rolled back</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-primary border-4 h-100">
+                <span class="text-primary text-uppercase fw-bold fs-2xs">Reversed Accounts Payable Debt</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_due_reversed|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Supplier balance liability reduced</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-success border-4 h-100">
+                <span class="text-success text-uppercase fw-bold fs-2xs">Reversed Supplier Payments</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_paid_reversed|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Cash / Bank outflows restored</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Procurement Forensic Guidance Alert Banner -->
+    <div class="alert bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded-4 p-3 mb-4 fs-xs text-dark">
+        <div class="d-flex align-items-start gap-2">
+            <i class="fas fa-shield-halved text-danger fs-5 mt-1"></i>
+            <div>
+                <strong class="text-danger d-block mb-1">Procurement Safeguard &amp; Stock Balance Verification:</strong>
+                <p class="mb-0 text-secondary">
+                    Cancelling a purchase GRN immediately deducts the inward inventory back out of <code>BranchStock</code>, archives or marks serialized smartphone IMEI instances as removed, reduces supplier balance in <code>SupplierUdhaariLedger</code>, and archives the event in immutable <code>AuditLog</code>.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar (AD & BS Calendar + Supplier Search) -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <input type="text" name="q" value="{{ filters.q|default:'' }}" class="form-control form-control-sm bg-light border-0 font-monospace" placeholder="Search Bill No, GRN, Supplier, PAN, Reason...">
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="supplier" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Suppliers</option>
+                    {% for s in suppliers %}
+                        <option value="{{ s.id }}" {% if filters.supplier_id == s.id|stringformat:"s" %}selected{% endif %}>{{ s.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>{{ br.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <input type="text" name="reason" value="{{ filters.reason|default:'' }}" class="form-control form-control-sm bg-light border-0" placeholder="Filter by Reason...">
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date (AD)">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-control bg-light border-0" title="End Date (AD)">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.supplier_id or filters.branch_id or filters.reason or filters.start_date or filters.end_date %}
+                <a href="{% url 'reports:cancelled_purchases' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Cancelled Purchases Audit Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-ban text-danger me-2"></i> Voided Inward Purchases (GRN) Forensic Ledger
+            </h6>
+            <span class="badge bg-danger rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Cancelled Bills</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-cancelled-purchases table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3 text-center">S.N.</th>
+                        <th>Supplier Bill Ref</th>
+                        <th>GRN Number</th>
+                        <th>Bill Date (AD / BS)</th>
+                        <th>Cancelled Date (AD / BS)</th>
+                        <th>Outlet Branch</th>
+                        <th>Supplier / Distributor</th>
+                        <th>Supplier PAN</th>
+                        <th class="text-end">Amount (NPR)</th>
+                        <th class="text-end">AP Debt Reversed</th>
+                        <th>Received By</th>
+                        <th>Cancelled By</th>
+                        <th>Cancellation Reason</th>
+                        <th class="text-center">Stock Reverted</th>
+                        <th class="text-end pe-3">Items</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <!-- 1. S.N. -->
+                        <td class="ps-3 text-center text-muted fs-2xs">
+                            {{ forloop.counter0|add:page_obj.start_index }}
+                        </td>
+
+                        <!-- 2. Supplier Bill No -->
+                        <td class="font-monospace fw-bold text-dark">
+                            {{ r.supplier_bill_no }}
+                        </td>
+
+                        <!-- 3. GRN Number -->
+                        <td class="font-monospace text-danger fw-bold">
+                            <a href="{% url 'purchases:grn_detail' r.id %}" class="text-danger text-decoration-none">
+                                {{ r.grn_number }}
+                            </a>
+                        </td>
+
+                        <!-- 4. Bill Date (AD / BS) -->
+                        <td>
+                            <span class="text-dark fw-semibold">{{ r.bill_date_ad }}</span>
+                            <small class="text-muted d-block font-monospace fs-2xs">{{ r.bill_date_bs }} BS</small>
+                        </td>
+
+                        <!-- 5. Cancelled Date (AD / BS) -->
+                        <td>
+                            <span class="text-dark fw-semibold">{{ r.cancel_date_ad_str }}</span>
+                            <small class="text-muted d-block font-monospace fs-2xs">{{ r.cancel_date_bs_str }} BS</small>
+                        </td>
+
+                        <!-- 6. Branch -->
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace">{{ r.branch_code }}</span>
+                        </td>
+
+                        <!-- 7. Supplier Name & Phone -->
+                        <td>
+                            <strong class="text-dark">{{ r.supplier_name }}</strong>
+                            {% if r.supplier_phone != '-' %}
+                                <small class="text-muted d-block font-monospace fs-2xs">
+                                    <i class="fas fa-phone me-1 text-primary"></i>{{ r.supplier_phone }}
+                                </small>
+                            {% endif %}
+                        </td>
+
+                        <!-- 8. Supplier PAN -->
+                        <td>
+                            {% if r.supplier_pan and r.supplier_pan != '-' %}
+                                <span class="badge bg-secondary bg-opacity-10 text-dark font-monospace fs-2xs border px-2 py-1">
+                                    <i class="fas fa-id-card me-1 text-primary"></i>{{ r.supplier_pan }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted fs-2xs">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 9. Net Amount (Rs.) -->
+                        <td class="col-num fw-bold text-danger">
+                            Rs. {{ r.net_total_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 10. AP Due Debt Reversed -->
+                        <td class="col-num text-primary font-monospace">
+                            {% if r.due_amount_reversed > 0 %}
+                                Rs. {{ r.due_amount_reversed|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <!-- 11. Received By -->
+                        <td>
+                            <span class="text-dark">{{ r.received_by }}</span>
+                        </td>
+
+                        <!-- 12. Cancelled By -->
+                        <td>
+                            <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-50 fs-2xs px-2 py-1 fw-bold">
+                                <i class="fas fa-user-shield me-1"></i>{{ r.cancelled_by }}
+                            </span>
+                        </td>
+
+                        <!-- 13. Reason -->
+                        <td>
+                            <span class="text-danger fw-semibold fs-xs">{{ r.cancellation_reason }}</span>
+                        </td>
+
+                        <!-- 14. Stock Reversal Verification -->
+                        <td class="text-center">
+                            {% if r.is_stock_reverted %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-check-circle me-1"></i> Reverted
+                                </span>
+                            {% else %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs">
+                                    Logged
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 15. Items Modal Button -->
+                        <td class="text-end pe-3">
+                            <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-2 py-0 fs-2xs fw-bold" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#voidPurchaseItemsModal_{{ r.id }}">
+                                <i class="fas fa-boxes-stacked me-1"></i> {{ r.items_count }} Item(s)
+                            </button>
+                        </td>
+                    </tr>
+
+                    <!-- =========================================================
+                         INSPECT CANCELLED PURCHASE GRN ITEMS MODAL
+                         ========================================================= -->
+                    <div class="modal fade" id="voidPurchaseItemsModal_{{ r.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-lg">
+                            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                                <div class="modal-header bg-dark text-white border-0 py-3 px-4">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-danger p-2 rounded-circle"><i class="fas fa-truck-ramp-box"></i></span>
+                                        <div>
+                                            <h6 class="modal-title fs-sm fw-bold text-white mb-0 font-monospace">{{ r.grn_number }} (Bill: {{ r.supplier_bill_no }})</h6>
+                                            <small class="text-white-50 fs-2xs">Cancelled Inward Procurement Consignment &amp; Scanned IMEIs</small>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body p-4">
+                                    <div class="p-3 bg-light rounded-3 border mb-3 fs-xs">
+                                        <div class="row g-2">
+                                            <div class="col-sm-6">Supplier: <strong>{{ r.supplier_name }}</strong></div>
+                                            <div class="col-sm-6">Supplier PAN: <strong class="font-monospace text-primary">{{ r.supplier_pan|default:"-" }}</strong></div>
+                                            <div class="col-sm-6">Supplier Bill No: <strong class="font-monospace">{{ r.supplier_bill_no }}</strong></div>
+                                            <div class="col-sm-6">Branch Outlet: <strong>{{ r.branch_name }} ({{ r.branch_code }})</strong></div>
+                                            <div class="col-sm-6">Received By: <strong>{{ r.received_by }}</strong></div>
+                                            <div class="col-sm-6">Cancelled By: <strong class="text-danger">{{ r.cancelled_by }}</strong></div>
+                                            <div class="col-12">Cancellation Reason: <strong class="text-danger">{{ r.cancellation_reason }}</strong></div>
+                                        </div>
+                                    </div>
+
+                                    <h6 class="fw-bold text-dark fs-xs mb-2">Inward Items Reverted / Deducted from Inventory:</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-bordered table-sm fs-xs mb-0">
+                                            <thead class="bg-light text-muted">
+                                                <tr>
+                                                    <th class="text-center">#</th>
+                                                    <th>Product Name</th>
+                                                    <th>SKU</th>
+                                                    <th class="text-center">Qty</th>
+                                                    <th class="text-end">Purchase Rate</th>
+                                                    <th class="text-end">Line Total</th>
+                                                    <th>Scanned IMEIs / Serials</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for line in r.items_list %}
+                                                <tr>
+                                                    <td class="text-center text-muted">{{ forloop.counter }}</td>
+                                                    <td><strong>{{ line.product_name }}</strong></td>
+                                                    <td class="font-monospace text-muted">{{ line.sku }}</td>
+                                                    <td class="text-center font-monospace">{{ line.quantity|floatformat:0 }} {{ line.unit_code }}</td>
+                                                    <td class="text-end font-monospace">Rs. {{ line.purchase_rate|floatformat:2|intcomma }}</td>
+                                                    <td class="text-end font-monospace fw-bold">Rs. {{ line.line_total|floatformat:2|intcomma }}</td>
+                                                    <td class="font-monospace text-primary fs-2xs" style="max-width: 200px; word-break: break-all;">
+                                                        {{ line.scanned_imeis|default:"-" }}
+                                                    </td>
+                                                </tr>
+                                                {% empty %}
+                                                <tr>
+                                                    <td colspan="7" class="text-center text-muted py-2">No individual line records attached.</td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="modal-footer bg-light border-0 d-flex justify-content-between">
+                                    <a href="{% url 'purchases:grn_detail' r.id %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                                        Open Full GRN View &rarr;
+                                    </a>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <tr>
+                        <td colspan="15" class="text-center py-5 text-muted">
+                            <i class="fas fa-check-circle fs-1 text-success opacity-50 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Cancelled or Voided Purchase Bills Found</h6>
+                            <p class="text-muted fs-xs mb-0">No inward procurement transactions have been voided in the selected period.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="8" class="ps-3 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="col-num text-danger fs-6">Rs. {{ totals.total_cancelled_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-primary fs-6">Rs. {{ totals.total_due_reversed|floatformat:2|intcomma }}</td>
+                        <td colspan="5" class="pe-3 text-white-50 fs-2xs">{{ totals.total_cancelled_bills }} Cancelled GRNs</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

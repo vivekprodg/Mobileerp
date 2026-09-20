@@ -1,0 +1,286 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Debit Note {{ purchase_return.return_number }} | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* A4 Debit Note Sheet Layout for Screen & Print */
+.debit-note-container {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: var(--erp-shadow-sm);
+}
+
+.debit-note-table th {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    vertical-align: middle;
+}
+
+.debit-note-table td {
+    padding: 10px 8px;
+    vertical-align: middle;
+}
+
+.imei-print-pill {
+    display: inline-block;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    margin: 2px 2px 0 0;
+}
+
+.signature-box-print {
+    border-top: 1.5px solid #0f172a;
+    width: 220px;
+    text-align: center;
+    padding-top: 6px;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+@media print {
+    @page {
+        size: A4 portrait;
+        margin: 10mm 12mm;
+    }
+
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 11px;
+    }
+
+    .no-print, header, aside, footer, nav, .btn, #sidebarOffcanvas {
+        display: none !important;
+    }
+
+    .debit-note-container {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    .debit-note-table th {
+        background-color: #1e293b !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1280px;">
+    <!-- Top Action Navigation Bar (Hidden in Print) -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 no-print">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-danger fs-xs font-monospace px-3 py-1 rounded-pill">{{ purchase_return.return_number }}</span>
+                <h4 class="fw-bold text-dark mb-0">Commercial Debit Note Voucher</h4>
+                <span class="badge bg-{% if purchase_return.status == 'CONFIRMED' %}success{% else %}secondary{% endif %} fs-xs px-3 py-1 rounded-pill">
+                    {{ purchase_return.get_status_display }}
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Issued to: <strong>{{ purchase_return.supplier.company_name }}</strong> &bull; Date: <strong>{{ purchase_return.return_date }} ({{ purchase_return.return_date_bs }} BS)</strong>
+            </p>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <button type="button" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Official Debit Note (A4)
+            </button>
+            <a href="{% url 'purchases:purchase_return_create' %}" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-plus me-1"></i> New Return
+            </a>
+            <a href="{% url 'purchases:purchase_return_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Returns List
+            </a>
+        </div>
+    </div>
+
+    <!-- Official Printable A4 Debit Note Sheet Container -->
+    <div class="debit-note-container">
+        <!-- 1. Header with Company Branding & Contact Info -->
+        <div class="text-center border-bottom pb-3 mb-3">
+            {% if purchase_return.branch.logo_url %}
+                <img src="{{ purchase_return.branch.logo_url }}" alt="{{ purchase_return.branch.display_company_name }}" class="mb-2" style="max-height: 52px; max-width: 220px; object-fit: contain;">
+            {% elif COMPANY_LOGO_URL %}
+                <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="mb-2" style="max-height: 52px; max-width: 220px; object-fit: contain;">
+            {% endif %}
+
+            <h3 class="fw-extrabold text-dark mb-0" style="letter-spacing: -0.02em;">{{ purchase_return.branch.display_company_name|default:COMPANY_NAME|upper }}</h3>
+            {% if purchase_return.branch.display_company_name_np or COMPANY_NAME_NP %}
+                <h6 class="text-secondary fw-bold mb-1">{{ purchase_return.branch.display_company_name_np|default:COMPANY_NAME_NP }}</h6>
+            {% endif %}
+            
+            <div class="fs-xs text-muted">
+                {{ purchase_return.branch.address }}, {{ purchase_return.branch.city }} | Phone: {{ purchase_return.branch.phone_number }}
+                {% if config.pan_number %} &bull; <strong>PAN / Reg: {{ config.pan_number }}</strong>{% endif %}
+                {% if config.vat_number and config.tax_system_mode == 'VAT' %} &bull; VAT Reg: {{ config.vat_number }}{% endif %}
+            </div>
+
+            <div class="mt-3">
+                <span class="badge bg-danger text-white px-4 py-2 fs-6 fw-bold rounded-pill text-uppercase" style="letter-spacing: 0.08em;">
+                    COMMERCIAL DEBIT NOTE / खरिद फिर्ता पुर्जी
+                </span>
+            </div>
+        </div>
+
+        <!-- 2. Metadata Grid (Voucher Number, Supplier, Reference, Dates) -->
+        <div class="row g-3 mb-4 fs-xs">
+            <div class="col-6 col-md-6">
+                <div class="p-3 bg-light rounded-3 border h-100">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">To / Supplier (Distributor Details):</span>
+                    <h6 class="fw-bold text-dark mb-1">{{ purchase_return.supplier.company_name }}</h6>
+                    <div class="text-secondary">{{ purchase_return.supplier.address }}, {{ purchase_return.supplier.city }}</div>
+                    <div class="text-secondary">Contact: <strong>{{ purchase_return.supplier.contact_person }}</strong> ({{ purchase_return.supplier.phone_number }})</div>
+                    {% if purchase_return.supplier.pan_number %}
+                        <div class="font-monospace text-dark mt-1">PAN: <strong>{{ purchase_return.supplier.pan_number }}</strong></div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="col-6 col-md-6">
+                <div class="p-3 bg-light rounded-3 border h-100">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Debit Note No:</span>
+                        <strong class="font-monospace text-danger fs-sm">{{ purchase_return.return_number }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Return Date (AD):</span>
+                        <strong class="text-dark">{{ purchase_return.return_date }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Return Date (BS):</span>
+                        <strong class="text-primary font-monospace">{{ purchase_return.return_date_bs }} BS</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Settlement Mode:</span>
+                        <span class="badge bg-primary bg-opacity-10 text-primary fw-bold fs-2xs">
+                            {{ purchase_return.get_refund_mode_display }}
+                        </span>
+                    </div>
+                    {% if purchase_return.original_bill_reference %}
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">Original Bill / Challan Ref:</span>
+                        <strong class="font-monospace">{{ purchase_return.original_bill_reference }}</strong>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Line Items Table with Scanned IMEIs & Returns Breakdown -->
+        <div class="table-responsive mb-4">
+            <table class="table table-bordered align-middle mb-0 debit-note-table">
+                <thead>
+                    <tr>
+                        <th class="ps-3 text-center" style="width: 45px;">#</th>
+                        <th>Product / Handset Model Description</th>
+                        <th class="text-center" style="width: 75px;">Unit</th>
+                        <th class="text-center" style="width: 80px;">Qty</th>
+                        <th class="text-end" style="width: 120px;">Purchase Rate</th>
+                        <th class="text-end" style="width: 85px;">VAT %</th>
+                        <th class="text-end pe-3" style="width: 140px;">Line Debit (NPR)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td class="ps-3 text-center text-muted fw-bold">{{ forloop.counter }}</td>
+                        <td>
+                            <strong class="text-dark">{{ item.product.name }}</strong>
+                            {% if item.product.ram and item.product.internal_storage %}
+                                <span class="text-muted fs-2xs">({{ item.product.ram }}/{{ item.product.internal_storage }}{% if item.product.color_variant %} - {{ item.product.color_variant }}{% endif %})</span>
+                            {% endif %}
+                            <small class="text-muted d-block font-monospace fs-2xs">SKU: {{ item.product.sku }}</small>
+
+                            {% if item.return_reason %}
+                                <div class="text-danger fs-2xs mt-1">
+                                    <i class="fas fa-circle-exclamation me-1"></i> Reason: <strong>{{ item.return_reason }}</strong>
+                                </div>
+                            {% endif %}
+
+                            <!-- Returned IMEIs Pills -->
+                            {% if item.returned_imei_list %}
+                                <div class="mt-2">
+                                    <span class="text-muted fs-2xs fw-bold d-block mb-1">Returned Handset Serial(s) / IMEI(s):</span>
+                                    {% for imei in item.returned_imei_list.splitlines %}
+                                        <span class="imei-print-pill text-dark font-monospace">{{ imei }}</span>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-center">{{ item.product.base_unit.code }}</td>
+                        <td class="text-center font-monospace fw-bold">{{ item.returned_quantity|floatformat:0 }}</td>
+                        <td class="text-end font-monospace">Rs. {{ item.purchase_rate|floatformat:2|intcomma }}</td>
+                        <td class="text-end font-monospace">{{ item.tax_rate|floatformat:1 }}%</td>
+                        <td class="text-end pe-3 font-monospace fw-bold text-danger">Rs. {{ item.line_total|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                <!-- Financial Totals Summary Footers -->
+                <tfoot class="border-top">
+                    <tr>
+                        <td colspan="6" class="text-end fw-bold text-muted text-uppercase fs-xs">Gross Merchandise Value:</td>
+                        <td class="text-end pe-3 font-monospace fw-bold fs-xs">Rs. {{ purchase_return.total_return_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% if purchase_return.tax_amount > 0 %}
+                    <tr>
+                        <td colspan="6" class="text-end fw-bold text-muted text-uppercase fs-xs">Tax / VAT Adjustment:</td>
+                        <td class="text-end pe-3 font-monospace fw-bold text-warning-emphasis fs-xs">+Rs. {{ purchase_return.tax_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endif %}
+                    <tr class="bg-light">
+                        <td colspan="6" class="text-end fw-extrabold text-dark text-uppercase fs-sm">Total Debit Note Credit Claim:</td>
+                        <td class="text-end pe-3 font-monospace fw-extrabold text-danger fs-5">Rs. {{ purchase_return.net_refund_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <!-- 4. Remarks & Commercial Notes -->
+        {% if purchase_return.remarks %}
+        <div class="p-3 bg-light rounded-3 border mb-4 fs-xs">
+            <strong class="text-dark d-block mb-1"><i class="fas fa-note-sticky text-primary me-1"></i> Return Remarks &amp; Agreement Terms:</strong>
+            <p class="text-secondary mb-0">{{ purchase_return.remarks|linebreaks }}</p>
+        </div>
+        {% endif %}
+
+        <!-- 5. Formal Legal Signatures Area -->
+        <div class="d-flex justify-content-between align-items-end mt-5 pt-4">
+            <div class="signature-box-print">
+                <div class="mb-5"></div>
+                <div>Authorized Store Signature &amp; Stamp</div>
+                <small class="text-muted fw-normal">({{ purchase_return.branch.name }})</small>
+            </div>
+
+            <div class="text-center text-muted fs-2xs" style="max-width: 320px;">
+                * This commercial debit note is an official statement of stock returned to the distributor. Please adjust the credit against our running ledger or issue a refund.
+            </div>
+
+            <div class="signature-box-print">
+                <div class="mb-5"></div>
+                <div>Distributor / Receiver Signature</div>
+                <small class="text-muted fw-normal">(Goods Received in Good Order)</small>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

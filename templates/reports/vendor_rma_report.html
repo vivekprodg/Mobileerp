@@ -1,0 +1,489 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Vendor RMA &amp; Distributor Claims Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.rma-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.rma-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-rma th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-rma td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+.res-pill-replaced {
+    background-color: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 6px;
+}
+.res-pill-credit {
+    background-color: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 6px;
+}
+.res-pill-pending {
+    background-color: #fffbeb;
+    color: #b45309;
+    border: 1px solid #fde68a;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 6px;
+}
+.res-pill-rejected {
+    background-color: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 6px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header & Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-truck-fast text-primary me-2"></i> Vendor RMA &amp; Distributor Claims Report (खराबी फिर्ता)
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Monitor defective parts and handsets sent to authorized brand service centers, track courier delivery tracking, and reconcile replacements and credit notes
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="{% url 'inventory:vendor_rma_create' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-plus-circle me-1"></i> New Vendor RMA Dispatch
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Summary
+            </button>
+            <a href="{% url 'reports:damaged_stock' %}" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-heart-crack me-1"></i> Quarantined Stock Desk
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Recovery & Settlement KPI Cards -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Total Credit Recovered -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="rma-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">Total Credit Reimbursed</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-hand-holding-dollar fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_credit_recovered|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Credited back into supplier running ledgers</small>
+            </div>
+        </div>
+
+        <!-- 2. Pending at Distributor Lab -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="rma-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">At Distributor Lab</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-clock fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    {{ totals.pending_claims_count|default:0 }} <span class="fs-6 fw-normal text-muted">Claims</span>
+                </h3>
+                <small class="text-muted fs-2xs">
+                    {{ totals.pending_items_count|default:0 }} Individual parts awaiting lab decision
+                </small>
+            </div>
+        </div>
+
+        <!-- 3. Factory Replacements Restocked -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="rma-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-primary text-uppercase fw-bold fs-2xs">Factory Replacements Received</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-boxes-packing fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.replaced_items_count|default:0 }} <span class="fs-6 fw-normal text-muted">New Parts</span>
+                </h3>
+                <small class="text-muted fs-2xs">Restocked directly to active warehouse count</small>
+            </div>
+        </div>
+
+        <!-- 4. Settlement Recovery Rate -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="rma-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Settlement Recovery Rate</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-chart-pie fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    {{ totals.settlement_rate|default:0 }}%
+                </h3>
+                <small class="text-muted fs-2xs">
+                    {{ totals.total_claimed_parts|default:0 }} Total defective items claimed
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search RMA No, Supplier, Tracking AWB, Serial/IMEI...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="supplier" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Suppliers / Distributors</option>
+                    {% for sup in suppliers %}
+                        <option value="{{ sup.id }}" {% if filters.supplier == sup.id|stringformat:"s" %}selected{% endif %}>
+                            {{ sup.company_name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Claim Statuses</option>
+                    <option value="DRAFT" {% if filters.status == 'DRAFT' %}selected{% endif %}>Draft Challan</option>
+                    <option value="DISPATCHED_TO_VENDOR" {% if filters.status == 'DISPATCHED_TO_VENDOR' %}selected{% endif %}>At Distributor Lab</option>
+                    <option value="PARTIALLY_SETTLED" {% if filters.status == 'PARTIALLY_SETTLED' %}selected{% endif %}>Partially Settled</option>
+                    <option value="COMPLETED" {% if filters.status == 'COMPLETED' %}selected{% endif %}>Fully Resolved &amp; Closed</option>
+                    <option value="REJECTED" {% if filters.status == 'REJECTED' %}selected{% endif %}>Rejected by Distributor</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date|default:'' }}" 
+                           class="form-control bg-light border-0" title="Dispatch Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date|default:'' }}" 
+                           class="form-control bg-light border-0" title="Dispatch End Date">
+                </div>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.supplier or filters.branch or filters.status or start_date or end_date %}
+                <a href="{% url 'reports:vendor_rma' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Master RMA Claims Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Dispatched Vendor Warranty Claim Consignments
+            </h6>
+            <span class="badge bg-primary rounded-pill px-3">
+                {{ page_obj.paginator.count|default:records|length }} Consignment Vouchers
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-rma">
+                <thead>
+                    <tr>
+                        <th class="ps-4">RMA Voucher No</th>
+                        <th>Supplier / Distributor</th>
+                        <th>Outlet Branch</th>
+                        <th>Dispatch Date (AD / BS)</th>
+                        <th>Tracking / Courier AWB</th>
+                        <th class="text-center">Parts Claimed</th>
+                        <th>Claim Status</th>
+                        <th>Settlement Breakdown</th>
+                        <th class="text-end">Credit Reimbursed</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in records %}
+                    <tr>
+                        <!-- RMA Number -->
+                        <td class="ps-4 font-monospace fw-bold">
+                            <a href="{% url 'inventory:vendor_rma_detail' item.id %}" class="text-decoration-none text-primary">
+                                {{ item.rma_number }}
+                            </a>
+                            <small class="text-muted d-block font-sans fs-2xs">{{ item.created_at|date:"M d, H:i" }}</small>
+                        </td>
+
+                        <!-- Supplier / Distributor -->
+                        <td>
+                            <strong class="text-dark">{{ item.supplier.company_name }}</strong>
+                            <small class="text-muted d-block fs-2xs">{{ item.service_center }}</small>
+                        </td>
+
+                        <!-- Branch Outlet -->
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace">{{ item.branch.code }}</span>
+                        </td>
+
+                        <!-- Dispatch Date -->
+                        <td>
+                            <span class="text-dark fw-semibold">{{ item.dispatch_date_str }}</span>
+                            {% if item.dispatch_date_bs != '-' %}
+                                <small class="text-muted d-block font-monospace fs-2xs">{{ item.dispatch_date_bs }} BS</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Courier Tracking AWB -->
+                        <td>
+                            <span class="font-monospace text-secondary fs-xs">
+                                {{ item.tracking_ref }}
+                            </span>
+                        </td>
+
+                        <!-- Total Claimed Items Count -->
+                        <td class="text-center">
+                            <button type="button" class="btn btn-link text-decoration-none p-0 fw-bold fs-xs" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#rmaItemsModal_{{ item.id }}">
+                                <span class="badge bg-light text-dark border font-monospace">
+                                    <i class="fas fa-boxes-stacked me-1"></i> {{ item.items_count }} Item(s)
+                                </span>
+                            </button>
+                        </td>
+
+                        <!-- Claim Status Badge -->
+                        <td>
+                            {% if item.status == 'COMPLETED' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-check-circle me-1"></i> Resolved &amp; Closed
+                                </span>
+                            {% elif item.status == 'DISPATCHED_TO_VENDOR' %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-truck me-1"></i> At Distributor Lab
+                                </span>
+                            {% elif item.status == 'PARTIALLY_SETTLED' %}
+                                <span class="badge bg-info bg-opacity-10 text-info fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-scale-balanced me-1"></i> Partially Settled
+                                </span>
+                            {% elif item.status == 'REJECTED' %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-times-circle me-1"></i> Rejected
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold fs-2xs px-2 py-1">
+                                    Draft
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Settlement Breakdown Pills -->
+                        <td>
+                            <div class="d-flex flex-wrap gap-1">
+                                {% if item.replaced_count > 0 %}
+                                    <span class="res-pill-replaced" title="Replaced with new factory part">
+                                        +{{ item.replaced_count }} Replaced
+                                    </span>
+                                {% endif %}
+                                {% if item.credit_count > 0 %}
+                                    <span class="res-pill-credit" title="Reimbursed as credit note">
+                                        +{{ item.credit_count }} Credited
+                                    </span>
+                                {% endif %}
+                                {% if item.pending_count > 0 %}
+                                    <span class="res-pill-pending" title="Awaiting distributor inspection">
+                                        {{ item.pending_count }} Pending
+                                    </span>
+                                {% endif %}
+                                {% if item.rejected_count > 0 %}
+                                    <span class="res-pill-rejected" title="Warranty rejected by lab">
+                                        {{ item.rejected_count }} Rejected
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </td>
+
+                        <!-- Total Credit Amount Reimbursed -->
+                        <td class="col-num fw-bold text-success">
+                            Rs. {{ item.total_credit_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Action Buttons -->
+                        <td class="text-end pe-4">
+                            <div class="d-inline-flex gap-1">
+                                <a href="{% url 'inventory:vendor_rma_detail' item.id %}" 
+                                   class="btn btn-outline-primary btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold">
+                                    <i class="fas fa-handshake me-1"></i> Settle
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- =========================================================
+                         INSPECT RMA CLAIM LINE ITEMS MODAL
+                         ========================================================= -->
+                    <div class="modal fade" id="rmaItemsModal_{{ item.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-lg">
+                            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                                <div class="modal-header bg-dark text-white border-0 py-3 px-4">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-truck-fast"></i></span>
+                                        <div>
+                                            <h6 class="modal-title fs-sm fw-bold text-white mb-0 font-monospace">{{ item.rma_number }}</h6>
+                                            <small class="text-white-50 fs-2xs">{{ item.supplier.company_name }} &bull; {{ item.service_center }}</small>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body p-4">
+                                    <div class="p-3 bg-light rounded-3 border mb-3 fs-xs">
+                                        <div class="row g-2">
+                                            <div class="col-6">Status: <strong>{{ item.status_display }}</strong></div>
+                                            <div class="col-6">Tracking AWB: <strong class="font-monospace text-primary">{{ item.tracking_ref }}</strong></div>
+                                            <div class="col-6">Dispatch Date: <strong>{{ item.dispatch_date_str }} ({{ item.dispatch_date_bs }} BS)</strong></div>
+                                            <div class="col-6">Credit Reimbursed: <strong class="text-success font-monospace">Rs. {{ item.total_credit_amount|floatformat:2|intcomma }}</strong></div>
+                                        </div>
+                                    </div>
+
+                                    <h6 class="fw-bold text-dark fs-xs mb-2">Claimed Defective Parts &amp; Individual Resolutions:</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-bordered table-sm fs-xs mb-0">
+                                            <thead class="bg-light text-muted">
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Part / Handset Model</th>
+                                                    <th>Defective Serial / IMEI</th>
+                                                    <th>Defect Failure Reason</th>
+                                                    <th>Resolution</th>
+                                                    <th>Credit (NPR)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for line in item.items_list %}
+                                                <tr>
+                                                    <td class="text-center text-muted">{{ forloop.counter }}</td>
+                                                    <td><strong>{{ line.product.name }}</strong></td>
+                                                    <td class="font-monospace text-danger">{{ line.defective_serial_or_imei }}</td>
+                                                    <td><small class="text-muted">{{ line.defect_description|truncatechars:35 }}</small></td>
+                                                    <td>
+                                                        <span class="badge bg-{% if line.resolution == 'REPLACED_WITH_NEW_PART' %}success{% elif line.resolution == 'CREDIT_NOTE_ISSUED' %}info{% elif line.resolution == 'PENDING' %}warning text-dark{% else %}danger{% endif %} fs-2xs">
+                                                            {{ line.get_resolution_display }}
+                                                        </span>
+                                                        {% if line.replacement_batch_or_serial %}
+                                                            <small class="d-block font-monospace text-primary">New S/N: {{ line.replacement_batch_or_serial }}</small>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td class="col-num fw-bold">
+                                                        {% if line.credit_amount > 0 %}
+                                                            Rs. {{ line.credit_amount|floatformat:2 }}
+                                                        {% else %}
+                                                            -
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="modal-footer bg-light border-0 d-flex justify-content-between">
+                                    <a href="{% url 'inventory:vendor_rma_detail' item.id %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold">
+                                        <i class="fas fa-handshake me-1"></i> Open Claim Settlement Screen &rarr;
+                                    </a>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center py-5 text-muted">
+                            <i class="fas fa-truck-fast fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Vendor RMA Claims Found</h6>
+                            <p class="text-muted fs-xs mb-0">No distributor warranty claim records match the specified filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="5" class="ps-4 text-end text-uppercase text-white-50">Total Reimbursed Value:</td>
+                        <td class="text-center col-num text-primary fs-6">{{ totals.total_claimed_parts }} Items</td>
+                        <td colspan="2"></td>
+                        <td class="text-end col-num text-success fs-6">Rs. {{ totals.total_credit_recovered|default:0|floatformat:2|intcomma }}</td>
+                        <td class="pe-4 text-white-50 fs-2xs">Total Credit Note Recoveries</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

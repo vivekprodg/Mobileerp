@@ -49,16 +49,38 @@
 .financial-summary-table th {
     padding: 6px 12px;
 }
+
+.settlement-card {
+    background: linear-gradient(145deg, #f8fafc 0%, #eff6ff 100%);
+    border: 1px solid #bfdbfe;
+    border-radius: 14px;
+}
+
+.disc-type-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 700;
+}
+
+.supervisor-auth-box {
+    background: #fffbeb;
+    border: 1px dashed #f59e0b;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.75rem;
+}
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1320px;">
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
     
     <!-- Top Action & Navigation Bar -->
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex flex-wrap align-items-center gap-2">
                 <h4 class="fw-bold text-dark mb-0 font-monospace">{{ estimate.estimate_number }}</h4>
                 
                 <!-- Bill Status Badge -->
@@ -74,6 +96,10 @@
                     <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold px-3 py-1 rounded-pill fs-xs">
                         <i class="fas fa-rotate-left me-1"></i> Partially Returned
                     </span>
+                {% elif estimate.status == 'RETURNED' %}
+                    <span class="badge bg-purple bg-opacity-10 text-purple fw-bold px-3 py-1 rounded-pill fs-xs">
+                        <i class="fas fa-rotate-left me-1"></i> Fully Returned
+                    </span>
                 {% else %}
                     <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold px-3 py-1 rounded-pill fs-xs">
                         {{ estimate.get_status_display }}
@@ -87,6 +113,13 @@
                     <span class="badge bg-warning text-dark px-2 py-1 rounded-pill fs-2xs fw-bold">Partial Payment</span>
                 {% else %}
                     <span class="badge bg-danger text-white px-2 py-1 rounded-pill fs-2xs fw-bold">Full Due / Udhaari</span>
+                {% endif %}
+
+                <!-- Manager Override Badge if Authorized -->
+                {% if estimate.manager_override_by %}
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-50 px-2 py-1 rounded-pill fs-2xs fw-bold">
+                        <i class="fas fa-key me-1"></i> Manager Approved
+                    </span>
                 {% endif %}
             </div>
             
@@ -104,14 +137,14 @@
             <a href="{% url 'sales:estimate_thermal_slip' estimate.pk %}" 
                target="_blank" 
                class="btn btn-dark btn-sm rounded-pill px-3 fw-bold shadow-xs">
-                <i class="fas fa-print me-1"></i> Thermal Receipt (80mm)
+                <i class="fas fa-print me-1"></i> Thermal Slip (80mm)
             </a>
 
             <!-- Full A4 Estimate / Tax Invoice Print -->
             <a href="{% url 'sales:estimate_detail' estimate.pk %}?format=a4" 
                target="_blank" 
                class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
-                <i class="fas fa-file-invoice me-1"></i> Print A4 Bill
+                <i class="fas fa-file-invoice me-1"></i> Print A4 Invoice
             </a>
 
             <!-- Itemized Return Action Button -->
@@ -125,11 +158,16 @@
 
             <!-- Restricted Bill Void Action -->
             {% if estimate.status != 'CANCELLED' and estimate.status != 'RETURNED' %}
-                <a href="{% url 'sales:estimate_cancel' estimate.pk %}" 
-                   class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold" 
-                   onclick="return confirm('Are you sure you want to completely void this sales estimate? All inventory, debt, and trade-in balances will be reversed.');">
-                    <i class="fas fa-ban me-1"></i> Void Bill
-                </a>
+                {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
+                <form action="{% url 'sales:estimate_cancel' estimate.pk %}" method="post" class="d-inline m-0">
+                    {% csrf_token %}
+                    <button type="submit" 
+                            class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold" 
+                            onclick="return confirm('Are you sure you want to completely void this sales estimate? All inventory, debt, and trade-in balances will be safely reversed.');">
+                        <i class="fas fa-ban me-1"></i> Void Bill
+                    </button>
+                </form>
+                {% endif %}
             {% endif %}
 
             <a href="{% url 'sales:estimate_list' %}" 
@@ -139,7 +177,7 @@
         </div>
     </div>
 
-    <!-- Non-IRD Estimation Notice Header -->
+    <!-- Non-IRD Estimation Notice Header Banner -->
     <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 fs-xs text-dark">
         <div class="d-flex align-items-center gap-2">
             <i class="fas fa-info-circle text-warning fs-5"></i>
@@ -150,7 +188,7 @@
     </div>
 
     <div class="row g-4">
-        <!-- Main Column (8 Cols): Line Items & Dual-IMEI Cards -->
+        <!-- Main Column (8 Cols): Line Items, Concession Analysis & Dual-IMEI Cards -->
         <div class="col-12 col-lg-8">
             
             <!-- Metadata Cards Grid -->
@@ -198,7 +236,7 @@
                         {% if estimate.manager_override_by %}
                             <div class="mt-1">
                                 <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs">
-                                    <i class="fas fa-key me-1"></i> Override: {{ estimate.manager_override_by.username }}
+                                    <i class="fas fa-key me-1"></i> Auth By: {{ estimate.manager_override_by.get_full_name|default:estimate.manager_override_by.username }}
                                 </span>
                             </div>
                         {% endif %}
@@ -206,7 +244,7 @@
                 </div>
             </div>
 
-            <!-- Line Items Table with Dedicated Dual-IMEI Rows & One-Click Copy -->
+            <!-- Line Items Table with Dedicated Dual-IMEI Rows, Price Overrides & Dual-Mode Discounts -->
             <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
                 <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
                     <h6 class="fw-bold text-dark mb-0">
@@ -221,12 +259,12 @@
                             <tr>
                                 <th class="ps-4">Item &amp; Device Details</th>
                                 <th class="text-center" style="width: 75px;">Qty</th>
-                                <th class="text-end" style="width: 100px;">Rate (NPR)</th>
-                                <th class="text-end" style="width: 90px;">Discount</th>
+                                <th class="text-end" style="width: 120px;">Selling Rate</th>
+                                <th class="text-end" style="width: 170px;">Discount Analysis</th>
                                 {% if estimate.vat_amount > 0 %}
                                     <th class="text-end" style="width: 90px;">Tax / VAT</th>
                                 {% endif %}
-                                <th class="text-end pe-4" style="width: 110px;">Line Total</th>
+                                <th class="text-end pe-4" style="width: 120px;">Net Line Total</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -245,6 +283,17 @@
                                             {% if item.product.network_type %}
                                                 <span class="badge bg-light text-dark border ms-1">{{ item.product.network_type }}</span>
                                             {% endif %}
+                                        </div>
+                                    {% endif %}
+
+                                    <!-- Cashier Price Override Concession Indicator -->
+                                    {% if item.official_unit_price and item.official_unit_price > item.unit_price %}
+                                        <div class="text-danger fs-2xs font-monospace mt-1">
+                                            <i class="fas fa-arrow-trend-down me-1"></i>Catalog MRP: 
+                                            <span class="text-decoration-line-through">Rs. {{ item.official_unit_price|floatformat:2|intcomma }}</span>
+                                            <span class="badge bg-warning bg-opacity-10 text-warning-emphasis ms-1 fw-bold">
+                                                Price Override: -Rs. {{ item.price_override_amount|floatformat:2|intcomma }}
+                                            </span>
                                         </div>
                                     {% endif %}
 
@@ -278,7 +327,7 @@
                                         {% endif %}
 
                                         <!-- Serial Number -->
-                                        {% if item.serial_number %}
+                                        {% if item.serial_number and item.serial_number != item.imei_number and item.serial_number != item.secondary_imei %}
                                         <div class="imei-badge-container bg-secondary bg-opacity-10 text-secondary border">
                                             <span><strong>S/N:</strong> {{ item.serial_number }}</span>
                                             <button type="button" 
@@ -315,13 +364,65 @@
                                 </td>
 
                                 <td class="text-center font-monospace">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</td>
-                                <td class="text-end font-monospace">Rs. {{ item.unit_price|floatformat:2|intcomma }}</td>
-                                <td class="text-end font-monospace text-muted">Rs. {{ item.discount_amount|floatformat:2|intcomma }}</td>
+                                
+                                <!-- Selling Rate -->
+                                <td class="text-end font-monospace">
+                                    Rs. {{ item.unit_price|floatformat:2|intcomma }}
+                                </td>
+
+                                <!-- Detailed Dual-Mode Line-Item Discount Analysis -->
+                                <td class="text-end font-monospace">
+                                    {% if item.discount_amount > 0 or item.item_discount_amount > 0 %}
+                                        <!-- Actual Deducted Discount Amount -->
+                                        <div class="text-danger fw-bold fs-xs">
+                                            -Rs. {{ item.item_discount_amount|default:item.discount_amount|floatformat:2|intcomma }}
+                                        </div>
+
+                                        <!-- Badge: Amount vs Percentage with Raw Typed Value -->
+                                        <div class="mt-1 d-flex justify-content-end gap-1 flex-wrap">
+                                            {% if item.discount_type == 'AMOUNT' or item.discount_type == 'FIXED' %}
+                                                <span class="disc-type-pill bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25" title="Cashier typed flat amount">
+                                                    Amount: Rs. {{ item.discount_input_value|floatformat:2|intcomma }}
+                                                </span>
+                                            {% elif item.discount_type == 'PERCENTAGE' %}
+                                                <span class="disc-type-pill bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25" title="Cashier typed percentage">
+                                                    Percent: {{ item.discount_input_value|default:item.discount_percent|floatformat:1 }}%
+                                                </span>
+                                            {% else %}
+                                                <span class="disc-type-pill bg-secondary bg-opacity-10 text-secondary border">
+                                                    Disc: {{ item.discount_percent|floatformat:1 }}%
+                                                </span>
+                                            {% endif %}
+                                        </div>
+
+                                        <!-- Effective Percentage Calculated -->
+                                        <div class="text-muted fs-2xs mt-1">
+                                            Eff: <strong>{{ item.effective_discount_percent|default:item.discount_percent|floatformat:1 }}%</strong>
+                                        </div>
+
+                                        <!-- Multi-Quantity Per-Unit Discount Detail -->
+                                        {% if item.quantity > 1 and item.unit_discount_amount > 0 %}
+                                            <div class="text-muted fs-2xs">
+                                                (Rs. {{ item.unit_discount_amount|floatformat:2|intcomma }}/unit)
+                                            </div>
+                                        {% endif %}
+
+                                        <!-- Allocated Bill Discount Component (if present) -->
+                                        {% if item.allocated_bill_discount_amount > 0 %}
+                                            <div class="text-secondary fs-2xs mt-1" title="Proportionate share of bill-level discount">
+                                                +Bill Disc: Rs. {{ item.allocated_bill_discount_amount|floatformat:2|intcomma }}
+                                            </div>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted fs-xs">-</span>
+                                    {% endif %}
+                                </td>
                                 
                                 {% if estimate.vat_amount > 0 %}
                                     <td class="text-end font-monospace text-warning-emphasis">Rs. {{ item.tax_amount|floatformat:2|intcomma }}</td>
                                 {% endif %}
 
+                                <!-- Net Line Total -->
                                 <td class="text-end pe-4 font-monospace fw-bold text-dark">
                                     Rs. {{ item.line_total|floatformat:2|intcomma }}
                                 </td>
@@ -394,56 +495,75 @@
             </div>
             {% endif %}
 
-            <!-- Linked Trade-In Buy-Back Voucher -->
-            {% if estimate.has_trade_in_exchange and estimate.trade_in_voucher_reference %}
-            <div class="card border-0 shadow-sm rounded-4 p-4 bg-warning bg-opacity-10 border border-warning border-opacity-25 mb-4">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <span class="badge bg-warning text-dark px-3 py-1 rounded-pill fs-xs mb-1">Old Phone Exchange</span>
-                        <h6 class="fw-bold text-dark mb-1">
-                            Traded-In Handset Voucher: <code>{{ estimate.trade_in_voucher_reference }}</code>
-                        </h6>
-                        <small class="text-muted">Buy-back value was deducted directly from this bill's grand total.</small>
-                    </div>
-                    <div class="text-end">
-                        <span class="text-muted fs-xs text-uppercase fw-bold d-block">Credit Deducted</span>
-                        <h4 class="fw-bold text-danger font-monospace mb-0">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2|intcomma }}</h4>
-                    </div>
-                </div>
-            </div>
-            {% endif %}
-
         </div>
 
-        <!-- Right Column (4 Cols): Financial Settlement & Payments -->
+        <!-- Right Column (4 Cols): Financial Summary & Settlement -->
         <div class="col-12 col-lg-4">
             
-            <!-- Grand Total Breakdown Card -->
+            <!-- Financial Summary Card (Merchandise Discounts & Commercial Approvals) -->
             <div class="invoice-detail-card p-4 mb-4">
                 <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
-                    <i class="fas fa-calculator text-primary me-2"></i> Financial Summary
+                    <i class="fas fa-receipt text-primary me-2"></i> Invoice Calculation
                 </h6>
 
                 <table class="table table-borderless table-sm fs-xs mb-0 financial-summary-table">
                     <tr>
-                        <td class="text-muted">Gross Subtotal:</td>
+                        <td class="text-muted">Gross Items Subtotal:</td>
                         <td class="text-end font-monospace fw-semibold">Rs. {{ estimate.subtotal|floatformat:2|intcomma }}</td>
                     </tr>
                     
-                    {% if estimate.item_discount_total > 0 or estimate.bill_discount_amount > 0 %}
+                    <!-- Line Items Discount Total -->
+                    {% if estimate.item_discount_total > 0 %}
                     <tr>
-                        <td class="text-muted">Total Discounts:</td>
-                        <td class="text-end font-monospace text-danger">-Rs. {{ estimate.item_discount_total|add:estimate.bill_discount_amount|floatformat:2|intcomma }}</td>
+                        <td class="text-muted">Line Items Discount:</td>
+                        <td class="text-end font-monospace text-danger">-Rs. {{ estimate.item_discount_total|floatformat:2|intcomma }}</td>
                     </tr>
                     {% endif %}
 
-                    {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
+                    <!-- Dual-Mode Bill-Level Discount with Typed Input vs Effective % -->
+                    {% if estimate.bill_discount_amount > 0 %}
                     <tr>
-                        <td class="text-muted">Trade-In Buy-Back Credit:</td>
-                        <td class="text-end font-monospace text-danger">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2|intcomma }}</td>
+                        <td class="text-muted">
+                            <div class="d-flex align-items-center gap-1">
+                                <span>
+                                    {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
+                                        Bill Discount:
+                                    {% else %}
+                                        Bill Discount:
+                                    {% endif %}
+                                </span>
+                                <span class="badge {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25{% else %}bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25{% endif %} font-monospace fs-2xs">
+                                    {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
+                                        Rs. {{ estimate.bill_discount_input_value|default:estimate.bill_discount_amount|floatformat:2|intcomma }} (Eff. {{ estimate.bill_discount_percent|floatformat:1 }}%)
+                                    {% else %}
+                                        {{ estimate.bill_discount_input_value|default:estimate.bill_discount_percent|floatformat:1 }}%
+                                    {% endif %}
+                                </span>
+                            </div>
+                        </td>
+                        <td class="text-end font-monospace text-danger align-top">
+                            -Rs. {{ estimate.bill_discount_amount|floatformat:2|intcomma }}
+                        </td>
                     </tr>
                     {% endif %}
 
+                    <!-- Total Sales Concession -->
+                    {% if estimate.item_discount_total > 0 and estimate.bill_discount_amount > 0 %}
+                    <tr class="border-top border-light">
+                        <td class="text-muted fw-bold">Total Sales Discount:</td>
+                        <td class="text-end font-monospace text-danger fw-bold">-Rs. {{ estimate.total_sales_discount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- Price Override Concessions (Catalog Reductions) -->
+                    {% if estimate.price_override_total > 0 %}
+                    <tr>
+                        <td class="text-muted">Catalog Price Overrides:</td>
+                        <td class="text-end font-monospace text-warning-emphasis fw-semibold">-Rs. {{ estimate.price_override_total|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endif %}
+
+                    <!-- Taxes -->
                     {% if estimate.vat_amount > 0 %}
                         {% if estimate.taxable_amount > 0 %}
                         <tr>
@@ -463,7 +583,55 @@
                             Rs. {{ estimate.grand_total|floatformat:2|intcomma }}
                         </td>
                     </tr>
+                </table>
 
+                <!-- SUPERVISOR APPROVAL & COMMERCIAL REASON AUDIT INSET -->
+                {% if estimate.manager_override_by or estimate.discount_reason %}
+                <div class="supervisor-auth-box mt-3">
+                    <div class="d-flex align-items-center gap-1 text-dark fw-bold fs-xs mb-1">
+                        <i class="fas fa-user-shield text-warning me-1"></i> Supervisor Authorization Audit:
+                    </div>
+                    {% if estimate.manager_override_by %}
+                    <div class="text-dark fs-2xs mb-1">
+                        <span class="text-muted">Approved by:</span> <strong>{{ estimate.manager_override_by.get_full_name|default:estimate.manager_override_by.username }}</strong>
+                        {% if estimate.discount_approved_at %}
+                            <span class="text-muted">at {{ estimate.discount_approved_at|date:"M d, Y H:i" }}</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% if estimate.discount_reason %}
+                    <div class="text-dark fs-2xs">
+                        <span class="text-muted">Commercial Justification:</span> 
+                        <span class="badge bg-white text-dark border border-warning border-opacity-50 fw-bold font-monospace">{{ estimate.discount_reason }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Dedicated Settlement Section (Trade-In Buy-Back Credit Strictly Separated) -->
+            <div class="settlement-card p-4 mb-4">
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                    <i class="fas fa-hand-holding-dollar text-success me-2"></i> Settlement &amp; Tendered Payments
+                </h6>
+
+                <!-- Trade-In Buy-Back Credit Display -->
+                {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
+                <div class="p-3 bg-white border border-warning border-opacity-50 rounded-3 mb-3 shadow-xs">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-warning text-dark fs-2xs fw-bold">
+                            <i class="fas fa-repeat me-1"></i> Trade-In Buy-Back
+                        </span>
+                        <span class="font-monospace text-muted fs-2xs">{{ estimate.trade_in_voucher_reference }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <strong class="text-dark fs-xs">Buy-Back Credit Offset:</strong>
+                        <strong class="text-danger font-monospace fs-sm">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2|intcomma }}</strong>
+                    </div>
+                </div>
+                {% endif %}
+
+                <table class="table table-borderless table-sm fs-xs mb-3 financial-summary-table">
                     <tr>
                         <td class="text-muted">Paid on Invoicing:</td>
                         <td class="text-end font-monospace fw-bold text-success">Rs. {{ estimate.paid_amount|floatformat:2|intcomma }}</td>
@@ -483,35 +651,34 @@
                     </tr>
                     {% endif %}
                 </table>
-            </div>
 
-            <!-- Payment Split Transactions Card -->
-            <div class="invoice-detail-card p-4 mb-4">
-                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
-                    <i class="fas fa-layer-group text-success me-2"></i> Payment Split Breakdown
-                </h6>
-
-                {% for p in payments %}
-                <div class="d-flex justify-content-between align-items-center py-2 border-bottom fs-xs">
-                    <div>
-                        <span class="badge bg-light text-dark border me-1">{{ p.get_payment_mode_display }}</span>
-                        {% if p.transaction_ref %}
-                            <small class="text-muted font-monospace d-block mt-1">Ref: {{ p.transaction_ref }}</small>
-                        {% endif %}
+                <!-- Payment Split Breakdown -->
+                <div class="border-top pt-2">
+                    <span class="text-uppercase text-muted fw-bold fs-2xs d-block mb-2">Tender Breakdown</span>
+                    {% for p in payments %}
+                    <div class="d-flex justify-content-between align-items-center py-1 fs-xs">
+                        <div>
+                            <span class="badge bg-light text-dark border me-1">{{ p.get_payment_mode_display }}</span>
+                            {% if p.transaction_ref %}
+                                <small class="text-muted font-monospace">{{ p.transaction_ref }}</small>
+                            {% endif %}
+                        </div>
+                        <strong class="font-monospace text-dark">Rs. {{ p.amount|floatformat:2|intcomma }}</strong>
                     </div>
-                    <strong class="font-monospace text-dark">Rs. {{ p.amount|floatformat:2|intcomma }}</strong>
+                    {% empty %}
+                    <div class="text-muted fs-xs">
+                        Paid via CASH: Rs. {{ estimate.paid_amount|floatformat:2|intcomma }}
+                    </div>
+                    {% endfor %}
                 </div>
-                {% empty %}
-                <div class="text-center py-3 text-muted fs-xs">
-                    Paid via CASH: Rs. {{ estimate.paid_amount|floatformat:2|intcomma }}
-                </div>
-                {% endfor %}
             </div>
 
-            <!-- Notes & Audit Remarks -->
+            <!-- Notes & Audit Remarks Card -->
             {% if estimate.notes or estimate.cancellation_reason %}
             <div class="invoice-detail-card p-4">
-                <h6 class="fw-bold text-dark border-bottom pb-2 mb-2 fs-xs">Audit &amp; Bill Remarks</h6>
+                <h6 class="fw-bold text-dark border-bottom pb-2 mb-2 fs-xs">
+                    <i class="fas fa-clipboard-check text-secondary me-1"></i> Audit &amp; Bill Remarks
+                </h6>
                 {% if estimate.cancellation_reason %}
                     <div class="p-2 bg-danger bg-opacity-10 rounded text-danger fs-2xs mb-2">
                         <strong>Void Reason:</strong> {{ estimate.cancellation_reason }}

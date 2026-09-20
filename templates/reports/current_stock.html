@@ -1,0 +1,355 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Current Stock Snapshot | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.current-stock-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.current-stock-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-current-stock th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-current-stock td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header & Action Buttons -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-cubes-stacked text-primary me-2"></i> Current Stock Snapshot (Live Inventory)
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Real-time snapshot of active warehouse quantities, reserved orders, defective quarantine, and total asset valuation
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'reports:stock_summary' %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-clipboard-list me-1"></i> Stock Summary (21-Col)
+            </a>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 Real-Time Inventory & Valuation Metrics -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="current-stock-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Live Units</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-boxes-stacked fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.total_units|floatformat:0|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Across {{ totals.total_skus }} active catalog products</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="current-stock-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Reserved &amp; Quarantined</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-box-archive fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    {{ totals.total_reserved|floatformat:0 }} <span class="fs-6 fw-normal text-muted">Res / {{ totals.total_defective|floatformat:0 }} Def</span>
+                </h3>
+                <small class="text-muted fs-2xs">In cart bookings &amp; defective quarantine</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="current-stock-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Asset Cost (Landed)</span>
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary p-2 rounded-circle">
+                        <i class="fas fa-coins fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_cost_val|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Capital invested at landed acquisition cost</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="current-stock-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">Retail Counter Valuation</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-arrow-trend-up fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_retail_val|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-success fs-2xs fw-bold">Active counter selling prices</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter & Search Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Product Name, SKU, Barcode, Model, Rack...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if request.GET.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if request.GET.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="brand" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Brands</option>
+                    {% for b in brands %}
+                        <option value="{{ b.id }}" {% if request.GET.brand == b.id|stringformat:"s" %}selected{% endif %}>
+                            {{ b.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-1">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Levels</option>
+                    <option value="in_stock" {% if request.GET.status == 'in_stock' %}selected{% endif %}>In Stock</option>
+                    <option value="low_stock" {% if request.GET.status == 'low_stock' %}selected{% endif %}>Low Stock</option>
+                    <option value="out_of_stock" {% if request.GET.status == 'out_of_stock' %}selected{% endif %}>Zero Stock</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.branch or request.GET.category or request.GET.brand or request.GET.status %}
+                <a href="{% url 'reports:current_stock' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Live Stock Inventory Ledger Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Real-Time Warehouse Stock Ledger
+            </h6>
+            <span class="badge bg-primary rounded-pill px-3">{{ page_obj.paginator.count|default:stocks|length }} Stock Records</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-current-stock">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Product / Item Model</th>
+                        <th>Category</th>
+                        <th>Brand</th>
+                        <th>Branch</th>
+                        <th>Rack Location</th>
+                        <th class="text-center">Live Stock</th>
+                        <th class="text-center">Reserved</th>
+                        <th class="text-center">Quarantined</th>
+                        <th class="text-end">Unit Cost</th>
+                        <th class="text-end">Selling MRP</th>
+                        <th class="text-end">Cost Valuation</th>
+                        <th class="text-end">Retail Valuation</th>
+                        <th>Status</th>
+                        <th class="text-end pe-4">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bs in stocks %}
+                    <tr>
+                        <td class="ps-4">
+                            <a href="{% url 'inventory:product_detail' bs.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                {{ bs.product.name }}
+                            </a>
+                            <div class="font-monospace text-muted fs-2xs mt-1">
+                                SKU: {{ bs.product.sku }}
+                                {% if bs.product.barcode %}&bull; {{ bs.product.barcode }}{% endif %}
+                                {% if bs.product.requires_imei_tracking %}
+                                    <span class="badge bg-primary bg-opacity-10 text-primary ms-1" style="font-size: 8px;">IMEI</span>
+                                {% endif %}
+                            </div>
+                        </td>
+
+                        <td>{{ bs.product.category.name|default:"General" }}</td>
+                        <td>{{ bs.product.brand.name|default:"-" }}</td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border">{{ bs.branch.code }}</span>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-secondary border font-monospace fs-2xs">
+                                {{ bs.product.rack_number|default:"-" }}
+                            </span>
+                        </td>
+
+                        <!-- Live Stock Quantity -->
+                        <td class="text-center">
+                            <strong class="font-monospace fs-sm {% if bs.quantity <= 0 %}text-danger{% elif bs.is_low_stock %}text-warning-emphasis{% else %}text-success{% endif %}">
+                                {{ bs.quantity|floatformat:1 }}
+                            </strong>
+                            <small class="text-muted fs-2xs">{{ bs.product.base_unit.code }}</small>
+                        </td>
+
+                        <!-- Reserved -->
+                        <td class="text-center font-monospace text-muted fs-xs">
+                            {{ bs.reserved_quantity|floatformat:1 }}
+                        </td>
+
+                        <!-- Defective Quarantine -->
+                        <td class="text-center">
+                            {% if bs.quarantined_defective_quantity > 0 %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace fs-2xs">
+                                    {{ bs.quarantined_defective_quantity|floatformat:1 }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted font-monospace fs-2xs">0.0</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Rates -->
+                        <td class="col-num text-dark">
+                            Rs. {{ bs.product.purchase_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <td class="col-num text-primary fw-semibold">
+                            Rs. {{ bs.product.selling_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Valuations -->
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ bs.cost_valuation|floatformat:2|intcomma }}
+                        </td>
+
+                        <td class="col-num fw-bold text-primary">
+                            Rs. {{ bs.retail_valuation|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Status Badge -->
+                        <td>
+                            {% if bs.quantity <= 0 %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">
+                                    Zero Stock
+                                </span>
+                            {% elif bs.is_low_stock %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-2xs px-2 py-1">
+                                    Low Stock
+                                </span>
+                            {% else %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    In Stock
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-end pe-4">
+                            <a href="{% url 'inventory:product_detail' bs.product.pk %}" 
+                               class="btn btn-outline-primary btn-sm rounded-pill px-2 py-0 fs-2xs" 
+                               title="View Specifications">
+                                Detail
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="14" class="text-center py-5 text-muted">
+                            <i class="fas fa-boxes-stacked fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Stock Records Found</h6>
+                            <p class="text-muted fs-xs mb-0">Try changing your search keywords or clearing selected filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if stocks %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="5" class="ps-4 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="text-center col-num text-primary fs-6">{{ totals.total_units|floatformat:1 }}</td>
+                        <td class="text-center col-num text-white-50">{{ totals.total_reserved|floatformat:1 }}</td>
+                        <td class="text-center col-num text-danger">{{ totals.total_defective|floatformat:1 }}</td>
+                        <td colspan="2"></td>
+                        <td class="text-end col-num text-white fs-6">Rs. {{ totals.total_cost_val|floatformat:2|intcomma }}</td>
+                        <td class="text-end col-num text-warning fs-6">Rs. {{ totals.total_retail_val|floatformat:2|intcomma }}</td>
+                        <td colspan="2"></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

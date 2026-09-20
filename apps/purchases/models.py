@@ -1,11 +1,36 @@
+"""
+Procurement, Supplier Udhaari, Goods Received Notes (GRN) & Commercial Purchase Return Models.
+
+Key Capabilities:
+1. Historical Integrity (2080 B.S. & Onwards):
+   - Goods Received Notes (GRN), Purchase Orders, and Purchase Returns allow manual setting
+     of historical purchase dates during data imports.
+   - Automatically synchronizes Gregorian AD dates, Bikram Sambat (BS) date strings, and
+     Nepali Fiscal Year identifiers (e.g., '2080/81', '2081/82') inside `.save()`.
+   - Supports self-healing two-way date parsing: if only BS date is supplied during migration,
+     converts and fills the AD date, and vice versa.
+2. Value-Based Overhead Allocation & Landed Cost Tracking:
+   - Tracks freight, customs duty, and insurance overheads to arrive at exact unit landed costs.
+3. Strict Serialized & Dual-IMEI Tracking:
+   - Full alignment with multi-SIM smartphone tracking and NTA MDMS compliance certification.
+4. Supplier Ledger Reconciliation:
+   - Complete tracking of accounts payable, credit limits, and payment settlement histories.
+   - Strict `recalculate_balance_from_ledger()` computes `current_balance` directly from ledger entries.
+"""
+
+import re
 import uuid
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, datetime
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
 from apps.core.models import TimeStampedModel
 from apps.branches.models import Branch
-from apps.inventory.models import Product, UnitOfMeasurement, UnitConversion
+from apps.inventory.models import Product, UnitOfMeasurement, UnitConversion, ItemInstance
+from apps.core.nepali_calendar import NepaliCalendar
 
 
 class Supplier(TimeStampedModel):
@@ -58,7 +83,7 @@ class Supplier(TimeStampedModel):
         ('BLOCKED', 'Blocked / Disputed (रोक्का गरिएको)'),
     ]
 
-    # --- 1. System Identification & 5 Strictly Mandatory Fields ---
+    # --- 1. System Identification & Core Mandatory Fields ---
     code = models.CharField(
         max_length=25, unique=True, db_index=True, blank=True,
         verbose_name=_("Supplier Code"),
@@ -128,7 +153,7 @@ class Supplier(TimeStampedModel):
     current_balance = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal('0.00'), null=True, blank=True,
         verbose_name=_("Net Outstanding Balance (NPR)"),
-        help_text=_("Positive balance indicates amount shop owes the supplier.")
+        help_text=_("Positive balance indicates amount shop owes the supplier. Auto-calculated from ledger.")
     )
     preferred_payment_method = models.CharField(
         max_length=25, choices=PAYMENT_METHOD_CHOICES, default='BANK_TRANSFER',
@@ -190,7 +215,7 @@ class Supplier(TimeStampedModel):
     )
     warranty_claim_contact = models.TextField(
         blank=True, null=True, verbose_name=_("Warranty Claim Lab / Service Center Location"),
-        help_text=_("Physical service center address, engineer contact, and dispatch instructions.")
+        help_text=_("Physical service center address, engineer contact, and drop point...")
     )
     doa_policy = models.TextField(
         blank=True, null=True, verbose_name=_("7-Day DOA Replacement Policy"),
@@ -276,8 +301,83 @@ class Supplier(TimeStampedModel):
             self.current_balance = initial_due
             Supplier.objects.filter(pk=self.pk).update(current_balance=initial_due)
 
+            SupplierUdhaariLedger.objects.create(
+                supplier=self,
+                branch=None,
+                transaction_type='OPENING_BALANCE',
+                amount=self.opening_balance,
+                previous_balance=Decimal('0.00'),
+                resulting_balance=initial_due,
+                payment_mode='OTHER',
+                remarks=f"Opening Balance on Registration ({self.get_balance_type_display()})"
+            )
+
+    def recalculate_balance_from_ledger(self, save=True):
+        """
+        Recalculates current_balance strictly from SupplierUdhaariLedger entries.
+        Ensures mathematical integrity between supplier sub-ledger records and the master balance.
+        Positive balance indicates amount owed to the supplier (Payable).
+        Negative balance indicates advance paid to supplier (Credit / Advance).
+        """
+        if not self.pk:
+            return self.current_balance or Decimal('0.00')
+
+        # Check if an explicit OPENING_BALANCE ledger entry exists
+        opening_entry = self.ledger_entries.filter(
+            transaction_type='OPENING_BALANCE'
+        ).order_by('created_at', 'id').first()
+
+        if opening_entry:
+            base_balance = opening_entry.resulting_balance
+        else:
+            # Fallback for historical/legacy records without an explicit opening ledger row
+            if self.balance_type == 'PAYABLE':
+                base_balance = self.opening_balance or Decimal('0.00')
+            else:
+                base_balance = -(self.opening_balance or Decimal('0.00'))
+
+        # Aggregate bills (purchases increase payable)
+        bills_total = self.ledger_entries.filter(
+            transaction_type='PURCHASE_BILL'
+        ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
+
+        # Aggregate payments (payouts reduce payable)
+        payments_total = self.ledger_entries.filter(
+            transaction_type='PAYMENT'
+        ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
+
+        # Aggregate returns (debit notes reduce payable)
+        returns_total = self.ledger_entries.filter(
+            transaction_type='PURCHASE_RETURN'
+        ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
+
+        # Aggregate adjustments: calculate delta from resulting_balance vs previous_balance if available
+        adjustments = self.ledger_entries.filter(transaction_type='ADJUSTMENT')
+        adj_total = Decimal('0.00')
+        for adj in adjustments:
+            if adj.resulting_balance is not None and adj.previous_balance is not None:
+                adj_total += (adj.resulting_balance - adj.previous_balance)
+            else:
+                adj_total += adj.amount
+
+        new_balance = (base_balance + bills_total - payments_total - returns_total + adj_total).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+        self.current_balance = new_balance
+        if save:
+            Supplier.objects.filter(pk=self.pk).update(
+                current_balance=new_balance,
+                updated_at=timezone.now()
+            )
+        return new_balance
+
 
 class PurchaseOrder(TimeStampedModel):
+    """
+    Purchase Order (PO) Header.
+    Allows manual specification of historical order dates with automatic BS & Fiscal Year sync.
+    """
     PO_STATUS = [
         ('DRAFT', 'Draft PO'),
         ('ISSUED', 'Issued to Supplier'),
@@ -289,7 +389,31 @@ class PurchaseOrder(TimeStampedModel):
     po_number = models.CharField(max_length=50, unique=True, db_index=True, verbose_name=_("PO Number"))
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='purchase_orders')
     branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name='purchase_orders')
-    order_date = models.DateField()
+
+    # Date Trackers (Allows Historical Imports from 2080 B.S.)
+    order_date = models.DateField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name=_("PO Order Date (AD)"),
+        help_text=_("Gregorian date for database indexing. Allows manual historical import dates.")
+    )
+    order_date_bs = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("PO Order Date (BS)"),
+        help_text=_("Bikram Sambat formatted date string (YYYY-MM-DD).")
+    )
+    fiscal_year = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Fiscal Year (BS)"),
+        help_text=_("Nepali Fiscal Year derived from BS date (e.g. 2080/81, 2081/82).")
+    )
+
     expected_delivery_date = models.DateField(blank=True, null=True)
     status = models.CharField(max_length=25, choices=PO_STATUS, default='DRAFT', db_index=True)
     
@@ -307,9 +431,43 @@ class PurchaseOrder(TimeStampedModel):
         ordering = ['-order_date', '-created_at']
         verbose_name = _('Purchase Order')
         verbose_name_plural = _('Purchase Orders')
+        indexes = [
+            models.Index(fields=['order_date', 'status', 'branch'], name='idx_po_date_status_branch'),
+            models.Index(fields=['fiscal_year', 'branch'], name='idx_po_fy_branch'),
+            models.Index(fields=['po_number'], name='idx_po_num'),
+        ]
 
     def __str__(self):
         return f"{self.po_number} - {self.supplier.company_name} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        # Auto-synchronize BS date and Nepali Fiscal Year for historical integrity
+        if self.order_date:
+            if isinstance(self.order_date, datetime):
+                ad_date = self.order_date.date()
+            else:
+                ad_date = self.order_date
+
+            if not self.order_date_bs or not self.fiscal_year:
+                try:
+                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
+                    if not self.order_date_bs:
+                        self.order_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
+                    if not self.fiscal_year:
+                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
+                except Exception:
+                    pass
+        elif self.order_date_bs:
+            try:
+                from apps.core.utils.nepali_date_converter import bs_to_ad_date
+                self.order_date = bs_to_ad_date(self.order_date_bs)
+                parts = [int(p) for p in re.findall(r'\d+', str(self.order_date_bs))]
+                if len(parts) >= 2 and not self.fiscal_year:
+                    self.fiscal_year = NepaliCalendar.get_fiscal_year(parts[0], parts[1])
+            except Exception:
+                pass
+
+        super().save(*args, **kwargs)
 
 
 class PurchaseOrderItem(TimeStampedModel):
@@ -331,6 +489,11 @@ class PurchaseOrderItem(TimeStampedModel):
 
 
 class GoodsReceivedNote(TimeStampedModel):
+    """
+    Goods Received Note (GRN) Inward Procurement Voucher.
+    Tracks supplier invoice numbers, proportional landed cost calculations,
+    NTA MDMS certification, supplier warranty centers, and historical purchase dates.
+    """
     GRN_STATUS = [
         ('DRAFT', 'Draft / In-Inspection'),
         ('RECEIVED', 'Goods Verified & Stock Updated'),
@@ -350,8 +513,30 @@ class GoodsReceivedNote(TimeStampedModel):
     supplier_product_code = models.CharField(
         max_length=100, blank=True, null=True, verbose_name=_("Supplier Batch / Product Code")
     )
-    bill_date = models.DateField(verbose_name=_("Bill / Challan Date (AD)"), db_index=True)
-    bill_date_bs = models.CharField(max_length=15, blank=True, null=True, verbose_name=_("Bill Date (BS)"))
+
+    # Date Trackers (Allows Historical Imports from 2080 B.S.)
+    bill_date = models.DateField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name=_("Bill / Challan Date (AD)"),
+        help_text=_("Gregorian date for database indexing and accounting. Allows manual historical import dates from 2080 B.S.")
+    )
+    bill_date_bs = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Bill Date (BS)"),
+        help_text=_("Bikram Sambat formatted date string (YYYY-MM-DD).")
+    )
+    fiscal_year = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Fiscal Year (BS)"),
+        help_text=_("Nepali Fiscal Year derived from BS date (e.g. 2080/81, 2081/82).")
+    )
     
     status = models.CharField(max_length=20, choices=GRN_STATUS, default='DRAFT', db_index=True)
 
@@ -403,12 +588,62 @@ class GoodsReceivedNote(TimeStampedModel):
 
     class Meta:
         db_table = 'pur_goods_received_notes'
-        ordering = ['-created_at']
+        ordering = ['-bill_date', '-created_at']
         verbose_name = _('Goods Received Note (GRN)')
         verbose_name_plural = _('Goods Received Notes (GRN)')
+        indexes = [
+            models.Index(fields=['bill_date', 'status', 'branch'], name='idx_grn_date_status_branch'),
+            models.Index(fields=['fiscal_year', 'branch'], name='idx_grn_fy_branch'),
+            models.Index(fields=['supplier', 'bill_date'], name='idx_grn_supplier_date'),
+            models.Index(fields=['supplier_bill_no'], name='idx_grn_supp_bill'),
+            models.Index(fields=['grn_number'], name='idx_grn_num'),
+        ]
 
     def __str__(self):
         return f"{self.grn_number} | {self.supplier.company_name} | Rs. {self.net_total_amount}"
+
+    def save(self, *args, **kwargs):
+        # Auto-synchronize BS date, AD date, and Nepali Fiscal Year for historical integrity
+        if self.bill_date:
+            if isinstance(self.bill_date, datetime):
+                ad_date = self.bill_date.date()
+            else:
+                ad_date = self.bill_date
+
+            if not self.bill_date_bs or not self.fiscal_year:
+                try:
+                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
+                    if not self.bill_date_bs:
+                        self.bill_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
+                    if not self.fiscal_year:
+                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
+                except Exception:
+                    pass
+        elif self.bill_date_bs:
+            try:
+                from apps.core.utils.nepali_date_converter import bs_to_ad_date
+                self.bill_date = bs_to_ad_date(self.bill_date_bs)
+                parts = [int(p) for p in re.findall(r'\d+', str(self.bill_date_bs))]
+                if len(parts) >= 2 and not self.fiscal_year:
+                    self.fiscal_year = NepaliCalendar.get_fiscal_year(parts[0], parts[1])
+            except Exception:
+                pass
+
+        super().save(*args, **kwargs)
+
+    @property
+    def bill_date_ad(self) -> date:
+        """Alias returning bill_date for consistent naming with SalesEstimate."""
+        return self.bill_date
+
+    @property
+    def overhead_total(self) -> Decimal:
+        """Total landed shipping, customs duties, and handling overheads."""
+        return (
+            (self.extra_freight_charge or Decimal('0.00')) +
+            (self.customs_import_charge or Decimal('0.00')) +
+            (self.other_handling_charge or Decimal('0.00'))
+        )
 
 
 class GRNItem(TimeStampedModel):
@@ -472,7 +707,6 @@ class GRNItem(TimeStampedModel):
         return f"{self.product.name} ({self.base_unit_quantity} {self.product.base_unit.code})"
 
     def save(self, *args, **kwargs):
-        # Auto-compute base quantity and line total if not explicitly set
         factor = self.conversion_factor if self.conversion_factor and self.conversion_factor > Decimal('0.000') else Decimal('1.000')
         qty = self.purchased_quantity if self.purchased_quantity and self.purchased_quantity > Decimal('0.000') else Decimal('1.000')
         
@@ -488,8 +722,225 @@ class GRNItem(TimeStampedModel):
         super().save(*args, **kwargs)
 
 
+class PurchaseReturn(TimeStampedModel):
+    """
+    Commercial Purchase Return / Debit Note Module.
+    Tracks outward return of merchandise (smartphones, accessories, parts) back to suppliers/distributors.
+    Supports deduction from Supplier Udhaari / Ledger Balance or Cash/Bank Refund.
+    """
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft / In-Preparation (मस्यौदा)'),
+        ('CONFIRMED', 'Confirmed & Stock Deducted (स्वीकृत / मौज्दात कट्टी)'),
+        ('CANCELLED', 'Cancelled / Voided (रद्द गरिएको)'),
+    ]
+
+    REFUND_MODE_CHOICES = [
+        ('DEDUCT_FROM_BALANCE', 'Deduct from Supplier Balance (उधारो कट्टी / हिसाब मिलान)'),
+        ('CASH_REFUND', 'Cash / Bank Refund Received (नगद / बैंक फिर्ता)'),
+        ('REPLACEMENT', 'Replacement Consignment Expected (सामान साट्ने)'),
+    ]
+
+    return_number = models.CharField(
+        max_length=50, unique=True, db_index=True, verbose_name=_("Debit Note / Return No.")
+    )
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.PROTECT, related_name='purchase_returns', verbose_name=_("Supplier / Distributor")
+    )
+    branch = models.ForeignKey(
+        Branch, on_delete=models.PROTECT, related_name='purchase_returns', verbose_name=_("Branch / Outlet")
+    )
+    original_grn = models.ForeignKey(
+        GoodsReceivedNote, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='purchase_returns', verbose_name=_("Original GRN Reference")
+    )
+    original_bill_reference = models.CharField(
+        max_length=100, blank=True, null=True, verbose_name=_("Supplier Invoice / Challan Ref No.")
+    )
+
+    # Date Trackers (Allows Historical Imports from 2080 B.S.)
+    return_date = models.DateField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name=_("Return Date (AD)"),
+        help_text=_("Gregorian date for database indexing. Allows manual historical import dates.")
+    )
+    return_date_bs = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Return Date (BS)"),
+        help_text=_("Bikram Sambat formatted date string (YYYY-MM-DD).")
+    )
+    fiscal_year = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Fiscal Year (BS)"),
+        help_text=_("Nepali Fiscal Year derived from BS date (e.g. 2080/81, 2081/82).")
+    )
+    
+    refund_mode = models.CharField(
+        max_length=30, choices=REFUND_MODE_CHOICES, default='DEDUCT_FROM_BALANCE',
+        verbose_name=_("Refund / Settlement Mode")
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='CONFIRMED', db_index=True,
+        verbose_name=_("Voucher Status")
+    )
+
+    total_return_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Total Return Value (NPR)")
+    )
+    tax_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Tax / VAT Amount (NPR)")
+    )
+    net_refund_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Net Refund / Debit Note Amount (NPR)")
+    )
+
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='processed_purchase_returns', verbose_name=_("Processed By")
+    )
+    remarks = models.TextField(blank=True, null=True, verbose_name=_("Reason / Remarks for Return"))
+
+    class Meta:
+        db_table = 'pur_purchase_returns'
+        ordering = ['-return_date', '-created_at']
+        verbose_name = _('Purchase Return / Debit Note')
+        verbose_name_plural = _('Purchase Returns / Debit Notes')
+        indexes = [
+            models.Index(fields=['return_date', 'branch'], name='idx_pret_date_branch'),
+            models.Index(fields=['fiscal_year', 'branch'], name='idx_pret_fy_branch'),
+            models.Index(fields=['return_number'], name='idx_pret_num'),
+        ]
+
+    def __str__(self):
+        return f"{self.return_number} | {self.supplier.company_name} | Rs. {self.net_refund_amount}"
+
+    def save(self, *args, **kwargs):
+        # Auto-synchronize BS date, AD date, and Nepali Fiscal Year for historical integrity
+        if self.return_date:
+            if isinstance(self.return_date, datetime):
+                ad_date = self.return_date.date()
+            else:
+                ad_date = self.return_date
+
+            if not self.return_date_bs or not self.fiscal_year:
+                try:
+                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
+                    if not self.return_date_bs:
+                        self.return_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
+                    if not self.fiscal_year:
+                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
+                except Exception:
+                    pass
+        elif self.return_date_bs:
+            try:
+                from apps.core.utils.nepali_date_converter import bs_to_ad_date
+                self.return_date = bs_to_ad_date(self.return_date_bs)
+                parts = [int(p) for p in re.findall(r'\d+', str(self.return_date_bs))]
+                if len(parts) >= 2 and not self.fiscal_year:
+                    self.fiscal_year = NepaliCalendar.get_fiscal_year(parts[0], parts[1])
+            except Exception:
+                pass
+
+        super().save(*args, **kwargs)
+
+
+class PurchaseReturnItem(TimeStampedModel):
+    """
+    Line item for goods returned to a vendor in a PurchaseReturn voucher.
+    Links returned product, quantity, unit rate, and scanned IMEIs.
+    """
+    purchase_return = models.ForeignKey(
+        PurchaseReturn, on_delete=models.CASCADE, related_name='items',
+        verbose_name=_("Purchase Return / Debit Note")
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name='purchase_return_items',
+        verbose_name=_("Product / Handset Model")
+    )
+    unit_conversion = models.ForeignKey(
+        UnitConversion, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name=_("Packaging Unit")
+    )
+    returned_quantity = models.DecimalField(
+        max_digits=10, decimal_places=3, default=Decimal('1.000'),
+        verbose_name=_("Returned Quantity")
+    )
+    conversion_factor = models.DecimalField(
+        max_digits=10, decimal_places=3, default=Decimal('1.000'),
+        verbose_name=_("Conversion Factor")
+    )
+    base_unit_quantity = models.DecimalField(
+        max_digits=12, decimal_places=3, default=Decimal('1.000'),
+        verbose_name=_("Base Unit Quantity Deducted")
+    )
+    purchase_rate = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Unit Purchase Rate (NPR)")
+    )
+    tax_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Tax / VAT Rate (%)")
+    )
+    tax_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Tax / VAT Amount (NPR)")
+    )
+    line_total = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Line Total (NPR)")
+    )
+    returned_imei_list = models.TextField(
+        blank=True, null=True,
+        verbose_name=_("Returned IMEIs / Serials"),
+        help_text=_("Comma or newline separated 15-digit IMEIs returned to vendor")
+    )
+    item_instance = models.ForeignKey(
+        ItemInstance, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='purchase_return_records',
+        verbose_name=_("Linked Serialized Unit")
+    )
+    return_reason = models.CharField(
+        max_length=255, blank=True, null=True,
+        verbose_name=_("Specific Defect / Reason for Line"),
+        help_text=_("e.g. Factory Defect, Damaged Box, Dead on Arrival, Wrong Model Received")
+    )
+
+    class Meta:
+        db_table = 'pur_purchase_return_items'
+        verbose_name = _('Purchase Return Item')
+        verbose_name_plural = _('Purchase Return Items')
+
+    def __str__(self):
+        return f"{self.product.name} x {self.returned_quantity} (Rs. {self.line_total})"
+
+    def save(self, *args, **kwargs):
+        factor = self.conversion_factor if self.conversion_factor and self.conversion_factor > Decimal('0.000') else Decimal('1.000')
+        qty = self.returned_quantity if self.returned_quantity and self.returned_quantity > Decimal('0.000') else Decimal('1.000')
+        self.base_unit_quantity = qty * factor
+        gross = qty * (self.purchase_rate or Decimal('0.00'))
+        if self.tax_rate and self.tax_rate > Decimal('0.00'):
+            self.tax_amount = (gross * (self.tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            self.tax_amount = Decimal('0.00')
+        self.line_total = gross + self.tax_amount
+        super().save(*args, **kwargs)
+
+
 class SupplierUdhaariLedger(TimeStampedModel):
+    """
+    Double-entry credit ledger tracking every invoice debt and payout repayment with suppliers.
+    """
     TRANSACTION_TYPES = [
+        ('OPENING_BALANCE', 'Opening Balance (सुरुवाती मौज्दात)'),
         ('PURCHASE_BILL', 'Stock Purchase / GRN (+)'),
         ('PAYMENT', 'Supplier Payout (-)'),
         ('PURCHASE_RETURN', 'Defective Return to Vendor (-)'),
@@ -501,7 +952,7 @@ class SupplierUdhaariLedger(TimeStampedModel):
         ('BANK_TRANSFER', 'Bank Transfer / IPS (बैंक ट्रान्सफर)'),
         ('CHEQUE', 'Cheque (चेक)'),
         ('FONEPAY', 'FonePay QR / Digital'),
-        ('OTHER', 'Other Adjustment'),
+        ('OTHER', 'Other Adjustment / Opening Balance'),
     ]
 
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name='ledger_entries')
@@ -513,7 +964,7 @@ class SupplierUdhaariLedger(TimeStampedModel):
     resulting_balance = models.DecimalField(max_digits=14, decimal_places=2)
     
     payment_mode = models.CharField(max_length=30, choices=PAYMENT_MODES, blank=True, null=True)
-    reference_number = models.CharField(max_length=100, blank=True, null=True, help_text="GRN No, Cheque No, Bank Ref")
+    reference_number = models.CharField(max_length=100, blank=True, null=True, help_text="GRN No, Cheque No, Bank Ref, Debit Note No")
     cheque_date = models.DateField(blank=True, null=True)
     cheque_cleared = models.BooleanField(default=True)
     

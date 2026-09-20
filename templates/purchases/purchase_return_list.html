@@ -1,0 +1,298 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Purchase Returns &amp; Debit Notes | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.purchase-nav-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.purchase-nav-pill:hover, .purchase-nav-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1720px;">
+
+    <!-- Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Purchase Suite:</span>
+        <a href="{% url 'taxation:purchase_register' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-book-open text-secondary"></i> Purchase Register
+        </a>
+        <a href="{% url 'reports:supplier_purchases' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-building-user text-secondary"></i> Supplier Purchases
+        </a>
+        <a href="{% url 'reports:product_purchases' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-boxes-stacked text-secondary"></i> Product Purchases
+        </a>
+        <a href="{% url 'purchases:purchase_return_list' %}" class="purchase-nav-pill active text-nowrap">
+            <i class="fas fa-arrow-rotate-left text-white"></i> Purchase Returns (Debit Notes)
+        </a>
+        <a href="{% url 'reports:supplier_outstanding' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-hand-holding-dollar text-warning"></i> Supplier Udhaari (Payables)
+        </a>
+        <a href="{% url 'reports:price_history' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-timeline text-info"></i> Purchase Price History
+        </a>
+    </div>
+
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-arrow-rotate-left text-danger me-2"></i> Purchase Return Report &amp; Debit Notes (खरिद फिर्ता)
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit supplier debit notes, returned smartphones and accessories, stock deductions, and supplier ledger debt adjustments
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <!-- Export to CSV Button -->
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'purchases:purchase_return_create' %}" class="btn btn-danger btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-plus-circle me-1"></i> New Purchase Return (Debit Note)
+            </a>
+            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                <i class="fas fa-truck-ramp-box me-1"></i> Inward GRN List
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Financial KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-danger border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Return Vouchers</span>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">{{ total_returns_count }}</h3>
+                <small class="text-muted fs-2xs">Debit note vouchers issued</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Refund Value</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">Rs. {{ total_refund_amount|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">Total returned goods valuation</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-success border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Deducted from Supplier Debt</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">Rs. {{ total_deducted_balance|floatformat:2|intcomma }}</h3>
+                <small class="text-success fs-2xs fw-bold">Udhaari balance reduced</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-warning border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Cash / Bank Refund Received</span>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">Rs. {{ total_cash_refunded|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">Collected directly from suppliers</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Search & Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search Voucher, Bill Ref, Supplier, IMEI...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="supplier" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Suppliers / Distributors</option>
+                    {% for sup in suppliers %}
+                        <option value="{{ sup.id }}" {% if request.GET.supplier == sup.id|stringformat:"s" %}selected{% endif %}>
+                            {{ sup.company_name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="refund_mode" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Refund Modes</option>
+                    <option value="DEDUCT_FROM_BALANCE" {% if request.GET.refund_mode == 'DEDUCT_FROM_BALANCE' %}selected{% endif %}>Deduct from Udhaari Balance</option>
+                    <option value="CASH_REFUND" {% if request.GET.refund_mode == 'CASH_REFUND' %}selected{% endif %}>Cash / Bank Refund</option>
+                    <option value="REPLACEMENT" {% if request.GET.refund_mode == 'REPLACEMENT' %}selected{% endif %}>Replacement Expected</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ request.GET.start_date|default:'' }}" class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ request.GET.end_date|default:'' }}" class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.supplier or request.GET.refund_mode or request.GET.start_date or request.GET.end_date %}
+                <a href="{% url 'purchases:purchase_return_list' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Purchase Returns Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Issued Debit Note Vouchers
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:returns|length }} Vouchers</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-4">Debit Note No</th>
+                        <th>Return Date (AD/BS)</th>
+                        <th>Supplier / Distributor</th>
+                        <th>Original Bill / GRN Ref</th>
+                        <th>Returned Items &amp; IMEIs</th>
+                        <th>Settlement Mode</th>
+                        <th>Net Debit Amount</th>
+                        <th>Processed By</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in returns %}
+                    <tr>
+                        <td class="ps-4 font-monospace fw-bold">
+                            <a href="{% url 'purchases:purchase_return_detail' r.pk %}" class="text-decoration-none text-danger">
+                                {{ r.return_number }}
+                            </a>
+                        </td>
+
+                        <td>
+                            <span class="text-dark fw-semibold">{{ r.return_date }}</span>
+                            {% if r.return_date_bs %}
+                                <small class="text-muted d-block font-monospace fs-2xs">{{ r.return_date_bs }} BS</small>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <strong>{{ r.supplier.company_name }}</strong>
+                            <small class="text-muted d-block font-monospace"><i class="fas fa-phone fs-2xs me-1 text-success"></i>{{ r.supplier.phone_number }}</small>
+                        </td>
+
+                        <td>
+                            {% if r.original_grn %}
+                                <a href="{% url 'purchases:grn_detail' r.original_grn.pk %}" class="text-decoration-none font-monospace text-primary">
+                                    {{ r.original_grn.grn_number }}
+                                </a>
+                                {% if r.original_bill_reference %}
+                                    <small class="text-muted d-block font-monospace">Bill: {{ r.original_bill_reference }}</small>
+                                {% endif %}
+                            {% elif r.original_bill_reference %}
+                                <span class="font-monospace text-muted">{{ r.original_bill_reference }}</span>
+                            {% else %}
+                                <span class="text-muted fs-xs">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Detailed Line Items & Scanned IMEIs Preview -->
+                        <td>
+                            <span class="badge bg-light text-dark border mb-1">
+                                <i class="fas fa-boxes-stacked me-1"></i> {{ r.items.count }} Line(s)
+                            </span>
+                            {% for itm in r.items.all %}
+                                <div class="text-truncate" style="max-width: 250px; font-size: 11px;">
+                                    &bull; <strong>{{ itm.product.name }}</strong> (x{{ itm.returned_quantity|floatformat:0 }})
+                                    {% if itm.return_reason %}<small class="text-danger">[{{ itm.return_reason|truncatechars:20 }}]</small>{% endif %}
+                                    {% if itm.returned_imei_list %}
+                                        <small class="text-muted font-monospace d-block">IMEIs: {{ itm.returned_imei_list|truncatechars:35 }}</small>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </td>
+
+                        <td>
+                            {% if r.refund_mode == 'DEDUCT_FROM_BALANCE' %}
+                                <span class="badge bg-primary bg-opacity-10 text-primary fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-wallet me-1"></i> Deduct from Debt
+                                </span>
+                            {% elif r.refund_mode == 'CASH_REFUND' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-money-bill-wave me-1"></i> Cash Refund
+                                </span>
+                            {% else %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-repeat me-1"></i> Replacement
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td class="fw-bold font-monospace text-danger">
+                            Rs. {{ r.net_refund_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <td>
+                            {% if r.processed_by %}
+                                {{ r.processed_by.get_full_name|default:r.processed_by.username }}
+                            {% else %}
+                                <span class="text-muted">System</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-end pe-4">
+                            <div class="d-inline-flex gap-2">
+                                <a href="{% url 'purchases:purchase_return_detail' r.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
+                                    Details
+                                </a>
+                                <a href="{% url 'purchases:purchase_return_detail' r.pk %}" target="_blank" class="btn btn-outline-dark btn-sm rounded-circle p-2" title="Print Debit Note Slip">
+                                    <i class="fas fa-print"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-arrow-rotate-left fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No commercial purchase return vouchers recorded yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+</div>
+{% endblock %}

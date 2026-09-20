@@ -1,0 +1,602 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Chart of Accounts (लेखा सूची) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Chart of Accounts</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-sitemap text-primary"></i>
+                <span>Chart of Accounts</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(लेखा सूची तथा मुख्य खाताहरू)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Visual hierarchical tree of Asset, Liability, Equity, Income, and Expense control ledgers</p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3" onclick="expandAllGroups()">
+                <i class="fas fa-expand-alt me-1"></i> Expand All
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" onclick="collapseAllGroups()">
+                <i class="fas fa-compress-alt me-1"></i> Collapse All
+            </button>
+            <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 shadow-xs" data-bs-toggle="modal" data-bs-target="#newAccountModal">
+                <i class="fas fa-plus-circle me-1"></i> Create New Ledger
+            </button>
+        </div>
+    </div>
+
+    <!-- 5 Fundamental Financial Category KPI Cards -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Assets -->
+        <div class="col-12 col-sm-6 col-xl">
+            <div class="card card-kpi border-0 shadow-sm p-3 h-100 bg-white border-start border-primary border-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fs-2xs fw-bold text-uppercase text-muted tracking-wider">Total Assets (सम्पत्ति)</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary fs-2xs font-mono">DR</span>
+                </div>
+                <h4 class="fw-extrabold text-dark font-mono mb-1">Rs. {{ total_assets|floatformat:2|intcomma }}</h4>
+                <div class="text-muted fs-2xs d-flex align-items-center gap-1">
+                    <i class="fas fa-vault text-primary"></i>
+                    <span>Cash, Banks, Receivables &amp; Stock</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Liabilities -->
+        <div class="col-12 col-sm-6 col-xl">
+            <div class="card card-kpi border-0 shadow-sm p-3 h-100 bg-white border-start border-warning border-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fs-2xs fw-bold text-uppercase text-muted tracking-wider">Total Liabilities (दायित्व)</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs font-mono">CR</span>
+                </div>
+                <h4 class="fw-extrabold text-dark font-mono mb-1">Rs. {{ total_liabilities|floatformat:2|intcomma }}</h4>
+                <div class="text-muted fs-2xs d-flex align-items-center gap-1">
+                    <i class="fas fa-file-invoice-dollar text-warning-emphasis"></i>
+                    <span>Supplier Udhaari &amp; VAT Payable</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Equity -->
+        <div class="col-12 col-sm-6 col-xl">
+            <div class="card card-kpi border-0 shadow-sm p-3 h-100 bg-white border-start border-info border-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fs-2xs fw-bold text-uppercase text-muted tracking-wider">Capital &amp; Equity (पुँजी)</span>
+                    <span class="badge bg-info bg-opacity-10 text-info fs-2xs font-mono">CR</span>
+                </div>
+                <h4 class="fw-extrabold text-dark font-mono mb-1">Rs. {{ total_equity|floatformat:2|intcomma }}</h4>
+                <div class="text-muted fs-2xs d-flex align-items-center gap-1">
+                    <i class="fas fa-scale-balanced text-info"></i>
+                    <span>Owner Capital &amp; Retained Earnings</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Revenue -->
+        <div class="col-12 col-sm-6 col-xl">
+            <div class="card card-kpi border-0 shadow-sm p-3 h-100 bg-white border-start border-success border-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fs-2xs fw-bold text-uppercase text-muted tracking-wider">Total Revenue (आम्दानी)</span>
+                    <span class="badge bg-success bg-opacity-10 text-success fs-2xs font-mono">CR</span>
+                </div>
+                <h4 class="fw-extrabold text-success font-mono mb-1">Rs. {{ total_revenue|floatformat:2|intcomma }}</h4>
+                <div class="text-muted fs-2xs d-flex align-items-center gap-1">
+                    <i class="fas fa-arrow-trend-up text-success"></i>
+                    <span>Sales &amp; Lab Repair Service Fees</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. Expenses -->
+        <div class="col-12 col-sm-6 col-xl">
+            <div class="card card-kpi border-0 shadow-sm p-3 h-100 bg-white border-start border-danger border-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fs-2xs fw-bold text-uppercase text-muted tracking-wider">Expenses &amp; COGS (खर्च)</span>
+                    <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs font-mono">DR</span>
+                </div>
+                <h4 class="fw-extrabold text-danger font-mono mb-1">Rs. {{ total_expenses|floatformat:2|intcomma }}</h4>
+                <div class="text-muted fs-2xs d-flex align-items-center gap-1">
+                    <i class="fas fa-cart-arrow-down text-danger"></i>
+                    <span>COGS, Operating Bills &amp; Rent</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tree Filter & Instant Live Search Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="row g-2 align-items-center">
+            <div class="col-12 col-md-5">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-end-0 text-muted">
+                        <i class="fas fa-search"></i>
+                    </span>
+                    <input type="text" id="coaSearchInput" class="form-control bg-light border-start-0 ps-0" 
+                           placeholder="Instant search ledger by account code, name, or Nepali keywords..."
+                           onkeyup="filterCoaTree()">
+                    <button class="btn btn-outline-secondary btn-sm" type="button" onclick="clearCoaSearch()">Clear</button>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fs-xs text-muted text-nowrap">Filter Class:</span>
+                    <select id="coaCategoryFilter" class="form-select form-select-sm" onchange="filterCoaTree()">
+                        <option value="ALL">All Categories (सबै वर्गहरू)</option>
+                        <option value="ASSET">Assets (सम्पत्ति)</option>
+                        <option value="LIABILITY">Liabilities (दायित्व)</option>
+                        <option value="EQUITY">Equity (पुँजी)</option>
+                        <option value="REVENUE">Revenue (आम्दानी)</option>
+                        <option value="DIRECT_EXPENSE">Direct Costs / COGS (प्रत्यक्ष खर्च)</option>
+                        <option value="INDIRECT_EXPENSE">Indirect Operating Expenses (सञ्चालन खर्च)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-12 col-md-3 text-md-end text-muted fs-xs font-mono">
+                <span id="matchCounterText">Displaying full Chart of Accounts</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Visual Interactive Account Hierarchy Tree -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+        <div class="card-header bg-slate-900 text-white px-4 py-3 d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+                <i class="fas fa-folder-tree text-warning"></i>
+                <span class="fw-bold fs-sm text-uppercase tracking-wider">Account Group Ledger Hierarchy</span>
+            </div>
+            <span class="badge bg-secondary bg-opacity-25 text-white fs-2xs font-mono">Nepal Standard COA</span>
+        </div>
+
+        <div class="p-3 p-md-4" id="coaTreeContainer">
+            {% for group in groups %}
+            <div class="coa-root-node mb-3" data-category="{{ group.category }}">
+                
+                <!-- Root Group Header -->
+                <div class="coa-group-header d-flex align-items-center justify-content-between p-2 px-3 rounded-3 bg-light border pointer"
+                     data-bs-toggle="collapse" data-bs-target="#groupCollapse_{{ group.id }}" aria-expanded="true">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fas fa-chevron-down fs-xs text-primary coa-chevron transition-transform"></i>
+                        <span class="badge bg-dark font-mono fs-2xs">{{ group.code }}</span>
+                        <span class="fw-extrabold text-dark fs-sm">{{ group.name }}</span>
+                        {% if group.name_np %}
+                            <span class="text-muted fs-xs font-nepali">({{ group.name_np }})</span>
+                        {% endif %}
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge {% if group.category == 'ASSET' %}bg-primary{% elif group.category == 'LIABILITY' %}bg-warning text-dark{% elif group.category == 'EQUITY' %}bg-info text-dark{% elif group.category == 'REVENUE' %}bg-success{% else %}bg-danger{% endif %} bg-opacity-10 text-{% if group.category == 'ASSET' %}primary{% elif group.category == 'LIABILITY' %}warning-emphasis{% elif group.category == 'EQUITY' %}info{% elif group.category == 'REVENUE' %}success{% else %}danger{% endif %} fs-2xs">
+                            {{ group.get_category_display }}
+                        </span>
+                        <span class="badge bg-light text-muted border font-mono fs-2xs">Nature: {{ group.nature }}</span>
+                    </div>
+                </div>
+
+                <!-- Collapsible Root Group Body -->
+                <div class="collapse show mt-2 ps-3 ps-md-4 border-start border-2 border-primary-subtle coa-group-body" id="groupCollapse_{{ group.id }}">
+                    
+                    <!-- Direct Accounts Under This Root Group -->
+                    {% if group.accounts.all %}
+                    <div class="table-responsive rounded-3 border mb-2 bg-white">
+                        <table class="table table-hover table-sm align-middle mb-0 coa-accounts-table">
+                            <thead class="bg-light text-muted fs-2xs text-uppercase">
+                                <tr>
+                                    <th class="ps-3 py-2" style="width: 150px;">GL Code</th>
+                                    <th>Account Name / Ledger Description</th>
+                                    <th>System Mapping Tag</th>
+                                    <th>Scope</th>
+                                    <th>Nature</th>
+                                    <th class="text-end pe-3">Current Balance (NPR)</th>
+                                    <th class="text-center" style="width: 90px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for acc in group.accounts.all %}
+                                <tr class="coa-account-row" data-account-code="{{ acc.code|lower }}" data-account-name="{{ acc.name|lower }} {{ acc.name_np|default:''|lower }}" data-category="{{ group.category }}">
+                                    <td class="ps-3 font-mono fw-bold text-primary fs-xs">
+                                        <span>{{ acc.code }}</span>
+                                        {% if acc.is_system_reserved or acc.journal_lines.exists %}
+                                            <i class="fas fa-lock text-muted ms-1 fs-2xs" data-bs-toggle="tooltip" data-bs-placement="top" title="Transacted Account - Accounting Nature Locked"></i>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="fw-semibold text-dark fs-sm">{{ acc.name }}</div>
+                                        {% if acc.name_np %}
+                                            <div class="text-muted fs-2xs font-nepali">{{ acc.name_np }}</div>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if acc.system_tag == 'CASH' %}
+                                            <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs">
+                                                <i class="fas fa-money-bill-wave me-1"></i>Cash Float
+                                            </span>
+                                        {% elif acc.system_tag == 'BANK' %}
+                                            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fs-2xs">
+                                                <i class="fas fa-building-columns me-1"></i>Bank Account
+                                            </span>
+                                        {% elif acc.system_tag == 'FONEPAY' %}
+                                            <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-2xs">
+                                                <i class="fas fa-qrcode me-1"></i>FonePay QR
+                                            </span>
+                                        {% elif acc.system_tag == 'ESEWA' %}
+                                            <span class="badge text-white fs-2xs" style="background-color: #48a134; border: 1px solid #3c882b;">
+                                                <i class="fas fa-wallet me-1"></i>eSewa Wallet
+                                            </span>
+                                        {% elif acc.system_tag == 'KHALTI' %}
+                                            <span class="badge text-white fs-2xs" style="background-color: #5c2d91; border: 1px solid #4a2475;">
+                                                <i class="fas fa-mobile-screen-button me-1"></i>Khalti Wallet
+                                            </span>
+                                        {% elif acc.system_tag == 'CARD_CLEARING' %}
+                                            <span class="badge text-white fs-2xs" style="background-color: #3b82f6; border: 1px solid #2563eb;">
+                                                <i class="fas fa-credit-card me-1"></i>Card POS Clearing
+                                            </span>
+                                        {% elif acc.system_tag == 'ACCUMULATED_DEPRECIATION' %}
+                                            <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25 fs-2xs">
+                                                <i class="fas fa-minus-circle me-1"></i>Contra-Asset
+                                            </span>
+                                        {% elif acc.system_tag == 'OWNER_DRAWINGS' %}
+                                            <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 fs-2xs">
+                                                <i class="fas fa-hand-holding-dollar me-1"></i>Contra-Equity
+                                            </span>
+                                        {% elif acc.system_tag == 'ACCOUNTS_RECEIVABLE' %}
+                                            <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 fs-2xs">
+                                                <i class="fas fa-users me-1"></i>Trade Debtors
+                                            </span>
+                                        {% elif acc.system_tag == 'ACCOUNTS_PAYABLE' %}
+                                            <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 fs-2xs">
+                                                <i class="fas fa-building-user me-1"></i>Trade Creditors
+                                            </span>
+                                        {% elif acc.system_tag == 'INVENTORY_ASSET' %}
+                                            <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs">
+                                                <i class="fas fa-boxes-stacked me-1"></i>Inventory Asset
+                                            </span>
+                                        {% elif acc.system_tag == 'DEFECTIVE_INVENTORY_ASSET' %}
+                                            <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-2xs">
+                                                <i class="fas fa-ban me-1"></i>Defective / RMA
+                                            </span>
+                                        {% elif acc.system_tag != 'NONE' %}
+                                            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fs-2xs">
+                                                <i class="fas fa-tag me-1"></i>{{ acc.get_system_tag_display }}
+                                            </span>
+                                        {% else %}
+                                            <span class="text-muted fs-2xs">General</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if acc.branch %}
+                                            <span class="badge bg-light text-dark border fs-2xs">{{ acc.branch.code }}</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs">HQ / Consolidated</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge {% if acc.is_debit_nature %}bg-info bg-opacity-10 text-info{% else %}bg-warning bg-opacity-10 text-warning-emphasis{% endif %} fs-2xs font-mono">
+                                            {% if acc.is_debit_nature %}Dr (डेबिट){% else %}Cr (क्रेडिट){% endif %}
+                                        </span>
+                                    </td>
+                                    <td class="text-end pe-3 font-mono fw-bold fs-sm {% if acc.current_balance < 0 %}text-danger{% elif acc.current_balance > 0 %}text-success{% else %}text-dark{% endif %}">
+                                        Rs. {{ acc.current_balance|floatformat:2|intcomma }}
+                                    </td>
+                                    <td class="text-center">
+                                        <a href="{% url 'accounting:general_ledger_account' acc.id %}" class="btn btn-outline-primary btn-sm py-0 px-2 rounded-pill fs-2xs" title="View Detailed Account Statement">
+                                            Ledger
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+
+                    <!-- Nested Sub-Groups (Level 2) -->
+                    {% for subgroup in group.sub_groups.all %}
+                    <div class="coa-subgroup-node mt-2 mb-2" data-category="{{ group.category }}">
+                        <div class="d-flex align-items-center justify-content-between p-2 px-3 rounded-2 bg-slate-50 border pointer"
+                             data-bs-toggle="collapse" data-bs-target="#subgroupCollapse_{{ subgroup.id }}" aria-expanded="true">
+                            <div class="d-flex align-items-center gap-2">
+                                <i class="fas fa-caret-down fs-sm text-secondary coa-chevron transition-transform"></i>
+                                <span class="badge bg-secondary text-white font-mono fs-2xs">{{ subgroup.code }}</span>
+                                <span class="fw-bold text-dark fs-xs">{{ subgroup.name }}</span>
+                                {% if subgroup.name_np %}
+                                    <span class="text-muted fs-2xs font-nepali">({{ subgroup.name_np }})</span>
+                                {% endif %}
+                            </div>
+                            <span class="badge bg-light text-muted border font-mono fs-2xs">Sub-Group</span>
+                        </div>
+
+                        <div class="collapse show mt-1 ps-3 border-start border-2 border-secondary-subtle" id="subgroupCollapse_{{ subgroup.id }}">
+                            {% if subgroup.accounts.all %}
+                            <div class="table-responsive rounded-3 border mb-2 bg-white mt-1">
+                                <table class="table table-hover table-sm align-middle mb-0 coa-accounts-table">
+                                    <thead class="bg-light text-muted fs-2xs text-uppercase">
+                                        <tr>
+                                            <th class="ps-3 py-2" style="width: 150px;">GL Code</th>
+                                            <th>Account Name / Ledger Description</th>
+                                            <th>System Mapping Tag</th>
+                                            <th>Scope</th>
+                                            <th>Nature</th>
+                                            <th class="text-end pe-3">Current Balance (NPR)</th>
+                                            <th class="text-center" style="width: 90px;">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for acc in subgroup.accounts.all %}
+                                        <tr class="coa-account-row" data-account-code="{{ acc.code|lower }}" data-account-name="{{ acc.name|lower }} {{ acc.name_np|default:''|lower }}" data-category="{{ group.category }}">
+                                            <td class="ps-3 font-mono fw-bold text-primary fs-xs">
+                                                <span>{{ acc.code }}</span>
+                                                {% if acc.is_system_reserved or acc.journal_lines.exists %}
+                                                    <i class="fas fa-lock text-muted ms-1 fs-2xs" data-bs-toggle="tooltip" data-bs-placement="top" title="Transacted Account - Accounting Nature Locked"></i>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <div class="fw-semibold text-dark fs-sm">{{ acc.name }}</div>
+                                                {% if acc.name_np %}
+                                                    <div class="text-muted fs-2xs font-nepali">{{ acc.name_np }}</div>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if acc.system_tag == 'CASH' %}
+                                                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-money-bill-wave me-1"></i>Cash Float
+                                                    </span>
+                                                {% elif acc.system_tag == 'BANK' %}
+                                                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-building-columns me-1"></i>Bank Account
+                                                    </span>
+                                                {% elif acc.system_tag == 'FONEPAY' %}
+                                                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-qrcode me-1"></i>FonePay QR
+                                                    </span>
+                                                {% elif acc.system_tag == 'ESEWA' %}
+                                                    <span class="badge text-white fs-2xs" style="background-color: #48a134; border: 1px solid #3c882b;">
+                                                        <i class="fas fa-wallet me-1"></i>eSewa Wallet
+                                                    </span>
+                                                {% elif acc.system_tag == 'KHALTI' %}
+                                                    <span class="badge text-white fs-2xs" style="background-color: #5c2d91; border: 1px solid #4a2475;">
+                                                        <i class="fas fa-mobile-screen-button me-1"></i>Khalti Wallet
+                                                    </span>
+                                                {% elif acc.system_tag == 'CARD_CLEARING' %}
+                                                    <span class="badge text-white fs-2xs" style="background-color: #3b82f6; border: 1px solid #2563eb;">
+                                                        <i class="fas fa-credit-card me-1"></i>Card POS Clearing
+                                                    </span>
+                                                {% elif acc.system_tag == 'ACCUMULATED_DEPRECIATION' %}
+                                                    <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-minus-circle me-1"></i>Contra-Asset
+                                                    </span>
+                                                {% elif acc.system_tag == 'OWNER_DRAWINGS' %}
+                                                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-hand-holding-dollar me-1"></i>Contra-Equity
+                                                    </span>
+                                                {% elif acc.system_tag == 'ACCOUNTS_RECEIVABLE' %}
+                                                    <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-users me-1"></i>Trade Debtors
+                                                    </span>
+                                                {% elif acc.system_tag == 'ACCOUNTS_PAYABLE' %}
+                                                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-building-user me-1"></i>Trade Creditors
+                                                    </span>
+                                                {% elif acc.system_tag == 'INVENTORY_ASSET' %}
+                                                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-boxes-stacked me-1"></i>Inventory Asset
+                                                    </span>
+                                                {% elif acc.system_tag == 'DEFECTIVE_INVENTORY_ASSET' %}
+                                                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-ban me-1"></i>Defective / RMA
+                                                    </span>
+                                                {% elif acc.system_tag != 'NONE' %}
+                                                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fs-2xs">
+                                                        <i class="fas fa-tag me-1"></i>{{ acc.get_system_tag_display }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="text-muted fs-2xs">General</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if acc.branch %}
+                                                    <span class="badge bg-light text-dark border fs-2xs">{{ acc.branch.code }}</span>
+                                                {% else %}
+                                                    <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs">HQ / Consolidated</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                <span class="badge {% if acc.is_debit_nature %}bg-info bg-opacity-10 text-info{% else %}bg-warning bg-opacity-10 text-warning-emphasis{% endif %} fs-2xs font-mono">
+                                                    {% if acc.is_debit_nature %}Dr (डेबिट){% else %}Cr (क्रेडिट){% endif %}
+                                                </span>
+                                            </td>
+                                            <td class="text-end pe-3 font-mono fw-bold fs-sm {% if acc.current_balance < 0 %}text-danger{% elif acc.current_balance > 0 %}text-success{% else %}text-dark{% endif %}">
+                                                Rs. {{ acc.current_balance|floatformat:2|intcomma }}
+                                            </td>
+                                            <td class="text-center">
+                                                <a href="{% url 'accounting:general_ledger_account' acc.id %}" class="btn btn-outline-primary btn-sm py-0 px-2 rounded-pill fs-2xs" title="View Detailed Account Statement">
+                                                    Ledger
+                                                </a>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+
+                </div>
+            </div>
+            {% empty %}
+            <div class="text-center py-5 text-muted">
+                <i class="fas fa-sitemap fs-1 opacity-25 d-block mb-3"></i>
+                <h6 class="fw-bold mb-1">No Account Groups Initialized</h6>
+                <p class="fs-xs">Default double-entry Chart of Accounts groups have not been loaded yet.</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+</div>
+
+<!-- Modal: Create New General Ledger Account -->
+<div class="modal fade" id="newAccountModal" tabindex="-1" aria-labelledby="newAccountModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-slate-900 text-white px-4 py-3">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fas fa-plus-circle text-primary"></i>
+                    <h5 class="modal-title fs-base fw-bold mb-0" id="newAccountModalLabel">Create General Ledger Account (नयाँ खाता खोल्नुहोस्)</h5>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{% url 'accounting:coa' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Account Code * (खाता कोड)</label>
+                            {{ form.code }}
+                            <div class="form-text fs-2xs">Unique alphanumeric code (e.g. 1010-02, 5020-NR)</div>
+                        </div>
+                        <div class="col-12 col-md-8">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Account Name (English) *</label>
+                            {{ form.name }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Account Name (Nepali / देवनागरी)</label>
+                            {{ form.name_np }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Account Group * (मुख्य समूह)</label>
+                            {{ form.group }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Branch Scope (शाखा)</label>
+                            {{ form.branch }}
+                            <div class="form-text fs-2xs">Leave blank for consolidated organization-wide ledger.</div>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">System Tag (प्रणाली ट्याग)</label>
+                            {% if form.system_tag %}
+                                {{ form.system_tag }}
+                            {% else %}
+                                <select name="system_tag" id="id_system_tag" class="form-select">
+                                    <option value="NONE" selected>Standard Custom Ledger (NONE) - सिफारिस गरिएको</option>
+                                </select>
+                            {% endif %}
+                            <div class="form-text fs-2xs text-muted">
+                                <i class="fas fa-shield-halved text-success me-1"></i>
+                                Locked to 'NONE' for custom ledgers to prevent overriding automated system control accounts.
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Opening Balance (सुरुवाती मौज्दात)</label>
+                            {{ form.opening_balance }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Balance Nature</label>
+                            {{ form.opening_balance_nature }}
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Ledger Description / Internal Memo</label>
+                            {{ form.description }}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light px-4 py-3 border-top">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill shadow-xs fw-bold">
+                        <i class="fas fa-check-circle me-1"></i> Save &amp; Initialize Account
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+    .coa-group-header:hover {
+        background-color: #f1f5f9 !important;
+    }
+    .coa-chevron {
+        transition: transform 0.2s ease;
+    }
+    .collapsed .coa-chevron {
+        transform: rotate(-90deg);
+    }
+</style>
+
+<script>
+    function filterCoaTree() {
+        const query = document.getElementById('coaSearchInput').value.trim().toLowerCase();
+        const selectedCat = document.getElementById('coaCategoryFilter').value;
+        const rows = document.querySelectorAll('.coa-account-row');
+        const rootNodes = document.querySelectorAll('.coa-root-node');
+        let matchedCount = 0;
+
+        rows.forEach(row => {
+            const code = row.dataset.accountCode || '';
+            const name = row.dataset.accountName || '';
+            const cat = row.dataset.category || '';
+
+            const matchesQuery = query === '' || code.includes(query) || name.includes(query);
+            const matchesCat = selectedCat === 'ALL' || cat === selectedCat;
+
+            if (matchesQuery && matchesCat) {
+                row.style.display = '';
+                matchedCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        // Hide empty group wrappers if none of their rows are visible
+        rootNodes.forEach(node => {
+            const cat = node.dataset.category || '';
+            const matchesCat = selectedCat === 'ALL' || cat === selectedCat;
+            const visibleRows = node.querySelectorAll('.coa-account-row:not([style*="display: none"])');
+            
+            if (matchesCat && (visibleRows.length > 0 || query === '')) {
+                node.style.display = '';
+            } else {
+                node.style.display = 'none';
+            }
+        });
+
+        const counterText = document.getElementById('matchCounterText');
+        if (query !== '' || selectedCat !== 'ALL') {
+            counterText.textContent = `Found ${matchedCount} matching account ledger(s)`;
+            counterText.classList.add('text-primary', 'fw-bold');
+        } else {
+            counterText.textContent = 'Displaying full Chart of Accounts';
+            counterText.classList.remove('text-primary', 'fw-bold');
+        }
+    }
+
+    function clearCoaSearch() {
+        document.getElementById('coaSearchInput').value = '';
+        document.getElementById('coaCategoryFilter').value = 'ALL';
+        filterCoaTree();
+    }
+
+    function expandAllGroups() {
+        document.querySelectorAll('.coa-group-body, .collapse').forEach(el => {
+            new bootstrap.Collapse(el, { show: true });
+        });
+    }
+
+    function collapseAllGroups() {
+        document.querySelectorAll('.coa-group-body').forEach(el => {
+            new bootstrap.Collapse(el, { toggle: false });
+            el.classList.remove('show');
+        });
+    }
+</script>
+{% endblock %}

@@ -1,13 +1,26 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
+/* ==========================================================================
+   1. DESIGN SYSTEM TOKENS & APPLICATION RESET
+   ========================================================================== */
 :root {
-    /* Brand Colors */
+    /* Fonts */
+    --erp-font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --erp-font-mono: 'JetBrains Mono', monospace;
+
+    /* Brand Accents */
     --erp-primary: #2563eb;
     --erp-primary-hover: #1d4ed8;
     --erp-primary-light: #eff6ff;
     --erp-primary-border: #bfdbfe;
     
-    /* Slate Neutrals */
+    /* Executive Header Surfaces */
+    --erp-top-header-bg: #060b18;
+    --erp-main-header-bg: #0b132b;
+    --erp-header-border: rgba(255, 255, 255, 0.08);
+
+    /* Canvas & Palette */
+    --erp-canvas-bg: #f8fafc;
     --erp-dark: #0f172a;
     --erp-slate-900: #0f172a;
     --erp-slate-800: #1e293b;
@@ -20,7 +33,7 @@
     --erp-slate-100: #f1f5f9;
     --erp-slate-50: #f8fafc;
     
-    /* Semantic Colors */
+    /* Semantics */
     --erp-success: #10b981;
     --erp-success-light: #ecfdf5;
     --erp-success-border: #a7f3d0;
@@ -37,87 +50,523 @@
     --erp-info-light: #f0f9ff;
     --erp-info-border: #bae6fd;
 
-    /* Geometry & Shadows */
+    /* Header & Layout Measurements */
+    --erp-top-header-height: 36px;
+    --erp-main-header-height: 58px;
+    --erp-header-total-height: 94px; /* 36px + 58px */
+    --erp-sidebar-width: 275px;
+    --erp-sidebar-collapsed-width: 72px;
+
+    /* Geometry & Elevation */
     --erp-radius-sm: 8px;
     --erp-radius-md: 12px;
     --erp-radius-lg: 16px;
     --erp-radius-pill: 9999px;
     
     --erp-shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
-    --erp-shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
-    --erp-shadow-md: 0 4px 10px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
-    --erp-shadow-lg: 0 12px 24px -4px rgba(15, 23, 42, 0.1), 0 4px 6px -2px rgba(15, 23, 42, 0.05);
+    --erp-shadow-sm: 0 2px 4px 0 rgba(15, 23, 42, 0.05);
+    --erp-shadow-md: 0 8px 20px -2px rgba(15, 23, 42, 0.07);
+    --erp-shadow-lg: 0 20px 30px -4px rgba(15, 23, 42, 0.1);
 }
 
-/* Base Body Styles */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
 body {
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    background-color: var(--erp-slate-50);
+    font-family: var(--erp-font-sans);
+    background-color: var(--erp-canvas-bg);
     color: var(--erp-slate-800);
     letter-spacing: -0.012em;
     -webkit-font-smoothing: antialiased;
-    scrollbar-width: thin;
-    scrollbar-color: var(--erp-slate-400) transparent;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
 }
 
-/* Typography Utilities */
+/* Thin Sleek Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--erp-slate-300); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--erp-slate-400); }
+
+/* Typography Helpers */
 .fs-2xs { font-size: 0.6875rem !important; }
-.fs-xs { font-size: 0.75rem !important; }
-.fs-sm { font-size: 0.845rem !important; }
+.fs-xs { font-size: 0.78125rem !important; }
+.fs-sm { font-size: 0.875rem !important; }
 .fs-base { font-size: 0.9375rem !important; }
-.font-mono { font-family: 'JetBrains Mono', monospace !important; }
+.font-mono { font-family: var(--erp-font-mono) !important; }
 .font-tabular { font-variant-numeric: tabular-nums; }
 .fw-semibold { font-weight: 600 !important; }
 .fw-bold { font-weight: 700 !important; }
 .fw-extrabold { font-weight: 800 !important; }
 .tracking-tight { letter-spacing: -0.025em; }
 
-/* Cross-Browser Sleek Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--erp-slate-400); border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: var(--erp-slate-500); }
+/* ==========================================================================
+   2. TOP HEADER BAR (SLIM TOP-BAR: 36px)
+   ========================================================================== */
+.erp-top-header {
+    height: var(--erp-top-header-height);
+    background-color: var(--erp-top-header-bg);
+    border-bottom: 1px solid var(--erp-header-border);
+    display: flex;
+    align-items: center;
+    z-index: 1032;
+    position: sticky;
+    top: 0;
+    padding: 0 20px;
+}
+
+.top-header-branch-btn {
+    background: transparent;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #ffffff;
+    font-size: 0.78125rem;
+    font-weight: 700;
+    white-space: nowrap;
+    padding: 0;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.top-header-branch-btn:hover {
+    color: #93c5fd;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--erp-success);
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35);
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.top-header-date {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78125rem;
+    color: #ffffff;
+    white-space: nowrap;
+}
+
+.top-header-date .date-bs-en {
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.top-header-date .date-bs-np {
+    color: #fbbf24;
+    font-weight: 600;
+}
 
 /* ==========================================================================
-   SIDEBAR NAVIGATION SYSTEM
+   3. MAIN HEADER BAR (58px)
    ========================================================================== */
-.app-sidebar-wrapper .nav-pills,
-.offcanvas-body .nav-pills {
-    display: flex !important;
-    flex-direction: column !important;
-    flex-wrap: nowrap !important;
-    width: 100% !important;
+.erp-main-header {
+    height: var(--erp-main-header-height);
+    background-color: var(--erp-main-header-bg);
+    border-bottom: 1px solid var(--erp-header-border);
+    position: sticky;
+    top: var(--erp-top-header-height);
+    z-index: 1030;
+    display: flex;
+    align-items: center;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 0 20px;
 }
 
-.app-sidebar-wrapper .nav-item,
-.offcanvas-body .nav-item {
-    width: 100% !important;
-    flex-shrink: 0 !important;
-}
-
-.app-sidebar-wrapper .nav-link,
-.offcanvas-body .nav-link {
-    width: 100% !important;
-    display: flex !important;
-    align-items: center !important;
+.header-brand-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     text-decoration: none !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    box-sizing: border-box !important;
-    padding-block: 0.55rem !important;
-    padding-inline: 0.85rem !important;
+    min-width: 0;
 }
 
-.app-sidebar-wrapper .nav-link:hover:not(.active),
-.offcanvas-body .nav-link:hover:not(.active) {
-    background-color: var(--erp-slate-100) !important;
+.header-brand-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    color: #ffffff;
+    font-size: 1rem;
+    flex-shrink: 0;
+    box-shadow: 0 3px 8px rgba(37, 99, 235, 0.35);
+}
+
+.header-brand-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.2;
+    min-width: 0;
+}
+
+.brand-title {
+    font-weight: 800;
+    font-size: 0.95rem;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: -0.02em;
+}
+
+.brand-subtitle {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #94a3b8;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Hero POS Billing Fast CTA */
+.btn-pos-hero {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #0f172a !important;
+    border: none;
+    font-size: 0.78125rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    padding: 7px 16px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    line-height: 1;
+    text-decoration: none !important;
+}
+
+.btn-pos-hero:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(245, 158, 11, 0.45);
+}
+
+/* Profile Button: STRICT ZERO-ZIGZAG ROW ALIGNMENT */
+.user-profile-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    padding: 3px 14px 3px 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none !important;
+}
+
+.user-profile-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.user-avatar-initials {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    color: #ffffff;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+}
+
+.user-meta-stack {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: left;
+    line-height: 1.25;
+    min-width: 0;
+}
+
+.user-meta-name {
+    font-weight: 700;
+    font-size: 0.8125rem;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: -0.01em;
+}
+
+.user-meta-role {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #94a3b8;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* ==========================================================================
+   4. SIDEBAR (EXPANDED 275px & COMPACT 72px VIA CTRL+B)
+   ========================================================================== */
+.app-layout {
+    display: flex;
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: calc(100vh - var(--erp-header-total-height));
+    position: relative;
+}
+
+.app-sidebar-wrapper {
+    width: var(--erp-sidebar-width);
+    min-width: var(--erp-sidebar-width);
+    max-width: var(--erp-sidebar-width);
+    background: #ffffff;
+    border-right: 1px solid var(--erp-slate-200);
+    height: calc(100vh - var(--erp-header-total-height));
+    position: sticky;
+    top: var(--erp-header-total-height);
+    display: flex;
+    flex-direction: column;
+    transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                min-width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                max-width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1020;
+    box-shadow: var(--erp-shadow-xs);
+}
+
+/* Collapsed Sidebar Mode (Desktop [Ctrl+B]) */
+.app-layout.sidebar-collapsed .app-sidebar-wrapper {
+    width: var(--erp-sidebar-collapsed-width);
+    min-width: var(--erp-sidebar-collapsed-width);
+    max-width: var(--erp-sidebar-collapsed-width);
+}
+
+.app-layout.sidebar-collapsed .sidebar-label-wrap,
+.app-layout.sidebar-collapsed .sidebar-section-heading,
+.app-layout.sidebar-collapsed .sidebar-disclaimer-wrap,
+.app-layout.sidebar-collapsed .badge-pill-tag,
+.app-layout.sidebar-collapsed .accordion-arrow {
+    display: none !important;
+}
+
+.app-layout.sidebar-collapsed .sidebar-nav-item {
+    justify-content: center !important;
+    padding: 10px 0 !important;
+}
+
+.app-layout.sidebar-collapsed .sidebar-nav-item i {
+    margin: 0 !important;
+    font-size: 1.15rem !important;
+}
+
+.sidebar-scroll-viewport {
+    flex: 1 1 0%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sidebar-section-heading {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #94a3b8;
+    padding: 14px 12px 6px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+}
+
+.sidebar-nav-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    color: #334155;
+    font-weight: 600;
+    font-size: 0.84rem;
+    border-radius: 9px;
+    text-decoration: none !important;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    line-height: 1.35;
+}
+
+.sidebar-nav-item i {
+    width: 20px;
+    text-align: center;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+}
+
+.sidebar-nav-item:hover {
+    background-color: #f1f5f9;
+    color: var(--erp-primary);
+}
+
+.sidebar-nav-item:hover i {
+    transform: scale(1.1);
+}
+
+.sidebar-nav-item.active {
+    background-color: #eff6ff !important;
+    color: var(--erp-primary) !important;
+    font-weight: 700 !important;
+    border-left: 3px solid var(--erp-primary);
+}
+
+.sidebar-nav-item.active i {
     color: var(--erp-primary) !important;
 }
 
+.sidebar-nav-item.hero-pos-link {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+    font-weight: 700;
+}
+
+.sidebar-nav-item.hero-pos-link:hover {
+    background: #fde68a;
+    color: #78350f;
+}
+
+/* Sub-group Accordion Container for Reports */
+.sidebar-subgroup-toggle {
+    cursor: pointer;
+}
+
+.sidebar-subgroup-content {
+    padding-left: 14px;
+    margin-left: 18px;
+    border-left: 1.5px dashed #cbd5e1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 2px;
+    margin-bottom: 4px;
+}
+
+.sidebar-subgroup-link {
+    font-size: 0.79rem;
+    padding: 5px 10px;
+    color: #475569;
+    font-weight: 500;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none !important;
+    transition: all 0.12s ease;
+}
+
+.sidebar-subgroup-link:hover {
+    background-color: #f1f5f9;
+    color: var(--erp-primary);
+}
+
+.sidebar-subgroup-link.active {
+    color: var(--erp-primary) !important;
+    font-weight: 700 !important;
+    background: #eff6ff;
+}
+
+.sidebar-disclaimer-wrap {
+    padding: 12px;
+    border-top: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    flex-shrink: 0;
+}
+
 /* ==========================================================================
-   BUTTON ARCHITECTURE
-   ========================================================================== */
+   5. MAIN CONTENT VIEWPORT & TWO-TIER FOOTERS
+   ========================================================================= */
+.app-content-wrapper {
+    flex: 1 1 0%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--erp-canvas-bg);
+    position: relative;
+}
+
+.app-main-body {
+    flex: 1 0 auto;
+    width: 100%;
+    padding-bottom: 20px;
+}
+
+/* Tier 1: Main Action Footer */
+.erp-main-footer {
+    background-color: #ffffff;
+    border-top: 1px solid var(--erp-slate-200);
+    padding: 10px 24px;
+    font-size: 0.8125rem;
+    color: var(--erp-slate-500);
+    width: 100%;
+    position: relative;
+    z-index: 10;
+}
+
+.footer-action-link {
+    color: var(--erp-slate-500);
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.15s ease;
+}
+
+.footer-action-link:hover {
+    color: var(--erp-primary);
+}
+
+/* Tier 2: Small Bottom Secondary Sub-Footer */
+.erp-sub-footer {
+    background-color: #060b18;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 8px 24px;
+    font-size: 0.75rem;
+    color: #94a3b8;
+    width: 100%;
+    position: relative;
+    z-index: 10;
+}
+
+.sub-footer-pill {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-family: var(--erp-font-mono);
+    font-size: 0.6875rem;
+    color: #cbd5e1;
+    white-space: nowrap;
+}
+
+/* ==========================================================================
+   6. GLOBAL BUTTONS, CARDS, BADGES & TABLES
+   ========================================================================= */
 .btn {
     display: inline-flex;
     align-items: center;
@@ -149,7 +598,6 @@ body {
     font-size: 0.95rem;
 }
 
-/* Ensure Bootstrap display utilities override .btn display rules */
 .btn.d-none { display: none !important; }
 .btn.d-inline-flex { display: inline-flex !important; }
 
@@ -161,14 +609,15 @@ body {
 @media (max-width: 991.98px) {
     .btn.d-lg-inline-flex { display: none !important; }
     .btn.d-lg-none { display: inline-flex !important; }
+    .app-sidebar-wrapper { display: none !important; }
 }
 
-/* Button Color Variants */
 .btn-primary {
     background-color: var(--erp-primary) !important;
     border: 1px solid var(--erp-primary) !important;
     color: #ffffff !important;
 }
+
 .btn-primary:hover {
     background-color: var(--erp-primary-hover) !important;
     border-color: var(--erp-primary-hover) !important;
@@ -181,6 +630,7 @@ body {
     border: 1px solid var(--erp-slate-200) !important;
     color: var(--erp-slate-700) !important;
 }
+
 .btn-outline-dark:hover {
     background-color: var(--erp-slate-100) !important;
     border-color: var(--erp-slate-400) !important;
@@ -193,6 +643,7 @@ body {
     border: 1px solid var(--erp-slate-200) !important;
     color: var(--erp-slate-600) !important;
 }
+
 .btn-outline-secondary:hover {
     background-color: var(--erp-slate-50) !important;
     border-color: var(--erp-slate-400) !important;
@@ -200,42 +651,14 @@ body {
     transform: translateY(-1.5px);
 }
 
-/* ==========================================================================
-   ENTERPRISE SOFT BADGES
-   ========================================================================== */
-.badge-soft-primary {
-    background-color: var(--erp-primary-light);
-    color: var(--erp-primary);
-    border: 1px solid var(--erp-primary-border);
-}
+/* Badges */
+.badge-soft-primary { background-color: var(--erp-primary-light); color: var(--erp-primary); border: 1px solid var(--erp-primary-border); }
+.badge-soft-success { background-color: var(--erp-success-light); color: #065f46; border: 1px solid var(--erp-success-border); }
+.badge-soft-warning { background-color: var(--erp-warning-light); color: #92400e; border: 1px solid var(--erp-warning-border); }
+.badge-soft-danger  { background-color: var(--erp-danger-light); color: #991b1b; border: 1px solid var(--erp-danger-border); }
+.badge-soft-secondary { background-color: var(--erp-slate-100); color: var(--erp-slate-600); border: 1px solid var(--erp-slate-200); }
 
-.badge-soft-success {
-    background-color: var(--erp-success-light);
-    color: #065f46;
-    border: 1px solid var(--erp-success-border);
-}
-
-.badge-soft-warning {
-    background-color: var(--erp-warning-light);
-    color: #92400e;
-    border: 1px solid var(--erp-warning-border);
-}
-
-.badge-soft-danger {
-    background-color: var(--erp-danger-light);
-    color: #991b1b;
-    border: 1px solid var(--erp-danger-border);
-}
-
-.badge-soft-secondary {
-    background-color: var(--erp-slate-100);
-    color: var(--erp-slate-600);
-    border: 1px solid var(--erp-slate-200);
-}
-
-/* ==========================================================================
-   CARDS & CONTAINERS
-   ========================================================================== */
+/* Cards */
 .card {
     background-color: #ffffff;
     border: 1px solid var(--erp-slate-200) !important;
@@ -247,13 +670,14 @@ body {
     border-radius: var(--erp-radius-md);
     transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
 .card-kpi:hover {
     box-shadow: var(--erp-shadow-lg) !important;
     border-color: var(--erp-primary-border) !important;
     transform: translateY(-3px);
 }
 
-/* Form Controls with Flexible Sizing */
+/* Form Controls */
 .form-control, .form-select {
     min-height: 40px;
     border: 1px solid var(--erp-slate-200);
@@ -265,6 +689,7 @@ body {
     color: var(--erp-slate-800);
     transition: all 0.15s ease;
 }
+
 .form-control:focus, .form-select:focus {
     border-color: var(--erp-primary);
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
@@ -285,9 +710,7 @@ body {
     font-size: 1rem;
 }
 
-/* ==========================================================================
-   TABLE ARCHITECTURE
-   ========================================================================== */
+/* Table Architecture */
 .table {
     margin-bottom: 0;
     width: 100%;
@@ -328,12 +751,11 @@ body {
     vertical-align: middle;
 }
 
-/* Interactive Utility Helpers */
+/* Interactivity & Modals */
 .pointer { cursor: pointer; }
 .hover-bg:hover { background-color: var(--erp-slate-100) !important; }
 .hover-primary:hover { color: var(--erp-primary) !important; }
 
-/* Modal Cleanups */
 .modal-content {
     border-radius: var(--erp-radius-lg);
     border: none;

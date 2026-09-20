@@ -1,0 +1,376 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Stock Adjustment &amp; Shrinkage Write-Off Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.adj-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.adj-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-adjustments th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-adjustments td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+.adj-delta-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 800;
+    font-size: 0.8rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header & Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-sliders text-primary me-2"></i> Stock Adjustment &amp; Shrinkage Write-Off Audit
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Forensic investigation report tracking inventory shrinkage, breakages, expired stock, theft, and physical audit count reconciliations
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="{% url 'reports:export_csv' 'adjustments' %}?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Audit Sheet
+            </button>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Inventory Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Shrinkage & Audit Metric Cards -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Total Shrinkage & Damage Loss Value -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="adj-kpi-card border-start border-danger border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-danger text-uppercase fw-bold fs-2xs">Total Loss &amp; Breakage</span>
+                    <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle">
+                        <i class="fas fa-arrow-trend-down fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_loss_value|default:total_loss_value|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">
+                    {{ totals.total_deducted_qty|default:total_deducted_qty|floatformat:1 }} Units written off as damage/theft
+                </small>
+            </div>
+        </div>
+
+        <!-- 2. Found / Recovered Inventory Value -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="adj-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">Found Stock / Audit Added</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-arrow-trend-up fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_added_value|default:total_added_value|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">
+                    +{{ totals.total_added_qty|default:total_added_qty|floatformat:1 }} Units found during physical audit
+                </small>
+            </div>
+        </div>
+
+        <!-- 3. Net Financial Impact -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="adj-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Net Financial Impact</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-scale-balanced fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold font-monospace mt-2 mb-0 {% if totals.net_financial_impact < 0 %}text-danger{% elif totals.net_financial_impact > 0 %}text-success{% else %}text-dark{% endif %}">
+                    Rs. {{ totals.net_financial_impact|default:net_financial_impact|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">
+                    Net Quantity Delta: <strong>{{ totals.net_adjustment_qty|default:net_adjustment_qty|stringformat:"+0.1f" }} Units</strong>
+                </small>
+            </div>
+        </div>
+
+        <!-- 4. Total Modification Audit Events -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="adj-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Audit Events Logged</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-fingerprint fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    {{ totals.total_events|default:total_events|default:0 }}
+                </h3>
+                <small class="text-muted fs-2xs">Manual modifications requiring reason</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center" id="adjustmentFilterForm">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Product, SKU, Barcode, User, Reason...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Store Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Adjustment Types</option>
+                    <option value="ADD" {% if filters.type == 'ADD' %}selected{% endif %}>
+                        (+) Found / Count Increase
+                    </option>
+                    <option value="SUB" {% if filters.type == 'SUB' %}selected{% endif %}>
+                        (-) Damage / Loss / Breakage
+                    </option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if filters.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date|default:'' }}" 
+                           class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date|default:'' }}" 
+                           class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.branch or filters.type or filters.category or start_date or end_date %}
+                <a href="{% url 'reports:stock_adjustments' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Adjustments Ledger Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Inventory Count Corrections &amp; Damage Write-Off Log
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">
+                {{ page_obj.paginator.count|default:records|length }} Adjustment Records
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-adjustments">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Timestamp (AD / BS)</th>
+                        <th>Outlet Branch</th>
+                        <th>Product / Item Model</th>
+                        <th>Category / Brand</th>
+                        <th>Adjustment Type</th>
+                        <th class="text-center">Quantity Delta</th>
+                        <th class="text-end">Unit Cost</th>
+                        <th class="text-end">Financial Impact</th>
+                        <th class="text-center">Before &rarr; After</th>
+                        <th>Reference Doc</th>
+                        <th>Auditor / User</th>
+                        <th class="pe-4">Reason / Remarks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in records %}
+                    <tr>
+                        <!-- Timestamp -->
+                        <td class="ps-4 font-monospace">
+                            <span class="text-dark fw-semibold">{{ item.created_at|date:"Y-m-d" }}</span>
+                            <small class="text-muted d-block fs-2xs">{{ item.created_at|date:"H:i:s" }}</small>
+                            {% if item.date_bs %}
+                                <small class="text-primary d-block fs-2xs font-monospace">{{ item.date_bs }} BS</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Branch Outlet -->
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace">{{ item.branch.code }}</span>
+                            <small class="text-muted d-block fs-2xs">{{ item.branch.name }}</small>
+                        </td>
+
+                        <!-- Product Description -->
+                        <td>
+                            <a href="{% url 'inventory:product_detail' item.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                {{ item.product.name }}
+                            </a>
+                            <div class="font-monospace text-muted fs-2xs mt-1">
+                                SKU: {{ item.product.sku }}
+                                {% if item.imei_or_serial_number %}
+                                    <span class="badge bg-light text-primary border font-monospace ms-1">
+                                        IMEI/SN: {{ item.imei_or_serial_number }}
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </td>
+
+                        <!-- Category & Brand -->
+                        <td>
+                            <span class="fw-semibold text-dark">{{ item.product.category.name|default:"General" }}</span>
+                            <small class="text-muted d-block">{{ item.product.brand.name|default:"-" }}</small>
+                        </td>
+
+                        <!-- Adjustment Classification Badge -->
+                        <td>
+                            {% if item.is_add %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-plus me-1"></i> Found / Correction
+                                </span>
+                            {% else %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-minus me-1"></i> Damage / Loss
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Quantity Delta -->
+                        <td class="text-center">
+                            {% if item.is_add %}
+                                <span class="adj-delta-badge bg-success bg-opacity-10 text-success border border-success border-opacity-25">
+                                    +{{ item.quantity_delta|floatformat:1 }} {{ item.unit_code }}
+                                </span>
+                            {% else %}
+                                <span class="adj-delta-badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25">
+                                    {{ item.quantity_delta|floatformat:1 }} {{ item.unit_code }}
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Cost Rate -->
+                        <td class="col-num text-dark">
+                            Rs. {{ item.cost_price|default:item.product.purchase_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Total Financial Impact -->
+                        <td class="col-num fw-bold {% if item.financial_impact < 0 %}text-danger{% elif item.financial_impact > 0 %}text-success{% else %}text-dark{% endif %}">
+                            Rs. {{ item.financial_impact|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Before -> After Stock Counts -->
+                        <td class="text-center font-monospace fs-xs">
+                            <span class="text-muted">{{ item.previous_quantity|floatformat:1 }}</span>
+                            <i class="fas fa-arrow-right text-muted fs-2xs mx-1"></i>
+                            <strong class="text-dark">{{ item.new_quantity|floatformat:1 }}</strong>
+                        </td>
+
+                        <!-- Reference Memo -->
+                        <td>
+                            <span class="font-monospace fs-2xs text-secondary">{{ item.reference_document|default:"-" }}</span>
+                        </td>
+
+                        <!-- Auditor / User -->
+                        <td>
+                            <strong class="text-dark fs-xs">{{ item.user_display|default:item.user.username|default:"System" }}</strong>
+                        </td>
+
+                        <!-- Mandatory Reason / Remarks -->
+                        <td class="pe-4">
+                            <span class="text-dark fs-xs fw-semibold">{{ item.remarks }}</span>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="12" class="text-center py-5 text-muted">
+                            <i class="fas fa-sliders fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Stock Adjustment Records Found</h6>
+                            <p class="text-muted fs-xs mb-0">No count modifications or write-offs match the selected criteria.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="5" class="ps-4 text-end text-uppercase text-white-50">Grand Net Totals:</td>
+                        <td class="text-center col-num {% if totals.net_adjustment_qty < 0 %}text-danger{% else %}text-success{% endif %} fs-6">
+                            {{ totals.net_adjustment_qty|default:net_adjustment_qty|stringformat:"+0.1f" }}
+                        </td>
+                        <td></td>
+                        <td class="text-end col-num {% if totals.net_financial_impact < 0 %}text-danger{% else %}text-warning{% endif %} fs-6">
+                            Rs. {{ totals.net_financial_impact|default:net_financial_impact|floatformat:2|intcomma }}
+                        </td>
+                        <td colspan="4" class="pe-4 text-white-50 fs-2xs">Cumulative Net Inventory Financial Impact</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

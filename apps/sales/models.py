@@ -1,42 +1,84 @@
+"""
+Sales & POS Billing Module Models: Estimations, Line Items, Split Payments,
+Itemized Sales Returns, and Pre-Owned Trade-In Exchanges.
+
+Key Capabilities:
+1. Historical Integrity (2080 B.S. & Onwards):
+   - bill_date_ad defaults to timezone.now (permits manual historical import dates).
+   - Auto-synchronizes Gregorian AD dates, Bikram Sambat (BS) date strings, and
+     Nepali Fiscal Year identifiers (e.g., '2080/81', '2081/82', '2082/83', '2083/84') in save().
+2. Safe IMEI Schema Architecture:
+   - imei_number and secondary_imei allow null=True, blank=True at the database level.
+   - Live counter 15-digit IMEI mandate is enforced at the POS service layer for physical phones,
+     allowing historical tax summary records and accessories to save without database errors.
+3. Dual-Mode Merchandise Discount Separation:
+   - Structured isolation between line-level and bill-level discounts (Amount vs. Percentage).
+   - Pure merchandise discounts are cleanly separated from old phone trade-in exchange credits.
+"""
+
+import re
 import uuid
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, datetime
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
 from apps.core.models import TimeStampedModel
 from apps.branches.models import Branch
 from apps.customers.models import Customer
 from apps.inventory.models import Product, UnitConversion, ItemInstance
+from apps.core.nepali_calendar import NepaliCalendar
+
+# =============================================================================
+# DISCOUNT TYPE CHOICES (NONE, PERCENTAGE, AMOUNT & LEGACY FIXED ALIAS)
+# =============================================================================
+DISCOUNT_TYPE_CHOICES = [
+    ('NONE', _('No Discount (छुट छैन)')),
+    ('PERCENTAGE', _('Percentage Concession (%)')),
+    ('AMOUNT', _('Fixed Amount Concession (नगद रकम छुट)')),
+    ('FIXED', _('Fixed Amount [Legacy Alias] (नगद रकम छुट)')),
+]
 
 
 class SalesEstimate(TimeStampedModel):
     """
-    Sales Estimation Slip / POS Invoice.
+    Sales Estimation Slip / POS Invoice Header.
     Tracks salesperson, customer information, multi-mode split payments,
-    dynamic tax calculations, trade-in exchange deductions, and customer warranty cards.
+    dynamic tax calculations, trade-in exchange deductions, customer warranty cards,
+    and structured merchandise discounts (Percentage or Fixed Cash Amount).
+
+    HISTORICAL INTEGRITY SUPPORT:
+    - bill_date_ad uses default=timezone.now to allow importing legacy transactions from 2080 B.S.
+    - fiscal_year (e.g. '2080/81') and Bikram Sambat date (bill_date_bs) are auto-derived in save().
     """
     STATUS_CHOICES = [
-        ('DRAFT', 'Draft / On Hold (होल्ड)'),
-        ('COMPLETED', 'Completed / Finalized (सम्पन्न)'),
-        ('CANCELLED', 'Cancelled (रद्द गरिएको)'),
-        ('RETURNED', 'Fully Returned (फिर्ता भएको)'),
-        ('PARTIALLY_RETURNED', 'Partially Returned (आंशिक फिर्ता)'),
+        ('DRAFT', _('Draft / On Hold (होल्ड)')),
+        ('COMPLETED', _('Completed / Finalized (सम्पन्न)')),
+        ('CANCELLED', _('Cancelled / Voided (रद्द गरिएको)')),
+        ('RETURNED', _('Fully Returned (फिर्ता भएको)')),
+        ('PARTIALLY_RETURNED', _('Partially Returned (आंशिक फिर्ता)')),
     ]
 
     PAYMENT_STATUS_CHOICES = [
-        ('PAID', 'Fully Paid (पूरा भुक्तानी)'),
-        ('PARTIAL', 'Partial Payment (आंशिक)'),
-        ('DUE', 'Full Udhaari / Due (उधारो)'),
+        ('PAID', _('Fully Paid (पूरा भुक्तानी)')),
+        ('PARTIAL', _('Partial Payment (आंशिक)')),
+        ('DUE', _('Full Udhaari / Due (उधारो)')),
     ]
+
+    DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
 
     estimate_number = models.CharField(
         max_length=50, unique=True, db_index=True, verbose_name=_("Estimate Slip No.")
     )
     branch = models.ForeignKey(
-        Branch, on_delete=models.PROTECT, related_name='sales_estimates'
+        Branch, on_delete=models.PROTECT, related_name='sales_estimates',
+        verbose_name=_("Store Branch")
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales_estimates'
+        Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales_estimates',
+        verbose_name=_("Linked Customer Profile")
     )
     customer_name_manual = models.CharField(
         max_length=200, blank=True, null=True, verbose_name=_("Walk-in Customer Name")
@@ -48,22 +90,79 @@ class SalesEstimate(TimeStampedModel):
         max_length=15, blank=True, null=True, verbose_name=_("Customer PAN (Optional)")
     )
 
-    # Date Trackers
-    bill_date_ad = models.DateField(auto_now_add=True, db_index=True)
-    bill_date_bs = models.CharField(max_length=15, blank=True, null=True, verbose_name=_("Bill Date (BS)"))
+    # Date Trackers (Allows Historical Imports from 2080 B.S.)
+    bill_date_ad = models.DateField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name=_("Bill Date (AD)"),
+        help_text=_("Gregorian date for database indexing and accounting. Allows historical import dates.")
+    )
+    bill_date_bs = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Bill Date (BS)"),
+        help_text=_("Bikram Sambat formatted date string (YYYY-MM-DD).")
+    )
+    fiscal_year = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Fiscal Year (BS)"),
+        help_text=_("Nepali Fiscal Year derived from BS date (e.g. 2080/81, 2081/82, 2082/83, 2083/84).")
+    )
 
-    # Financial Breakdown
-    subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Gross Items Subtotal"))
-    item_discount_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Total Line Discounts"))
-    bill_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Bill Discount (%)"))
-    bill_discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Bill Discount (NPR)"))
-    
-    # Old Phone Trade-In / Exchange Deduction
+    # Financial Breakdown & Subtotals
+    subtotal = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Gross Items Subtotal")
+    )
+    item_discount_total = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Total Line Discounts")
+    )
+
+    # Bill-Level Discount Configuration (Percentage vs Fixed Amount)
+    bill_discount_type = models.CharField(
+        max_length=15,
+        choices=DISCOUNT_TYPE_CHOICES,
+        default='PERCENTAGE',
+        db_index=True,
+        verbose_name=_("Bill Discount Type")
+    )
+    bill_discount_input_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Bill Discount Input Value"),
+        help_text=_("Raw input value entered by cashier in UI (e.g. 5.00 for 5%, or 1000.00 for flat Rs. 1,000).")
+    )
+    bill_discount_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Bill Discount (%)")
+    )
+    bill_discount_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Bill Discount (NPR)")
+    )
+    discount_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name=_("Commercial Discount Reason / Justification"),
+        help_text=_("e.g. Customer Negotiation, Clearance, Damaged Packaging, VIP Loyalty.")
+    )
+    discount_approved_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        verbose_name=_("Discount Approval Timestamp"),
+        help_text=_("Exact timestamp when manager override PIN authorized the discount/price override.")
+    )
+
+    # Old Phone Trade-In / Exchange Buy-Back Credit (Separated from Sales Discounts)
     has_trade_in_exchange = models.BooleanField(default=False, verbose_name=_("Has Old Phone Trade-In Exchange"))
     trade_in_discount_amount = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Trade-In Buy-Back Valuation Credit (NPR)"),
-        help_text=_("Amount deducted directly from bill total for traded-in old handset.")
+        help_text=_("Agreed buy-back valuation of customer's old phone deducted directly from bill payable total.")
     )
     trade_in_voucher_reference = models.CharField(
         max_length=50, blank=True, null=True, db_index=True,
@@ -72,14 +171,20 @@ class SalesEstimate(TimeStampedModel):
 
     # Tax Breakdown
     is_vat_applicable = models.BooleanField(default=False, verbose_name=_("Is Tax Applicable"))
-    taxable_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Taxable Base Amount"))
-    non_taxable_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Non-Taxable / Exempt Amount"))
-    vat_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Total Tax / VAT Amount"))
-    
+    taxable_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Taxable Base Amount")
+    )
+    non_taxable_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Non-Taxable / Exempt Amount")
+    )
+    vat_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Total Tax / VAT Amount")
+    )
+
     round_off = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Round Off Offset"))
     grand_total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), db_index=True, verbose_name=_("Payable Grand Total"))
 
-    # Cost of Goods Sold (COGS) & Total Margin Tracker
+    # Cost of Goods Sold (COGS) & Margin Realization
     total_cost_amount = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Total Acquisition Cost (COGS) (NPR)")
@@ -90,32 +195,36 @@ class SalesEstimate(TimeStampedModel):
     )
 
     # Payments & Collections
-    paid_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
-    due_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
-    change_returned = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    paid_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Paid Amount"))
+    due_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Due / Udhaari Amount"))
+    change_returned = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Change Returned"))
 
     status = models.CharField(max_length=25, choices=STATUS_CHOICES, default='COMPLETED', db_index=True)
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='PAID', db_index=True)
 
     cashier = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='billed_estimates'
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='billed_estimates',
+        verbose_name=_("Billed Cashier")
     )
     salesperson = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='credited_sales'
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='credited_sales',
+        verbose_name=_("Credited Salesperson")
     )
     manager_override_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_discounts'
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_discounts',
+        verbose_name=_("Authorized Manager Override")
     )
     cancellation_reason = models.TextField(blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
 
     class Meta:
         db_table = 'pos_sales_estimates'
-        ordering = ['-created_at']
+        ordering = ['-bill_date_ad', '-created_at']
         verbose_name = _('Sales Estimate Slip')
         verbose_name_plural = _('Sales Estimate Slips')
         indexes = [
             models.Index(fields=['bill_date_ad', 'status', 'branch'], name='idx_est_date_status_branch'),
+            models.Index(fields=['fiscal_year', 'branch'], name='idx_est_fy_branch'),
             models.Index(fields=['branch', 'payment_status', 'created_at'], name='idx_est_branch_pay_created'),
             models.Index(fields=['customer', 'bill_date_ad'], name='idx_est_cust_date'),
             models.Index(fields=['salesperson', 'bill_date_ad'], name='idx_est_salesperson_date'),
@@ -124,6 +233,41 @@ class SalesEstimate(TimeStampedModel):
     def __str__(self):
         return f"{self.estimate_number} - Rs. {self.grand_total} ({self.status})"
 
+    def clean(self):
+        super().clean()
+        if self.bill_discount_type == 'FIXED':
+            self.bill_discount_type = 'AMOUNT'
+
+    def save(self, *args, **kwargs):
+        if self.bill_discount_type == 'FIXED':
+            self.bill_discount_type = 'AMOUNT'
+
+        # Auto-synchronize BS date and Nepali Fiscal Year
+        if self.bill_date_ad:
+            if isinstance(self.bill_date_ad, datetime):
+                ad_date = self.bill_date_ad.date()
+            else:
+                ad_date = self.bill_date_ad
+
+            if not self.bill_date_bs or not self.fiscal_year:
+                try:
+                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
+                    if not self.bill_date_bs:
+                        self.bill_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
+                    if not self.fiscal_year:
+                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
+                except Exception:
+                    pass
+        elif self.bill_date_bs and not self.fiscal_year:
+            try:
+                parts = [int(p) for p in re.findall(r'\d+', str(self.bill_date_bs))]
+                if len(parts) >= 2:
+                    self.fiscal_year = NepaliCalendar.get_fiscal_year(parts[0], parts[1])
+            except Exception:
+                pass
+
+        super().save(*args, **kwargs)
+
     @property
     def recipient_display_name(self) -> str:
         if self.customer:
@@ -131,30 +275,143 @@ class SalesEstimate(TimeStampedModel):
         return self.customer_name_manual or "Cash Customer (खुदरा ग्राहक)"
 
     @property
+    def total_sales_discount(self) -> Decimal:
+        """
+        Returns genuine merchandise concessions (line-item discounts + bill-level discount).
+        Excludes trade-in buy-back valuation credits to prevent false discount inflation.
+        """
+        item_disc = self.item_discount_total if self.item_discount_total is not None else Decimal('0.00')
+        bill_disc = self.bill_discount_amount if self.bill_discount_amount is not None else Decimal('0.00')
+        return item_disc + bill_disc
+
+    @property
+    def price_override_total(self) -> Decimal:
+        """
+        Aggregates total price reduction concessions where unit_price was overridden below official_unit_price.
+        """
+        if hasattr(self, '_prefetched_objects_cache') and 'items' in self._prefetched_objects_cache:
+            return sum((item.price_override_amount for item in self.items.all()), Decimal('0.00'))
+        total = self.items.aggregate(total=models.Sum('price_override_amount'))['total']
+        return total if total is not None else Decimal('0.00')
+
+    @property
+    def total_commercial_reduction(self) -> Decimal:
+        """
+        Returns total commercial price reductions:
+        Official Catalog Price Overrides + Merchandise Sales Discounts.
+        """
+        return self.price_override_total + self.total_sales_discount
+
+    @property
     def total_discount_given(self) -> Decimal:
-        return self.item_discount_total + self.bill_discount_amount + self.trade_in_discount_amount
+        """Backward-compatibility alias returning total_sales_discount."""
+        return self.total_sales_discount
+
+    @property
+    def trade_in_credit(self) -> Decimal:
+        """Returns the buy-back valuation credit applied from an old phone trade-in exchange."""
+        if self.has_trade_in_exchange and self.trade_in_discount_amount:
+            return self.trade_in_discount_amount
+        return Decimal('0.00')
 
 
 class SalesEstimateItem(TimeStampedModel):
-    """Line item in sales estimate linked to exact sold IMEI, pricing mode, batch, and warranty card."""
+    """
+    Line item in sales estimate linked to exact sold IMEI, pricing mode, batch, and warranty card.
+    
+    SCHEMA CONSTRAINT DESIGN:
+    - imei_number and secondary_imei have blank=True, null=True.
+    - Non-serialized accessories, repair labor, and historical Mobilesoft tax sales save without database constraint crashes.
+    - Mandatory 15-digit IMEI validation for real phones is enforced at the POS service/form layer.
+    """
+    DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
+
     estimate = models.ForeignKey(SalesEstimate, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='sales_lines')
     unit_conversion = models.ForeignKey(
         UnitConversion, on_delete=models.SET_NULL, null=True, blank=True
     )
-    
+
     quantity = models.DecimalField(max_digits=10, decimal_places=3, default=Decimal('1.000'))
     conversion_factor = models.DecimalField(max_digits=10, decimal_places=3, default=Decimal('1.000'))
     base_unit_quantity = models.DecimalField(max_digits=12, decimal_places=3)
-    
-    unit_price = models.DecimalField(max_digits=12, decimal_places=2, verbose_name=_("Unit Selling Price (NPR)"))
+
+    # Selling Price & Historical Catalog Price Audit
+    unit_price = models.DecimalField(
+        max_digits=12, decimal_places=2, verbose_name=_("Unit Selling Price (NPR)")
+    )
+    official_unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Official Catalog Price (NPR)"),
+        help_text=_("Official catalog price at the moment of billing before any cashier price override.")
+    )
+    price_override_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Price Override Concession Amount (NPR)"),
+        help_text=_("Total concession: (official_unit_price - unit_price) * quantity.")
+    )
     cost_price = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Exact Acquisition Cost Price (NPR)")
     )
-    discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'))
-    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
-    
+
+    # Dual-Mode Line Discount Structure
+    discount_type = models.CharField(
+        max_length=15,
+        choices=DISCOUNT_TYPE_CHOICES,
+        default='NONE',
+        db_index=True,
+        verbose_name=_("Discount Type")
+    )
+    discount_input_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Discount Input Value"),
+        help_text=_("Exact numeric input typed by cashier (e.g. 5.00 for 5%, or 2500.00 for Rs. 2,500).")
+    )
+    item_discount_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Actual Item Discount Amount (NPR)"),
+        help_text=_("Actual monetary deduction resulting strictly from the item discount input (isolated from bill discounts).")
+    )
+    effective_discount_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Effective Discount (%)"),
+        help_text=_("Secondary control percentage calculated against line selling base for authorization, limits, and audit.")
+    )
+    allocated_bill_discount_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Allocated Bill Discount (NPR)"),
+        help_text=_("Line item's proportionate share of the invoice-level bill discount.")
+    )
+
+    # Backwards-compatibility aliases
+    discount_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Legacy Discount (%)"),
+        help_text=_("Synchronized with effective_discount_percent for backward compatibility.")
+    )
+    discount_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Total Line Discount Concession (NPR)"),
+        help_text=_("Total line concession: item_discount_amount + allocated_bill_discount_amount.")
+    )
+
     tax_pricing_type = models.CharField(
         max_length=20,
         choices=Product.TAX_PRICING_TYPE_CHOICES,
@@ -168,16 +425,16 @@ class SalesEstimateItem(TimeStampedModel):
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Calculated Tax Amount"))
     line_total = models.DecimalField(max_digits=14, decimal_places=2, verbose_name=_("Final Line Total"))
 
-    # Smartphone / IMEI / Batch tracking linkage
+    # Smartphone / IMEI / Batch tracking linkage (Nullable and optional for non-serialized items)
     item_instance = models.ForeignKey(
         ItemInstance, on_delete=models.SET_NULL, null=True, blank=True, related_name='sold_records'
     )
     batch_reference = models.CharField(max_length=60, blank=True, null=True, help_text=_("Associated Batch Identifier"))
-    imei_number = models.CharField(max_length=35, blank=True, null=True, db_index=True)
-    secondary_imei = models.CharField(max_length=35, blank=True, null=True)
+    imei_number = models.CharField(max_length=35, blank=True, null=True, db_index=True, verbose_name=_("Sold IMEI 1"))
+    secondary_imei = models.CharField(max_length=35, blank=True, null=True, verbose_name=_("Sold IMEI 2"))
     serial_number = models.CharField(max_length=60, blank=True, null=True)
     device_condition = models.CharField(max_length=30, blank=True, null=True, default="Brand New")
-    
+
     # Customer Warranty Card
     warranty_months = models.PositiveIntegerField(default=12)
     warranty_start_date = models.DateField(blank=True, null=True)
@@ -191,10 +448,43 @@ class SalesEstimateItem(TimeStampedModel):
         indexes = [
             models.Index(fields=['estimate', 'product'], name='idx_estitem_est_prod'),
             models.Index(fields=['imei_number'], name='idx_estitem_imei'),
+            models.Index(fields=['discount_type'], name='idx_estitem_disc_type'),
         ]
 
     def __str__(self):
         return f"{self.product.name} x {self.quantity} = Rs. {self.line_total}"
+
+    def clean(self):
+        super().clean()
+        if self.discount_type == 'FIXED':
+            self.discount_type = 'AMOUNT'
+
+    def save(self, *args, **kwargs):
+        if self.discount_type == 'FIXED':
+            self.discount_type = 'AMOUNT'
+
+        if (not self.official_unit_price or self.official_unit_price <= Decimal('0.00')) and self.unit_price:
+            self.official_unit_price = self.unit_price
+
+        if self.official_unit_price and self.unit_price and self.official_unit_price > self.unit_price:
+            qty = self.quantity if self.quantity else Decimal('1.000')
+            self.price_override_amount = ((self.official_unit_price - self.unit_price) * qty).quantize(Decimal('0.01'))
+        elif not self.price_override_amount:
+            self.price_override_amount = Decimal('0.00')
+
+        if self.item_discount_amount is None:
+            self.item_discount_amount = Decimal('0.00')
+        if self.allocated_bill_discount_amount is None:
+            self.allocated_bill_discount_amount = Decimal('0.00')
+        if self.effective_discount_percent is None:
+            self.effective_discount_percent = self.discount_percent or Decimal('0.00')
+
+        if self.discount_amount is None or self.discount_amount == Decimal('0.00'):
+            self.discount_amount = self.item_discount_amount + self.allocated_bill_discount_amount
+        if not self.discount_percent and self.effective_discount_percent:
+            self.discount_percent = self.effective_discount_percent
+
+        super().save(*args, **kwargs)
 
     @property
     def line_gross_profit(self) -> Decimal:
@@ -202,17 +492,35 @@ class SalesEstimateItem(TimeStampedModel):
         net_revenue = self.base_taxable_amount if (self.is_vat_applicable and self.vat_rate > 0) else (self.line_total - self.tax_amount)
         return net_revenue - total_cost
 
+    @property
+    def is_price_overridden(self) -> bool:
+        return bool(self.official_unit_price and self.unit_price < self.official_unit_price)
+
+    @property
+    def is_amount_discount(self) -> bool:
+        return self.discount_type in ['AMOUNT', 'FIXED']
+
+    @property
+    def is_percentage_discount(self) -> bool:
+        return self.discount_type == 'PERCENTAGE'
+
+    @property
+    def unit_discount_amount(self) -> Decimal:
+        """Returns the per-unit equivalent of the item discount for Quantity > 1."""
+        qty = self.quantity if self.quantity and self.quantity > Decimal('0.000') else Decimal('1.000')
+        return (self.item_discount_amount / qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
 
 class SalesPaymentTransaction(TimeStampedModel):
     """Split payment recording across Cash, Digital Wallets, Cards, and Udhaari."""
     PAYMENT_MODES = [
-        ('CASH', 'Cash (नगद)'),
-        ('ESEWA', 'eSewa (ईसेवा)'),
-        ('KHALTI', 'Khalti (खल्ती)'),
-        ('FONEPAY', 'FonePay QR (फोनपे)'),
-        ('CARD', 'POS Card Swipe (कार्ड)'),
-        ('BANK_TRANSFER', 'Bank Transfer / ConnectIPS'),
-        ('CREDIT', 'Udhaari / Account Balance (उधारो)'),
+        ('CASH', _('Cash (नगद)')),
+        ('ESEWA', _('eSewa (ईसेवा)')),
+        ('KHALTI', _('Khalti (खल्ती)')),
+        ('FONEPAY', _('FonePay QR (फोनपे)')),
+        ('CARD', _('POS Card Swipe (कार्ड)')),
+        ('BANK_TRANSFER', _('Bank Transfer / ConnectIPS')),
+        ('CREDIT', _('Udhaari / Account Balance (उधारो)')),
     ]
 
     estimate = models.ForeignKey(
@@ -245,11 +553,11 @@ class PhoneExchangeTradeIn(TimeStampedModel):
     ownership undertaking (KYC), POS bill deduction offset, and inventory restocking.
     """
     TRADE_IN_STATUS_CHOICES = [
-        ('DRAFT', '1. Inspection In-Progress (जाँच हुँदै)'),
-        ('VALUATED', '2. Valuated / Offer Generated (मूल्याङ्कन तयार)'),
-        ('ATTACHED_TO_BILL', '3. Deducted Against POS Bill (बिलमा समायोजन)'),
-        ('RESTOCKED', '4. Added to Used Inventory (मौज्दातमा दर्ता)'),
-        ('CANCELLED', '5. Cancelled / Customer Rejected (रद्द)'),
+        ('DRAFT', _('1. Inspection In-Progress (जाँच हुँदै)')),
+        ('VALUATED', _('2. Valuated / Offer Generated (मूल्याङ्कन तयार)')),
+        ('ATTACHED_TO_BILL', _('3. Deducted Against POS Bill (बिलमा समायोजन)')),
+        ('RESTOCKED', _('4. Added to Used Inventory (मौज्दातमा दर्ता)')),
+        ('CANCELLED', _('5. Cancelled / Customer Rejected (रद्द)')),
     ]
 
     voucher_number = models.CharField(
@@ -272,6 +580,27 @@ class PhoneExchangeTradeIn(TimeStampedModel):
     )
     inspector_technician = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='inspected_trade_ins'
+    )
+
+    # Historical Trade-In Date & Fiscal Tracking
+    intake_date_ad = models.DateField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name=_("Trade-In Date (AD)")
+    )
+    intake_date_bs = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Trade-In Date (BS)")
+    )
+    fiscal_year = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Fiscal Year (BS)")
     )
 
     # Traded-in Device Profile
@@ -331,17 +660,36 @@ class PhoneExchangeTradeIn(TimeStampedModel):
 
     class Meta:
         db_table = 'pos_phone_trade_in_exchanges'
-        ordering = ['-created_at']
+        ordering = ['-intake_date_ad', '-created_at']
         verbose_name = _('Phone Exchange / Trade-In Voucher')
         verbose_name_plural = _('Phone Exchange / Trade-In Vouchers')
         indexes = [
             models.Index(fields=['branch', 'status'], name='idx_tradein_branch_status'),
+            models.Index(fields=['fiscal_year', 'branch'], name='idx_tradein_fy_branch'),
             models.Index(fields=['imei_1'], name='idx_tradein_imei1'),
             models.Index(fields=['voucher_number'], name='idx_tradein_voucher_no'),
         ]
 
     def __str__(self):
         return f"{self.voucher_number} - {self.brand_name} {self.model_name} (Rs. {self.final_trade_in_value}) [{self.status}]"
+
+    def save(self, *args, **kwargs):
+        if self.intake_date_ad:
+            if isinstance(self.intake_date_ad, datetime):
+                ad_date = self.intake_date_ad.date()
+            else:
+                ad_date = self.intake_date_ad
+
+            if not self.intake_date_bs or not self.fiscal_year:
+                try:
+                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
+                    if not self.intake_date_bs:
+                        self.intake_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
+                    if not self.fiscal_year:
+                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
+                except Exception:
+                    pass
+        super().save(*args, **kwargs)
 
 
 class TradeInInspectionChecklist(TimeStampedModel):
@@ -449,10 +797,10 @@ class TradeInLegalUndertaking(TimeStampedModel):
     Protects shop owners from legal liability, stolen property claims, and police investigations.
     """
     ID_TYPE_CHOICES = [
-        ('CITIZENSHIP', 'Nepali Citizenship Card (नागरिकता प्रमाणपत्र)'),
-        ('NATIONAL_ID', 'National Identity Card (राष्ट्रिय परिचयपत्र)'),
-        ('DRIVING_LICENSE', 'Smart Driving License (सवारी चालक अनुमतिपत्र)'),
-        ('PASSPORT', 'Passport (राहदानी)'),
+        ('CITIZENSHIP', _('Nepali Citizenship Card (नागरिकता प्रमाणपत्र)')),
+        ('NATIONAL_ID', _('National Identity Card (राष्ट्रिय परिचयपत्र)')),
+        ('DRIVING_LICENSE', _('Smart Driving License (सवारी चालक अनुमतिपत्र)')),
+        ('PASSPORT', _('Passport (राहदानी)')),
     ]
 
     trade_in_voucher = models.OneToOneField(
@@ -462,12 +810,12 @@ class TradeInLegalUndertaking(TimeStampedModel):
     # Customer Identity Details
     customer_full_name = models.CharField(max_length=150, verbose_name=_("Customer Full Name (English/Nepali)"))
     customer_father_or_spouse_name = models.CharField(max_length=150, blank=True, null=True, verbose_name=_("Father / Spouse Name"))
-    
+
     id_type = models.CharField(max_length=30, choices=ID_TYPE_CHOICES, default='CITIZENSHIP')
     id_number = models.CharField(max_length=60, db_index=True, verbose_name=_("Identification / Citizenship No."))
     id_issued_district = models.CharField(max_length=100, default="Kathmandu", verbose_name=_("Issued District"))
     id_issued_date_bs = models.CharField(max_length=20, blank=True, null=True, verbose_name=_("Issued Date (BS)"))
-    
+
     permanent_address = models.CharField(max_length=255, verbose_name=_("Permanent Address (District, Ward, Municipality)"))
     current_address = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("Current Residence / Room Address"))
 
@@ -512,38 +860,64 @@ class TradeInLegalUndertaking(TimeStampedModel):
 
 
 class SalesReturn(TimeStampedModel):
-    """Customer sales return or warranty replacement voucher."""
-    return_number = models.CharField(max_length=50, unique=True, db_index=True)
+    """
+    Customer sales return or warranty replacement voucher.
+    HISTORICAL INTEGRITY UPDATE: Added return_date_ad, return_date_bs, and fiscal_year.
+    """
+    return_number = models.CharField(max_length=50, unique=True, db_index=True, verbose_name=_("Return Voucher No."))
     original_estimate = models.ForeignKey(
-        SalesEstimate, on_delete=models.PROTECT, related_name='returns'
+        SalesEstimate, on_delete=models.PROTECT, related_name='returns', verbose_name=_("Original Sales Invoice")
     )
-    branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name='sales_returns')
+    branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name='sales_returns', verbose_name=_("Store Branch"))
     customer = models.ForeignKey(
-        Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='returns'
+        Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='returns', verbose_name=_("Customer")
     )
-    
-    total_refund_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+
+    return_date_ad = models.DateField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name=_("Return Date (AD)")
+    )
+    return_date_bs = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Return Date (BS)")
+    )
+    fiscal_year = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Fiscal Year (BS)")
+    )
+
+    total_refund_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Total Refund Amount"))
     refund_mode = models.CharField(
         max_length=30,
         choices=[
-            ('CASH', 'Cash Refund'),
-            ('STORE_CREDIT', 'Customer Store Credit'),
-            ('EXCHANGE_ADJUST', 'Adjusted in Exchange Bill'),
+            ('CASH', _('Cash Refund')),
+            ('STORE_CREDIT', _('Customer Store Credit')),
+            ('EXCHANGE_ADJUST', _('Adjusted in Exchange Bill')),
         ],
-        default='CASH'
+        default='CASH',
+        verbose_name=_("Refund Mode")
     )
     reason = models.TextField(verbose_name=_("Reason for Return"))
     technician_notes = models.TextField(blank=True, null=True, verbose_name=_("Diagnostic / Inspection Findings"))
     processed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='processed_returns'
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='processed_returns', verbose_name=_("Processed By")
     )
 
     class Meta:
         db_table = 'pos_sales_returns'
-        ordering = ['-created_at']
+        ordering = ['-return_date_ad', '-created_at']
         verbose_name = _('Sales Return')
         verbose_name_plural = _('Sales Returns')
         indexes = [
+            models.Index(fields=['return_date_ad', 'branch'], name='idx_ret_date_branch'),
+            models.Index(fields=['fiscal_year', 'branch'], name='idx_ret_fy_branch'),
             models.Index(fields=['branch', 'created_at'], name='idx_return_branch_date'),
             models.Index(fields=['return_number'], name='idx_return_num'),
         ]
@@ -551,15 +925,68 @@ class SalesReturn(TimeStampedModel):
     def __str__(self):
         return f"{self.return_number} for {self.original_estimate.estimate_number} (Rs. {self.total_refund_amount})"
 
+    def save(self, *args, **kwargs):
+        if self.return_date_ad:
+            if isinstance(self.return_date_ad, datetime):
+                ad_date = self.return_date_ad.date()
+            else:
+                ad_date = self.return_date_ad
+
+            if not self.return_date_bs or not self.fiscal_year:
+                try:
+                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
+                    if not self.return_date_bs:
+                        self.return_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
+                    if not self.fiscal_year:
+                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
+                except Exception:
+                    pass
+        super().save(*args, **kwargs)
+
 
 class SalesReturnItem(TimeStampedModel):
+    """
+    Line item within a customer sales return voucher.
+    Preserves original discount type, original entered discount value, actual discount amount,
+    and effective discount percentage for full reporting and audit trail continuity.
+    """
+    DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
+
     sales_return = models.ForeignKey(SalesReturn, on_delete=models.CASCADE, related_name='items')
-    estimate_item = models.ForeignKey(SalesEstimateItem, on_delete=models.PROTECT)
-    product = models.ForeignKey(Product, on_delete=models.PROTECT)
-    return_quantity = models.DecimalField(max_digits=10, decimal_places=3)
-    base_unit_quantity = models.DecimalField(max_digits=12, decimal_places=3)
-    refund_amount = models.DecimalField(max_digits=12, decimal_places=2)
-    returned_imei = models.CharField(max_length=35, blank=True, null=True)
+    estimate_item = models.ForeignKey(SalesEstimateItem, on_delete=models.PROTECT, verbose_name=_("Original Sales Line"))
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, verbose_name=_("Returned Product"))
+    return_quantity = models.DecimalField(max_digits=10, decimal_places=3, verbose_name=_("Return Quantity"))
+    base_unit_quantity = models.DecimalField(max_digits=12, decimal_places=3, verbose_name=_("Base Unit Quantity"))
+    refund_amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name=_("Net Refund Amount"))
+
+    # Preserved original discount audit fields
+    discount_type = models.CharField(
+        max_length=15,
+        choices=DISCOUNT_TYPE_CHOICES,
+        default='NONE',
+        db_index=True,
+        verbose_name=_("Original Item Discount Type")
+    )
+    discount_input_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Original Discount Input Value")
+    )
+    item_discount_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Original Item Discount Amount (NPR)")
+    )
+    effective_discount_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name=_("Original Effective Discount (%)")
+    )
+
+    returned_imei = models.CharField(max_length=35, blank=True, null=True, verbose_name=_("Returned IMEI"))
     restock_to_inventory = models.BooleanField(
         default=True, help_text=_("Re-add returned item back to active branch stock")
     )
@@ -574,4 +1001,13 @@ class SalesReturnItem(TimeStampedModel):
         verbose_name_plural = _('Sales Return Items')
         indexes = [
             models.Index(fields=['sales_return', 'product'], name='idx_retitem_ret_prod'),
+            models.Index(fields=['discount_type'], name='idx_retitem_disc_type'),
         ]
+
+    def __str__(self):
+        return f"{self.product.name} x {self.return_quantity} (Refund: Rs. {self.refund_amount})"
+
+    def save(self, *args, **kwargs):
+        if self.discount_type == 'FIXED':
+            self.discount_type = 'AMOUNT'
+        super().save(*args, **kwargs)

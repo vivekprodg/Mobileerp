@@ -1,3 +1,4 @@
+{% load humanize %}
 <!DOCTYPE html>
 <html>
 <head>
@@ -77,6 +78,13 @@
             white-space: nowrap;
         }
 
+        .concession-line {
+            font-size: 9px;
+            padding-left: 4px;
+            color: #000000;
+            font-weight: bold;
+        }
+
         .warranty-box {
             border: 1px dotted #000000;
             padding: 3px;
@@ -96,16 +104,15 @@
     </style>
 </head>
 <body onload="window.print()">
-    <!-- Top Action Toolbar -->
+    <!-- Top Action Toolbar (Hidden in Print) -->
     <div class="no-print" style="margin-bottom: 10px; text-align: center; background: #0f172a; padding: 8px; border-radius: 6px;">
         <button onclick="window.print()" style="padding: 6px 16px; font-weight: bold; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer;">
             PRINT 80mm THERMAL SLIP
         </button>
     </div>
 
-    <!-- Company Branding Header -->
+    <!-- 1. Company Branding Header -->
     <div class="text-center">
-        <!-- Optional Logo Upload Rendering -->
         {% if estimate.branch.logo_url %}
             <img src="{{ estimate.branch.logo_url }}" alt="{{ estimate.branch.display_company_name }}" class="thermal-logo-img">
         {% elif COMPANY_LOGO_URL %}
@@ -135,19 +142,23 @@
         {% endif %}
     </div>
 
-    <!-- Bill Metadata -->
+    <!-- 2. Bill Metadata -->
     <div>
         Slip No    : <strong>{{ estimate.estimate_number }}</strong><br>
         Date (AD)  : {{ estimate.bill_date_ad }} | BS: {{ estimate.bill_date_bs|default:"-" }}<br>
         Customer   : <strong>{{ estimate.recipient_display_name }}</strong><br>
         {% if estimate.customer_phone_manual %}Phone      : {{ estimate.customer_phone_manual }}<br>{% endif %}
         {% if estimate.customer_pan %}Cust PAN   : {{ estimate.customer_pan }}<br>{% endif %}
-        Salesperson: {% if estimate.salesperson %}{{ estimate.salesperson.get_full_name|default:estimate.salesperson.username }}{% else %}{{ estimate.cashier.get_full_name|default:estimate.cashier.username }}{% endif %} | Cashier: {{ estimate.cashier.username }}
+        Sales Rep  : {% if estimate.salesperson %}{{ estimate.salesperson.get_full_name|default:estimate.salesperson.username }}{% else %}{{ estimate.cashier.get_full_name|default:estimate.cashier.username }}{% endif %}<br>
+        Billed By  : {{ estimate.cashier.username }}
+        {% if estimate.manager_override_by %}
+            <br>Override   : {{ estimate.manager_override_by.username }}
+        {% endif %}
     </div>
 
     <div class="divider"></div>
 
-    <!-- Line Items Table -->
+    <!-- 3. Line Items Table (Dual-Mode Line Concessions & Overrides) -->
     <table>
         <thead>
             <tr>
@@ -173,11 +184,33 @@
             <tr>
                 <td></td>
                 <td align="center">{{ item.quantity|floatformat:0 }}</td>
-                <td align="right">{{ item.unit_price|floatformat:2 }}</td>
-                <td align="right">{{ item.line_total|floatformat:2 }}</td>
+                <td align="right">Rs. {{ item.unit_price|floatformat:2 }}</td>
+                <td align="right">Rs. {{ item.line_total|floatformat:2 }}</td>
             </tr>
 
-            <!-- Dedicated Dual-IMEI Independent Print Lines -->
+            <!-- Cashier Price Override Concession Line -->
+            {% if item.official_unit_price and item.official_unit_price > item.unit_price %}
+            <tr>
+                <td colspan="4" class="concession-line">
+                    [Catalog MRP: Rs. {{ item.official_unit_price|floatformat:2 }} | Override: -Rs. {{ item.price_override_amount|floatformat:2 }}]
+                </td>
+            </tr>
+            {% endif %}
+
+            <!-- Item-Level Discount Line: Explicit Amount vs. Percentage Format -->
+            {% if item.discount_amount > 0 %}
+            <tr>
+                <td colspan="4" class="concession-line">
+                    {% if item.discount_type == 'AMOUNT' or item.discount_type == 'FIXED' %}
+                        [Discount: -Rs. {{ item.discount_amount|floatformat:2|intcomma }} (Amount) &bull; {{ item.effective_discount_percent|default:item.discount_percent|floatformat:1 }}%{% if item.quantity > 1 %} (Rs. {{ item.unit_discount_amount|floatformat:2|intcomma }}/unit){% endif %}]
+                    {% else %}
+                        [Discount: -Rs. {{ item.discount_amount|floatformat:2|intcomma }} ({{ item.effective_discount_percent|default:item.discount_percent|floatformat:1 }}%){% if item.quantity > 1 %} (Rs. {{ item.unit_discount_amount|floatformat:2|intcomma }}/unit){% endif %}]
+                    {% endif %}
+                </td>
+            </tr>
+            {% endif %}
+
+            <!-- Dual-IMEI Independent Lines -->
             {% if item.imei_number %}
             <tr>
                 <td colspan="4" class="imei-line">
@@ -190,6 +223,14 @@
             <tr>
                 <td colspan="4" class="imei-line">
                     [IMEI 2: {{ item.secondary_imei }}]
+                </td>
+            </tr>
+            {% endif %}
+
+            {% if item.serial_number and item.serial_number != item.imei_number and item.serial_number != item.secondary_imei %}
+            <tr>
+                <td colspan="4" class="imei-line">
+                    [S/N: {{ item.serial_number }}]
                 </td>
             </tr>
             {% endif %}
@@ -218,61 +259,95 @@
 
     <div class="divider"></div>
 
-    <!-- Totals Breakdown -->
+    <!-- 4. Merchandise Discounts & Subtotals -->
     <table>
         <tr>
             <td>Subtotal (Gross):</td>
             <td align="right">Rs. {{ estimate.subtotal|floatformat:2 }}</td>
         </tr>
-        {% if estimate.item_discount_total > 0 or estimate.bill_discount_amount > 0 %}
-            <tr>
-                <td>Total Discount:</td>
-                <td align="right">-Rs. {{ estimate.item_discount_total|add:estimate.bill_discount_amount|floatformat:2 }}</td>
-            </tr>
+
+        <!-- Item-Level Discounts Total -->
+        {% if estimate.item_discount_total > 0 %}
+        <tr>
+            <td>Line Discounts Total:</td>
+            <td align="right">-Rs. {{ estimate.item_discount_total|floatformat:2 }}</td>
+        </tr>
         {% endif %}
-        {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
-            <tr class="fw-bold">
-                <td>Trade-In Credit ({{ estimate.trade_in_voucher_reference }}):</td>
-                <td align="right">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2 }}</td>
-            </tr>
+
+        <!-- Dual-Mode Bill-Level Discount -->
+        {% if estimate.bill_discount_amount > 0 %}
+        <tr>
+            <td>
+                {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
+                    Bill Discount (Amount):
+                {% else %}
+                    Bill Discount ({{ estimate.bill_discount_percent|floatformat:1 }}%):
+                {% endif %}
+            </td>
+            <td align="right">-Rs. {{ estimate.bill_discount_amount|floatformat:2 }}</td>
+        </tr>
         {% endif %}
+
+        {% if estimate.discount_reason %}
+        <tr>
+            <td colspan="2" style="font-size: 8.5px; color: #555; padding-left: 4px;">
+                [Disc Reason: {{ estimate.discount_reason }}]
+            </td>
+        </tr>
+        {% endif %}
+
+        <!-- Taxes & Grand Total -->
         {% if estimate.vat_amount > 0 %}
             {% if estimate.taxable_amount > 0 %}
-                <tr>
-                    <td>Taxable Base:</td>
-                    <td align="right">Rs. {{ estimate.taxable_amount|floatformat:2 }}</td>
-                </tr>
+            <tr>
+                <td>Taxable Base:</td>
+                <td align="right">Rs. {{ estimate.taxable_amount|floatformat:2 }}</td>
+            </tr>
             {% endif %}
             <tr>
                 <td>Tax / VAT:</td>
                 <td align="right">Rs. {{ estimate.vat_amount|floatformat:2 }}</td>
             </tr>
         {% endif %}
-        <tr class="fw-bold" style="font-size: 12.5px;">
+
+        <tr class="fw-bold" style="font-size: 12.5px; border-top: 1px solid #000; border-bottom: 1px solid #000;">
             <td>GRAND TOTAL:</td>
             <td align="right">Rs. {{ estimate.grand_total|floatformat:2 }}</td>
         </tr>
+    </table>
+
+    <!-- 5. Settlement & Payments Section (Trade-In Buy-Back Credit strictly separated) -->
+    <div style="font-size: 9px; font-weight: bold; margin-top: 5px; text-transform: uppercase;">
+        Settlement &amp; Tendered Payments:
+    </div>
+    <table>
+        {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
+        <tr class="fw-bold">
+            <td>Trade-In Buy-Back Credit{% if estimate.trade_in_voucher_reference %} ({{ estimate.trade_in_voucher_reference }}){% endif %}:</td>
+            <td align="right">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2 }}</td>
+        </tr>
+        {% endif %}
         <tr>
             <td>Paid Amount:</td>
             <td align="right">Rs. {{ estimate.paid_amount|floatformat:2 }}</td>
         </tr>
         {% if estimate.due_amount > 0 %}
-            <tr class="fw-bold">
-                <td>Due (Udhaari Balance):</td>
-                <td align="right">Rs. {{ estimate.due_amount|floatformat:2 }}</td>
-            </tr>
+        <tr class="fw-bold">
+            <td>Due (Udhaari Balance):</td>
+            <td align="right">Rs. {{ estimate.due_amount|floatformat:2 }}</td>
+        </tr>
         {% endif %}
         {% if estimate.change_returned > 0 %}
-            <tr>
-                <td>Change Returned:</td>
-                <td align="right">Rs. {{ estimate.change_returned|floatformat:2 }}</td>
-            </tr>
+        <tr>
+            <td>Change Returned:</td>
+            <td align="right">Rs. {{ estimate.change_returned|floatformat:2 }}</td>
+        </tr>
         {% endif %}
     </table>
 
     <div class="divider"></div>
 
-    <!-- Payment Modes -->
+    <!-- Tender Transactions List -->
     <div style="font-size: 9.5px;">
         {% for p in payments %}
             Paid via {{ p.get_payment_mode_display }}{% if p.transaction_ref %} ({{ p.transaction_ref }}){% endif %}: Rs. {{ p.amount|floatformat:2 }}<br>
@@ -281,7 +356,7 @@
         {% endfor %}
     </div>
 
-    <!-- Disclaimer & Policy Footer -->
+    <!-- 6. Disclaimer & Policy Footer -->
     <div class="text-center" style="font-size: 8.5px; margin-top: 6px; line-height: 1.3;">
         {% if SYS_CONFIG.bill_estimate_disclaimer %}
             {{ SYS_CONFIG.bill_estimate_disclaimer }}<br>

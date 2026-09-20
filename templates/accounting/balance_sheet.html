@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Balance Sheet (वासेलतात) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 no-print">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Balance Sheet</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-building-columns text-primary"></i>
+                <span>Statement of Financial Position</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(कम्पनीको वासेलतात विवरण)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Clean Balance Sheet enforcing the fundamental accounting equation: Total Assets = Total Liabilities + Owner's Equity</p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Balance Sheet
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportBalanceSheetCSV()">
+                <i class="fas fa-file-excel me-1"></i> Export Excel (CSV)
+            </button>
+        </div>
+    </div>
+
+    <!-- Fundamental Accounting Equation Verification Card -->
+    <div class="alert {% if bs_data.is_balanced %}bg-primary bg-opacity-10 border-primary text-primary{% else %}bg-danger bg-opacity-10 border-danger text-danger{% endif %} rounded-4 p-3 mb-4 border d-flex align-items-center justify-content-between">
+        <div class="d-flex align-items-center gap-3">
+            <i class="fas {% if bs_data.is_balanced %}fa-shield-halved fs-3 text-primary{% else %}fa-triangle-exclamation fs-3 text-danger{% endif %}"></i>
+            <div>
+                <h6 class="fw-bold mb-0">
+                    {% if bs_data.is_balanced %}
+                        FUNDAMENTAL EQUATION BALANCED: ASSETS = LIABILITIES + EQUITY
+                    {% else %}
+                        BALANCE SHEET DISCREPANCY DETECTED (Variance: Rs. {{ bs_data.variance|floatformat:2|intcomma }})!
+                    {% endif %}
+                </h6>
+                <small class="fs-xs text-muted">
+                    Total Assets (Rs. {{ bs_data.total_assets|floatformat:2|intcomma }}) equals Total Liabilities &amp; Capital (Rs. {{ bs_data.total_liabilities_and_equity|floatformat:2|intcomma }}).
+                </small>
+            </div>
+        </div>
+        <div class="text-end font-mono">
+            <div class="fs-xs text-muted">As of Date: <strong id="asOfDateVal">{{ bs_data.as_of_date_ad|date:"Y-m-d" }}</strong></div>
+            <div class="fs-2xs text-muted font-nepali">Fiscal Year: <strong>{{ bs_data.fiscal_year }}</strong></div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 no-print">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Nepali Fiscal Year</label>
+                {{ filter_form.fiscal_year }}
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Outlet Scope</label>
+                {{ filter_form.branch }}
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">As of Date (AD)</label>
+                <input type="date" name="as_of_date" value="{{ bs_data.as_of_date_ad|date:'Y-m-d' }}" class="form-control form-control-sm font-mono">
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end pt-md-3">
+                <button type="submit" class="btn btn-dark btn-sm rounded-pill px-3 w-100 fw-bold">
+                    <i class="fas fa-filter me-1"></i> Recalculate
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Dual-Column Balance Sheet Representation (Assets on Left, Liabilities & Equity on Right) -->
+    <div class="row g-4" id="balanceSheetPrintArea">
+        
+        <!-- LEFT: Assets Section -->
+        <div class="col-12 col-lg-6">
+            <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden h-100">
+                <div class="card-header bg-primary text-white px-4 py-3 d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fas fa-vault"></i>
+                        <span class="fw-bold fs-sm text-uppercase tracking-wider">Total Assets (सम्पत्ति)</span>
+                    </div>
+                    <span class="badge bg-white text-primary font-mono fs-2xs">Debit Nature</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-sm" id="assetsTable">
+                        <thead class="bg-light text-muted fs-2xs text-uppercase">
+                            <tr>
+                                <th class="ps-4 py-2">Account Code &amp; Ledger</th>
+                                <th class="text-end pe-4">Net Value (NPR)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for asset in bs_data.asset_lines %}
+                            <tr>
+                                <td class="ps-4">
+                                    <div class="fw-semibold text-dark">{{ asset.name }}</div>
+                                    <small class="text-muted fs-2xs font-mono">{{ asset.code }}</small>
+                                </td>
+                                <td class="text-end pe-4 font-mono fw-bold text-dark">
+                                    Rs. {{ asset.balance|floatformat:2|intcomma }}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="2" class="ps-4 py-3 text-muted fst-italic">No active asset ledger balances found.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot class="bg-slate-900 text-white font-mono fw-extrabold fs-sm">
+                            <tr>
+                                <td class="ps-4 py-3 text-uppercase tracking-wider">TOTAL ASSETS:</td>
+                                <td class="text-end pe-4 py-3 text-info fs-base">Rs. {{ bs_data.total_assets|floatformat:2|intcomma }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Liabilities & Equity Section -->
+        <div class="col-12 col-lg-6">
+            <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden h-100">
+                <div class="card-header bg-slate-900 text-white px-4 py-3 d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fas fa-scale-balanced text-warning"></i>
+                        <span class="fw-bold fs-sm text-uppercase tracking-wider">Liabilities &amp; Equity (दायित्व तथा पुँजी)</span>
+                    </div>
+                    <span class="badge bg-secondary bg-opacity-25 text-white font-mono fs-2xs">Credit Nature</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 fs-sm" id="liabilitiesEquityTable">
+                        <thead class="bg-light text-muted fs-2xs text-uppercase">
+                            <tr>
+                                <th class="ps-4 py-2">Account Code &amp; Ledger</th>
+                                <th class="text-end pe-4">Net Value (NPR)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Liabilities Sub-Heading -->
+                            <tr class="table-light fw-bold">
+                                <td colspan="2" class="ps-4 text-warning-emphasis text-uppercase fs-xs">
+                                    <i class="fas fa-file-invoice-dollar me-1"></i> A. Liabilities (हामीले तिर्नुपर्ने दायित्व)
+                                </td>
+                            </tr>
+                            {% for liab in bs_data.liability_lines %}
+                            <tr>
+                                <td class="ps-4">
+                                    <div class="fw-semibold text-dark">{{ liab.name }}</div>
+                                    <small class="text-muted fs-2xs font-mono">{{ liab.code }}</small>
+                                </td>
+                                <td class="text-end pe-4 font-mono fw-bold text-dark">
+                                    Rs. {{ liab.balance|floatformat:2|intcomma }}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="2" class="ps-4 py-2 text-muted fst-italic">No outstanding liabilities.</td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="fw-bold bg-slate-50">
+                                <td class="ps-4 text-end text-uppercase fs-2xs">Total Liabilities:</td>
+                                <td class="text-end pe-4 font-mono text-warning-emphasis">Rs. {{ bs_data.total_liabilities|floatformat:2|intcomma }}</td>
+                            </tr>
+
+                            <!-- Equity Sub-Heading -->
+                            <tr class="table-light fw-bold">
+                                <td colspan="2" class="ps-4 text-info text-uppercase fs-xs">
+                                    <i class="fas fa-crown me-1"></i> B. Equity &amp; Retained Earnings (साहूको पुँजी)
+                                </td>
+                            </tr>
+                            {% for eq in bs_data.equity_lines %}
+                            <tr>
+                                <td class="ps-4">
+                                    <div class="fw-semibold text-dark">{{ eq.name }}</div>
+                                    <small class="text-muted fs-2xs font-mono">{{ eq.code }}</small>
+                                </td>
+                                <td class="text-end pe-4 font-mono fw-bold text-dark">
+                                    Rs. {{ eq.balance|floatformat:2|intcomma }}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="2" class="ps-4 py-2 text-muted fst-italic">No base capital records.</td>
+                            </tr>
+                            {% endfor %}
+
+                            <!-- Current Year P&L Profit Allocation -->
+                            <tr class="table-info bg-opacity-25">
+                                <td class="ps-4">
+                                    <div class="fw-extrabold text-dark">
+                                        <i class="fas fa-circle-arrow-up text-success me-1"></i> Current Period Net Profit (P&amp;L)
+                                    </div>
+                                    <small class="text-muted fs-2xs">Accumulated earnings transferred to equity</small>
+                                </td>
+                                <td class="text-end pe-4 font-mono fw-extrabold {% if bs_data.current_period_net_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                    Rs. {{ bs_data.current_period_net_profit|floatformat:2|intcomma }}
+                                </td>
+                            </tr>
+                            <tr class="fw-bold bg-slate-50">
+                                <td class="ps-4 text-end text-uppercase fs-2xs">Total Equity:</td>
+                                <td class="text-end pe-4 font-mono text-info">Rs. {{ bs_data.total_equity|floatformat:2|intcomma }}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot class="bg-slate-900 text-white font-mono fw-extrabold fs-sm">
+                            <tr>
+                                <td class="ps-4 py-3 text-uppercase tracking-wider">TOTAL LIABILITIES &amp; EQUITY:</td>
+                                <td class="text-end pe-4 py-3 text-warning fs-base">Rs. {{ bs_data.total_liabilities_and_equity|floatformat:2|intcomma }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<!-- Error-Free DOM Extraction for CSV Export -->
+<script>
+    function exportBalanceSheetCSV() {
+        const asOfDate = document.getElementById('asOfDateVal') ? document.getElementById('asOfDateVal').innerText.trim() : 'Date';
+        let csv = [
+            "Statement of Financial Position (Balance Sheet)",
+            `"As of Date: ${asOfDate}"`,
+            ""
+        ];
+
+        // 1. Process Assets Table
+        csv.push("ASSETS,Amount (NPR)");
+        const assetsTable = document.getElementById('assetsTable');
+        if (assetsTable) {
+            const rows = assetsTable.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length === 2) {
+                    const name = cells[0].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+                    const amt = cells[1].innerText.replace("Rs.", "").replace(/,/g, "").trim();
+                    csv.push(`"${name.replace(/"/g, '""')}",${amt}`);
+                }
+            });
+            const tfoot = assetsTable.querySelector('tfoot td:last-child');
+            if (tfoot) {
+                const totalAssetVal = tfoot.innerText.replace("Rs.", "").replace(/,/g, "").trim();
+                csv.push(`"TOTAL ASSETS",${totalAssetVal}`);
+            }
+        }
+        csv.push("");
+
+        // 2. Process Liabilities & Equity Table
+        csv.push("LIABILITIES & EQUITY,Amount (NPR)");
+        const liabTable = document.getElementById('liabilitiesEquityTable');
+        if (liabTable) {
+            const rows = liabTable.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length === 2) {
+                    const name = cells[0].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+                    const amt = cells[1].innerText.replace("Rs.", "").replace(/,/g, "").trim();
+                    csv.push(`"${name.replace(/"/g, '""')}",${amt}`);
+                } else if (cells.length === 1) {
+                    const header = cells[0].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+                    csv.push(`"${header.replace(/"/g, '""')}",`);
+                }
+            });
+            const tfoot = liabTable.querySelector('tfoot td:last-child');
+            if (tfoot) {
+                const totalLiabVal = tfoot.innerText.replace("Rs.", "").replace(/,/g, "").trim();
+                csv.push(`"TOTAL LIABILITIES & EQUITY",${totalLiabVal}`);
+            }
+        }
+
+        const csvFile = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const downloadLink = document.createElement("a");
+        downloadLink.download = `Balance_Sheet_${asOfDate.replace(/-/g, '_')}.csv`;
+        downloadLink.href = window.URL.createObjectURL(csvFile);
+        downloadLink.style.display = "none";
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+</script>
+{% endblock %}

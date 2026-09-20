@@ -1,27 +1,45 @@
 """
-POS Counter Terminal & Parked Bill (Hold Cart) Recovery Service.
-File Path: D:\Mobile Shop\Inventory\apps\sales\services\pos_service.py
+POS Counter Terminal, Sales Estimation & Parked Bill Recovery Service.
 
 Core Capabilities:
-1. Itemized Sales Return & Defective Quarantine Routing:
-   - Allows partial or itemized returns from multi-item invoices without voiding the bill.
-   - Working items are restored to sellable live stock counter.
-   - Defective items are automatically routed to Quarantined Defective Stock for Vendor RMA claims.
-   - Updates ItemInstance statuses (IN_STOCK vs RETURNED_DEFECTIVE) and deactivates active warranties for returned units.
-   - Deducts return amounts from customer cumulative lifetime spend (total_spent).
-   - Adjusts customer Udhaari balance and posts CustomerUdhaariLedger entries when store credit is chosen.
-   - Updates invoice status to PARTIALLY_RETURNED or RETURNED.
-2. Price Recovery for Parked Bills: Full preservation of item rates, discounts, quantities, and scanned IMEIs on F9 (Hold) and F10 (Recall).
-3. Dual-SIM Sequential Scanning: Automatic prompt and dual-slot validation for IMEI 1 & IMEI 2.
-4. Strict Walk-In Credit (Udhaari) Guard: Blocks credit sales for anonymous walk-in customers and enforces credit limits.
-5. Server-Side Catalog Price Integrity (SEC-01): Verifies cart prices against official database rates and mandates Manager PIN overrides on deviations.
-6. Multi-Mode Payment & Trade-In Excess: Handles split payments, excess buy-back credit refunds, real-time inventory deductions, and FIFO costing.
+1. Historical Migration Safeguard (Zero Shelf-Stock Deduction):
+   - When is_historical_import=True, saves the sales invoice and items for audit and tax
+     reporting, but completely bypasses physical stock deduction (InventoryService.adjust_stock),
+     batch depletion (ProductBatch), handset serial mutation (ItemInstance), and customer warranties.
+   - Sets total_cost_amount to 0.00 for historical imports, protecting Account 1310 (Inventory Asset).
+2. Strict Live Counter Validation (15-Digit Mandatory IMEI):
+   - When is_historical_import=False (standard live POS operations), strictly mandates that any
+     smartphone (product.requires_imei_tracking) must have a valid scanned 15-digit IMEI verified
+     in IN_STOCK status before allowing checkout.
+3. Direct Amount Usage & Zero Rounding Leakage:
+   - When Discount Type = AMOUNT (or legacy FIXED), the entered monetary value is
+     applied directly as the line deduction without prior conversion to percentage.
+4. Absolute Field Separation:
+   - Item discount is saved exclusively into item_discount_amount.
+   - Proportional bill-level discount is saved exclusively into allocated_bill_discount_amount.
+5. Proportional Bill Discount Allocation with Residual Penny Reconciliation:
+   - Distributes bill-level discounts only across eligible discountable lines.
+   - Reconciles 1-paisa rounding variances to the highest-value line item.
+6. Post-Discount Net Tax Base:
+   - TaxCalculator computes VAT strictly on the net post-discount payable base.
+7. Strict General Ledger Integration & Bank Reconciliation:
+   - Normalizes and captures digital transaction reference numbers (FonePay Trace IDs,
+     eSewa IDs, Card Approval Codes, Cheque Numbers).
+   - Enriches General Ledger double-entry voucher line narrations with exact transaction
+     reference codes so accountants can reconcile bank statement deposits effortlessly.
+8. Itemized Sales Return & Defective Routing:
+   - Refunds strictly the net amount the customer paid per returned unit.
+   - Restocks working items to sellable stock and routes defective items to RMA quarantine.
+9. Atomic Bill Cancellation:
+   - Reverses physical stock, voids warranties, reverses Udhaari, and creates inverse journal vouchers.
 """
 
 import re
 import uuid
+import inspect
+import logging
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 
 from django.db import transaction
@@ -43,12 +61,16 @@ from apps.sales.services.trade_in_engine import TradeInValuationEngine
 from apps.customers.models import Customer, CustomerUdhaariLedger
 from apps.branches.models import Branch, BranchDocumentSequence
 from apps.core.models import SystemConfiguration, AuditLog
+from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
+
+logger = logging.getLogger(__name__)
 
 
 class TaxCalculator:
     """
-    Dedicated tax computation engine supporting Inclusive, Exclusive, and Exempt tax models.
+    Dedicated tax computation engine supporting Exclusive, Inclusive, and Exempt tax regimes.
+    Calculates tax strictly on the net post-discount merchandise base.
     """
 
     @staticmethod
@@ -90,8 +112,13 @@ class TaxCalculator:
 class SalesPOSService:
     """
     Modular POS Engine executing instant billing, sales scoping, dual-IMEI tagging,
-    price validation, customer credit checks, live inventory movements, and itemized sales returns.
+    price validation, customer credit checks, live inventory movements, itemized sales returns,
+    and automated General Ledger double-entry synchronization.
     """
+
+    DIGITAL_PAYMENT_MODES = {
+        'FONEPAY', 'ESEWA', 'KHALTI', 'CARD', 'BANK_TRANSFER', 'CONNECT_IPS', 'CHEQUE'
+    }
 
     @staticmethod
     def generate_estimate_number(branch: Branch) -> str:
@@ -119,42 +146,64 @@ class SalesPOSService:
         customer_name: str = "",
         customer_phone: str = "",
         customer_pan: str = "",
-        bill_discount_percent: Decimal = Decimal('0.00'),
+        bill_discount_type: str = 'PERCENTAGE',
+        bill_discount_input_value: Optional[Decimal] = None,
+        bill_discount_percent: Optional[Decimal] = None,
+        discount_reason: str = "",
         trade_in_voucher_id: Optional[int] = None,
         manager_override_user=None,
-        notes: str = ""
+        notes: str = "",
+        is_historical_import: bool = False,
+        bill_date_ad: Optional[date] = None,
+        bill_date_bs: Optional[str] = None,
+        fiscal_year: Optional[str] = None,
+        estimate_number_override: Optional[str] = None,
+        **kwargs
     ) -> SalesEstimate:
+        """
+        Main transactional checkout coordinator.
+        
+        SAFEGUARDS:
+        - When is_historical_import=True:
+            * Bypasses physical stock deduction and batch depletion.
+            * Bypasses strict counter IMEI mandates (historical rows can use placeholders).
+            * Protects Account 1310 (Inventory Asset) by setting total_cost_amount = 0.00.
+        - When is_historical_import=False (Live Daily POS Sales):
+            * 100% strictly mandates 15-digit IMEIs for real smartphones.
+            * Decrements live warehouse shelf inventory and manages serialized warranties.
+        """
         cls._validate_cart_items(cart_items)
-
-        if bill_discount_percent is None:
-            bill_discount_percent = Decimal('0.00')
-        if not isinstance(bill_discount_percent, Decimal):
-            try:
-                bill_discount_percent = Decimal(str(bill_discount_percent))
-            except (InvalidOperation, ValueError, TypeError):
-                raise ValidationError("Invalid bill discount percentage format.")
-
-        bill_discount_percent = bill_discount_percent.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        if bill_discount_percent < Decimal('0.00') or bill_discount_percent > Decimal('100.00'):
-            raise ValidationError(
-                f"Invalid bill discount percentage ({bill_discount_percent}%). "
-                f"Discount percentage must be between 0.00% and 100.00%."
-            )
 
         config = SystemConfiguration.get_solo()
         is_shop_vat_registered = (config.tax_system_mode == 'VAT')
-        today_ad = timezone.now().date()
-        today_bs = ad_to_bs_string(today_ad, lang='en')
 
+        # 1. Date & Fiscal Period Resolution
+        if bill_date_ad:
+            target_date_ad = bill_date_ad
+            if isinstance(target_date_ad, datetime):
+                target_date_ad = target_date_ad.date()
+        else:
+            target_date_ad = timezone.now().date()
+
+        if bill_date_bs and fiscal_year:
+            target_date_bs = bill_date_bs
+            target_fiscal_year = fiscal_year
+        else:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(target_date_ad)
+            target_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+            target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+        # 2. Resolve Customer Profile & Tier
         customer_type = 'RETAIL'
         if customer_id:
             customer_record = Customer.objects.filter(id=customer_id, is_active=True).first()
             if customer_record:
                 customer_type = customer_record.customer_type
 
+        # 3. Validate Trade-In Voucher (if attached)
         trade_in_voucher, trade_in_credit_amt = cls._validate_trade_in_voucher(branch, trade_in_voucher_id)
 
+        # 4. Parse Cart Lines (Dual-Mode Item Discounts & Price Override Audit)
         processed_lines, subtotal, item_discount_sum = cls._parse_cart_lines(
             cart_items=cart_items,
             is_shop_vat_registered=is_shop_vat_registered,
@@ -162,42 +211,127 @@ class SalesPOSService:
             manager_override_user=manager_override_user,
             config=config,
             cashier=cashier,
-            branch=branch
+            branch=branch,
+            is_historical=is_historical_import
         )
 
-        net_after_item_discounts = max(Decimal('0.00'), subtotal - item_discount_sum)
-        threshold = config.require_manager_approval_discount or Decimal('10.00')
+        # 5. Dual-Mode Bill-Level Discount Evaluation & Authorization Check
+        discountable_net_base = sum(
+            line['line_after_item_disc'] for line in processed_lines if line['is_discountable']
+        )
 
-        if bill_discount_percent > threshold:
-            is_authorized = bool(
-                manager_override_user or
-                cashier.is_superuser or
-                getattr(cashier, 'role', '') in ['OWNER', 'MANAGER']
-            )
-            if not is_authorized:
+        raw_bill_type = str(bill_discount_type or 'PERCENTAGE').upper().strip()
+        if raw_bill_type in ['AMOUNT', 'FIXED', 'FLAT', 'CASH', 'NPR', 'RS']:
+            raw_bill_type = 'AMOUNT'
+        elif raw_bill_type in ['PERCENTAGE', '%', 'PERCENT']:
+            raw_bill_type = 'PERCENTAGE'
+        elif raw_bill_type == 'NONE':
+            raw_bill_type = 'NONE'
+        else:
+            raw_bill_type = 'PERCENTAGE'
+
+        if bill_discount_input_value is not None and str(bill_discount_input_value).strip() != '':
+            try:
+                raw_bill_input = Decimal(str(bill_discount_input_value))
+            except (InvalidOperation, ValueError, TypeError):
+                raise ValidationError("Invalid bill discount input format.")
+        elif bill_discount_percent is not None and str(bill_discount_percent).strip() != '':
+            try:
+                raw_bill_input = Decimal(str(bill_discount_percent))
+                raw_bill_type = 'PERCENTAGE'
+            except (InvalidOperation, ValueError, TypeError):
+                raise ValidationError("Invalid bill discount percentage format.")
+        else:
+            raw_bill_input = Decimal('0.00')
+
+        raw_bill_input = raw_bill_input.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        if raw_bill_input < Decimal('0.00'):
+            raise ValidationError("Bill discount cannot be negative.")
+
+        if raw_bill_input > Decimal('0.00') and discountable_net_base <= Decimal('0.00'):
+            raise ValidationError("Bill discount cannot be applied because there are no discountable items in the cart.")
+
+        # Calculate bill discount deduction amount and secondary control percentage
+        if raw_bill_type == 'AMOUNT':
+            if raw_bill_input > discountable_net_base and not is_historical_import:
                 raise ValidationError(
-                    f"Bill discount of {bill_discount_percent:.2f}% exceeds the store manager threshold of {threshold:.2f}%. "
-                    f"Manager PIN approval is required."
+                    f"Bill discount amount of Rs. {raw_bill_input:.2f} cannot exceed "
+                    f"the discountable merchandise subtotal of Rs. {discountable_net_base:.2f}."
                 )
+            bill_discount_amt = raw_bill_input
+            effective_bill_discount_pct = (
+                ((bill_discount_amt / discountable_net_base) * Decimal('100.00')).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )
+                if discountable_net_base > Decimal('0.00')
+                else Decimal('0.00')
+            )
+        elif raw_bill_type == 'PERCENTAGE':
+            if raw_bill_input > Decimal('100.00'):
+                raise ValidationError(f"Bill discount percentage ({raw_bill_input:.2f}%) cannot exceed 100.00%.")
+            effective_bill_discount_pct = raw_bill_input
+            bill_discount_amt = (
+                discountable_net_base * (effective_bill_discount_pct / Decimal('100.00'))
+            ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            raw_bill_type = 'NONE'
+            raw_bill_input = Decimal('0.00')
+            effective_bill_discount_pct = Decimal('0.00')
+            bill_discount_amt = Decimal('0.00')
 
-        bill_discount_amt = (net_after_item_discounts * (bill_discount_percent / Decimal('100.00'))).quantize(
-            Decimal('0.01'), rounding=ROUND_HALF_UP
+        # Check global manager approval threshold (Bypassed on historical migration)
+        threshold = config.require_manager_approval_discount or Decimal('10.00')
+        is_cashier_privileged = bool(
+            manager_override_user or
+            cashier.is_superuser or
+            getattr(cashier, 'role', '') in ['OWNER', 'MANAGER'] or
+            is_historical_import
         )
 
-        estimate_number = cls.generate_estimate_number(branch)
+        if effective_bill_discount_pct > threshold and not is_cashier_privileged:
+            raise ValidationError(
+                f"Bill discount of {effective_bill_discount_pct:.2f}% (Rs. {bill_discount_amt:.2f}) "
+                f"exceeds the supervisor authorization threshold of {threshold:.2f}%. "
+                f"Manager PIN approval is required."
+            )
+
+        # 6. Proportional Bill Discount Allocation with Residual Penny Reconciliation
+        cls._allocate_bill_discount_with_residual_reconciliation(
+            processed_lines=processed_lines,
+            discountable_net_base=discountable_net_base,
+            bill_discount_amt=bill_discount_amt
+        )
+
+        # 7. Initialize Sales Estimate Invoice Model
+        estimate_number = estimate_number_override or cls.generate_estimate_number(branch)
+        discount_approved_at = timezone.now() if (
+            manager_override_user or (
+                is_cashier_privileged and (
+                    bill_discount_amt > Decimal('0.00') or
+                    any(l['price_override_amount'] > Decimal('0.00') or l['line_disc'] > Decimal('0.00') for l in processed_lines)
+                )
+            )
+        ) else None
 
         estimate = SalesEstimate(
             estimate_number=estimate_number,
             branch=branch,
             cashier=cashier,
             salesperson=salesperson or cashier,
-            bill_date_ad=today_ad,
-            bill_date_bs=today_bs,
+            bill_date_ad=target_date_ad,
+            bill_date_bs=target_date_bs,
+            fiscal_year=target_fiscal_year,
             customer_id=customer_id,
             customer_name_manual=customer_name,
             customer_phone_manual=customer_phone,
             customer_pan=customer_pan,
-            bill_discount_percent=bill_discount_percent,
+            bill_discount_type=raw_bill_type,
+            bill_discount_input_value=raw_bill_input,
+            bill_discount_percent=effective_bill_discount_pct,
+            bill_discount_amount=bill_discount_amt,
+            discount_reason=discount_reason.strip() if discount_reason else None,
+            discount_approved_at=discount_approved_at,
             has_trade_in_exchange=bool(trade_in_voucher),
             trade_in_discount_amount=trade_in_credit_amt,
             trade_in_voucher_reference=trade_in_voucher.voucher_number if trade_in_voucher else None,
@@ -207,43 +341,57 @@ class SalesPOSService:
             is_vat_applicable=is_shop_vat_registered
         )
 
+        # 8. Process Line Items, Taxes, COGS & Inventory (Safeguard Applied)
         calc_result = cls._process_lines_and_inventory(
             estimate=estimate,
             branch=branch,
             cashier=cashier,
             processed_lines=processed_lines,
-            net_after_item_discounts=net_after_item_discounts,
-            bill_discount_amt=bill_discount_amt,
             is_shop_vat_registered=is_shop_vat_registered,
             default_vat_rate=config.default_vat_rate,
             allow_negative=config.allow_negative_stock,
-            today_ad=today_ad,
+            today_ad=target_date_ad,
             customer_name=customer_name,
-            customer_phone=customer_phone
+            customer_phone=customer_phone,
+            is_historical=is_historical_import
         )
 
+        # 9. Finalize Totals, Net Revenue & Margin Realization
         excess_trade_in_credit = cls._finalize_estimate_totals(
             estimate=estimate,
             subtotal=subtotal,
             item_discount_sum=item_discount_sum,
             bill_discount_amt=bill_discount_amt,
             trade_in_credit_amt=trade_in_credit_amt,
-            calc_result=calc_result
+            calc_result=calc_result,
+            is_historical=is_historical_import
         )
 
-        if trade_in_voucher:
+        # Apply Trade-In Restocking if present (Only for live sales)
+        if trade_in_voucher and not is_historical_import:
             cls._apply_trade_in_restock(trade_in_voucher, estimate, branch, cashier)
 
-        cls._process_payments_and_udhaari(
+        # 10. Split Payments & Customer Debt (Udhaari) Settlement
+        payment_transactions = cls._process_payments_and_udhaari(
             estimate=estimate,
             branch=branch,
             cashier=cashier,
             payments=payments,
             customer_id=customer_id,
             excess_trade_in_credit=excess_trade_in_credit,
-            manager_override_user=manager_override_user
+            manager_override_user=manager_override_user,
+            is_historical=is_historical_import,
+            **kwargs
         )
 
+        # 11. Automatic General Ledger Double-Entry Posting
+        cls._post_gl_sales_estimate(
+            estimate=estimate,
+            cashier=cashier,
+            payment_transactions=payment_transactions
+        )
+
+        # 12. Forensic Audit Log
         AuditLog.objects.create(
             user=cashier,
             branch=branch,
@@ -252,15 +400,33 @@ class SalesPOSService:
             object_repr=estimate.estimate_number,
             details={
                 'tax_mode': config.tax_system_mode,
-                'grand_total': str(estimate.grand_total),
-                'bill_discount_pct': str(bill_discount_percent),
+                'subtotal': str(estimate.subtotal),
+                'item_discount_total': str(estimate.item_discount_total),
+                'bill_discount_type': estimate.bill_discount_type,
+                'bill_discount_input': str(estimate.bill_discount_input_value),
+                'bill_discount_amount': str(estimate.bill_discount_amount),
+                'bill_discount_pct': str(estimate.bill_discount_percent),
+                'discount_reason': estimate.discount_reason or "",
                 'trade_in_credit': str(trade_in_credit_amt),
-                'excess_trade_in_refunded_or_credited': str(excess_trade_in_credit),
+                'excess_trade_in_credit': str(excess_trade_in_credit),
+                'grand_total': str(estimate.grand_total),
+                'total_cogs': str(estimate.total_cost_amount),
+                'total_gross_profit': str(estimate.total_gross_profit),
                 'paid': str(estimate.paid_amount),
                 'due': str(estimate.due_amount),
                 'payment_status': estimate.payment_status,
-                'salesperson': estimate.salesperson.username,
-                'manager_override': manager_override_user.username if manager_override_user else None
+                'is_historical_import': is_historical_import,
+                'payments': [
+                    {
+                        'mode': p.payment_mode,
+                        'amount': str(p.amount),
+                        'transaction_ref': p.transaction_ref or ""
+                    }
+                    for p in payment_transactions
+                ],
+                'salesperson': estimate.salesperson.username if estimate.salesperson else cashier.username,
+                'manager_override': manager_override_user.username if manager_override_user else None,
+                'discount_approved_at': estimate.discount_approved_at.isoformat() if estimate.discount_approved_at else None
             }
         )
 
@@ -294,8 +460,13 @@ class SalesPOSService:
         manager_override_user=None,
         config: SystemConfiguration = None,
         cashier=None,
-        branch: Branch = None
+        branch: Branch = None,
+        is_historical: bool = False
     ) -> Tuple[list, Decimal, Decimal]:
+        """
+        Parses all cart lines.
+        Supports direct AMOUNT and PERCENTAGE line-level discounts without rounding leakage.
+        """
         processed = []
         subtotal = Decimal('0.00')
         item_discount_sum = Decimal('0.00')
@@ -303,6 +474,7 @@ class SalesPOSService:
         threshold = config.require_manager_approval_discount if config else Decimal('10.00')
         is_cashier_privileged = bool(
             manager_override_user or
+            is_historical or
             (cashier and (cashier.is_superuser or getattr(cashier, 'role', '') in ['OWNER', 'MANAGER']))
         )
 
@@ -324,6 +496,7 @@ class SalesPOSService:
             if qty <= Decimal('0.000'):
                 raise ValidationError(f"Quantity for item '{product.name}' must be greater than zero.")
 
+            # Packaging Unit Conversion
             pkg_conversion_id = item_data.get('unit_conversion_id') or item_data.get('conversion_id')
             factor = Decimal('1.000')
             unit_conv = None
@@ -332,6 +505,7 @@ class SalesPOSService:
                 if unit_conv:
                     factor = unit_conv.conversion_factor
 
+            # Official Catalog Price
             base_official_price = ProductCatalogService.get_applicable_price(product, qty * factor, customer_type)
             if unit_conv and unit_conv.selling_price_per_unit:
                 official_unit_price = unit_conv.selling_price_per_unit
@@ -339,6 +513,7 @@ class SalesPOSService:
                 official_unit_price = base_official_price * factor
             official_unit_price = official_unit_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+            # Submitted Selling Price
             raw_price = item_data.get('unit_price')
             if raw_price is None or str(raw_price).strip() == '':
                 raw_price = item_data.get('price')
@@ -353,48 +528,108 @@ class SalesPOSService:
             else:
                 submitted_unit_price = official_unit_price
 
-            raw_item_disc = item_data.get('discount_percent', 0)
+            if submitted_unit_price < Decimal('0.00'):
+                raise ValidationError(f"Unit price for '{product.name}' cannot be negative.")
+
+            # Gross Line Totals
+            line_official_gross = (qty * official_unit_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            line_submitted_gross = (qty * submitted_unit_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            # Dual-Mode Item Discount Parsing
+            raw_disc_type = str(item_data.get('discount_type', '')).upper().strip()
+            if raw_disc_type in ['AMOUNT', 'FIXED', 'FLAT', 'CASH', 'NPR', 'RS']:
+                raw_disc_type = 'AMOUNT'
+            elif raw_disc_type in ['PERCENTAGE', '%', 'PERCENT']:
+                raw_disc_type = 'PERCENTAGE'
+            elif raw_disc_type == 'NONE':
+                raw_disc_type = 'NONE'
+            else:
+                raw_disc_type = 'PERCENTAGE'
+
+            raw_disc_val = item_data.get('discount_input_value')
+            if raw_disc_val is None or str(raw_disc_val).strip() == '':
+                raw_disc_val = item_data.get('discount_value')
+            if raw_disc_val is None or str(raw_disc_val).strip() == '':
+                raw_disc_val = item_data.get('discount_percent', Decimal('0.00'))
+
             try:
-                discount_pct = Decimal(str(raw_item_disc if raw_item_disc is not None else 0)).quantize(
+                disc_input_val = Decimal(str(raw_disc_val if raw_disc_val is not None else 0)).quantize(
                     Decimal('0.01'), rounding=ROUND_HALF_UP
                 )
             except (InvalidOperation, ValueError, TypeError):
-                raise ValidationError(f"Invalid line discount percentage for '{product.name}'.")
+                raise ValidationError(f"Invalid line discount input for '{product.name}'.")
 
-            if discount_pct < Decimal('0.00') or discount_pct > Decimal('100.00'):
+            if disc_input_val < Decimal('0.00'):
+                raise ValidationError(f"Discount for '{product.name}' cannot be negative.")
+
+            is_item_discountable = getattr(product, 'is_discountable', True)
+            if not is_item_discountable and disc_input_val > Decimal('0.00') and not is_historical:
                 raise ValidationError(
-                    f"Line item discount percentage for '{product.name}' must be between 0.00% and 100.00%. "
-                    f"Received: {discount_pct}%."
+                    f"Product '{product.name}' is marked as non-discountable. Line-level discounts cannot be applied."
                 )
 
-            line_official_gross = (qty * official_unit_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            line_submitted_gross = (qty * submitted_unit_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            line_submitted_disc = (line_submitted_gross * (discount_pct / Decimal('100.00'))).quantize(
-                Decimal('0.01'), rounding=ROUND_HALF_UP
-            )
+            if not is_item_discountable or raw_disc_type == 'NONE' or disc_input_val == Decimal('0.00'):
+                raw_disc_type = 'NONE'
+                disc_input_val = Decimal('0.00')
+                line_submitted_disc = Decimal('0.00')
+                effective_item_disc_pct = Decimal('0.00')
+            elif raw_disc_type == 'AMOUNT':
+                if disc_input_val > line_submitted_gross and not is_historical:
+                    raise ValidationError(
+                        f"Discount amount of Rs. {disc_input_val:.2f} on '{product.name}' cannot exceed "
+                        f"the line gross total of Rs. {line_submitted_gross:.2f}."
+                    )
+                line_submitted_disc = disc_input_val
+                effective_item_disc_pct = (
+                    ((line_submitted_disc / line_submitted_gross) * Decimal('100.00')).quantize(
+                        Decimal('0.01'), rounding=ROUND_HALF_UP
+                    )
+                    if line_submitted_gross > Decimal('0.00')
+                    else Decimal('0.00')
+                )
+            elif raw_disc_type == 'PERCENTAGE':
+                if disc_input_val > Decimal('100.00'):
+                    raise ValidationError(
+                        f"Discount percentage for '{product.name}' cannot exceed 100.00%. "
+                        f"Received: {disc_input_val:.2f}%."
+                    )
+                effective_item_disc_pct = disc_input_val
+                line_submitted_disc = (
+                    line_submitted_gross * (effective_item_disc_pct / Decimal('100.00'))
+                ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
             line_submitted_net = max(Decimal('0.00'), line_submitted_gross - line_submitted_disc)
 
-            effective_item_discount_pct = Decimal('0.00')
+            price_override_amount = Decimal('0.00')
+            if official_unit_price > submitted_unit_price:
+                price_override_amount = ((official_unit_price - submitted_unit_price) * qty).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )
+
+            total_price_concession = max(Decimal('0.00'), line_official_gross - line_submitted_net)
+            effective_commercial_pct = Decimal('0.00')
             if line_official_gross > Decimal('0.00'):
-                effective_item_discount_pct = (
-                    ((line_official_gross - line_submitted_net) / line_official_gross) * Decimal('100.00')
+                effective_commercial_pct = (
+                    (total_price_concession / line_official_gross) * Decimal('100.00')
                 ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             prod_max_discount = getattr(product, 'max_discount_percent', Decimal('10.00'))
             allowed_threshold = min(threshold, prod_max_discount)
 
             has_price_reduction = (submitted_unit_price < official_unit_price)
-            has_excessive_discount = (effective_item_discount_pct > allowed_threshold)
+            has_excessive_item_discount = (effective_item_disc_pct > prod_max_discount)
+            has_excessive_concession = (effective_commercial_pct > allowed_threshold)
 
-            if (has_price_reduction or has_excessive_discount) and not is_cashier_privileged:
+            if (has_price_reduction or has_excessive_item_discount or has_excessive_concession) and not is_cashier_privileged:
                 raise ValidationError(
-                    f"Unauthorized price reduction or discount on '{product.name}'. "
-                    f"Official Database Price: Rs. {official_unit_price:.2f}, Submitted Price: Rs. {submitted_unit_price:.2f} "
-                    f"(Effective Discount: {effective_item_discount_pct:.2f}% > Allowed: {allowed_threshold:.2f}%). "
-                    f"Manager PIN approval is required."
+                    f"Commercial discount ceiling exceeded on '{product.name}'. "
+                    f"Official Catalog Price: Rs. {official_unit_price:.2f}, Submitted Unit Rate: Rs. {submitted_unit_price:.2f} "
+                    f"(Item Discount: {effective_item_disc_pct:.2f}% > Product Max: {prod_max_discount:.2f}%, "
+                    f"Total Concession: Rs. {total_price_concession:.2f} / {effective_commercial_pct:.2f}% > Allowed: {allowed_threshold:.2f}%). "
+                    f"Manager PIN authorization is required."
                 )
 
-            if has_price_reduction and is_cashier_privileged:
+            if has_price_reduction and is_cashier_privileged and not is_historical:
                 AuditLog.objects.create(
                     user=manager_override_user or cashier,
                     branch=branch,
@@ -402,22 +637,18 @@ class SalesPOSService:
                     module='POS_Checkout',
                     object_repr=f"{product.name} (SKU: {product.sku})",
                     details={
-                        'official_price': str(official_unit_price),
-                        'override_price': str(submitted_unit_price),
+                        'official_unit_price': str(official_unit_price),
+                        'override_unit_price': str(submitted_unit_price),
                         'quantity': str(qty),
-                        'effective_discount_pct': str(effective_item_discount_pct),
+                        'concession_amount': str(price_override_amount),
+                        'effective_commercial_pct': str(effective_commercial_pct),
                         'authorized_by': (manager_override_user.username if manager_override_user else cashier.username)
                     }
                 )
 
-            unit_price = submitted_unit_price
             base_units = (qty * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
-            line_gross = line_submitted_gross
-            line_disc = line_submitted_disc
-            line_after_item_disc = line_submitted_net
-
-            subtotal += line_gross
-            item_discount_sum += line_disc
+            subtotal += line_submitted_gross
+            item_discount_sum += line_submitted_disc
 
             imei_num = str(item_data.get('imei_number', '') or item_data.get('imei_1', '')).strip()
             secondary_imei = str(item_data.get('secondary_imei', '') or item_data.get('imei_2', '')).strip()
@@ -429,21 +660,68 @@ class SalesPOSService:
             processed.append({
                 'product': product,
                 'qty': qty,
-                'unit_price': unit_price,
+                'unit_price': submitted_unit_price,
                 'official_unit_price': official_unit_price,
-                'discount_pct': discount_pct,
-                'line_gross': line_gross,
-                'line_disc': line_disc,
-                'line_after_item_disc': line_after_item_disc,
+                'price_override_amount': price_override_amount,
+                'discount_type': raw_disc_type,
+                'discount_input_value': disc_input_val,
+                'discount_percent': effective_item_disc_pct,
+                'line_gross': line_submitted_gross,
+                'line_disc': line_submitted_disc,
+                'line_after_item_disc': line_submitted_net,
+                'is_discountable': is_item_discountable,
                 'factor': factor,
                 'unit_conv': unit_conv,
                 'base_units': base_units,
                 'imei_num': imei_num,
                 'secondary_imei': secondary_imei,
                 'tax_mode': tax_mode,
+                'allocated_bill_discount': Decimal('0.00')
             })
 
         return processed, subtotal, item_discount_sum
+
+    @classmethod
+    def _allocate_bill_discount_with_residual_reconciliation(
+        cls,
+        processed_lines: list,
+        discountable_net_base: Decimal,
+        bill_discount_amt: Decimal
+    ) -> None:
+        if discountable_net_base <= Decimal('0.00') or bill_discount_amt <= Decimal('0.00'):
+            for line in processed_lines:
+                line['allocated_bill_discount'] = Decimal('0.00')
+            return
+
+        allocated_discounts = []
+        sum_allocated = Decimal('0.00')
+        largest_idx = -1
+        largest_net = Decimal('-1.00')
+
+        for idx, line in enumerate(processed_lines):
+            line_net = line['line_after_item_disc']
+            is_discountable = line['is_discountable']
+
+            if not is_discountable or line_net <= Decimal('0.00'):
+                raw_alloc = Decimal('0.00')
+            else:
+                if line_net > largest_net:
+                    largest_net = line_net
+                    largest_idx = idx
+
+                raw_alloc = (bill_discount_amt * (line_net / discountable_net_base)).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )
+
+            allocated_discounts.append(raw_alloc)
+            sum_allocated += raw_alloc
+
+        residual = bill_discount_amt - sum_allocated
+        if residual != Decimal('0.00') and largest_idx >= 0:
+            allocated_discounts[largest_idx] += residual
+
+        for idx, line in enumerate(processed_lines):
+            line['allocated_bill_discount'] = allocated_discounts[idx]
 
     @classmethod
     def _process_lines_and_inventory(
@@ -452,14 +730,13 @@ class SalesPOSService:
         branch: Branch,
         cashier,
         processed_lines: list,
-        net_after_item_discounts: Decimal,
-        bill_discount_amt: Decimal,
         is_shop_vat_registered: bool,
         default_vat_rate: Decimal,
         allow_negative: bool,
         today_ad: date,
         customer_name: str,
-        customer_phone: str
+        customer_phone: str,
+        is_historical: bool = False
     ) -> Dict[str, Any]:
         saved_items = []
         taxable_total = Decimal('0.00')
@@ -478,16 +755,11 @@ class SalesPOSService:
             imei_num = line['imei_num']
             secondary_imei = line['secondary_imei']
             tax_mode = line['tax_mode']
-            line_disc = line['line_disc']
+            pure_item_disc = line['line_disc']
+            allocated_bill_disc = line['allocated_bill_discount']
             line_after_item_disc = line['line_after_item_disc']
 
-            line_bill_disc = Decimal('0.00')
-            if net_after_item_discounts > Decimal('0.00') and bill_discount_amt > Decimal('0.00'):
-                line_bill_disc = (bill_discount_amt * (line_after_item_disc / net_after_item_discounts)).quantize(
-                    Decimal('0.01'), rounding=ROUND_HALF_UP
-                )
-
-            net_line_payable = max(Decimal('0.00'), line_after_item_disc - line_bill_disc)
+            net_line_payable = max(Decimal('0.00'), line_after_item_disc - allocated_bill_disc)
 
             effective_vat_rate = (
                 product.vat_rate if (product.is_vat_applicable and product.vat_rate > Decimal('0.00')) else default_vat_rate
@@ -509,6 +781,7 @@ class SalesPOSService:
             else:
                 non_taxable_total += net_line_payable
 
+            # Allocate Stock & Cost: Safeguard intercepts historical import to protect shelf inventory
             actual_unit_cost, item_instance, batch_ref, warranty_exp, warranty_summary = cls._allocate_stock_and_cost(
                 product=product,
                 branch=branch,
@@ -521,10 +794,12 @@ class SalesPOSService:
                 customer_name=customer_name,
                 customer_phone=customer_phone,
                 unit_price=unit_price,
-                cashier=cashier
+                cashier=cashier,
+                is_historical=is_historical
             )
 
             total_cogs += (actual_unit_cost * base_units)
+            total_line_discount_amount = pure_item_disc + allocated_bill_disc
 
             saved_items.append(SalesEstimateItem(
                 estimate=estimate,
@@ -534,9 +809,16 @@ class SalesPOSService:
                 conversion_factor=factor,
                 base_unit_quantity=base_units,
                 unit_price=unit_price,
+                official_unit_price=line['official_unit_price'],
+                price_override_amount=line['price_override_amount'],
                 cost_price=actual_unit_cost,
-                discount_percent=line['discount_pct'],
-                discount_amount=line_disc + line_bill_disc,
+                discount_type=line['discount_type'],
+                discount_input_value=line['discount_input_value'],
+                item_discount_amount=pure_item_disc,
+                effective_discount_percent=line['discount_percent'],
+                allocated_bill_discount_amount=allocated_bill_disc,
+                discount_percent=line['discount_percent'],
+                discount_amount=total_line_discount_amount,
                 tax_pricing_type=tax_mode,
                 is_vat_applicable=is_shop_vat_registered and product.is_vat_applicable,
                 vat_rate=effective_vat_rate,
@@ -550,8 +832,8 @@ class SalesPOSService:
                 secondary_imei=secondary_imei or None,
                 serial_number=item_instance.serial_number if item_instance else None,
                 device_condition=item_instance.get_condition_display() if item_instance else "Brand New",
-                warranty_months=product.warranty_months,
-                warranty_start_date=today_ad,
+                warranty_months=product.warranty_months if not is_historical else 0,
+                warranty_start_date=today_ad if not is_historical else None,
                 warranty_expiry_date=warranty_exp,
                 warranty_terms=warranty_summary
             ))
@@ -579,8 +861,33 @@ class SalesPOSService:
         customer_name: str,
         customer_phone: str,
         unit_price: Decimal,
-        cashier
+        cashier,
+        is_historical: bool = False
     ) -> Tuple[Decimal, Optional[ItemInstance], Optional[str], Optional[date], str]:
+        """
+        Allocates stock and resolves landed costs.
+
+        SAFEGUARD PROTOCOL:
+        - If is_historical=True:
+            * Completely skips physical shelf stock deductions (InventoryService.adjust_stock).
+            * Leaves non-serialized ProductBatch balances untouched.
+            * Skips ItemInstance lookups and updates.
+            * Returns actual_unit_cost = 0.00 to guarantee that General Ledger Account 1310
+              (Merchandise Inventory Asset) is not credited with false deductions.
+        - If is_historical=False (Live POS Counter Operations):
+            * Mandates strict 15-digit IMEI check on all smartphones.
+            * Locks and marks ItemInstance as SOLD.
+            * Deducts warehouse inventory atomically via InventoryService.adjust_stock.
+        """
+        # =====================================================================
+        # 1. HISTORICAL MIGRATION BYPASS (SHELF INVENTORY FULLY PROTECTED)
+        # =====================================================================
+        if is_historical:
+            return Decimal('0.00'), None, None, None, "Historical Migration - Stock & Warranty Unaltered"
+
+        # =====================================================================
+        # 2. LIVE DAILY COUNTER BILLING (STRICT IMEI & REAL-TIME STOCK DEDUCTION)
+        # =====================================================================
         actual_unit_cost = product.purchase_price
         item_instance = None
         batch_ref = None
@@ -591,8 +898,9 @@ class SalesPOSService:
             clean_imei_1 = imei_num.strip() if imei_num else None
             clean_imei_2 = secondary_imei.strip() if secondary_imei else None
 
+            # Enforce 15-digit IMEI on live counter
             if not clean_imei_1 and not clean_imei_2:
-                raise ValidationError(f"Primary IMEI 1 is required for smartphone '{product.name}'.")
+                raise ValidationError(f"Primary 15-Digit IMEI is strictly required for smartphone '{product.name}'.")
 
             if clean_imei_1:
                 item_instance = ItemInstance.objects.select_for_update().filter(
@@ -657,6 +965,7 @@ class SalesPOSService:
                 warranty_summary = " | ".join(w_terms)
 
         else:
+            # Non-serialized accessories FIFO batch depletion
             available_batches = ProductBatch.objects.select_for_update().filter(
                 product=product, branch=branch, is_depleted=False
             ).order_by('purchase_date', 'created_at')
@@ -688,6 +997,7 @@ class SalesPOSService:
             if product.warranty_months > 0:
                 warranty_exp = today_ad + timedelta(days=product.warranty_months * 30)
 
+        # Deduct physical warehouse stock
         imei_log_str = f"{imei_num} / {secondary_imei}".strip(' /') if (imei_num or secondary_imei) else ""
         InventoryService.adjust_stock(
             product=product,
@@ -710,7 +1020,8 @@ class SalesPOSService:
         item_discount_sum: Decimal,
         bill_discount_amt: Decimal,
         trade_in_credit_amt: Decimal,
-        calc_result: dict
+        calc_result: dict,
+        is_historical: bool = False
     ) -> Decimal:
         gross_payable = (subtotal - item_discount_sum - bill_discount_amt) + calc_result['exclusive_vat_to_add']
 
@@ -726,22 +1037,22 @@ class SalesPOSService:
             )
 
         grand_total = net_payable_after_trade_in
-        round_off = Decimal('0.00')
-
         net_merchandise_revenue = calc_result['taxable_total'] + calc_result['non_taxable_total']
-        total_gross_profit = (net_merchandise_revenue - calc_result['total_cogs']).quantize(
+        
+        # Zero COGS on historical import protects General Ledger Account 1310
+        total_cogs = Decimal('0.00') if is_historical else calc_result['total_cogs']
+        total_gross_profit = (net_merchandise_revenue - total_cogs).quantize(
             Decimal('0.01'), rounding=ROUND_HALF_UP
         )
 
         estimate.subtotal = subtotal
         estimate.item_discount_total = item_discount_sum
-        estimate.bill_discount_amount = bill_discount_amt
         estimate.taxable_amount = calc_result['taxable_total']
         estimate.non_taxable_amount = calc_result['non_taxable_total']
         estimate.vat_amount = calc_result['vat_sum']
-        estimate.round_off = round_off
+        estimate.round_off = Decimal('0.00')
         estimate.grand_total = grand_total
-        estimate.total_cost_amount = calc_result['total_cogs']
+        estimate.total_cost_amount = total_cogs
         estimate.total_gross_profit = total_gross_profit
         estimate.save()
 
@@ -761,22 +1072,37 @@ class SalesPOSService:
             user=cashier
         )
 
-    @staticmethod
+    @classmethod
     def _process_payments_and_udhaari(
+        cls,
         estimate: SalesEstimate,
         branch: Branch,
         cashier,
         payments: list,
         customer_id: Optional[int],
         excess_trade_in_credit: Decimal = Decimal('0.00'),
-        manager_override_user=None
-    ):
+        manager_override_user=None,
+        is_historical: bool = False,
+        **kwargs
+    ) -> List[SalesPaymentTransaction]:
+        """
+        Parses split payments, normalizes transaction references, updates customer Udhaari
+        ledgers, and records SalesPaymentTransaction records.
+        """
         total_real_paid = Decimal('0.00')
         credit_tendered = Decimal('0.00')
+        created_transactions: List[SalesPaymentTransaction] = []
 
         for pay in payments:
-            pay_mode = str(pay.get('mode', '')).upper().strip()
-            amt = Decimal(str(pay.get('amount', 0))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            pay_mode = str(pay.get('mode') or pay.get('payment_mode') or '').upper().strip()
+            raw_amt = pay.get('amount', 0)
+            try:
+                amt = Decimal(str(raw_amt if raw_amt is not None else 0)).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )
+            except (InvalidOperation, ValueError, TypeError):
+                amt = Decimal('0.00')
+
             if amt > Decimal('0.00'):
                 if pay_mode == 'CREDIT':
                     credit_tendered += amt
@@ -785,13 +1111,14 @@ class SalesPOSService:
 
         tentative_due = max(Decimal('0.00'), estimate.grand_total - total_real_paid)
 
-        if (tentative_due > Decimal('0.00') or credit_tendered > Decimal('0.00')) and not customer_id:
+        # Restrict anonymous credit sales on live counter (Historical import bypasses)
+        if (tentative_due > Decimal('0.00') or credit_tendered > Decimal('0.00')) and not customer_id and not is_historical:
             raise ValidationError(
                 "Credit sales (Udhaari) require a registered customer profile. "
                 "Please select or register a customer before completing this sale."
             )
 
-        if customer_id and tentative_due > Decimal('0.00'):
+        if customer_id and tentative_due > Decimal('0.00') and not is_historical:
             customer = Customer.objects.select_for_update().get(id=customer_id)
             prev_balance = customer.current_credit_balance
             projected_balance = prev_balance + tentative_due
@@ -831,17 +1158,38 @@ class SalesPOSService:
                 )
 
         for pay in payments:
-            pay_mode = str(pay.get('mode', '')).upper().strip()
-            amt = Decimal(str(pay.get('amount', 0))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            ref = str(pay.get('reference', '') or '').strip()
+            pay_mode = str(pay.get('mode') or pay.get('payment_mode') or '').upper().strip()
+            raw_amt = pay.get('amount', 0)
+            try:
+                amt = Decimal(str(raw_amt if raw_amt is not None else 0)).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )
+            except (InvalidOperation, ValueError, TypeError):
+                amt = Decimal('0.00')
+
+            raw_ref = (
+                pay.get('transaction_ref') or
+                pay.get('trace_id') or
+                pay.get('approval_code') or
+                pay.get('txn_id') or
+                pay.get('reference') or
+                pay.get('reference_number') or
+                pay.get('auth_code') or
+                pay.get('cheque_number') or
+                pay.get('cheque_no') or
+                pay.get('ref') or
+                ''
+            )
+            clean_ref = str(raw_ref).strip() if raw_ref else ''
 
             if amt > Decimal('0.00'):
-                SalesPaymentTransaction.objects.create(
+                tx = SalesPaymentTransaction.objects.create(
                     estimate=estimate,
                     payment_mode=pay_mode,
                     amount=amt,
-                    transaction_ref=ref or None
+                    transaction_ref=clean_ref or None
                 )
+                created_transactions.append(tx)
 
         estimate.paid_amount = total_real_paid
         estimate.due_amount = tentative_due
@@ -859,7 +1207,7 @@ class SalesPOSService:
             estimate.payment_status = 'DUE'
             estimate.change_returned = Decimal('0.00')
 
-        if excess_trade_in_credit > Decimal('0.00'):
+        if excess_trade_in_credit > Decimal('0.00') and not is_historical:
             if customer_id:
                 customer = Customer.objects.select_for_update().get(id=customer_id)
                 prev_bal = customer.current_credit_balance
@@ -884,7 +1232,7 @@ class SalesPOSService:
 
         estimate.save(update_fields=['paid_amount', 'due_amount', 'change_returned', 'payment_status', 'updated_at'])
 
-        if customer_id:
+        if customer_id and not is_historical:
             customer = Customer.objects.select_for_update().get(id=customer_id)
             if estimate.due_amount > Decimal('0.00'):
                 prev_bal = customer.current_credit_balance
@@ -909,10 +1257,148 @@ class SalesPOSService:
                 customer.total_spent += estimate.grand_total
                 customer.save(update_fields=['total_spent', 'updated_at'])
 
-    # =========================================================================
-    # ITEMIZE SALES RETURN & DEFECTIVE ITEM QUARANTINE ROUTING
-    # =========================================================================
+        return created_transactions
 
+    @classmethod
+    def _post_gl_sales_estimate(
+        cls,
+        estimate: SalesEstimate,
+        cashier,
+        payment_transactions: Optional[List[SalesPaymentTransaction]] = None
+    ) -> None:
+        """
+        Executes double-entry General Ledger auto-posting strictly within the atomic transaction.
+        Enriches journal line items with cashier-provided payment reference codes (e.g. FonePay Trace ID,
+        eSewa Txn ID, Card Approval Code) for bank reconciliation.
+        """
+        from apps.accounting.services.auto_posting import AutoPostingService
+
+        if payment_transactions is None:
+            payment_transactions = list(
+                SalesPaymentTransaction.objects.filter(estimate=estimate).order_by('id')
+            )
+
+        payment_details = []
+        for ptx in payment_transactions:
+            ref_str = ptx.transaction_ref or ""
+            payment_details.append({
+                'id': ptx.id,
+                'mode': ptx.payment_mode,
+                'amount': ptx.amount,
+                'transaction_ref': ref_str,
+                'reference': ref_str,
+                'trace_id': ref_str,
+                'narration': (
+                    f"{ptx.payment_mode} Payment (Ref: {ref_str})"
+                    if ref_str else f"{ptx.payment_mode} Payment"
+                )
+            })
+
+        try:
+            sig = inspect.signature(AutoPostingService.post_sales_estimate)
+            call_kwargs = {'estimate': estimate, 'user': cashier}
+
+            if 'payment_details' in sig.parameters:
+                call_kwargs['payment_details'] = payment_details
+            if 'payment_transactions' in sig.parameters:
+                call_kwargs['payment_transactions'] = payment_transactions
+            if 'payments' in sig.parameters:
+                call_kwargs['payments'] = payment_details
+            if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                call_kwargs['payment_details'] = payment_details
+                call_kwargs['payment_transactions'] = payment_transactions
+
+            result_voucher = AutoPostingService.post_sales_estimate(**call_kwargs)
+
+            cls._enrich_voucher_payment_narrations(
+                estimate=estimate,
+                payment_transactions=payment_transactions,
+                result_voucher=result_voucher
+            )
+
+        except ValidationError:
+            raise
+        except Exception as err:
+            logger.error(
+                f"[POS GL Auto-Posting Error] Estimate {estimate.estimate_number} failed to post to GL: {err}",
+                exc_info=True
+            )
+            raise ValidationError(
+                f"Checkout could not be completed because General Ledger posting failed: {err}. "
+                f"The transaction has been rolled back to prevent accounting ledger discrepancy."
+            )
+
+    @classmethod
+    def _enrich_voucher_payment_narrations(
+        cls,
+        estimate: SalesEstimate,
+        payment_transactions: List[SalesPaymentTransaction],
+        result_voucher=None
+    ) -> None:
+        """
+        Guarantees that every payment line item in the sales journal voucher displays
+        the cashier-provided reference code directly on the General Ledger statement.
+        """
+        from apps.accounting.models import JournalEntry
+
+        voucher = result_voucher if isinstance(result_voucher, JournalEntry) else None
+        if not voucher:
+            voucher = JournalEntry.objects.filter(
+                voucher_type='SALES',
+                reference_document=estimate.estimate_number
+            ).order_by('-created_at').first()
+
+        if not voucher:
+            return
+
+        unmatched_refs = [
+            tx for tx in payment_transactions
+            if tx.transaction_ref and tx.amount > Decimal('0.00')
+        ]
+
+        if not unmatched_refs:
+            return
+
+        items = list(voucher.items.filter(debit_amount__gt=Decimal('0.00')).select_related('account'))
+
+        for tx in unmatched_refs:
+            tx_ref = tx.transaction_ref
+            mode_upper = tx.payment_mode.upper()
+            matched_item = None
+
+            for itm in items:
+                acct_name = (itm.account.name or '').upper() if itm.account else ''
+                line_narr = (itm.narration or '').upper()
+                if itm.debit_amount == tx.amount and (mode_upper in acct_name or mode_upper in line_narr):
+                    matched_item = itm
+                    break
+
+            if not matched_item:
+                for itm in items:
+                    if itm.debit_amount == tx.amount:
+                        matched_item = itm
+                        break
+
+            if not matched_item:
+                for itm in items:
+                    acct_name = (itm.account.name or '').upper() if itm.account else ''
+                    if mode_upper in acct_name:
+                        matched_item = itm
+                        break
+
+            if matched_item:
+                if tx_ref not in (matched_item.narration or ""):
+                    ref_tag = f"[{tx.payment_mode} Ref: {tx_ref}]"
+                    if matched_item.narration:
+                        matched_item.narration = f"{matched_item.narration} {ref_tag}"
+                    else:
+                        matched_item.narration = f"Receipt via {tx.payment_mode} {ref_tag} for {estimate.estimate_number}"
+                    matched_item.save(update_fields=['narration'])
+                items.remove(matched_item)
+
+    # =========================================================================
+    # ITEMIZED SALES RETURN & DEFECTIVE ITEM QUARANTINE ROUTING
+    # =========================================================================
     @classmethod
     @transaction.atomic
     def process_sales_return(
@@ -925,18 +1411,8 @@ class SalesPOSService:
         user
     ) -> SalesReturn:
         """
-        Executes itemized customer return workflow:
-        1. Itemized Return Selection: Returns single or multiple items from a bill without voiding whole invoice.
-        2. Routes Defective vs Working Items:
-           - Working Items: Directly restored to Sellable Branch Stock and ItemInstance marked IN_STOCK.
-           - Defective Items: Routed to Quarantined Defective Stock (`quarantined_defective_quantity`)
-             for Supplier RMA claims and ItemInstance marked RETURNED_DEFECTIVE.
-        3. Deactivates customer warranty cards for returned serialized items.
-        4. Financial & Debt Accounting:
-           - Deducts refund amount from customer's cumulative lifetime spend (`customer.total_spent`).
-           - If `refund_mode == 'STORE_CREDIT'`, reduces customer's Udhaari debt or increases credit deposit
-             and records an immutable `CustomerUdhaariLedger` ADJUSTMENT entry.
-        5. Updates invoice status to `PARTIALLY_RETURNED` or `RETURNED`.
+        Executes itemized customer return workflow, inventory restock/quarantine,
+        customer udhaari adjustments, and double-entry General Ledger reversal vouchers.
         """
         if original_estimate.status in ['CANCELLED', 'RETURNED']:
             raise ValidationError("Cannot process returns from an invoice that is already cancelled or fully returned.")
@@ -944,7 +1420,6 @@ class SalesPOSService:
         if not items_to_return:
             raise ValidationError("Please select at least one line item to return.")
 
-        # Re-lock original estimate
         original_estimate = SalesEstimate.objects.select_for_update().get(pk=original_estimate.pk)
 
         sales_return = SalesReturn.objects.create(
@@ -975,7 +1450,6 @@ class SalesPOSService:
             is_defective = bool(item_data.get('is_defective', False))
             defect_desc = str(item_data.get('defect_reason', '') or '').strip()
 
-            # Check previously returned quantities
             already_returned_qty = SalesReturnItem.objects.filter(
                 sales_return__original_estimate=original_estimate,
                 estimate_item=est_item
@@ -992,12 +1466,15 @@ class SalesPOSService:
             factor = est_item.conversion_factor if est_item.conversion_factor > Decimal('0.000') else Decimal('1.000')
             base_return_units = (return_qty * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
 
-            # Compute refund value proportional to net line item billing
             effective_unit_net_rate = (est_item.line_total / est_item.quantity).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
             ) if est_item.quantity > Decimal('0.000') else est_item.unit_price
 
             refund_val = (effective_unit_net_rate * return_qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            proportionate_item_discount = (
+                (est_item.item_discount_amount / est_item.quantity) * return_qty
+            ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if est_item.quantity > Decimal('0.000') else Decimal('0.00')
 
             SalesReturnItem.objects.create(
                 sales_return=sales_return,
@@ -1006,17 +1483,17 @@ class SalesPOSService:
                 return_quantity=return_qty,
                 base_unit_quantity=base_return_units,
                 refund_amount=refund_val,
+                discount_type=est_item.discount_type,
+                discount_input_value=est_item.discount_input_value,
+                item_discount_amount=proportionate_item_discount,
+                effective_discount_percent=est_item.effective_discount_percent,
                 returned_imei=est_item.imei_number,
                 restock_to_inventory=not is_defective,
                 is_defective=is_defective,
                 defect_reason=defect_desc
             )
 
-            # -------------------------------------------------------------
-            # INVENTORY ROUTING: SELLABLE WORKING STOCK vs DEFECTIVE QUARANTINE
-            # -------------------------------------------------------------
             if not is_defective:
-                # Working Condition: Restore to active branch sellable stock
                 InventoryService.adjust_stock(
                     product=est_item.product,
                     branch=original_estimate.branch,
@@ -1029,7 +1506,6 @@ class SalesPOSService:
                     allow_negative=True
                 )
             else:
-                # Defective Condition: Move to Quarantined Defective Stock for Vendor RMA
                 branch_stock, _ = BranchStock.objects.select_for_update().get_or_create(
                     branch=original_estimate.branch,
                     product=est_item.product,
@@ -1058,9 +1534,6 @@ class SalesPOSService:
                     user=user
                 )
 
-            # -------------------------------------------------------------
-            # SERIALIZED ITEM INSTANCE & WARRANTY DEACTIVATION
-            # -------------------------------------------------------------
             if est_item.item_instance:
                 target_status = 'IN_STOCK' if not is_defective else 'RETURNED_DEFECTIVE'
                 est_item.item_instance.status = target_status
@@ -1074,7 +1547,6 @@ class SalesPOSService:
                     'customer_phone', 'sale_date', 'sold_price', 'updated_at'
                 ])
 
-                # Void customer component warranties issued on this sold handset
                 DeviceComponentWarranty.objects.filter(
                     item_instance=est_item.item_instance,
                     status='ACTIVE'
@@ -1089,18 +1561,14 @@ class SalesPOSService:
         sales_return.total_refund_amount = total_refund
         sales_return.save(update_fields=['total_refund_amount', 'updated_at'])
 
-        # -----------------------------------------------------------------
-        # CUSTOMER ACCOUNTING: LIFETIME SPEND & UDHAARI STORE CREDIT ADJUSTMENT
-        # -----------------------------------------------------------------
+        # Customer Account Udhaari Reversal
         customer = None
         if original_estimate.customer_id:
             customer = Customer.objects.select_for_update().filter(id=original_estimate.customer_id).first()
 
         if customer:
-            # 1. Deduct refund from customer cumulative lifetime spend
             customer.total_spent = max(Decimal('0.00'), customer.total_spent - total_refund)
 
-            # 2. If Store Credit: reduce customer Udhaari debt or deposit credit balance
             if refund_mode == 'STORE_CREDIT':
                 prev_bal = customer.current_credit_balance
                 new_bal = prev_bal - total_refund
@@ -1121,9 +1589,7 @@ class SalesPOSService:
 
             customer.save(update_fields=['current_credit_balance', 'total_spent', 'updated_at'])
 
-        # -----------------------------------------------------------------
-        # CHECK FULL VS PARTIAL RETURN COMPLETION STATUS
-        # -----------------------------------------------------------------
+        # Check Full vs Partial Return
         all_items = original_estimate.items.all()
         is_fully_returned = True
 
@@ -1140,9 +1606,13 @@ class SalesPOSService:
         original_estimate.status = 'RETURNED' if is_fully_returned else 'PARTIALLY_RETURNED'
         original_estimate.save(update_fields=['status', 'updated_at'])
 
-        # -----------------------------------------------------------------
-        # AUDIT LOGGING
-        # -----------------------------------------------------------------
+        try:
+            from apps.accounting.services.auto_posting import AutoPostingService
+            AutoPostingService.post_sales_return(sales_return=sales_return, user=user)
+        except Exception as err:
+            logger.error(f"[SalesReturn GL Auto-Posting Error] Return {sales_return.return_number}: {err}")
+            raise ValidationError(f"Sales return processed but General Ledger posting failed: {err}")
+
         AuditLog.objects.create(
             user=user,
             branch=original_estimate.branch,
@@ -1159,3 +1629,147 @@ class SalesPOSService:
         )
 
         return sales_return
+
+    # =========================================================================
+    # BILL CANCELLATION & REVERSING DOUBLE-ENTRY JOURNAL
+    # =========================================================================
+    @classmethod
+    @transaction.atomic
+    def cancel_sales_estimate(
+        cls,
+        estimate: SalesEstimate,
+        reason: str,
+        user
+    ) -> SalesEstimate:
+        """
+        Atomically cancels a SalesEstimate:
+        1. Restores all physical inventory items and marks IMEI ItemInstances as IN_STOCK.
+        2. Voids serialized customer warranties.
+        3. Reverses customer Udhaari balance if debt was added on this bill.
+        4. Updates bill status to 'CANCELLED'.
+        5. Voids the original JournalEntry and creates an inverse balancing journal voucher.
+        """
+        if estimate.status in ['CANCELLED', 'RETURNED']:
+            raise ValidationError(f"Bill {estimate.estimate_number} is already {estimate.get_status_display()}.")
+
+        estimate = SalesEstimate.objects.select_for_update().get(pk=estimate.pk)
+
+        # 1. Restore Physical Stock & Handset IMEIs
+        for line in estimate.items.select_related('product', 'item_instance'):
+            InventoryService.adjust_stock(
+                product=line.product,
+                branch=estimate.branch,
+                quantity_delta=line.base_unit_quantity,
+                movement_type='SALE_RETURN',
+                reference_doc=f"VOID-{estimate.estimate_number}",
+                imei_or_serial=line.imei_number or "",
+                remarks=f"Bill Voided / Cancelled: {estimate.estimate_number}. Reason: {reason}",
+                user=user,
+                allow_negative=True
+            )
+
+            if line.item_instance:
+                line.item_instance.status = 'IN_STOCK'
+                line.item_instance.sold_invoice_reference = None
+                line.item_instance.customer_name = None
+                line.item_instance.customer_phone = None
+                line.item_instance.sale_date = None
+                line.item_instance.sold_price = None
+                line.item_instance.save(update_fields=[
+                    'status', 'sold_invoice_reference', 'customer_name',
+                    'customer_phone', 'sale_date', 'sold_price', 'updated_at'
+                ])
+
+                DeviceComponentWarranty.objects.filter(
+                    item_instance=line.item_instance,
+                    status='ACTIVE'
+                ).update(
+                    status='VOID',
+                    void_reason=f"Bill Cancelled ({estimate.estimate_number}): {reason}",
+                    updated_at=timezone.now()
+                )
+
+        # 2. Reverse Customer Udhaari Debt
+        if estimate.customer and estimate.due_amount > Decimal('0.00'):
+            cust = Customer.objects.select_for_update().get(pk=estimate.customer.pk)
+            prev_bal = cust.current_credit_balance
+            new_bal = max(Decimal('0.00'), prev_bal - estimate.due_amount)
+            cust.current_credit_balance = new_bal
+            cust.total_spent = max(Decimal('0.00'), cust.total_spent - estimate.grand_total)
+            cust.save(update_fields=['current_credit_balance', 'total_spent', 'updated_at'])
+
+            CustomerUdhaariLedger.objects.create(
+                customer=cust,
+                branch=estimate.branch,
+                entry_type='ADJUSTMENT',
+                amount=estimate.due_amount,
+                previous_balance=prev_bal,
+                resulting_balance=new_bal,
+                reference_invoice=f"VOID-{estimate.estimate_number}",
+                payment_mode='OTHER',
+                remarks=f"Reversal of debt from cancelled bill {estimate.estimate_number}",
+                recorded_by=user
+            )
+
+        # 3. Mark Estimate Status as CANCELLED
+        estimate.status = 'CANCELLED'
+        estimate.cancellation_reason = reason
+        estimate.save(update_fields=['status', 'cancellation_reason', 'updated_at'])
+
+        # 4. Void Original Journal Voucher & Post Reversing Journal Voucher
+        try:
+            from apps.accounting.models import JournalEntry
+            from apps.accounting.services.auto_posting import JournalEngine
+
+            orig_entry = JournalEntry.objects.filter(
+                voucher_type='SALES',
+                reference_document=estimate.estimate_number,
+                status='POSTED'
+            ).first()
+
+            if orig_entry:
+                orig_entry.status = 'CANCELLED'
+                orig_entry.save(update_fields=['status', 'updated_at'])
+
+                reversing_lines = []
+                for item in orig_entry.items.select_related('account'):
+                    reversing_lines.append({
+                        'account': item.account,
+                        'debit': item.credit_amount,
+                        'credit': item.debit_amount,
+                        'customer': item.customer,
+                        'supplier': item.supplier,
+                        'narration': f"Cancellation reversal of {orig_entry.voucher_number} for {estimate.estimate_number}"
+                    })
+
+                if reversing_lines:
+                    JournalEngine.create_balanced_entry(
+                        voucher_type='JOURNAL',
+                        date_ad=timezone.now().date(),
+                        branch=estimate.branch,
+                        lines=reversing_lines,
+                        narration=f"Full Reversal of Cancelled Sales Bill {estimate.estimate_number}. Reason: {reason}",
+                        reference_doc=f"REV-{estimate.estimate_number}",
+                        user=user,
+                        auto_post=True
+                    )
+        except Exception as err:
+            logger.error(f"[POS Bill Cancellation GL Error] Estimate {estimate.estimate_number}: {err}")
+            raise ValidationError(f"Bill cancelled but General Ledger reversal failed: {err}")
+
+        # 5. Audit Trail
+        AuditLog.objects.create(
+            user=user,
+            branch=estimate.branch,
+            action_type='BILL_CANCEL',
+            module='POS_Sales',
+            object_repr=estimate.estimate_number,
+            details={
+                'estimate_number': estimate.estimate_number,
+                'grand_total': str(estimate.grand_total),
+                'due_amount_reversed': str(estimate.due_amount),
+                'reason': reason
+            }
+        )
+
+        return estimate

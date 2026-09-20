@@ -1,13 +1,22 @@
+"""
+Procurement, Supplier Udhaari & Purchase Return Forms.
+File Path: apps/purchases/forms.py
+"""
+
 import re
+from datetime import date
 from decimal import Decimal
 from django import forms
 from django.forms import inlineformset_factory
 from django.utils.translation import gettext_lazy as _
 from apps.purchases.models import (
     Supplier, PurchaseOrder, PurchaseOrderItem,
-    GoodsReceivedNote, GRNItem, SupplierUdhaariLedger
+    GoodsReceivedNote, GRNItem, SupplierUdhaariLedger,
+    PurchaseReturn, PurchaseReturnItem
 )
-from apps.inventory.models import Product, UnitOfMeasurement
+from apps.inventory.models import Product, UnitOfMeasurement, UnitConversion
+from apps.branches.models import Branch
+from apps.core.nepali_calendar import NepaliCalendar
 
 
 # ==============================================================================
@@ -210,8 +219,7 @@ class PurchaseOrderForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['supplier'].queryset = Supplier.objects.filter(is_active=True).order_by('company_name')
         if not self.instance.pk:
-            import datetime
-            self.fields['order_date'].initial = datetime.date.today()
+            self.fields['order_date'].initial = date.today()
 
 
 class PurchaseOrderItemForm(forms.ModelForm):
@@ -424,7 +432,175 @@ GRNItemFormSet = inlineformset_factory(
 
 
 # ==============================================================================
-# 5. SUPPLIER PAYMENT / PAYOUT FORM
+# 5. COMMERCIAL PURCHASE RETURN (DEBIT NOTE) FORMS & FORMSET
+# ==============================================================================
+
+class PurchaseReturnForm(forms.ModelForm):
+    """
+    Header form for commercial purchase returns / debit notes to suppliers.
+    Captures supplier, origin branch, return date, original invoice/GRN references,
+    settlement mode, and debit note voucher remarks.
+    """
+    class Meta:
+        model = PurchaseReturn
+        fields = [
+            'supplier', 'branch', 'original_grn', 'original_bill_reference',
+            'return_date', 'return_date_bs', 'refund_mode', 'remarks'
+        ]
+        widgets = {
+            'supplier': forms.Select(attrs={'class': 'form-select select2-enable', 'required': 'required'}),
+            'branch': forms.Select(attrs={'class': 'form-select', 'required': 'required'}),
+            'original_grn': forms.Select(attrs={'class': 'form-select'}),
+            'original_bill_reference': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'e.g. INV-9908 / GRN-MAIN-000001'}),
+            'return_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date', 'required': 'required'}),
+            'return_date_bs': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'YYYY-MM-DD (BS)'}),
+            'refund_mode': forms.Select(attrs={'class': 'form-select', 'required': 'required'}),
+            'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Reason for return, commercial agreement, or supplier RMA authorization note...'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        branch = kwargs.pop('branch', None)
+        super().__init__(*args, **kwargs)
+        self.fields['supplier'].queryset = Supplier.objects.filter(is_active=True).order_by('company_name')
+        if branch:
+            self.fields['branch'].initial = branch
+            self.fields['original_grn'].queryset = GoodsReceivedNote.objects.filter(
+                branch=branch, status='RECEIVED'
+            ).order_by('-bill_date')
+        else:
+            self.fields['original_grn'].queryset = GoodsReceivedNote.objects.filter(
+                status='RECEIVED'
+            ).order_by('-bill_date')
+
+        self.fields['supplier'].required = True
+        self.fields['branch'].required = True
+        self.fields['return_date'].required = True
+        self.fields['refund_mode'].required = True
+        self.fields['original_grn'].required = False
+        self.fields['original_bill_reference'].required = False
+        self.fields['return_date_bs'].required = False
+        self.fields['remarks'].required = False
+
+        if not self.instance.pk:
+            today = date.today()
+            self.fields['return_date'].initial = today
+            y, m, d = NepaliCalendar.ad_to_bs(today)
+            self.fields['return_date_bs'].initial = NepaliCalendar.format_bs(y, m, d, lang='en')
+            self.fields['refund_mode'].initial = 'DEDUCT_FROM_BALANCE'
+
+    def clean(self):
+        cleaned_data = super().clean()
+        ret_date = cleaned_data.get('return_date')
+        ret_date_bs = cleaned_data.get('return_date_bs')
+        if ret_date and not ret_date_bs:
+            y, m, d = NepaliCalendar.ad_to_bs(ret_date)
+            cleaned_data['return_date_bs'] = NepaliCalendar.format_bs(y, m, d, lang='en')
+        return cleaned_data
+
+
+class PurchaseReturnItemForm(forms.ModelForm):
+    """
+    Line item form for each product returned to a supplier.
+    Captures product, return quantity, agreed return rate, tax rate,
+    specific defect reason, and scanned IMEI/serial numbers for phones.
+    """
+    class Meta:
+        model = PurchaseReturnItem
+        fields = [
+            'product', 'returned_quantity', 'purchase_rate',
+            'tax_rate', 'return_reason', 'returned_imei_list'
+        ]
+        widgets = {
+            'product': forms.Select(attrs={
+                'class': 'form-select form-select-sm select-return-product',
+                'required': 'required'
+            }),
+            'returned_quantity': forms.NumberInput(attrs={
+                'class': 'form-control form-control-sm text-center font-monospace return-qty-input',
+                'step': '1', 'min': '1', 'value': '1', 'required': 'required'
+            }),
+            'purchase_rate': forms.NumberInput(attrs={
+                'class': 'form-control form-control-sm text-end font-monospace return-rate-input',
+                'step': '0.01', 'min': '0.00', 'placeholder': '0.00', 'required': 'required'
+            }),
+            'tax_rate': forms.NumberInput(attrs={
+                'class': 'form-control form-control-sm text-center font-monospace return-tax-input',
+                'step': '0.01', 'min': '0.00', 'value': '0.00'
+            }),
+            'return_reason': forms.TextInput(attrs={
+                'class': 'form-control form-control-sm',
+                'placeholder': 'Defect reason / Dead on Arrival / Damaged box'
+            }),
+            'returned_imei_list': forms.Textarea(attrs={
+                'class': 'form-control form-control-sm font-monospace fs-xs return-imei-box',
+                'rows': 2,
+                'placeholder': 'Enter/Scan 15-digit IMEI(s), one per line or comma-separated'
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['product'].queryset = Product.objects.filter(
+            is_active=True
+        ).select_related('base_unit').order_by('name')
+        self.fields['product'].required = True
+        self.fields['returned_quantity'].required = True
+        self.fields['purchase_rate'].required = True
+        self.fields['tax_rate'].required = False
+        self.fields['return_reason'].required = False
+        self.fields['returned_imei_list'].required = False
+
+        if not self.instance.pk:
+            self.fields['returned_quantity'].initial = Decimal('1.000')
+            self.fields['purchase_rate'].initial = Decimal('0.00')
+            self.fields['tax_rate'].initial = Decimal('0.00')
+
+    def clean_returned_quantity(self):
+        qty = self.cleaned_data.get('returned_quantity')
+        if qty is None or qty <= Decimal('0.000'):
+            raise forms.ValidationError(_("Returned quantity must be greater than zero."))
+        return qty
+
+    def clean_purchase_rate(self):
+        rate = self.cleaned_data.get('purchase_rate')
+        if rate is None or rate < Decimal('0.00'):
+            raise forms.ValidationError(_("Purchase rate cannot be negative."))
+        return rate
+
+    def clean(self):
+        cleaned_data = super().clean()
+        product = cleaned_data.get('product')
+        qty = cleaned_data.get('returned_quantity')
+        imei_raw = cleaned_data.get('returned_imei_list') or ''
+
+        if product and (product.requires_imei_tracking or product.requires_serial_tracking):
+            expected_units = int(qty or 0)
+            tokens = [t.strip() for t in re.split(r'[\n,;]+', imei_raw) if t.strip()]
+
+            if expected_units > 0 and len(tokens) != expected_units:
+                raise forms.ValidationError(
+                    _(f"IMEI Count Mismatch for '{product.name}': You are returning {expected_units} unit(s), "
+                      f"but {len(tokens)} IMEI(s) were entered. Exactly {expected_units} IMEI(s) are required.")
+                )
+
+            for token in tokens:
+                clean_token = token.split('|')[0].strip()
+                if not clean_token.isdigit() and len(clean_token) >= 14:
+                    raise forms.ValidationError(_(f"Invalid IMEI '{clean_token}'. IMEIs must be numeric digits."))
+        return cleaned_data
+
+
+PurchaseReturnItemFormSet = inlineformset_factory(
+    PurchaseReturn,
+    PurchaseReturnItem,
+    form=PurchaseReturnItemForm,
+    extra=1,
+    can_delete=True
+)
+
+
+# ==============================================================================
+# 6. SUPPLIER PAYMENT / PAYOUT FORM
 # ==============================================================================
 
 class SupplierPaymentForm(forms.ModelForm):

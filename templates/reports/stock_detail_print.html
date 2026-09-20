@@ -1,0 +1,269 @@
+{% load humanize static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock_Detail_{{ product.sku }}_{{ start_date }}_{{ end_date }}</title>
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 8mm 10mm;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 8.5px;
+            color: #0f172a;
+            background-color: #ffffff;
+            line-height: 1.25;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .no-print {
+            background: #0f172a;
+            color: #ffffff;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 11px;
+            font-family: sans-serif;
+        }
+
+        .no-print button {
+            background: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 5px 16px;
+            border-radius: 999px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .header-section {
+            text-align: center;
+            margin-bottom: 6px;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 6px;
+        }
+
+        .header-title {
+            font-size: 14px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #0f172a;
+            letter-spacing: 0.04em;
+        }
+
+        .header-subtitle {
+            font-size: 9px;
+            color: #475569;
+            margin-top: 1px;
+        }
+
+        .meta-strip {
+            display: flex;
+            justify-content: space-between;
+            font-size: 8.5px;
+            margin: 4px 0 6px 0;
+            padding: 4px 8px;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 8px;
+        }
+
+        th, td {
+            border: 0.5px solid #64748b;
+            padding: 3px 5px;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+
+        th {
+            background-color: #1e293b;
+            color: #ffffff;
+            text-transform: uppercase;
+            font-size: 7.5px;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            text-align: center;
+        }
+
+        .text-left { text-align: left; }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .font-mono { font-family: 'Courier New', Courier, monospace; }
+        .fw-bold { font-weight: bold; }
+
+        .opening-row td {
+            background-color: #f8fafc;
+            font-weight: bold;
+            border-top: 1px solid #0f172a;
+            border-bottom: 1px solid #0f172a;
+        }
+
+        .totals-row td {
+            background-color: #e2e8f0;
+            font-weight: bold;
+            border-top: 1.5px solid #0f172a;
+            border-bottom: 2px solid #0f172a;
+            font-size: 8.5px;
+        }
+
+        .signatures-area {
+            margin-top: 24px;
+            display: flex;
+            justify-content: space-between;
+            page-break-inside: avoid;
+        }
+
+        .sig-box {
+            width: 180px;
+            border-top: 1px solid #0f172a;
+            text-align: center;
+            font-size: 8.5px;
+            padding-top: 4px;
+        }
+
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                background: #ffffff !important;
+            }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+
+    <!-- Non-Print Toolbar -->
+    <div class="no-print">
+        <span><strong>STOCK DETAIL REPORT (BIN CARD)</strong> &bull; {{ product.name }} ({{ records|length }} records)</span>
+        <div>
+            <button onclick="window.print()">Print Report (A4)</button>
+            <button onclick="window.close()" style="background:#475569; margin-left: 6px;">Close</button>
+        </div>
+    </div>
+
+    <!-- Letterhead Header -->
+    <div class="header-section">
+        <div class="header-title">{{ selected_branch.display_company_name|default:COMPANY_NAME|upper }}</div>
+        {% if selected_branch.display_company_name_np or COMPANY_NAME_NP %}
+            <div style="font-size: 11px; font-weight: bold;">{{ selected_branch.display_company_name_np|default:COMPANY_NAME_NP }}</div>
+        {% endif %}
+        <div class="header-subtitle">
+            {{ selected_branch.address }}, {{ selected_branch.city }} | Phone: {{ selected_branch.phone_number }}
+            {% if SYS_CONFIG.pan_number %} | PAN: <strong>{{ SYS_CONFIG.pan_number }}</strong>{% endif %}
+        </div>
+    </div>
+
+    <!-- Product & Metadata Banner -->
+    <div class="meta-strip">
+        <div>
+            Product: <strong>{{ product.name }}</strong> &bull; SKU: <strong class="font-mono">{{ product.sku }}</strong> 
+            &bull; Category: <strong>{{ product.category.name }}</strong>
+        </div>
+        <div>
+            Scope: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong> 
+            (<strong>{{ start_date_bs }}</strong> to <strong>{{ end_date_bs }} BS</strong>)
+        </div>
+        <div>
+            Branch: <strong>{{ selected_branch.name }}</strong> &bull; Unit: <strong>{{ product.base_unit.code }}</strong>
+        </div>
+    </div>
+
+    <!-- Exact 10-Column Table Matching Client Excel -->
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 35px;">S.N.</th>
+                <th style="width: 120px;">Date</th>
+                <th style="width: 130px;">Invoice Type</th>
+                <th style="width: 100px;">Invoice number</th>
+                <th style="width: 65px;">In Stock</th>
+                <th style="width: 65px;">Out Stock</th>
+                <th style="width: 45px;">Unit</th>
+                <th style="width: 80px;">Price</th>
+                <th style="width: 75px;">Balance</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Opening Row -->
+            <tr class="opening-row">
+                <td class="text-center">-</td>
+                <td class="text-center">{{ start_date }} ({{ start_date_bs }})</td>
+                <td class="text-left">OPENING BALANCE</td>
+                <td class="text-center">-</td>
+                <td class="text-right font-mono">0.0</td>
+                <td class="text-right font-mono">0.0</td>
+                <td class="text-center font-mono">{{ product.base_unit.code }}</td>
+                <td class="text-right font-mono">0.00</td>
+                <td class="text-right font-mono fw-bold">{{ opening_balance|floatformat:1 }}</td>
+                <td class="text-left">Opening Stock Balance as of {{ start_date }}</td>
+            </tr>
+
+            <!-- Movements -->
+            {% for r in records %}
+            <tr>
+                <td class="text-center font-mono">{{ r.sn }}</td>
+                <td class="text-center font-mono">{{ r.date_ad }} ({{ r.date_bs }})</td>
+                <td class="text-left fw-bold">{{ r.invoice_type }}</td>
+                <td class="text-center font-mono">{{ r.invoice_number }}</td>
+                <td class="text-right font-mono">{% if r.in_stock > 0 %}+{{ r.in_stock|floatformat:1 }}{% else %}-{% endif %}</td>
+                <td class="text-right font-mono">{% if r.out_stock > 0 %}-{{ r.out_stock|floatformat:1 }}{% else %}-{% endif %}</td>
+                <td class="text-center font-mono">{{ r.unit }}</td>
+                <td class="text-right font-mono">{{ r.price|floatformat:2|intcomma }}</td>
+                <td class="text-right font-mono fw-bold">{{ r.balance|floatformat:1 }}</td>
+                <td class="text-left">{{ r.remarks|truncatechars:45 }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="10" class="text-center py-3">No inventory movements recorded in selected period.</td>
+            </tr>
+            {% endfor %}
+
+            <!-- Totals Footer Row -->
+            <tr class="totals-row">
+                <td colspan="4" class="text-right">TOTAL MOVEMENTS:</td>
+                <td class="text-right font-mono">+{{ total_in|floatformat:1 }}</td>
+                <td class="text-right font-mono">-{{ total_out|floatformat:1 }}</td>
+                <td class="text-center font-mono">{{ product.base_unit.code }}</td>
+                <td></td>
+                <td class="text-right font-mono fw-bold">{{ closing_balance|floatformat:1 }}</td>
+                <td class="text-left">Closing Stock Balance</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- Signatures Area -->
+    <div class="signatures-area">
+        <div class="sig-box">
+            Prepared By (Store Keeper)
+        </div>
+        <div class="sig-box">
+            Verified By (Inventory In-Charge)
+        </div>
+        <div class="sig-box">
+            Approved By (Manager / Owner)
+        </div>
+    </div>
+
+</body>
+</html>

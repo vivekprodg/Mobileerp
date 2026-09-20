@@ -1,0 +1,361 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Stock Summary Report | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.stock-summary-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 14px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.table-stock-summary th {
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+
+.table-stock-summary td {
+    font-size: 0.75rem;
+    padding: 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.sticky-table-container {
+    max-height: calc(100vh - 360px);
+    overflow: auto;
+    border-radius: 12px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1720px;">
+    
+    <!-- Top Header & Export Buttons -->
+    <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-clipboard-list text-primary me-2"></i> Stock Summary Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Complete management overview of opening inventory, inward/outward movements, branch transfers, returns, adjustments, and closing stock valuation.
+            </p>
+        </div>
+
+        <!-- Export & Print Action Buttons -->
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'format' and k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}format=print" target="_blank" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </a>
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' and k != 'format' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' and k != 'format' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=excel" class="btn btn-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-excel me-1"></i> Export Excel
+            </a>
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' and k != 'format' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=pdf" class="btn btn-danger btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-pdf me-1"></i> Export PDF
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 Summary KPI Metric Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="stock-summary-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Closing Units</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle"><i class="fas fa-boxes-stacked fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">{{ summary_totals.total_closing_qty|floatformat:0|intcomma }}</h3>
+                <small class="text-muted fs-2xs">Opening: {{ summary_totals.total_opening_qty|floatformat:0|intcomma }} Units</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="stock-summary-kpi-card border-start border-info border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Inward vs Outward Movement</span>
+                    <span class="badge bg-info bg-opacity-10 text-info p-2 rounded-circle"><i class="fas fa-right-left fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    +{{ summary_totals.total_inward_qty|floatformat:0 }} / -{{ summary_totals.total_outward_qty|floatformat:0 }}
+                </h3>
+                <small class="text-muted fs-2xs">Net: +{{ summary_totals.total_inward_qty|add:summary_totals.total_returns|floatformat:0 }} received</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="stock-summary-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Inventory Asset Value (Cost)</span>
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary p-2 rounded-circle"><i class="fas fa-coins fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">Rs. {{ summary_totals.total_cost_value|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs">True landed acquisition cost</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="stock-summary-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">Retail Valuation &amp; Margin</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle"><i class="fas fa-arrow-trend-up fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">Rs. {{ summary_totals.total_retail_value|floatformat:2|intcomma }}</h3>
+                <small class="text-success fs-2xs fw-bold">Rs. {{ summary_totals.projected_margin|floatformat:2|intcomma }} ({{ summary_totals.margin_percentage }}% Margin)</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Comprehensive Filter Panel (10 Filter Fields) -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-filter text-primary me-2"></i> Report Filters</h6>
+            <span class="text-muted fs-2xs">Active Scope: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong> ({{ start_date_bs }} to {{ end_date_bs }} BS)</span>
+        </div>
+
+        <form method="get" class="row g-2 align-items-end" id="stockSummaryFilterForm">
+            <!-- 1. Start Date -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Start Date (AD)</label>
+                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm bg-light border-0">
+            </div>
+
+            <!-- 2. End Date -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">End Date (AD)</label>
+                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm bg-light border-0">
+            </div>
+
+            <!-- 3. Branch Selector -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Store Outlet / Branch</label>
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Branches</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>{{ br.name }} ({{ br.code }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 4. Warehouse (Rack/Shelf Location) -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Warehouse / Rack Location</label>
+                <input type="text" name="warehouse" value="{{ filters.warehouse }}" class="form-control form-control-sm bg-light border-0" placeholder="e.g. Rack-A1 / Shelf-B">
+            </div>
+
+            <!-- 5. Category -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Category</label>
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if filters.category_id == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 6. Subcategory -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Subcategory</label>
+                <select name="subcategory" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Subcategories</option>
+                    {% for sub in subcategories %}
+                        <option value="{{ sub.id }}" {% if filters.subcategory_id == sub.id|stringformat:"s" %}selected{% endif %}>{{ sub.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 7. Brand -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Brand</label>
+                <select name="brand" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Brands</option>
+                    {% for b in brands %}
+                        <option value="{{ b.id }}" {% if filters.brand_id == b.id|stringformat:"s" %}selected{% endif %}>{{ b.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 8. SKU Search -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Product SKU</label>
+                <input type="text" name="sku" value="{{ filters.sku }}" class="form-control form-control-sm bg-light border-0 font-monospace" placeholder="e.g. SAM-A55">
+            </div>
+
+            <!-- 9. Product Keyword Search -->
+            <div class="col-6 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Product Name / Barcode</label>
+                <input type="text" name="q" value="{{ filters.q }}" class="form-control form-control-sm bg-light border-0" placeholder="Product name or box barcode...">
+            </div>
+
+            <!-- 10. Stock Status & Serialized Dropdowns -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Stock Status</label>
+                <select name="stock_status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Stock Levels</option>
+                    <option value="in_stock" {% if filters.stock_status == 'in_stock' %}selected{% endif %}>In Stock</option>
+                    <option value="low_stock" {% if filters.stock_status == 'low_stock' %}selected{% endif %}>Low Stock Alert</option>
+                    <option value="out_of_stock" {% if filters.stock_status == 'out_of_stock' %}selected{% endif %}>Out of Stock / Zero</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-1">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Serialized?</label>
+                <select name="is_serialized" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All</option>
+                    <option value="serialized" {% if filters.is_serialized == 'serialized' %}selected{% endif %}>IMEI</option>
+                    <option value="non_serialized" {% if filters.is_serialized == 'non_serialized' %}selected{% endif %}>Bulk</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-primary btn-sm w-100 rounded-3 fw-bold shadow-xs">
+                    <i class="fas fa-filter me-1"></i> Apply
+                </button>
+                <a href="{% url 'reports:stock_summary' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Reset Filters">↺</a>
+            </div>
+        </form>
+    </div>
+
+    <!-- 21-Column Responsive Master Data Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-table-cells text-primary me-2"></i> Inventory Ledger Summary
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Products Match</span>
+        </div>
+
+        <div class="table-responsive sticky-table-container">
+            <table class="table table-hover table-bordered table-sm align-middle mb-0 table-stock-summary">
+                <thead>
+                    <tr>
+                        <th class="ps-3">1. SKU</th>
+                        <th>2. Barcode</th>
+                        <th>3. Product Name</th>
+                        <th>4. Category</th>
+                        <th>5. Brand</th>
+                        <th>6. Branch</th>
+                        <th>7. Warehouse</th>
+                        <th>8. Unit</th>
+                        <th class="text-end">9. Opening</th>
+                        <th class="text-end">10. Inward</th>
+                        <th class="text-end">11. Outward</th>
+                        <th class="text-end">12. Tr In</th>
+                        <th class="text-end">13. Tr Out</th>
+                        <th class="text-end">14. Returns</th>
+                        <th class="text-end">15. Adjust</th>
+                        <th class="text-end">16. Reserved</th>
+                        <th class="text-end">17. Defective</th>
+                        <th class="text-end">18. Available</th>
+                        <th class="text-end">19. Closing</th>
+                        <th class="text-end">20. Cost Value (NPR)</th>
+                        <th class="text-end pe-3">21. Retail Value (NPR)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td class="ps-3 font-monospace fw-bold text-primary">
+                            <a href="{% url 'inventory:product_detail' r.product_id %}" class="text-decoration-none">
+                                {{ r.sku }}
+                            </a>
+                        </td>
+                        <td class="font-monospace text-muted">{{ r.barcode|default:"-" }}</td>
+                        <td>
+                            <strong class="text-dark">{{ r.product_name }}</strong>
+                            {% if r.is_serialized %}
+                                <span class="badge bg-primary bg-opacity-10 text-primary ms-1" style="font-size: 8px;">IMEI</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ r.category_name }}</td>
+                        <td>{{ r.brand_name }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ r.branch_code }}</span></td>
+                        <td><small class="text-muted">{{ r.warehouse }}</small></td>
+                        <td class="text-center font-monospace">{{ r.unit_code }}</td>
+
+                        <!-- Movements -->
+                        <td class="col-num">{{ r.opening_qty|floatformat:1 }}</td>
+                        <td class="col-num text-success fw-semibold">+{{ r.inward_qty|floatformat:1 }}</td>
+                        <td class="col-num text-danger">-{{ r.outward_qty|floatformat:1 }}</td>
+                        <td class="col-num text-info">+{{ r.transfer_in|floatformat:1 }}</td>
+                        <td class="col-num text-muted">-{{ r.transfer_out|floatformat:1 }}</td>
+                        <td class="col-num text-success">+{{ r.returns|floatformat:1 }}</td>
+                        <td class="col-num {% if r.adjustments >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            {{ r.adjustments|floatformat:1 }}
+                        </td>
+
+                        <!-- Stock Snapshot -->
+                        <td class="col-num text-warning-emphasis">{{ r.reserved_qty|floatformat:1 }}</td>
+                        <td class="col-num text-danger">{{ r.defective_qty|floatformat:1 }}</td>
+                        <td class="col-num fw-bold text-success">{{ r.available_qty|floatformat:1 }}</td>
+                        <td class="col-num fw-bold">
+                            <span class="badge bg-{{ r.stock_status_badge }} bg-opacity-10 text-{{ r.stock_status_badge }} px-2 py-1">
+                                {{ r.closing_qty|floatformat:1 }}
+                            </span>
+                        </td>
+
+                        <!-- Valuation -->
+                        <td class="col-num fw-semibold text-dark">Rs. {{ r.cost_value|floatformat:2|intcomma }}</td>
+                        <td class="col-num pe-3 fw-bold text-primary">Rs. {{ r.retail_value|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="21" class="text-center py-5 text-muted">
+                            <i class="fas fa-boxes-stacked fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No stock records matched the selected filters.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <!-- Cumulative Totals Row -->
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top">
+                    <tr style="background-color: #0f172a; color: #ffffff;">
+                        <td colspan="8" class="ps-3 text-uppercase text-end">TOTALS:</td>
+                        <td class="col-num text-white">{{ summary_totals.total_opening_qty|floatformat:1 }}</td>
+                        <td class="col-num text-success">+{{ summary_totals.total_inward_qty|floatformat:1 }}</td>
+                        <td class="col-num text-danger">-{{ summary_totals.total_outward_qty|floatformat:1 }}</td>
+                        <td class="col-num text-info">+{{ summary_totals.total_transfer_in|floatformat:1 }}</td>
+                        <td class="col-num text-white-50">-{{ summary_totals.total_transfer_out|floatformat:1 }}</td>
+                        <td class="col-num text-success">+{{ summary_totals.total_returns|floatformat:1 }}</td>
+                        <td class="col-num text-white">{{ summary_totals.total_adjustments|floatformat:1 }}</td>
+                        <td class="col-num text-warning">{{ summary_totals.total_reserved_qty|floatformat:1 }}</td>
+                        <td class="col-num text-danger">{{ summary_totals.total_defective_qty|floatformat:1 }}</td>
+                        <td class="col-num text-success">{{ summary_totals.total_available_qty|floatformat:1 }}</td>
+                        <td class="col-num text-white fs-6">{{ summary_totals.total_closing_qty|floatformat:1 }}</td>
+                        <td class="col-num text-white">Rs. {{ summary_totals.total_cost_value|floatformat:2|intcomma }}</td>
+                        <td class="col-num pe-3 text-warning fs-6">Rs. {{ summary_totals.total_retail_value|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

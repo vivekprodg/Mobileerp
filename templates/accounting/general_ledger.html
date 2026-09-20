@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}General Ledger Statement: {{ account.name }} | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">General Ledger</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-book-bookmark text-primary"></i>
+                <span>General Ledger Statement</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(खाताको विस्तृत विवरण तथा लेजर)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Detailed transaction statement with opening balance, sequential running balance, and source voucher audit trails</p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Statement
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportLedgerToCSV()">
+                <i class="fas fa-file-excel me-1"></i> Export Excel (CSV)
+            </button>
+            <a href="{% url 'accounting:coa' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                <i class="fas fa-sitemap me-1"></i> Chart of Accounts
+            </a>
+        </div>
+    </div>
+
+    <!-- Account Selection & Nepali Date Range Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center" id="glFilterForm">
+            <!-- Account Dropdown Selector -->
+            <div class="col-12 col-md-4">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Select General Ledger Account</label>
+                <select class="form-select form-select-sm" onchange="location = this.value;">
+                    {% for acc in all_accounts %}
+                    <option value="{% url 'accounting:general_ledger_account' acc.id %}" {% if acc.id == account.id %}selected{% endif %}>
+                        {{ acc.code }} - {{ acc.name }} {% if acc.branch %}[{{ acc.branch.code }}]{% else %}[HQ]{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Start Date (AD & BS) -->
+            <div class="col-12 col-sm-6 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">From Date (AD / BS)</label>
+                <input type="date" name="start_date" id="glStartDate" value="{{ start_date|date:'Y-m-d' }}" 
+                       class="form-control form-control-sm font-mono">
+            </div>
+
+            <!-- End Date (AD & BS) -->
+            <div class="col-12 col-sm-6 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">To Date (AD / BS)</label>
+                <input type="date" name="end_date" id="glEndDate" value="{{ end_date|date:'Y-m-d' }}" 
+                       class="form-control form-control-sm font-mono">
+            </div>
+
+            <!-- Actions -->
+            <div class="col-12 col-md-2 d-flex align-items-end gap-2 pt-md-3">
+                <button type="submit" class="btn btn-primary btn-sm rounded-pill px-3 w-100 fw-bold">
+                    <i class="fas fa-sync-alt me-1"></i> Fetch
+                </button>
+                <a href="{% url 'accounting:general_ledger_account' account.id %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                    Reset
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Active Ledger Profile Header Card -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <div class="row g-3 align-items-center">
+            <div class="col-12 col-lg-6">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="rounded-3 bg-primary bg-opacity-10 text-primary p-3 fs-3 font-mono fw-extrabold">
+                        {{ account.code }}
+                    </div>
+                    <div>
+                        <h4 class="fw-extrabold text-dark mb-1">{{ account.name }}</h4>
+                        {% if account.name_np %}
+                            <div class="text-muted fs-sm font-nepali mb-1">{{ account.name_np }}</div>
+                        {% endif %}
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs font-mono">
+                                Group: {{ account.group.name }}
+                            </span>
+                            <span class="badge bg-light text-dark border fs-2xs font-mono">
+                                Scope: {% if account.branch %}{{ account.branch.name }} ({{ account.branch.code }}){% else %}Organization-Wide (HQ){% endif %}
+                            </span>
+                            <span class="badge {% if account.is_debit_nature %}bg-info bg-opacity-10 text-info{% else %}bg-warning bg-opacity-10 text-warning-emphasis{% endif %} fs-2xs font-mono">
+                                Normal Nature: {% if account.is_debit_nature %}DEBIT (Dr){% else %}CREDIT (Cr){% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Running Balance Financial Cards -->
+            <div class="col-12 col-lg-6">
+                <div class="row g-2">
+                    <div class="col-4">
+                        <div class="p-2 px-3 rounded-3 bg-light border text-center">
+                            <span class="fs-2xs fw-bold text-uppercase text-muted d-block">Opening Bal</span>
+                            <span class="font-mono fw-bold fs-sm {% if opening_balance < 0 %}text-danger{% elif opening_balance > 0 %}text-primary{% else %}text-muted{% endif %}">
+                                Rs. {{ opening_balance|floatformat:2|intcomma }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="p-2 px-3 rounded-3 bg-light border text-center">
+                            <span class="fs-2xs fw-bold text-uppercase text-muted d-block">Period Turnover</span>
+                            <span class="font-mono fw-bold fs-xs text-dark d-block">
+                                Dr: {{ total_debit|floatformat:2|intcomma }}
+                            </span>
+                            <span class="font-mono fw-bold fs-xs text-muted d-block">
+                                Cr: {{ total_credit|floatformat:2|intcomma }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="p-2 px-3 rounded-3 bg-primary bg-opacity-10 border border-primary border-opacity-25 text-center">
+                            <span class="fs-2xs fw-bold text-uppercase text-primary d-block">Net Closing Bal</span>
+                            <span class="font-mono fw-extrabold fs-sm text-primary">
+                                Rs. {{ closing_balance|floatformat:2|intcomma }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ledger Transaction Statement Table -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+        <div class="card-header bg-slate-900 text-white px-4 py-3 d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+                <i class="fas fa-list-check text-warning"></i>
+                <span class="fw-bold fs-sm text-uppercase tracking-wider">Statement of Entries ({{ start_date|date:"Y-m-d" }} to {{ end_date|date:"Y-m-d" }})</span>
+            </div>
+            <span class="badge bg-secondary bg-opacity-25 text-white fs-2xs font-mono">{{ ledger_lines|length }} Transaction Lines</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm" id="generalLedgerTable">
+                <thead class="bg-light text-muted fs-2xs text-uppercase tracking-wider">
+                    <tr>
+                        <th class="ps-3 py-3" style="width: 120px;">Date (AD/BS)</th>
+                        <th style="width: 140px;">Voucher No.</th>
+                        <th style="width: 130px;">Type</th>
+                        <th style="width: 120px;">Ref Doc</th>
+                        <th>Sub-Ledger Party / Entity</th>
+                        <th>Particulars / Narration</th>
+                        <th class="text-end" style="width: 130px;">Debit (Dr)</th>
+                        <th class="text-end" style="width: 130px;">Credit (Cr)</th>
+                        <th class="text-end pe-3" style="width: 150px;">Running Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Opening Balance Row -->
+                    <tr class="table-light fw-bold">
+                        <td class="ps-3 font-mono fs-xs">{{ start_date|date:"Y-m-d" }}</td>
+                        <td colspan="5" class="text-uppercase text-muted tracking-wider fs-xs">
+                            <i class="fas fa-arrow-turn-down me-1"></i> Balance Brought Forward (B/F) / Opening Balance
+                        </td>
+                        <td class="text-end font-mono">{% if account.is_debit_nature and opening_balance > 0 %}Rs. {{ opening_balance|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="text-end font-mono">{% if not account.is_debit_nature and opening_balance > 0 %}Rs. {{ opening_balance|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="text-end pe-3 font-mono text-primary">Rs. {{ opening_balance|floatformat:2|intcomma }}</td>
+                    </tr>
+
+                    {% for row in ledger_lines %}
+                    <tr>
+                        <td class="ps-3">
+                            <div class="font-mono fs-xs fw-semibold text-dark">{{ row.date|date:"Y-m-d" }}</div>
+                            {% if row.date_bs %}
+                                <small class="text-muted fs-2xs font-nepali">{{ row.date_bs }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="font-mono fw-bold text-primary fs-xs">{{ row.voucher_no }}</span>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs font-mono">{{ row.voucher_type }}</span>
+                        </td>
+                        <td>
+                            <span class="font-mono fs-xs text-muted">{{ row.reference }}</span>
+                        </td>
+                        <td>
+                            {% if row.entity != '-' %}
+                                <span class="fw-semibold text-dark fs-xs">{{ row.entity }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="text-dark fs-xs text-truncate" style="max-width: 280px;" title="{{ row.narration }}">
+                                {{ row.narration }}
+                            </div>
+                        </td>
+                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+                            {% if row.debit > 0 %}
+                                Rs. {{ row.debit|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+                            {% if row.credit > 0 %}
+                                Rs. {{ row.credit|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="text-end pe-3 font-mono fw-extrabold fs-xs {% if row.running_balance < 0 %}text-danger{% else %}text-primary{% endif %}">
+                            Rs. {{ row.running_balance|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-4 text-muted">
+                            <i class="fas fa-inbox fs-2 opacity-25 d-block mb-2"></i>
+                            No posted transactions found for this account within the selected date range.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot class="bg-slate-900 text-white font-mono fw-extrabold fs-xs">
+                    <tr>
+                        <td colspan="6" class="text-end text-uppercase tracking-wider pe-3">Period Grand Totals:</td>
+                        <td class="text-end text-info">Rs. {{ total_debit|floatformat:2|intcomma }}</td>
+                        <td class="text-end text-warning">Rs. {{ total_credit|floatformat:2|intcomma }}</td>
+                        <td class="text-end pe-3 text-white">Rs. {{ closing_balance|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- CSV Export Script -->
+<script>
+    function exportLedgerToCSV() {
+        const table = document.getElementById('generalLedgerTable');
+        let csv = [];
+        for (let row of table.rows) {
+            let cols = [];
+            for (let cell of row.cells) {
+                // Strip extra whitespace and commas inside monetary figures
+                let text = cell.innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+                text = `"${text.replace(/"/g, '""')}"`;
+                cols.push(text);
+            }
+            csv.push(cols.join(","));
+        }
+        const csvFile = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const downloadLink = document.createElement("a");
+        downloadLink.download = `General_Ledger_{{ account.code }}_{{ start_date }}_to_{{ end_date }}.csv`;
+        downloadLink.href = window.URL.createObjectURL(csvFile);
+        downloadLink.style.display = "none";
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+</script>
+{% endblock %}

@@ -1,11 +1,71 @@
 {% load static %}
-<header class="navbar navbar-expand navbar-dark bg-dark sticky-top px-3 py-2 border-bottom border-secondary border-opacity-25" style="height: var(--erp-header-height, 62px); z-index: 1030;">
+
+<!-- =========================================================================
+     1. TOP HEADER (SLIM TOP-BAR: 36px)
+     Holds:
+     - Left: Store Outlet Identifier (New Road Branch) with live indicator
+     - Right: Bikram Sambat Date: 2081-05-15 BS (१५ भदौ २०८१)
+     ========================================================================= -->
+<div class="erp-top-header d-flex justify-content-between align-items-center">
+    <!-- Left: Store Outlet Identifier with Dropdown Context Switcher -->
+    <div class="dropdown">
+        <button class="top-header-branch-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Click to switch store branch context">
+            <span class="status-dot"></span>
+            <i class="fas fa-store text-primary"></i>
+            <span>{{ STORE_OUTLET_NAME|default:"New Road Branch" }}</span>
+            <i class="fas fa-chevron-down fs-2xs text-white-50 ms-1"></i>
+        </button>
+
+        {% if AVAILABLE_BRANCHES %}
+        <div class="dropdown-menu shadow-lg border-0 bg-white p-2 rounded-4 mt-2" style="min-width: 270px; z-index: 1060;">
+            <div class="px-3 py-2 border-bottom">
+                <span class="text-uppercase text-muted fw-bold fs-2xs d-block">Switch Counter Outlet</span>
+                <small class="text-secondary fs-xs">Select active store for POS &amp; Stock Scoping</small>
+            </div>
+            <form id="headerBranchSwitchForm" action="{% url 'branches:switch_branch' %}" method="post" class="m-0">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <input type="hidden" name="branch" id="headerBranchSelectInput" value="">
+                <div class="p-1">
+                    {% for br in AVAILABLE_BRANCHES %}
+                    <button type="button" 
+                            class="dropdown-item d-flex align-items-center justify-content-between py-2 px-3 rounded-3 fs-xs {% if ACTIVE_BRANCH.id == br.id %}bg-primary bg-opacity-10 text-primary fw-bold{% else %}text-dark{% endif %}"
+                            onclick="document.getElementById('headerBranchSelectInput').value='{{ br.id }}'; document.getElementById('headerBranchSwitchForm').submit();">
+                        <div class="d-flex align-items-center gap-2 text-truncate">
+                            <i class="fas fa-store {% if ACTIVE_BRANCH.id == br.id %}text-primary{% else %}text-muted{% endif %}"></i>
+                            <span class="text-truncate">{{ br.name }}</span>
+                        </div>
+                        <span class="badge bg-light text-muted border font-mono ms-2">{{ br.code }}</span>
+                    </button>
+                    {% endfor %}
+                </div>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Right: Nepali Bikram Sambat Calendar Date Widget -->
+    <div class="top-header-date">
+        <i class="far fa-calendar-alt text-warning"></i>
+        <span class="date-bs-en">{{ CURRENT_BS_DATE_EN|default:"2081-05-15" }} BS</span>
+        {% if CURRENT_BS_DATE_NP %}
+            <span class="date-bs-np">({{ CURRENT_BS_DATE_NP }})</span>
+        {% else %}
+            <span class="date-bs-np">(१५ भदौ २०८१)</span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- =========================================================================
+     2. MAIN HEADER (BRAND LOGO, TOGGLES, POS BILLING & USER PROFILE: 58px)
+     ========================================================================= -->
+<header class="erp-main-header">
     <div class="container-fluid px-0 d-flex align-items-center justify-content-between">
         
-        <!-- Left: White-Label Brand Logo & Responsive Sidebar Toggles -->
+        <!-- Left: Sidebar Toggles & Company Branding -->
         <div class="d-flex align-items-center gap-2">
-            <!-- Mobile Offcanvas Trigger (VISIBLE ONLY ON MOBILE & TABLETS < 992px) -->
-            <button class="btn btn-outline-secondary btn-sm d-inline-flex d-lg-none border-0 text-light px-2" 
+            <!-- Mobile Offcanvas Drawer Trigger (< 992px) -->
+            <button class="btn btn-outline-secondary btn-sm d-inline-flex d-lg-none border-0 text-white px-2 py-1" 
                     type="button" 
                     data-bs-toggle="offcanvas" 
                     data-bs-target="#sidebarOffcanvas" 
@@ -15,105 +75,65 @@
                 <i class="fas fa-bars fs-5"></i>
             </button>
 
-            <!-- Desktop Sidebar Collapse Toggle (VISIBLE ONLY ON DESKTOP >= 992px) -->
-            <button class="btn btn-outline-secondary btn-sm d-none d-lg-inline-flex border-0 text-light px-2" 
+            <!-- Desktop Sidebar Collapse Toggle (>= 992px) -->
+            <button class="btn btn-outline-secondary btn-sm d-none d-lg-inline-flex border-0 text-white px-2 py-1" 
                     type="button" 
                     id="sidebarToggleBtn" 
                     title="Collapse / Expand Sidebar [Ctrl+B]">
                 <i class="fas fa-bars-staggered fs-5"></i>
             </button>
 
-            <!-- Brand Identity: Custom Logo Image (if uploaded) OR Icon Badge Fallback -->
-            <a class="navbar-brand d-flex align-items-center gap-2 m-0 text-decoration-none" href="{% url 'core:dashboard' %}" title="{{ COMPANY_NAME }} Dashboard">
-                {% if HAS_COMPANY_LOGO %}
+            <!-- Company Brand Identity: Logo Image OR Styled Icon Badge -->
+            <a class="header-brand-wrap" href="{% url 'core:dashboard' %}" title="{{ COMPANY_NAME }} Dashboard">
+                {% if HAS_COMPANY_LOGO and COMPANY_LOGO_URL %}
                     <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="rounded-3 bg-white p-1 shadow-xs" style="max-height: 38px; width: auto; object-fit: contain;">
                 {% else %}
-                    <span class="badge bg-primary p-2 rounded-3 fs-6 shadow-xs"><i class="fas fa-mobile-screen"></i></span>
+                    <div class="header-brand-icon">
+                        <i class="fas fa-mobile-screen"></i>
+                    </div>
                 {% endif %}
-                <div class="d-flex flex-column">
-                    <span class="fw-bold fs-6 text-light tracking-tight lh-1 text-truncate" style="max-width: 240px;">{{ COMPANY_NAME }}</span>
-                    <span class="text-white-50 fs-2xs d-none d-md-inline mt-1 text-truncate" style="letter-spacing: 0.04em; max-width: 240px;">
-                        {{ STORE_OUTLET_NAME|upper }} ({{ STORE_OUTLET_CODE }})
-                    </span>
+                
+                <div class="header-brand-text">
+                    <span class="brand-title">{{ COMPANY_NAME|default:"Smart Mobile & Optics Hub" }}</span>
+                    <span class="brand-subtitle">{{ STORE_OUTLET_NAME|default:"New Road Branch"|upper }} ({{ STORE_OUTLET_CODE|default:"HQ" }})</span>
                 </div>
             </a>
         </div>
 
-        <!-- Right Side Nav Items -->
+        <!-- Right: POS Billing Hero CTA & Single-Line User Profile (Strict Zero-Zigzag Alignment) -->
         <div class="d-flex align-items-center gap-2 gap-md-3">
             
-            <!-- Bikram Sambat Date Widget -->
-            <div class="d-none d-md-flex align-items-center bg-secondary bg-opacity-25 text-light px-3 py-1 rounded-pill border border-secondary border-opacity-50 fs-xs">
-                <i class="far fa-calendar-alt text-warning me-2"></i>
-                <span class="fw-bold">{{ CURRENT_BS_DATE_EN }} BS</span>
-                {% if CURRENT_BS_DATE_NP %}<span class="text-white-50 ms-1">({{ CURRENT_BS_DATE_NP }})</span>{% endif %}
-            </div>
-
-            <!-- Branch / Terminal Switcher Dropdown -->
-            {% if user.is_authenticated %}
-            <div class="dropdown">
-                <button class="btn btn-dark btn-sm rounded-pill border border-secondary border-opacity-50 px-3 py-1 d-flex align-items-center gap-2 text-light" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Switch Store Terminal">
-                    <span class="rounded-circle bg-success" style="width: 8px; height: 8px; display: inline-block;"></span>
-                    <i class="fas fa-store text-primary fs-xs"></i>
-                    <span class="fw-bold fs-xs text-truncate" style="max-width: 140px;">{{ STORE_OUTLET_NAME }}</span>
-                    <i class="fas fa-chevron-down fs-2xs text-white-50"></i>
-                </button>
-                <div class="dropdown-menu dropdown-menu-end shadow-lg border-0 bg-white mt-2 p-2 rounded-4" style="min-width: 260px;">
-                    <div class="px-3 py-2 border-bottom">
-                        <span class="text-uppercase text-muted fw-bold fs-2xs d-block">Switch Active Outlet</span>
-                        <small class="text-secondary fs-xs">Select counter terminal for POS &amp; Stock</small>
-                    </div>
-                    <form id="globalBranchSwitchForm" action="{% url 'branches:switch_branch' %}" method="post" class="m-0">
-                        {% csrf_token %}
-                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <input type="hidden" name="branch" id="globalBranchSelectInput" value="">
-                        <div class="p-1">
-                            {% for br in AVAILABLE_BRANCHES %}
-                            <button type="button" 
-                                    class="dropdown-item d-flex align-items-center justify-content-between py-2 px-3 rounded-3 fs-xs {% if ACTIVE_BRANCH.id == br.id %}bg-primary bg-opacity-10 text-primary fw-bold{% else %}text-dark{% endif %}"
-                                    onclick="document.getElementById('globalBranchSelectInput').value='{{ br.id }}'; document.getElementById('globalBranchSwitchForm').submit();">
-                                <div class="d-flex align-items-center gap-2 text-truncate">
-                                    <i class="fas fa-store {% if ACTIVE_BRANCH.id == br.id %}text-primary{% else %}text-muted{% endif %}"></i>
-                                    <span class="text-truncate">{{ br.name }}</span>
-                                </div>
-                                <span class="badge bg-light text-muted border font-monospace ms-2">{{ br.code }}</span>
-                            </button>
-                            {% endfor %}
-                        </div>
-                    </form>
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- POS Billing Hero CTA Button -->
-            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning btn-sm fw-bold px-3 py-1 rounded-pill d-flex align-items-center gap-1 shadow-sm fs-xs text-dark border-0">
-                <i class="fas fa-bolt text-dark"></i> <span class="d-none d-sm-inline">POS BILLING</span>
+            <!-- Hero POS Billing Fast CTA Button -->
+            <a href="{% url 'sales:pos_terminal' %}" class="btn-pos-hero" title="Open POS Billing Terminal [F2]">
+                <i class="fas fa-bolt"></i>
+                <span class="d-none d-sm-inline">POS BILLING</span>
             </a>
 
-            <!-- User Profile Dropdown -->
+            <!-- User Profile: ZERO-ZIGZAG ROW ALIGNMENT -->
+            {% if user.is_authenticated %}
             <div class="dropdown">
-                <button class="btn btn-dark btn-sm rounded-pill border border-secondary border-opacity-50 p-1 pe-2 d-flex align-items-center gap-2 text-light" 
-                        type="button" 
-                        data-bs-toggle="dropdown" 
-                        aria-expanded="false" 
-                        title="User Account Menu">
-                    
-                    <div class="bg-primary text-white rounded-circle fw-bold d-flex align-items-center justify-content-center shadow-xs flex-shrink-0" 
-                         style="width: 28px; height: 28px; font-size: 11px; letter-spacing: 0.05em;">
+                <button class="user-profile-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="User Account Menu">
+                    <!-- Circular Two-Letter Gradient Avatar -->
+                    <div class="user-avatar-initials">
                         {{ user.first_name|default:user.username|slice:":2"|upper }}
                     </div>
 
-                    <div class="d-none d-sm-flex flex-column text-start lh-1 me-1">
-                        <span class="fw-bold fs-xs text-light text-truncate" style="max-width: 100px;">{{ user.first_name|default:user.username }}</span>
-                        <small class="text-white-50 fs-2xs text-uppercase" style="font-size: 0.65rem;">{{ user.get_role_display|default:user.role }}</small>
+                    <!-- Single-Line Meta Stack (No broken or jagged wrapping) -->
+                    <div class="user-meta-stack d-none d-sm-flex">
+                        <span class="user-meta-name">
+                            {{ user.get_full_name|default:user.username }}
+                        </span>
+                        <span class="user-meta-role">
+                            {{ user.get_role_display|default:user.role }}
+                        </span>
                     </div>
 
-                    <i class="fas fa-chevron-down fs-2xs text-white-50"></i>
+                    <i class="fas fa-chevron-down fs-2xs text-white-50 ms-1"></i>
                 </button>
 
-                <ul class="dropdown-menu dropdown-menu-end shadow-lg border bg-white mt-2 p-2 rounded-4" style="min-width: 250px;">
+                <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0 bg-white mt-2 p-2 rounded-4" style="min-width: 250px;">
                     <li class="px-3 py-2 border-bottom">
-                        <div class="fw-bold text-dark fs-sm">{{ user.get_full_name|default:user.username }}</div>
+                        <div class="fw-bold text-dark fs-sm text-truncate">{{ user.get_full_name|default:user.username }}</div>
                         <span class="badge bg-primary bg-opacity-10 text-primary fs-2xs fw-bold">{{ user.get_role_display|default:user.role }}</span>
                         <div class="text-muted fs-2xs mt-1">
                             <i class="fas fa-location-dot me-1 text-primary"></i>{{ STORE_OUTLET_NAME }} ({{ STORE_OUTLET_CODE }})
@@ -128,14 +148,14 @@
                     <li>
                         <a class="dropdown-item text-dark py-2 fs-xs rounded-2 d-flex align-items-center gap-2" href="{% url 'pos:session_list' %}">
                             <i class="fas fa-cash-register text-success"></i>
-                            <span>Shift Registers</span>
+                            <span>Shift Registers &amp; Float</span>
                         </a>
                     </li>
                     <li><hr class="dropdown-divider my-1"></li>
                     <li>
                         <form action="{% url 'users:logout' %}" method="post" class="m-0">
                             {% csrf_token %}
-                            <button type="submit" class="dropdown-item text-danger py-2 fs-xs rounded-2 d-flex align-items-center gap-2">
+                            <button type="submit" class="dropdown-item text-danger py-2 fs-xs rounded-2 d-flex align-items-center gap-2 border-0 bg-transparent w-100 text-start">
                                 <i class="fas fa-right-from-bracket"></i>
                                 <span>Log Out</span>
                             </button>
@@ -143,6 +163,7 @@
                     </li>
                 </ul>
             </div>
+            {% endif %}
 
         </div>
     </div>

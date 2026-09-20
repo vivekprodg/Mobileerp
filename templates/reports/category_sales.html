@@ -1,0 +1,314 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Category-Wise Sales Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.sales-suite-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sales-suite-pill:hover, .sales-suite-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+.report-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.table-cat-sales th {
+    font-size: 0.70rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-cat-sales td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1720px;">
+
+    <!-- Sales Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Sales Suite:</span>
+        <a href="{% url 'reports:sales_summary' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-chart-pie text-secondary"></i> Daily Summary
+        </a>
+        <a href="{% url 'reports:item_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-list-check text-secondary"></i> Line Items
+        </a>
+        <a href="{% url 'reports:product_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-boxes-stacked text-secondary"></i> Product-Wise
+        </a>
+        <a href="{% url 'reports:brand_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-tags text-secondary"></i> Brand-Wise
+        </a>
+        <a href="{% url 'reports:category_sales' %}" class="sales-suite-pill active text-nowrap">
+            <i class="fas fa-folder-tree text-white"></i> Category-Wise
+        </a>
+        <a href="{% url 'reports:sold_imei' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-barcode text-secondary"></i> Sold IMEIs
+        </a>
+        <a href="{% url 'reports:salesperson_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-user-tie text-secondary"></i> Sales Reps
+        </a>
+        <a href="{% url 'reports:cashier_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-cash-register text-secondary"></i> Cashiers
+        </a>
+        <a href="{% url 'reports:payment_methods' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-wallet text-secondary"></i> Payment Modes
+        </a>
+        <a href="{% url 'reports:gross_profit' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-coins text-warning"></i> Gross Profit
+        </a>
+        <a href="{% url 'reports:top_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-arrow-trend-up text-success"></i> Top Sellers
+        </a>
+        <a href="{% url 'reports:cancelled_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-ban text-danger"></i> Voided Bills
+        </a>
+    </div>
+
+    <!-- Page Header & Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-folder-tree text-primary me-2"></i> Category-Wise Departmental Sales Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Analyze department revenue (Smartphones, Fast Chargers, Screen Covers, Audio, Eyewear), sales volume, and gross margin contributions
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'inventory:category_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                <i class="fas fa-tags me-1"></i> Categories
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Category KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-primary border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Items Billed</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.total_units_sold|default:0|floatformat:0|intcomma }} <span class="fs-6 fw-normal text-muted">Units</span>
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.total_lines_count|default:0 }} Transaction lines billed</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-success border-4 h-100">
+                <span class="text-success text-uppercase fw-bold fs-2xs">Net Turnover</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_net|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Gross: Rs. {{ totals.total_gross|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-warning border-4 h-100">
+                <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Gross Profit Realized</span>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_profit|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-success fs-2xs fw-bold">{{ totals.overall_margin_pct }}% Average Category Margin</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-dark border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Active Departments</span>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    {{ totals.categories_count|default:0 }} <span class="fs-6 fw-normal text-muted">Categories</span>
+                </h3>
+                <small class="text-muted fs-2xs">Products with sales in this period</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <input type="text" name="q" value="{{ filters.q|default:'' }}" class="form-control form-control-sm bg-light border-0" placeholder="Search Category Name...">
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if filters.category_id == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>{{ br.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.category_id or filters.branch_id %}
+                <a href="{% url 'reports:category_sales' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Category Sales Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-folder-tree text-secondary me-2"></i> Departmental Turnover Breakdown
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Categories Active</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-cat-sales table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Code</th>
+                        <th>Category Name</th>
+                        <th>Nepali Name</th>
+                        <th class="text-center">Bills</th>
+                        <th class="text-center">Lines Billed</th>
+                        <th class="text-center">Units Sold</th>
+                        <th class="text-end">Gross Sales</th>
+                        <th class="text-end">Discounts</th>
+                        <th class="text-end">Net Turnover</th>
+                        <th class="text-end">Landed COGS</th>
+                        <th class="text-end">Gross Profit</th>
+                        <th class="text-end">Margin %</th>
+                        <th class="text-end pe-3">Contribution %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td class="ps-3 font-monospace text-primary fw-bold">{{ r.category_code }}</td>
+
+                        <td>
+                            <strong class="text-dark">{{ r.category_name }}</strong>
+                        </td>
+
+                        <td class="text-secondary">{{ r.category_name_np|default:"-" }}</td>
+
+                        <td class="text-center font-monospace">{{ r.invoices_count }}</td>
+                        <td class="text-center font-monospace">{{ r.lines_count }}</td>
+                        <td class="text-center font-monospace fw-bold text-dark">{{ r.total_units_sold|floatformat:0 }}</td>
+
+                        <td class="col-num">Rs. {{ r.gross_sales|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger">{% if r.total_discounts > 0 %}-Rs. {{ r.total_discounts|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num fw-bold text-dark">Rs. {{ r.net_turnover|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-muted">Rs. {{ r.total_cogs|floatformat:2|intcomma }}</td>
+
+                        <td class="col-num fw-bold text-success">
+                            Rs. {{ r.gross_profit|floatformat:2|intcomma }}
+                        </td>
+
+                        <td class="col-num">
+                            <span class="badge bg-success bg-opacity-10 text-success fw-bold font-monospace fs-2xs">
+                                {{ r.margin_percent }}%
+                            </span>
+                        </td>
+
+                        <td class="col-num pe-3">
+                            <span class="badge bg-primary bg-opacity-10 text-primary fw-bold font-monospace fs-2xs">
+                                {{ r.contribution_percent }}%
+                            </span>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="13" class="text-center py-5 text-muted">
+                            <i class="fas fa-folder-open fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Category Sales Recorded</h6>
+                            <p class="text-muted fs-xs mb-0">No sales transactions match the selected filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="3" class="ps-3 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="text-center col-num text-white-50"></td>
+                        <td class="text-center col-num text-white-50">{{ totals.total_lines_count }}</td>
+                        <td class="text-center col-num text-white fs-6">{{ totals.total_units_sold|floatformat:0 }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_gross|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning-emphasis">-Rs. {{ totals.total_discounts|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white fs-6">Rs. {{ totals.total_net|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_cogs|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success fs-6">Rs. {{ totals.total_profit|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success">{{ totals.overall_margin_pct }}%</td>
+                        <td class="pe-3 col-num text-warning">100.0%</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

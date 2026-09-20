@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Bank Reconciliation (बैंक हिसाब मिलान) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Bank Reconciliation</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-landmark-dome text-primary"></i>
+                <span>Bank Statement Reconciliation</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(बैंक हिसाब मिलान तथा चेक ट्र्याकिङ)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Reconcile physical bank statements against GL book balances, unpresented cheques, and digital transfers</p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 shadow-xs fw-bold" data-bs-toggle="modal" data-bs-target="#newReconciliationModal">
+                <i class="fas fa-plus-circle me-1"></i> Start New Bank Reconciliation
+            </button>
+        </div>
+    </div>
+
+    <!-- Mathematical Reconciliation Guidance Banner -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="row g-3 align-items-center">
+            <div class="col-12 col-md-8">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="rounded-3 bg-primary bg-opacity-10 text-primary p-3 fs-3">
+                        <i class="fas fa-calculator"></i>
+                    </div>
+                    <div>
+                        <h6 class="fw-bold text-dark mb-1">Standard Bank Reconciliation Logic</h6>
+                        <div class="fs-xs font-mono text-muted">
+                            <strong>Bank Statement Ending Balance</strong> + <em>Uncleared Customer Deposits</em> - <em>Unpresented Supplier Cheques</em> = <strong>GL Book Balance</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4 text-md-end">
+                <span class="badge bg-success bg-opacity-10 text-success p-2 px-3 fs-xs fw-bold">
+                    <i class="fas fa-check-circle me-1"></i> Auto-Matching Enabled
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Historical Reconciliation Sessions Table -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+        <div class="card-header bg-slate-900 text-white px-4 py-3 d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+                <i class="fas fa-clock-rotate-left text-warning"></i>
+                <span class="fw-bold fs-sm text-uppercase tracking-wider">Bank Reconciliation Audit Sessions</span>
+            </div>
+            <span class="badge bg-secondary bg-opacity-25 text-white fs-2xs font-mono">{{ reconciliations|length }} Sessions</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-light text-muted fs-2xs text-uppercase tracking-wider">
+                    <tr>
+                        <th class="ps-3 py-3">Bank Account</th>
+                        <th>Outlet Branch</th>
+                        <th>Statement Date</th>
+                        <th class="text-end">Statement Ending Bal</th>
+                        <th class="text-end">GL Book Balance</th>
+                        <th class="text-end">Discrepancy (Variance)</th>
+                        <th class="text-center">Status</th>
+                        <th>Reconciled By</th>
+                        <th class="text-center" style="width: 100px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rec in reconciliations %}
+                    <tr>
+                        <td class="ps-3">
+                            <div class="fw-bold text-dark">{{ rec.bank_account.name }}</div>
+                            <small class="text-muted fs-2xs font-mono">{{ rec.bank_account.code }}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs">{{ rec.branch.name }}</span>
+                        </td>
+                        <td>
+                            <span class="font-mono fs-xs">{{ rec.statement_date|date:"Y-m-d" }}</span>
+                            {% if rec.statement_date_bs %}
+                                <small class="text-muted fs-2xs font-nepali d-block">{{ rec.statement_date_bs }} BS</small>
+                            {% endif %}
+                        </td>
+                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+                            Rs. {{ rec.statement_ending_balance|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+                            Rs. {{ rec.gl_book_balance|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-end font-mono fw-extrabold fs-xs {% if rec.difference == 0 %}text-success{% else %}text-danger{% endif %}">
+                            Rs. {{ rec.difference|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-center">
+                            {% if rec.status == 'RECONCILED' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fs-2xs">Reconciled</span>
+                            {% else %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs">In Progress</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small class="text-muted d-flex align-items-center gap-1">
+                                <i class="fas fa-user-circle"></i> {{ rec.reconciled_by.username|default:"System" }}
+                            </small>
+                        </td>
+                        <td class="text-center">
+                            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2 rounded-pill fs-2xs" 
+                                    data-bs-toggle="modal" data-bs-target="#sessionDetails_{{ rec.id }}" title="Inspect Lines">
+                                View
+                            </button>
+                        </td>
+                    </tr>
+
+                    <!-- Session Details Modal -->
+                    <div class="modal fade" id="sessionDetails_{{ rec.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-lg">
+                            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                                <div class="modal-header bg-slate-900 text-white px-4 py-3">
+                                    <h5 class="modal-title fs-sm fw-bold mb-0">Reconciliation: {{ rec.bank_account.name }} ({{ rec.statement_date }})</h5>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body p-4">
+                                    <div class="row g-2 p-3 bg-light rounded-3 fs-xs mb-3">
+                                        <div class="col-4"><strong>Bank Balance:</strong> Rs. {{ rec.statement_ending_balance|floatformat:2|intcomma }}</div>
+                                        <div class="col-4"><strong>System Balance:</strong> Rs. {{ rec.gl_book_balance|floatformat:2|intcomma }}</div>
+                                        <div class="col-4"><strong>Variance:</strong> <span class="{% if rec.difference == 0 %}text-success{% else %}text-danger{% endif %} fw-bold">Rs. {{ rec.difference|floatformat:2|intcomma }}</span></div>
+                                    </div>
+                                    {% if rec.notes %}
+                                        <div class="p-2 border rounded bg-white fs-xs mb-3 text-muted"><strong>Notes:</strong> {{ rec.notes }}</div>
+                                    {% endif %}
+
+                                    <h6 class="fs-xs fw-bold text-uppercase text-dark mb-2">Matched Statement Lines</h6>
+                                    <div class="table-responsive border rounded-3">
+                                        <table class="table table-sm table-striped align-middle mb-0 fs-2xs">
+                                            <thead class="bg-light text-muted text-uppercase">
+                                                <tr>
+                                                    <th>Date</th>
+                                                    <th>Description</th>
+                                                    <th>Ref / Cheque</th>
+                                                    <th class="text-end">Withdrawal</th>
+                                                    <th class="text-end">Deposit</th>
+                                                    <th class="text-center">Cleared</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for line in rec.statement_lines.all %}
+                                                <tr>
+                                                    <td>{{ line.transaction_date }}</td>
+                                                    <td>{{ line.description }}</td>
+                                                    <td>{{ line.cheque_or_ref_no|default:"-" }}</td>
+                                                    <td class="text-end">Rs. {{ line.withdrawal_amount|floatformat:2 }}</td>
+                                                    <td class="text-end">Rs. {{ line.deposit_amount|floatformat:2 }}</td>
+                                                    <td class="text-center">
+                                                        {% if line.is_cleared %}<i class="fas fa-check-circle text-success"></i>{% else %}<i class="fas fa-clock text-warning"></i>{% endif %}
+                                                    </td>
+                                                </tr>
+                                                {% empty %}
+                                                <tr>
+                                                    <td colspan="6" class="text-center py-3 text-muted">No individual statement lines attached to this summary session.</td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="modal-footer bg-light px-4 py-2 border-top">
+                                    <button type="button" class="btn btn-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-landmark-dome fs-1 opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold mb-1">No Reconciliation Sessions Found</h6>
+                            <p class="fs-xs mb-3">Initialize your first monthly bank reconciliation session to start matching cleared cheques.</p>
+                            <button type="button" class="btn btn-primary btn-sm rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#newReconciliationModal">
+                                <i class="fas fa-plus-circle me-1"></i> Start First Reconciliation
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<!-- Modal: Start New Bank Reconciliation Session -->
+<div class="modal fade" id="newReconciliationModal" tabindex="-1" aria-labelledby="newReconciliationModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-slate-900 text-white px-4 py-3">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="fas fa-landmark text-primary"></i>
+                    <h5 class="modal-title fs-base fw-bold mb-0" id="newReconciliationModalLabel">Start Bank Statement Reconciliation (नयाँ बैंक मिलान)</h5>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{% url 'accounting:reconciliation' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body p-4">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Bank GL Account * (बैंक खाता)</label>
+                            {{ form.bank_account }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Store Outlet * (शाखा)</label>
+                            {{ form.branch }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Statement Ending Date (AD) *</label>
+                            {{ form.statement_date }}
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Bank Statement Closing Balance (NPR) *</label>
+                            {{ form.statement_ending_balance }}
+                            <div class="form-text fs-2xs">The exact closing balance displayed on the physical bank statement.</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">Reconciliation Notes &amp; Unpresented Cheque Memos</label>
+                            {{ form.notes }}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light px-4 py-3 border-top">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill shadow-xs fw-bold">
+                        <i class="fas fa-check-circle me-1"></i> Initialize Reconciliation Session
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

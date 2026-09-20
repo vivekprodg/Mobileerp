@@ -10,6 +10,17 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
         'vat_number', 'default_vat_rate', 'require_manager_approval_discount',
         'default_trade_in_margin_percent', 'thermal_printer_paper_width'
     ]
+    raw_id_fields = [
+        'default_cash_account', 'default_bank_account',
+        'default_fonepay_account', 'default_esewa_account',
+        'default_khalti_account', 'default_card_clearing_account',
+        'default_receivable_account', 'default_payable_account',
+        'default_inventory_asset_account', 'default_cogs_account',
+        'default_sales_revenue_account', 'default_discount_expense_account',
+        'default_vat_output_account', 'default_vat_input_account',
+        'default_shrinkage_account', 'default_gateway_fee_account',
+        'default_interest_expense_account', 'default_drawings_account',
+    ]
     fieldsets = (
         ("1. Shop Identity & Tax Operating Mode", {
             'description': "Select whether POS bills operate in 13% VAT mode, 0% PAN mode, or simple estimation.",
@@ -53,6 +64,23 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 ('currency_symbol', 'currency_code'),
                 ('enable_nepali_calendar', 'default_language'),
                 'thermal_printer_paper_width'
+            )
+        }),
+        ("7. General Ledger Control Account Bindings (Double-Entry Automation)", {
+            'description': (
+                "Map operational touchpoints to general ledger Chart of Accounts accounts for "
+                "automated real-time double-entry journal postings across POS sales, payments, and inventory."
+            ),
+            'fields': (
+                ('default_cash_account', 'default_bank_account'),
+                ('default_fonepay_account', 'default_esewa_account'),
+                ('default_khalti_account', 'default_card_clearing_account'),
+                ('default_receivable_account', 'default_payable_account'),
+                ('default_inventory_asset_account', 'default_cogs_account'),
+                ('default_sales_revenue_account', 'default_discount_expense_account'),
+                ('default_vat_output_account', 'default_vat_input_account'),
+                ('default_shrinkage_account', 'default_gateway_fee_account'),
+                ('default_interest_expense_account', 'default_drawings_account'),
             )
         }),
     )

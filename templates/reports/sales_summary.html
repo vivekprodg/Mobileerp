@@ -1,0 +1,488 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Sales Summary Report (Date-Wise &amp; Fiscal Year) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.sales-suite-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sales-suite-pill:hover, .sales-suite-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+.report-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.report-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-sales-summary th {
+    font-size: 0.70rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-sales-summary td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.nepali-date-badge {
+    background-color: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+    font-weight: 800;
+    font-size: 0.78rem;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+}
+.fy-badge {
+    background: #0f172a;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1760px;">
+
+    <!-- Sales Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Sales Suite:</span>
+        <a href="{% url 'reports:sales_summary' %}" class="sales-suite-pill active text-nowrap">
+            <i class="fas fa-chart-pie text-white"></i> Daily Summary
+        </a>
+        <a href="{% url 'reports:item_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-list-check text-secondary"></i> Line Items
+        </a>
+        <a href="{% url 'reports:product_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-boxes-stacked text-secondary"></i> Product-Wise
+        </a>
+        <a href="{% url 'reports:brand_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-tags text-secondary"></i> Brand-Wise
+        </a>
+        <a href="{% url 'reports:category_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-folder-tree text-secondary"></i> Category-Wise
+        </a>
+        <a href="{% url 'reports:sold_imei' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-barcode text-secondary"></i> Sold IMEIs
+        </a>
+        <a href="{% url 'reports:salesperson_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-user-tie text-secondary"></i> Sales Reps
+        </a>
+        <a href="{% url 'reports:cashier_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-cash-register text-secondary"></i> Cashiers
+        </a>
+        <a href="{% url 'reports:payment_methods' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-wallet text-secondary"></i> Payment Modes
+        </a>
+        <a href="{% url 'reports:gross_profit' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-coins text-warning"></i> Gross Profit
+        </a>
+        <a href="{% url 'reports:top_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-arrow-trend-up text-success"></i> Top Sellers
+        </a>
+        <a href="{% url 'reports:slow_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-snowflake text-info"></i> Slow Sellers
+        </a>
+        <a href="{% url 'reports:cancelled_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-ban text-danger"></i> Voided Bills
+        </a>
+    </div>
+
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <h4 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-calendar-days text-primary me-2"></i> Date-Wise Sales Summary &amp; Collection Rollup
+                </h4>
+                {% if fiscal_year %}
+                    <span class="fy-badge">
+                        <i class="fas fa-landmark me-1 text-warning"></i> FY {{ fiscal_year }} (आ.व. {{ fiscal_year }})
+                    </span>
+                {% endif %}
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Chronological daily rollup of sales volume, line and bill discounts, output VAT, landed COGS, gross profit, and tender breakdowns
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning btn-sm rounded-pill px-4 fw-bold text-dark shadow-xs">
+                <i class="fas fa-bolt me-1"></i> Open POS Terminal
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Financial KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Net Turnover Billed</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-receipt fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_net_turnover|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.total_invoices|default:0 }} Bills &bull; {{ totals.total_units_sold|floatformat:0 }} Units Sold</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">Realized Gross Profit</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-arrow-trend-up fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_profit|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-success fs-2xs fw-bold">{{ totals.overall_margin_pct }}% Average Gross Margin</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Total Discounts Given</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-percent fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    -Rs. {{ totals.total_sales_disc|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Items: Rs. {{ totals.total_item_disc|floatformat:2|intcomma }} | Bill: Rs. {{ totals.total_bill_disc|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-danger border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-danger text-uppercase fw-bold fs-2xs">Pending Due (Udhaari)</span>
+                    <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle">
+                        <i class="fas fa-hand-holding-dollar fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_due|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Paid on Invoicing: Rs. {{ totals.total_paid|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Enhanced Multi-Calendar Filter Toolbar with Fiscal Year Selector & Dual B.S. Datepicker Inputs -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-end" id="salesSummaryFilterForm">
+            
+            <!-- 1. Nepali Fiscal Year Selector (Dropdown) -->
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="fas fa-landmark text-primary me-1"></i> Nepali Fiscal Year (आर्थिक वर्ष)
+                </label>
+                <select name="fiscal_year" id="fiscalYearSelect" class="form-select form-select-sm bg-light border-0 fw-bold text-dark">
+                    <option value="">-- Custom Date Range --</option>
+                    {% if available_fiscal_years %}
+                        {% for fy in available_fiscal_years %}
+                            <option value="{{ fy }}" {% if request.GET.fiscal_year == fy or fiscal_year == fy and not request.GET.start_date %}selected{% endif %}>
+                                Fiscal Year {{ fy }} (आ.व. {{ fy }})
+                            </option>
+                        {% endfor %}
+                    {% else %}
+                        <option value="2082/83" {% if request.GET.fiscal_year == "2082/83" %}selected{% endif %}>Fiscal Year 2082/83 (आ.व. २०८२/८३)</option>
+                        <option value="2081/82" {% if request.GET.fiscal_year == "2081/82" or fiscal_year == "2081/82" and not request.GET.start_date %}selected{% endif %}>Fiscal Year 2081/82 (आ.व. २०८१/८२)</option>
+                        <option value="2080/81" {% if request.GET.fiscal_year == "2080/81" or fiscal_year == "2080/81" and not request.GET.start_date %}selected{% endif %}>Fiscal Year 2080/81 (आ.व. २०८०/८१)</option>
+                        <option value="2079/80" {% if request.GET.fiscal_year == "2079/80" %}selected{% endif %}>Fiscal Year 2079/80 (आ.व. २०७९/८०)</option>
+                        <option value="2078/79" {% if request.GET.fiscal_year == "2078/79" %}selected{% endif %}>Fiscal Year 2078/79 (आ.व. २०७८/७९)</option>
+                    {% endif %}
+                </select>
+            </div>
+
+            <!-- 2. Dual Nepali Date Input 1: Start Date (B.S.) with Interactive Calendar Picker -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="far fa-calendar-alt text-primary me-1"></i> Start Date (B.S. मिति)
+                </label>
+                <div class="input-group input-group-sm">
+                    <input type="text" 
+                           name="start_date" 
+                           id="startDateBs" 
+                           value="{{ start_date_bs }}" 
+                           class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
+                           placeholder="YYYY-MM-DD (BS)" 
+                           autocomplete="off">
+                    <span class="input-group-text bg-light border-0 text-muted fs-2xs">BS</span>
+                </div>
+            </div>
+
+            <!-- 3. Dual Nepali Date Input 2: End Date (B.S.) with Interactive Calendar Picker -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="far fa-calendar-alt text-primary me-1"></i> End Date (B.S. मिति)
+                </label>
+                <div class="input-group input-group-sm">
+                    <input type="text" 
+                           name="end_date" 
+                           id="endDateBs" 
+                           value="{{ end_date_bs }}" 
+                           class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
+                           placeholder="YYYY-MM-DD (BS)" 
+                           autocomplete="off">
+                    <span class="input-group-text bg-light border-0 text-muted fs-2xs">BS</span>
+                </div>
+            </div>
+
+            <!-- 4. Store Outlet Branch Selector -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Store Outlet</label>
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 5. Payment Status Selector -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Payment Status</label>
+                <select name="payment_status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Payments</option>
+                    <option value="PAID" {% if filters.payment_status == 'PAID' %}selected{% endif %}>Fully Paid</option>
+                    <option value="PARTIAL" {% if filters.payment_status == 'PARTIAL' %}selected{% endif %}>Partial Payment</option>
+                    <option value="DUE" {% if filters.payment_status == 'DUE' %}selected{% endif %}>Full Due (Udhaari)</option>
+                </select>
+            </div>
+
+            <!-- 6. Filter & Reset Controls -->
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.start_date or filters.end_date or filters.branch_id or filters.payment_status or request.GET.fiscal_year %}
+                <a href="{% url 'reports:sales_summary' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <!-- Active Scope Feedback Strip -->
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 pt-2 border-top fs-2xs text-muted">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span>Active Scope (B.S.): <strong class="text-primary font-mono">{{ start_date_bs }}</strong> to <strong class="text-primary font-mono">{{ end_date_bs }} BS</strong></span>
+                <span class="text-muted">&bull;</span>
+                <span>Gregorian (A.D.): <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong></span>
+                {% if fiscal_year %}
+                    <span class="text-muted">&bull;</span>
+                    <span>Fiscal Cycle: <strong class="text-dark">{{ fiscal_year }}</strong></span>
+                {% endif %}
+            </div>
+            <div>
+                Store Context: <strong class="text-dark">{{ selected_branch.name|default:"All Outlets" }}</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Date-Wise Rollup Table (Prominent Nepali B.S. Date per row) -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-table-list text-secondary me-2"></i> Daily Sales Aggregations
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Days Logged</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-sales-summary table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Nepali Date (B.S.) / A.D.</th>
+                        <th class="text-center">Bills</th>
+                        <th class="text-center">Units Sold</th>
+                        <th class="text-end">Gross Subtotal</th>
+                        <th class="text-end">Total Discounts</th>
+                        <th class="text-end">Trade-In Credit</th>
+                        <th class="text-end">Tax / VAT</th>
+                        <th class="text-end">Grand Total</th>
+                        <th class="text-end">Landed COGS</th>
+                        <th class="text-end">Gross Profit</th>
+                        <th class="text-end">Margin %</th>
+                        <th class="text-end">Cash Inflow</th>
+                        <th class="text-end">Digital (QR/Wallets)</th>
+                        <th class="text-end pe-3">Udhaari Added</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <!-- Prominent Nepali B.S. Date as Primary Identifier -->
+                        <td class="ps-3 font-monospace">
+                            <span class="nepali-date-badge">
+                                <i class="far fa-calendar-check me-1 text-primary"></i>{{ r.date_bs }} BS
+                            </span>
+                            <small class="text-muted d-block fs-2xs mt-1 ps-1">AD: {{ r.date_ad_str }}</small>
+                        </td>
+
+                        <td class="text-center font-monospace fw-bold">{{ r.invoice_count }}</td>
+                        <td class="text-center font-monospace fw-semibold">{{ r.units_sold|floatformat:0 }}</td>
+                        <td class="col-num">Rs. {{ r.gross_subtotal|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger">{% if r.total_discount_sum > 0 %}-Rs. {{ r.total_discount_sum|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num text-warning-emphasis">{% if r.trade_in_credit_sum > 0 %}-Rs. {{ r.trade_in_credit_sum|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num text-muted">Rs. {{ r.vat_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num fw-bold text-dark">Rs. {{ r.grand_total|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-muted">Rs. {{ r.cogs_amount|floatformat:2|intcomma }}</td>
+                        
+                        <td class="col-num fw-bold text-success">
+                            Rs. {{ r.gross_profit|floatformat:2|intcomma }}
+                        </td>
+
+                        <td class="col-num">
+                            <span class="badge bg-success bg-opacity-10 text-success fw-bold font-monospace fs-2xs">
+                                {{ r.margin_percent }}%
+                            </span>
+                        </td>
+
+                        <td class="col-num text-dark">Rs. {{ r.cash_collected|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-primary">Rs. {{ r.fonepay_collected|add:r.esewa_collected|add:r.khalti_collected|floatformat:2|intcomma }}</td>
+                        
+                        <td class="col-num pe-3">
+                            {% if r.due_amount > 0 %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace fs-2xs">
+                                    Rs. {{ r.due_amount|floatformat:2|intcomma }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted font-monospace fs-2xs">0.00</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="14" class="text-center py-5 text-muted">
+                            <i class="fas fa-calendar-xmark fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Sales Recorded in Period</h6>
+                            <p class="text-muted fs-xs mb-0">Try changing your fiscal year, selecting another date range, or switching store outlets.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td class="ps-3 text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="text-center col-num text-white">{{ totals.total_invoices }}</td>
+                        <td class="text-center col-num text-white">{{ totals.total_units_sold|floatformat:0 }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_gross|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning-emphasis">-Rs. {{ totals.total_sales_disc|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">-Rs. {{ totals.total_trade_in|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_vat|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white fs-6">Rs. {{ totals.total_net_turnover|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_cogs|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success fs-6">Rs. {{ totals.total_profit|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success">{{ totals.overall_margin_pct }}%</td>
+                        <td class="col-num text-white">Rs. {{ totals.total_cash|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white">Rs. {{ totals.total_fonepay|add:totals.total_esewa|add:totals.total_khalti|floatformat:2|intcomma }}</td>
+                        <td class="col-num pe-3 text-danger fs-6">Rs. {{ totals.total_due|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+
+<!-- Client-Side Synchronization Script for Fiscal Year & Dual B.S. Datepicker Inputs -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const fySelect = document.getElementById('fiscalYearSelect');
+    const startDateInput = document.getElementById('startDateBs');
+    const endDateInput = document.getElementById('endDateBs');
+
+    if (fySelect && startDateInput && endDateInput) {
+        // When user picks a fiscal year from the dropdown, clear the date fields so the backend evaluates the full fiscal year range cleanly
+        fySelect.addEventListener('change', () => {
+            const chosenFy = fySelect.value.trim();
+            if (chosenFy) {
+                startDateInput.value = '';
+                endDateInput.value = '';
+                startDateInput.placeholder = 'Fiscal Year Active';
+                endDateInput.placeholder = 'Fiscal Year Active';
+            } else {
+                startDateInput.placeholder = 'YYYY-MM-DD (BS)';
+                endDateInput.placeholder = 'YYYY-MM-DD (BS)';
+            }
+        });
+
+        // When user picks or types into custom B.S. date fields, reset the fiscal year selector to custom mode
+        [startDateInput, endDateInput].forEach(inp => {
+            inp.addEventListener('input', () => {
+                if (inp.value.trim() !== '') {
+                    fySelect.value = '';
+                }
+            });
+            inp.addEventListener('change', () => {
+                if (inp.value.trim() !== '') {
+                    fySelect.value = '';
+                }
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

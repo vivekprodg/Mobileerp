@@ -1,0 +1,321 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}IMEI Device Lifecycle Journey | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Vertical Stepped Timeline Architecture */
+.timeline-vertical {
+    position: relative;
+    padding: 10px 0 10px 32px;
+}
+.timeline-vertical::before {
+    content: '';
+    position: absolute;
+    top: 14px;
+    bottom: 14px;
+    left: 12px;
+    width: 2px;
+    background: #e2e8f0;
+}
+.timeline-node {
+    position: relative;
+    margin-bottom: 24px;
+}
+.timeline-node:last-child {
+    margin-bottom: 0;
+}
+.timeline-icon-badge {
+    position: absolute;
+    left: -32px;
+    top: 4px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    box-shadow: 0 0 0 4px #ffffff;
+    z-index: 2;
+}
+.timeline-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 14px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.timeline-card:hover {
+    border-color: var(--erp-primary-border);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+.device-spec-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.imei-copy-btn {
+    border: none;
+    background: transparent;
+    color: #64748b;
+    padding: 0 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: all 0.15s ease;
+}
+.imei-copy-btn:hover {
+    color: var(--erp-primary);
+    transform: scale(1.15);
+}
+.imei-copy-btn.copied {
+    color: #10b981 !important;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+
+    <!-- Page Header & Action Buttons -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-magnifying-glass-arrow-right text-primary me-2"></i> Forensic Single-IMEI Lifecycle Journey
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Trace the entire chronological history of any phone: Inward GRN &rarr; Transfers &rarr; POS Sale &rarr; Warranties &rarr; Repairs &rarr; Trade-Ins
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Forensic Audit Sheet
+            </button>
+            <a href="{% url 'reports:imei_stock' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-barcode me-1"></i> Live IMEI Stock Registry
+            </a>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- IMEI Search Card -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-9">
+                <div class="input-group input-group-lg">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-barcode text-primary"></i></span>
+                    <input type="text" name="imei" id="imeiSearchBox" value="{{ query }}" 
+                           class="form-control bg-light border-0 font-monospace fs-6" 
+                           placeholder="Enter or scan 15-digit IMEI 1, IMEI 2, Serial Number, or Device UID..." 
+                           autofocus autocomplete="off">
+                </div>
+            </div>
+            <div class="col-12 col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-lg w-100 rounded-3 fw-bold shadow-sm">
+                    <i class="fas fa-search me-1"></i> Trace Journey
+                </button>
+                {% if query %}
+                <a href="{% url 'reports:imei_lifecycle' %}" class="btn btn-outline-secondary btn-lg rounded-3" title="Clear Search">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    {% if is_found and device %}
+    <!-- 1. Device Hardware Specification & Current Status Card -->
+    <div class="device-spec-card mb-4">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 border-bottom pb-3 mb-3">
+            <div class="d-flex align-items-center gap-3">
+                <div class="bg-primary bg-opacity-10 text-primary p-3 rounded-4 fs-3">
+                    <i class="fas fa-mobile-screen"></i>
+                </div>
+                <div>
+                    <h5 class="fw-bold text-dark mb-0">{{ device.product.name }}</h5>
+                    <div class="text-muted fs-xs mt-1">
+                        Brand: <strong>{{ device.product.brand.name|default:"Brand Generic" }}</strong> &bull;
+                        Specs: <strong>{{ device.product.ram|default:"-" }}/{{ device.product.internal_storage|default:"-" }}</strong> &bull;
+                        Color: <strong>{{ device.product.color_variant|default:"Standard" }}</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Status Tags -->
+            <div class="d-flex flex-wrap gap-2">
+                <span class="badge bg-{% if device.status == 'IN_STOCK' %}success{% elif device.status == 'SOLD' %}secondary{% else %}danger{% endif %} fs-xs px-3 py-2 rounded-pill">
+                    Status: {{ device.get_status_display }}
+                </span>
+                {% if device.mdms_status == 'REGISTERED_OFFICIAL' %}
+                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-xs px-3 py-2 rounded-pill fw-bold">
+                        <i class="fas fa-shield-check me-1"></i> NTA MDMS OK
+                    </span>
+                {% else %}
+                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-xs px-3 py-2 rounded-pill fw-bold">
+                        <i class="fas fa-triangle-exclamation me-1"></i> Gray Market
+                    </span>
+                {% endif %}
+                <span class="badge bg-light text-dark border fs-xs px-3 py-2 rounded-pill">
+                    {{ device.get_condition_display }}
+                </span>
+            </div>
+        </div>
+
+        <!-- 4 Sub-Panels: Identifiers, Pricing, Stock Location, Active Customer -->
+        <div class="row g-3 fs-xs">
+            <div class="col-12 col-md-3">
+                <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Unique Hardware Identifiers</span>
+                <div class="d-flex align-items-center gap-1 font-monospace">
+                    <span>IMEI 1: <strong>{{ device.imei_1|default:"-" }}</strong></span>
+                    {% if device.imei_1 %}
+                    <button type="button" class="imei-copy-btn" onclick="copyImeiText('{{ device.imei_1 }}', this)" title="Copy IMEI 1"><i class="far fa-copy"></i></button>
+                    {% endif %}
+                </div>
+                <div class="d-flex align-items-center gap-1 font-monospace mt-1">
+                    <span>IMEI 2: <strong>{{ device.imei_2|default:"N/A" }}</strong></span>
+                    {% if device.imei_2 %}
+                    <button type="button" class="imei-copy-btn" onclick="copyImeiText('{{ device.imei_2 }}', this)" title="Copy IMEI 2"><i class="far fa-copy"></i></button>
+                    {% endif %}
+                </div>
+                <div class="text-muted font-monospace mt-1">UID: {{ device.device_uid }}</div>
+            </div>
+
+            <div class="col-12 col-md-3">
+                <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Valuation &amp; Rates</span>
+                <div>Landed Cost: <strong class="font-monospace">Rs. {{ device.landed_cost|floatformat:2|intcomma }}</strong></div>
+                <div>Counter MRP: <strong class="font-monospace text-primary">Rs. {{ device.product.selling_price|floatformat:2|intcomma }}</strong></div>
+                {% if device.sold_price %}
+                <div>Sold Price: <strong class="font-monospace text-success">Rs. {{ device.sold_price|floatformat:2|intcomma }}</strong></div>
+                {% endif %}
+            </div>
+
+            <div class="col-12 col-md-3">
+                <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Current Branch Location</span>
+                <strong class="text-dark">{{ device.branch.name }}</strong>
+                <small class="text-muted d-block font-monospace">Code: {{ device.branch.code }}</small>
+                <small class="text-muted d-block">Rack: {{ device.product.rack_number|default:"-" }}</small>
+            </div>
+
+            <div class="col-12 col-md-3">
+                <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Customer &amp; Sale Status</span>
+                {% if device.status == 'SOLD' and device.sold_invoice_reference %}
+                    <strong class="text-primary">{{ device.customer_name|default:"Customer" }}</strong>
+                    <small class="text-muted d-block font-monospace">Bill: {{ device.sold_invoice_reference }}</small>
+                    <small class="text-muted d-block">Sold Date: {{ device.sale_date }}</small>
+                {% else %}
+                    <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs">
+                        In Store Stock (Available)
+                    </span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Chronological Vertical Lifecycle Timeline -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4">
+            <div>
+                <h6 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-timeline text-primary me-2"></i> Chronological Lifecycle Milestones
+                </h6>
+                <small class="text-muted fs-2xs">Complete audit trail arranged newest to oldest</small>
+            </div>
+            <span class="badge bg-primary rounded-pill px-3">{{ total_events_count }} Lifecycle Milestone(s)</span>
+        </div>
+
+        <div class="timeline-vertical">
+            {% for ev in timeline %}
+            <div class="timeline-node">
+                <!-- Icon Node Badge -->
+                <span class="timeline-icon-badge bg-{{ ev.badge_color }} text-white">
+                    <i class="{{ ev.icon_class }}"></i>
+                </span>
+
+                <!-- Event Content Card -->
+                <div class="timeline-card">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-1 mb-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-{{ ev.badge_color }} bg-opacity-10 text-{{ ev.badge_color }} fw-bold fs-2xs">
+                                {{ ev.title }}
+                            </span>
+                            <span class="badge bg-light text-dark border font-monospace fs-2xs">
+                                {{ ev.branch_name }}
+                            </span>
+                        </div>
+
+                        <!-- Dates -->
+                        <div class="text-md-end text-muted fs-2xs">
+                            <span class="fw-bold text-dark">{{ ev.date_ad_str }}</span>
+                            <span class="font-monospace text-primary ms-1">({{ ev.date_bs_str }} BS)</span>
+                            &bull; <span>{{ ev.time_str }}</span>
+                        </div>
+                    </div>
+
+                    <p class="fs-xs text-dark mb-1">
+                        {{ ev.details }}
+                    </p>
+
+                    <div class="d-flex flex-wrap gap-2 align-items-center text-muted fs-2xs mt-2 pt-2 border-top">
+                        <span>Ref Doc: <strong class="font-monospace text-dark">{{ ev.reference_doc }}</strong></span>
+                        &bull;
+                        <span>Responsible: <strong>{{ ev.actor }}</strong></span>
+                    </div>
+                </div>
+            </div>
+            {% empty %}
+            <div class="text-center py-4 text-muted fs-xs">
+                No chronological events recorded for this device.
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% elif query %}
+    <!-- Device Not Found Alert -->
+    <div class="card border-0 shadow-sm rounded-4 p-5 text-center bg-white">
+        <i class="fas fa-triangle-exclamation fs-1 text-danger mb-3 opacity-50"></i>
+        <h5 class="fw-bold text-dark mb-1">No Device Found for "{{ query }}"</h5>
+        <p class="text-muted fs-xs mb-3">
+            Could not find any smartphone matching IMEI 1, IMEI 2, Serial Number, or Device UID.
+        </p>
+        <div class="d-flex justify-content-center gap-2">
+            <a href="{% url 'reports:imei_lifecycle' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                Try Another Search
+            </a>
+            <a href="{% url 'purchases:grn_list' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold">
+                Check Inward GRNs
+            </a>
+        </div>
+    </div>
+
+    {% else %}
+    <!-- Initial Prompt / Instruction Screen -->
+    <div class="card border-0 shadow-sm rounded-4 p-5 text-center bg-white">
+        <i class="fas fa-barcode fs-1 text-primary opacity-25 d-block mb-3"></i>
+        <h5 class="fw-bold text-dark mb-1">Scan or Enter a 15-Digit IMEI Above</h5>
+        <p class="text-muted fs-xs mb-0">
+            Audit the device's complete journey from procurement inward (GRN) to retail sale, warranties, and repairs.
+        </p>
+    </div>
+    {% endif %}
+
+</div>
+
+<script>
+function copyImeiText(text, btn) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = 'fas fa-check text-success';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            if (icon) icon.className = 'far fa-copy';
+            btn.classList.remove('copied');
+        }, 1500);
+    });
+}
+</script>
+{% endblock %}

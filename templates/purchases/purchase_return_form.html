@@ -1,0 +1,382 @@
+{% extends "core/base.html" %}
+{% load static humanize %}
+
+{% block title %}Record Purchase Return (Debit Note) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.return-item-row {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 14px;
+    transition: all 0.2s ease;
+}
+.return-item-row:hover {
+    border-color: #f87171;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.06);
+}
+.return-sticky-footer {
+    position: sticky;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--erp-slate-200);
+    z-index: 1020;
+    padding: 14px 24px;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+    <!-- Page Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-arrow-rotate-left text-danger me-2"></i> Record Purchase Return / Debit Note to Supplier
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Return defective devices or over-shipped stock to distributors, automatically deduct warehouse inventory, lock IMEIs, and reduce supplier debt
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'purchases:purchase_return_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Returns List
+            </a>
+        </div>
+    </div>
+
+    <!-- Error Summary Alert -->
+    {% if form.errors or formset.errors %}
+    <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="badge bg-danger text-white rounded-pill px-2 py-1 fs-2xs">Validation Error</span>
+            <h6 class="fw-bold text-danger mb-0">Please resolve the following submission errors:</h6>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <ul class="mb-0 fs-xs ps-3">
+            {% for field in form %}{% for err in field.errors %}<li><strong>Header:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}
+            {% for f in formset %}{% for field in f %}{% for err in field.errors %}<li><strong>Line Item {{ forloop.parentloop.counter }}:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}{% endfor %}
+            {% for err in form.non_field_errors %}<li>{{ err }}</li>{% endfor %}
+            {% for err in formset.non_form_errors %}<li>{{ err }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <form method="post" id="purchaseReturnMasterForm" novalidate>
+        {% csrf_token %}
+
+        <!-- Section 1: Supplier & Return Details Header -->
+        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+            <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+                <i class="fas fa-building-user text-primary me-2"></i> 1. Supplier &amp; Return Voucher Header
+            </h6>
+
+            <div class="row g-3">
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">
+                        Distributor / Supplier <span class="text-danger">*</span>
+                    </label>
+                    {{ form.supplier }}
+                    <small class="text-muted fs-2xs mt-1 d-block">Select the supplier receiving the returned goods.</small>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">
+                        Origin Branch Outlet <span class="text-danger">*</span>
+                    </label>
+                    {{ form.branch }}
+                    <small class="text-muted fs-2xs mt-1 d-block">Store location where items are physically deducted.</small>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label fw-bold text-dark fs-xs">
+                        Settlement / Refund Mode <span class="text-danger">*</span>
+                    </label>
+                    {{ form.refund_mode }}
+                    <small class="text-muted fs-2xs mt-1 d-block">Deduct from Supplier Balance / Cash Refund / Replacement.</small>
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Return Date (AD) <span class="text-danger">*</span></label>
+                    {{ form.return_date }}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Return Date (BS)</label>
+                    {{ form.return_date_bs }}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Original Inward GRN (Optional)</label>
+                    {{ form.original_grn }}
+                </div>
+
+                <div class="col-12 col-md-3">
+                    <label class="form-label fw-bold text-dark fs-xs">Original Supplier Bill / Challan Ref</label>
+                    {{ form.original_bill_reference }}
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label fw-bold text-dark fs-xs">General Remarks / RMA Authorization Notes</label>
+                    {{ form.remarks }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: Returned Line Items Formset -->
+        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 border-bottom pb-3 mb-3">
+                <div>
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-boxes-stacked text-danger me-2"></i> 2. Returned Products, Quantities &amp; Serialized IMEIs
+                    </h6>
+                    <small class="text-muted fs-2xs">Specify products, return quantities, agreed return purchase rates, and enter 15-digit IMEIs for smartphones.</small>
+                </div>
+                <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold" id="addNewReturnItemBtn">
+                    <i class="fas fa-plus me-1"></i> Add Another Item
+                </button>
+            </div>
+
+            {{ formset.management_form }}
+
+            <div id="returnFormsetContainer">
+                {% for item_form in formset %}
+                <div class="return-item-row" data-row-index="{{ forloop.counter0 }}">
+                    {{ item_form.id }}
+                    <div class="row g-3 align-items-end">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
+                            {{ item_form.product }}
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label fw-bold text-dark fs-xs">Return Qty <span class="text-danger">*</span></label>
+                            {{ item_form.returned_quantity }}
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label fw-bold text-dark fs-xs">Purchase Rate (NPR) <span class="text-danger">*</span></label>
+                            {{ item_form.purchase_rate }}
+                        </div>
+                        <div class="col-6 col-md-1">
+                            <label class="form-label fw-bold text-dark fs-xs">VAT %</label>
+                            {{ item_form.tax_rate }}
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label fw-bold text-muted fs-2xs text-uppercase">Line Debit Total</label>
+                            <div class="form-control form-control-sm bg-light border-0 font-monospace fw-bold text-danger return-line-total-text" id="lineTotalText_{{ forloop.counter0 }}">
+                                Rs. 0.00
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-1 text-end">
+                            {% if formset.can_delete %}
+                                <div class="form-check form-check-inline mt-4">
+                                    {{ item_form.DELETE }}
+                                    <label class="form-check-label text-danger fs-2xs fw-bold">Remove</label>
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Specific Defect Reason & Serialized IMEIs -->
+                        <div class="col-12 col-md-5">
+                            <label class="form-label fw-bold text-dark fs-xs">Return Reason / Defect</label>
+                            {{ item_form.return_reason }}
+                        </div>
+                        <div class="col-12 col-md-7">
+                            <label class="form-label fw-bold text-dark fs-xs">Scanned 15-Digit IMEI(s) (For Smartphones / Serialized Devices)</label>
+                            {{ item_form.returned_imei_list }}
+                            <small class="text-muted fs-2xs mt-1 d-block">Enter exactly as many IMEIs as the return quantity (comma or newline separated).</small>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Real-Time Return Totals Summary Panel -->
+            <div class="p-3 bg-light rounded-3 border mt-3 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+                <div class="fs-xs text-muted">
+                    <i class="fas fa-calculator text-danger me-1"></i> Live Debit Note Valuation updates automatically based on quantity, rates, and tax.
+                </div>
+                <div class="d-flex align-items-center gap-4">
+                    <div class="text-end">
+                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Total Debit Note Value</span>
+                        <h4 class="fw-extrabold text-danger font-monospace mb-0" id="returnGrandTotalText">Rs. 0.00</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sticky Bottom Submission Bar -->
+        <div class="return-sticky-footer d-flex align-items-center justify-content-between">
+            <div class="d-none d-md-block text-muted fs-xs">
+                <i class="fas fa-shield-halved text-success me-1"></i>
+                Physical inventory will be deducted from active stock, IMEIs locked as returned, and supplier balance adjusted.
+            </div>
+            <div class="d-flex align-items-center gap-2 w-100 w-md-auto justify-content-end">
+                <a href="{% url 'purchases:purchase_return_list' %}" class="btn btn-outline-secondary px-4 rounded-pill">
+                    Cancel
+                </a>
+                <button type="submit" class="btn btn-danger px-5 py-2 rounded-pill fw-bold shadow-sm">
+                    <i class="fas fa-check-circle me-2"></i> Issue Debit Note &amp; Deduct Stock
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Embedded Product Default Purchase Cost Map -->
+<script id="productCostMeta" type="application/json">
+{
+    {% for prod in products %}
+    "{{ prod.id }}": {
+        "cost_price": "{{ prod.purchase_price|default:'0.00' }}",
+        "requires_imei": {{ prod.requires_imei_tracking|yesno:"true,false" }}
+    }{% if not forloop.last %},{% endif %}
+    {% endfor %}
+}
+</script>
+
+<!-- Empty Form Template for Dynamic Line Additions -->
+<div id="emptyReturnFormTemplate" style="display: none;">
+    <div class="return-item-row" data-row-index="__prefix__">
+        {{ formset.empty_form.id }}
+        <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-4">
+                <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
+                {{ formset.empty_form.product }}
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label fw-bold text-dark fs-xs">Return Qty <span class="text-danger">*</span></label>
+                {{ formset.empty_form.returned_quantity }}
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label fw-bold text-dark fs-xs">Purchase Rate (NPR) <span class="text-danger">*</span></label>
+                {{ formset.empty_form.purchase_rate }}
+            </div>
+            <div class="col-6 col-md-1">
+                <label class="form-label fw-bold text-dark fs-xs">VAT %</label>
+                {{ formset.empty_form.tax_rate }}
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label fw-bold text-muted fs-2xs text-uppercase">Line Debit Total</label>
+                <div class="form-control form-control-sm bg-light border-0 font-monospace fw-bold text-danger return-line-total-text" id="lineTotalText___prefix__">
+                    Rs. 0.00
+                </div>
+            </div>
+            <div class="col-6 col-md-1 text-end">
+                <div class="form-check form-check-inline mt-4">
+                    {{ formset.empty_form.DELETE }}
+                    <label class="form-check-label text-danger fs-2xs fw-bold">Remove</label>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-5">
+                <label class="form-label fw-bold text-dark fs-xs">Return Reason / Defect</label>
+                {{ formset.empty_form.return_reason }}
+            </div>
+            <div class="col-12 col-md-7">
+                <label class="form-label fw-bold text-dark fs-xs">Scanned 15-Digit IMEI(s) (For Smartphones / Serialized Devices)</label>
+                {{ formset.empty_form.returned_imei_list }}
+                <small class="text-muted fs-2xs mt-1 d-block">Enter exactly as many IMEIs as the return quantity (comma or newline separated).</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    let productCostMap = {};
+    try {
+        const costScript = document.getElementById('productCostMeta');
+        if (costScript) {
+            productCostMap = JSON.parse(costScript.textContent || '{}');
+        }
+    } catch(e) {}
+
+    const container = document.getElementById('returnFormsetContainer');
+    const addBtn = document.getElementById('addNewReturnItemBtn');
+    const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+    const grandTotalEl = document.getElementById('returnGrandTotalText');
+
+    function recalculateReturnTotals() {
+        let runningTotal = 0;
+        document.querySelectorAll('.return-item-row').forEach(row => {
+            const deleteCb = row.querySelector('input[name$="-DELETE"]');
+            if (deleteCb && deleteCb.checked) return;
+
+            const qtyInput = row.querySelector('.return-qty-input');
+            const rateInput = row.querySelector('.return-rate-input');
+            const taxInput = row.querySelector('.return-tax-input');
+            const lineTotalText = row.querySelector('.return-line-total-text');
+
+            const qty = parseFloat(qtyInput ? qtyInput.value : 0) || 0;
+            const rate = parseFloat(rateInput ? rateInput.value : 0) || 0;
+            const taxPct = parseFloat(taxInput ? taxInput.value : 0) || 0;
+
+            const gross = qty * rate;
+            const tax = gross * (taxPct / 100);
+            const lineTot = gross + tax;
+
+            if (lineTotalText) {
+                lineTotalText.innerText = `Rs. ${lineTot.toFixed(2)}`;
+            }
+
+            runningTotal += lineTot;
+        });
+
+        if (grandTotalEl) {
+            grandTotalEl.innerText = `Rs. ${runningTotal.toFixed(2)}`;
+        }
+    }
+
+    if (container) {
+        container.addEventListener('input', (e) => {
+            if (e.target.classList.contains('return-qty-input') || 
+                e.target.classList.contains('return-rate-input') || 
+                e.target.classList.contains('return-tax-input')) {
+                recalculateReturnTotals();
+            }
+        });
+
+        container.addEventListener('change', (e) => {
+            if (e.target.classList.contains('select-return-product')) {
+                const prodId = e.target.value;
+                const row = e.target.closest('.return-item-row');
+                if (row && prodId && productCostMap[prodId]) {
+                    const rateInput = row.querySelector('.return-rate-input');
+                    if (rateInput && (!rateInput.value || parseFloat(rateInput.value) === 0)) {
+                        rateInput.value = parseFloat(productCostMap[prodId].cost_price || 0).toFixed(2);
+                    }
+                }
+                recalculateReturnTotals();
+            }
+
+            if (e.target.name && e.target.name.endsWith('-DELETE')) {
+                recalculateReturnTotals();
+            }
+        });
+    }
+
+    if (addBtn && totalFormsInput && container) {
+        addBtn.addEventListener('click', () => {
+            const currentCount = parseInt(totalFormsInput.value, 10);
+            const templateHtml = document.getElementById('emptyReturnFormTemplate').innerHTML;
+            const newRowHtml = templateHtml.replace(/__prefix__/g, currentCount);
+
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = newRowHtml;
+            const newRow = tempDiv.firstElementChild;
+            container.appendChild(newRow);
+
+            totalFormsInput.value = currentCount + 1;
+            recalculateReturnTotals();
+        });
+    }
+
+    recalculateReturnTotals();
+});
+</script>
+{% endblock %}

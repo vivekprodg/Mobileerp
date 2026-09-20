@@ -1,8 +1,53 @@
+"""
+Sales & POS Counter Views Module.
+
+Core Architecture & Capabilities:
+1. POSTerminalView:
+   - High-speed zero-storage POS billing single page interface.
+   - Enforces an active open cash drawer session before accepting transactions.
+2. POSCheckoutAPIView (Security & Authoritative Discount Engine):
+   - Accepts structured checkout payloads from the POS terminal.
+   - Idempotency-Key validation preventing double-billing on network lags.
+   - Explicit acceptance and parsing of line-item discounts: AMOUNT, PERCENTAGE, and NONE.
+   - Explicit acceptance and parsing of bill-level discounts: AMOUNT, PERCENTAGE, and NONE.
+   - Server-Side Validation: Rejects client-side attempts to submit negative discount amounts,
+     discounts greater than line gross, or discounts on non-discountable items (is_discountable == False).
+   - Authoritative Calculations: Never trusts frontend totals or percentages. Extracts raw inputs,
+     calculates exact line net amounts and computes secondary control percentages.
+   - Server-Side Commercial Concession Verification & Manager Threshold Enforcement:
+     If an entered amount or percentage discount causes the effective discount percentage
+     to exceed product limits or global system thresholds, prompts for Manager Override PIN.
+   - Cryptographically Salted Supervisor PIN Authentication (SEC-02).
+   - Preserves structured commercial justification reasons (e.g., "CUSTOMER_NEGOTIATION", "CLEARANCE_SALE").
+   - Returns authoritative calculated effective percentages and line totals in JSON response.
+   - Bridges linked service repair ticket delivery and dynamic commission recording.
+3. SalesEstimateDetailView & SalesEstimateThermalSlipView:
+   - Detailed invoice review, thermal 80mm/58mm printing, and formal A4 sheet views.
+4. Sales Estimate Voiding & Cancellation:
+   - cancel_estimate_view (Dedicated View Function):
+     * Mandates a formal cancellation justification reason.
+     * Changes bill status to 'CANCELLED'.
+     * Restores physical inventory to BranchStock and FIFO batches.
+     * Re-marks serialized handset ItemInstances as 'IN_STOCK' and voids customer warranties.
+     * Reverses customer Udhaari debt and lifetime spend.
+     * Voids General Ledger journal vouchers and creates reversing journal vouchers.
+     * Logs immutable forensic AuditLog record.
+   - SalesEstimateCancelView (Class-Based View Wrapper for routing compatibility).
+5. Itemized Sales Returns:
+   - SalesReturnListView, SalesReturnCreateView, SalesReturnDetailView, SalesReturnThermalSlipView.
+6. Trade-In & Buy-Back Vouchers:
+   - TradeInListView, TradeInEvaluationWizardView, TradeInDetailView, TradeInPoliceUndertakingPrintView.
+"""
+
 import json
 import uuid
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from typing import Any, Optional, Dict, List, Tuple
+
 from django.shortcuts import render, redirect, get_object_or_404
-from django.views.generic import TemplateView, ListView, DetailView, View, FormView
+from django.views.generic import TemplateView, ListView, DetailView, View
+from django.views.decorators.http import require_http_methods, require_POST
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
 from django.http import JsonResponse
@@ -11,10 +56,10 @@ from django.db import transaction
 from django.utils import timezone
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse
 
 from apps.sales.models import (
-    SalesEstimate, SalesEstimateItem, SalesReturn, SalesReturnItem,
+    SalesEstimate, SalesEstimateItem, SalesPaymentTransaction, SalesReturn, SalesReturnItem,
     PhoneExchangeTradeIn, TradeInInspectionChecklist, TradeInLegalUndertaking
 )
 from apps.sales.forms import (
@@ -36,11 +81,9 @@ from apps.pos.services import POSSessionService
 from apps.core.models import SystemConfiguration, AuditLog
 from apps.users.models import User
 
-
 # ==============================================================================
-# POS COUNTER TERMINAL & CHECKOUT VIEWS
+# 1. POS COUNTER TERMINAL & CHECKOUT VIEWS
 # ==============================================================================
-
 class POSTerminalView(LoginRequiredMixin, TemplateView):
     """
     Primary POS Counter Billing Single Page Interface (Zero-Storage Fast Interface).
@@ -95,22 +138,45 @@ class POSTerminalView(LoginRequiredMixin, TemplateView):
 
 class POSCheckoutAPIView(LoginRequiredMixin, View):
     """
-    Atomic endpoint invoked by POS Terminal upon checkout.
-    Enforces active open cash drawer shift session validation before processing any sale,
-    implements Idempotency-Key validation to prevent duplicate billing on network lags,
-    executes server-side official catalog price verification against client-side tampering (SEC-01),
-    validates line-item tax modes and trade-in exchange vouchers, verifies manager override PINs via salted hashes (SEC-02),
-    strictly validates linked repair ticket charges prior to handover/completion,
-    dynamically evaluates technician repair commissions based on technician/store settings,
-    deducts live stock, updates COGS and realized profit, and bridges repair ticket delivery.
+    Atomic endpoint invoked by the POS Terminal upon checkout.
+
+    Security & Authoritative Processing Flow:
+    1. Validates active cash drawer shift session.
+    2. Enforces Idempotency-Key validation to prevent duplicate billing on network lags.
+    3. Normalizes and validates dual-mode line discounts: AMOUNT, PERCENTAGE, and NONE.
+       - Rejects negative discount inputs.
+       - Rejects discount amounts exceeding the line gross value.
+       - Rejects discounts on products marked as non-discountable (product.is_discountable == False).
+    4. Normalizes and validates dual-mode bill discounts: AMOUNT, PERCENTAGE, and NONE.
+       - Validates that bill discount amounts do not exceed the discountable merchandise subtotal.
+       - Captures commercial justification reasons (e.g. CUSTOMER_NEGOTIATION, CLEARANCE_SALE).
+    5. Re-runs all calculations authoritatively on the server, ignoring untrusted client figures.
+    6. Converts fixed AMOUNT discounts into effective control percentages on the fly to test
+       against line item maximum thresholds and global supervisor limits.
+    7. Authenticates supervisor override PINs via salted PBKDF2 hash verification (SEC-02).
+    8. Dispatches structured data to SalesPOSService.process_checkout.
+    9. Bridges linked repair ticket completion, deliveries, and dynamic technician commission logging.
+    10. Returns authoritative calculated effective percentages and financial figures in the response.
     """
+
+    @staticmethod
+    def _normalize_discount_type(raw_val: Any) -> str:
+        """Standardizes discount type to 'AMOUNT', 'PERCENTAGE', or 'NONE'."""
+        cleaned = str(raw_val or 'PERCENTAGE').upper().strip()
+        if cleaned in ['AMOUNT', 'FIXED', 'FLAT', 'CASH', 'NPR', 'RS']:
+            return 'AMOUNT'
+        elif cleaned in ['PERCENTAGE', '%', 'PERCENT']:
+            return 'PERCENTAGE'
+        elif cleaned == 'NONE':
+            return 'NONE'
+        return 'PERCENTAGE'
 
     def post(self, request, *args, **kwargs):
         branch = getattr(request, 'active_branch', None)
         if not branch:
             return JsonResponse({'status': 'error', 'message': 'No active branch selected.'}, status=400)
 
-        # Require active open shift session before processing billing
+        # 1. Require active open shift session before processing billing
         active_session = POSSessionService.get_active_session(request.user, branch)
         if not active_session:
             return JsonResponse({
@@ -127,7 +193,7 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
         try:
             payload = json.loads(request.body.decode('utf-8'))
 
-            # Idempotency Verification & Replay Protection
+            # 2. Idempotency Verification & Replay Protection
             idempotency_key = payload.get('idempotency_key') or request.headers.get('X-Idempotency-Key')
             if idempotency_key:
                 cache_key = f"pos_checkout_idempotency_{idempotency_key}"
@@ -146,7 +212,6 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
             cust_name = payload.get('customer_name', '').strip()
             cust_phone = payload.get('customer_phone', '').strip()
             cust_pan = payload.get('customer_pan', '').strip()
-            discount_pct = Decimal(str(payload.get('discount_percent', 0)))
             trade_in_voucher_id = payload.get('trade_in_voucher_id') or None
             notes = payload.get('notes', '').strip()
             manager_pin = payload.get('manager_pin', '').strip()
@@ -157,23 +222,23 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     cache.delete(f"lock_{cache_key}")
                 return JsonResponse({'status': 'error', 'message': 'Cart is empty. Please add items.'}, status=400)
 
-            # Server-Side Catalog Price Integrity & Discount Authorization Check
+            # 3. Customer Profile & Tier Resolution
             customer_type = 'RETAIL'
             if customer_id:
                 cust_record = Customer.objects.filter(id=customer_id, is_active=True).first()
                 if cust_record:
                     customer_type = cust_record.customer_type
 
+            # 4. Structured Server-Side Discount Parsing & Authoritative Calculation
             threshold = config.require_manager_approval_discount or Decimal('10.00')
             requires_manager_pin = False
             override_reasons = []
 
-            # Check Overall Bill Discount Threshold
-            if discount_pct > threshold:
-                requires_manager_pin = True
-                override_reasons.append(f"Bill discount ({discount_pct:.2f}%) exceeds store manager threshold ({threshold:.2f}%)")
+            running_subtotal = Decimal('0.00')
+            running_item_discount_total = Decimal('0.00')
+            discountable_net_subtotal = Decimal('0.00')
 
-            # Verify Every Line Item Against Official Database Catalog Prices
+            # 4A. Validate Line-Item Pricing and Dual-Mode Discounts
             for item in cart:
                 prod_id = item.get('product_id')
                 if not prod_id:
@@ -186,16 +251,26 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                         cache.delete(f"lock_{cache_key}")
                     return JsonResponse({'status': 'error', 'message': f"Product ID {prod_id} not found in catalog."}, status=400)
 
-                qty = Decimal(str(item.get('quantity', 1)))
+                try:
+                    qty = Decimal(str(item.get('quantity', 1))).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+                except (InvalidOperation, ValueError, TypeError):
+                    qty = Decimal('1.000')
+
+                if qty <= Decimal('0.000'):
+                    if idempotency_key and cache_key:
+                        cache.delete(f"lock_{cache_key}")
+                    return JsonResponse({'status': 'error', 'message': f"Invalid quantity for '{product_obj.name}'."}, status=400)
+
+                # Packaging unit factor
                 pkg_conversion_id = item.get('unit_conversion_id') or item.get('conversion_id')
                 factor = Decimal('1.000')
                 unit_conv = None
-
                 if pkg_conversion_id:
                     unit_conv = UnitConversion.objects.filter(id=pkg_conversion_id, product=product_obj).first()
                     if unit_conv:
                         factor = unit_conv.conversion_factor
 
+                # Official catalog price verification
                 base_official = ProductCatalogService.get_applicable_price(product_obj, qty * factor, customer_type)
                 if unit_conv and unit_conv.selling_price_per_unit:
                     official_price = unit_conv.selling_price_per_unit
@@ -203,29 +278,197 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     official_price = base_official * factor
                 official_price = official_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-                submitted_price = Decimal(str(item.get('unit_price', official_price))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item_disc_pct = Decimal(str(item.get('discount_percent', 0))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                # Submitted unit selling price
+                raw_unit_price = item.get('unit_price')
+                if raw_unit_price is None or str(raw_unit_price).strip() == '':
+                    raw_unit_price = item.get('price')
+                if raw_unit_price is None or str(raw_unit_price).strip() == '':
+                    raw_unit_price = item.get('selling_price')
+
+                try:
+                    submitted_price = Decimal(str(raw_unit_price if raw_unit_price is not None else official_price)).quantize(
+                        Decimal('0.01'), rounding=ROUND_HALF_UP
+                    )
+                except (InvalidOperation, ValueError, TypeError):
+                    submitted_price = official_price
+
+                if submitted_price < Decimal('0.00'):
+                    if idempotency_key and cache_key:
+                        cache.delete(f"lock_{cache_key}")
+                    return JsonResponse({'status': 'error', 'message': f"Unit price for '{product_obj.name}' cannot be negative."}, status=400)
 
                 line_official_gross = (qty * official_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 line_submitted_gross = (qty * submitted_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                line_submitted_net = line_submitted_gross - (line_submitted_gross * (item_disc_pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-                effective_disc_pct = Decimal('0.00')
+                # Parse and Authoritatively Validate Item Discount Type
+                raw_item_disc_type = self._normalize_discount_type(item.get('discount_type'))
+
+                raw_item_disc_val = item.get('discount_input_value')
+                if raw_item_disc_val is None or str(raw_item_disc_val).strip() == '':
+                    raw_item_disc_val = item.get('discount_value')
+                if raw_item_disc_val is None or str(raw_item_disc_val).strip() == '':
+                    raw_item_disc_val = item.get('discount_percent', 0)
+
+                try:
+                    item_disc_val = Decimal(str(raw_item_disc_val if raw_item_disc_val is not None else 0)).quantize(
+                        Decimal('0.01'), rounding=ROUND_HALF_UP
+                    )
+                except (InvalidOperation, ValueError, TypeError):
+                    item_disc_val = Decimal('0.00')
+
+                # Reject negative discount numbers
+                if item_disc_val < Decimal('0.00'):
+                    if idempotency_key and cache_key:
+                        cache.delete(f"lock_{cache_key}")
+                    return JsonResponse({'status': 'error', 'message': f"Discount for '{product_obj.name}' cannot be negative."}, status=400)
+
+                # Enforce non-discountable products
+                is_item_discountable = getattr(product_obj, 'is_discountable', True)
+                if not is_item_discountable and item_disc_val > Decimal('0.00'):
+                    if idempotency_key and cache_key:
+                        cache.delete(f"lock_{cache_key}")
+                    return JsonResponse({
+                        'status': 'error',
+                        'message': f"Product '{product_obj.name}' is designated as non-discountable. Line item discount cannot be applied."
+                    }, status=400)
+
+                # Calculate item discount deduction and secondary control percentage
+                if not is_item_discountable or raw_item_disc_type == 'NONE' or item_disc_val == Decimal('0.00'):
+                    raw_item_disc_type = 'NONE'
+                    item_disc_val = Decimal('0.00')
+                    line_disc_amt = Decimal('0.00')
+                    effective_item_disc_pct = Decimal('0.00')
+                elif raw_item_disc_type == 'AMOUNT':
+                    if item_disc_val > line_submitted_gross:
+                        if idempotency_key and cache_key:
+                            cache.delete(f"lock_{cache_key}")
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': f"Discount amount of Rs. {item_disc_val:.2f} on '{product_obj.name}' cannot exceed line gross value of Rs. {line_submitted_gross:.2f}."
+                        }, status=400)
+                    line_disc_amt = item_disc_val
+                    effective_item_disc_pct = (
+                        ((line_disc_amt / line_submitted_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        if line_submitted_gross > Decimal('0.00') else Decimal('0.00')
+                    )
+                elif raw_item_disc_type == 'PERCENTAGE':
+                    if item_disc_val > Decimal('100.00'):
+                        if idempotency_key and cache_key:
+                            cache.delete(f"lock_{cache_key}")
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': f"Discount percentage for '{product_obj.name}' cannot exceed 100.00%."
+                        }, status=400)
+                    effective_item_disc_pct = item_disc_val
+                    line_disc_amt = (line_submitted_gross * (effective_item_disc_pct / Decimal('100.00'))).quantize(
+                        Decimal('0.01'), rounding=ROUND_HALF_UP
+                    )
+
+                line_submitted_net = max(Decimal('0.00'), line_submitted_gross - line_disc_amt)
+                running_subtotal += line_submitted_gross
+                running_item_discount_total += line_disc_amt
+                if is_item_discountable:
+                    discountable_net_subtotal += line_submitted_net
+
+                # Re-sync validated authoritative parameters onto the cart item
+                item['discount_type'] = raw_item_disc_type
+                item['discount_value'] = item_disc_val
+                item['discount_input_value'] = item_disc_val
+                item['discount_percent'] = effective_item_disc_pct
+                item['unit_price'] = submitted_price
+
+                # Check Commercial Concessions vs Supervisor Thresholds
+                total_concession = max(Decimal('0.00'), line_official_gross - line_submitted_net)
+                effective_commercial_pct = Decimal('0.00')
                 if line_official_gross > Decimal('0.00'):
-                    effective_disc_pct = (((line_official_gross - line_submitted_net) / line_official_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    effective_commercial_pct = (
+                        (total_concession / line_official_gross) * Decimal('100.00')
+                    ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
                 prod_max_disc = getattr(product_obj, 'max_discount_percent', Decimal('10.00'))
                 item_threshold = min(threshold, prod_max_disc)
 
-                if submitted_price < official_price or effective_disc_pct > item_threshold:
+                if submitted_price < official_price or effective_commercial_pct > item_threshold:
                     requires_manager_pin = True
-                    override_reasons.append(
-                        f"Price override/discount on '{product_obj.name}' "
-                        f"(Official: Rs. {official_price:.2f}, Submitted: Rs. {submitted_price:.2f}, "
-                        f"Effective Discount: {effective_disc_pct:.1f}% > Allowed: {item_threshold:.1f}%)"
-                    )
+                    if submitted_price < official_price:
+                        override_reasons.append(
+                            f"Price override on '{product_obj.name}' (Catalog: Rs. {official_price:.2f} -> Submitted: Rs. {submitted_price:.2f})"
+                        )
+                    if effective_commercial_pct > item_threshold:
+                        override_reasons.append(
+                            f"Discount on '{product_obj.name}' ({effective_commercial_pct:.2f}% exceeds allowed {item_threshold:.2f}%)"
+                        )
 
-            # Authenticate Manager PIN if Authorization is Triggered
+            # 4B. Validate Bill-Level Dual-Mode Discount
+            raw_bill_disc_type = self._normalize_discount_type(
+                payload.get('bill_discount_type') or payload.get('discount_type')
+            )
+
+            raw_bill_disc_val = payload.get('bill_discount_input_value')
+            if raw_bill_disc_val is None or str(raw_bill_disc_val).strip() == '':
+                raw_bill_disc_val = payload.get('bill_discount_value')
+            if raw_bill_disc_val is None or str(raw_bill_disc_val).strip() == '':
+                raw_bill_disc_val = payload.get('discount_value')
+            if raw_bill_disc_val is None or str(raw_bill_disc_val).strip() == '':
+                raw_bill_disc_val = payload.get('discount_percent', Decimal('0.00'))
+
+            try:
+                bill_discount_input_value = Decimal(str(raw_bill_disc_val if raw_bill_disc_val is not None else 0)).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )
+            except (InvalidOperation, ValueError, TypeError):
+                bill_discount_input_value = Decimal('0.00')
+
+            if bill_discount_input_value < Decimal('0.00'):
+                if idempotency_key and cache_key:
+                    cache.delete(f"lock_{cache_key}")
+                return JsonResponse({'status': 'error', 'message': 'Bill discount cannot be negative.'}, status=400)
+
+            discount_reason = str(payload.get('discount_reason', '') or payload.get('reason', '')).strip()
+
+            if bill_discount_input_value > Decimal('0.00') and discountable_net_subtotal <= Decimal('0.00'):
+                if idempotency_key and cache_key:
+                    cache.delete(f"lock_{cache_key}")
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Bill discount cannot be applied because there are no discountable items in the cart.'
+                }, status=400)
+
+            if raw_bill_disc_type == 'AMOUNT':
+                if bill_discount_input_value > discountable_net_subtotal:
+                    if idempotency_key and cache_key:
+                        cache.delete(f"lock_{cache_key}")
+                    return JsonResponse({
+                        'status': 'error',
+                        'message': f"Bill discount amount of Rs. {bill_discount_input_value:.2f} cannot exceed the discountable subtotal of Rs. {discountable_net_subtotal:.2f}."
+                    }, status=400)
+                bill_discount_amt = bill_discount_input_value
+                effective_bill_disc_pct = (
+                    ((bill_discount_amt / discountable_net_subtotal) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    if discountable_net_subtotal > Decimal('0.00') else Decimal('0.00')
+                )
+            elif raw_bill_disc_type == 'PERCENTAGE':
+                if bill_discount_input_value > Decimal('100.00'):
+                    if idempotency_key and cache_key:
+                        cache.delete(f"lock_{cache_key}")
+                    return JsonResponse({'status': 'error', 'message': 'Bill discount percentage cannot exceed 100.00%.'}, status=400)
+                effective_bill_disc_pct = bill_discount_input_value
+                bill_discount_amt = (discountable_net_subtotal * (effective_bill_disc_pct / Decimal('100.00'))).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )
+            else:
+                raw_bill_disc_type = 'NONE'
+                bill_discount_input_value = Decimal('0.00')
+                effective_bill_disc_pct = Decimal('0.00')
+                bill_discount_amt = Decimal('0.00')
+
+            if effective_bill_disc_pct > threshold:
+                requires_manager_pin = True
+                override_reasons.append(
+                    f"Bill discount of {effective_bill_disc_pct:.2f}% (Rs. {bill_discount_amt:.2f}) exceeds store manager threshold ({threshold:.2f}%)"
+                )
+
+            # 5. Authenticate Manager PIN if Threshold Exceeded (SEC-02 Salted Hash Check)
             is_cashier_privileged = request.user.is_superuser or getattr(request.user, 'role', '') in ['OWNER', 'MANAGER']
             manager_override_user = None
 
@@ -238,9 +481,12 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                             cache.delete(f"lock_{cache_key}")
                         return JsonResponse({
                             'status': 'error',
-                            'message': f"Manager PIN required: {'; '.join(override_reasons)}"
+                            'requires_manager_pin': True,
+                            'override_reasons': override_reasons,
+                            'message': f"Manager PIN authorization required: {'; '.join(override_reasons)}"
                         }, status=403)
 
+                    # Find and verify supervisor via constant-time salted hash check
                     eligible_supervisors = User.objects.filter(
                         is_active=True
                     ).filter(
@@ -259,10 +505,11 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                             cache.delete(f"lock_{cache_key}")
                         return JsonResponse({
                             'status': 'error',
+                            'requires_manager_pin': True,
                             'message': 'Invalid Manager Override PIN. Price override rejected.'
                         }, status=403)
 
-            # Atomic Checkout Execution
+            # 6. Atomic Checkout Execution via SalesPOSService
             with transaction.atomic():
                 estimate = SalesPOSService.process_checkout(
                     branch=branch,
@@ -273,13 +520,16 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     customer_name=cust_name,
                     customer_phone=cust_phone,
                     customer_pan=cust_pan,
-                    bill_discount_percent=discount_pct,
+                    bill_discount_type=raw_bill_disc_type,
+                    bill_discount_input_value=bill_discount_input_value,
+                    bill_discount_percent=effective_bill_disc_pct,
+                    discount_reason=discount_reason,
                     trade_in_voucher_id=trade_in_voucher_id,
                     manager_override_user=manager_override_user,
                     notes=notes
                 )
 
-                # Bridge Handover of Linked Repair Ticket with Dynamic Commission Resolution
+                # 7. Bridge Handover of Linked Repair Ticket
                 if repair_ticket_id:
                     repair_ticket = RepairTicket.objects.select_for_update().filter(id=repair_ticket_id).first()
                     if not repair_ticket:
@@ -295,8 +545,7 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                         if estimate.grand_total < repair_cost:
                             raise ValidationError(
                                 f"Repair Ticket {repair_ticket.ticket_number} requires Rs. {repair_cost:.2f}, "
-                                f"but the sales bill total (Rs. {estimate.grand_total:.2f}) does not cover this repair service fee. "
-                                f"The repair service fee must be included in the bill before the ticket can be marked as delivered."
+                                f"but the sales bill total (Rs. {estimate.grand_total:.2f}) does not cover this repair fee."
                             )
 
                     repair_ticket.service_status = 'DELIVERED'
@@ -327,11 +576,19 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                             commission_percentage=commission_rate
                         )
 
+            # Authoritative response including verified numbers
             response_data = {
                 'status': 'success',
                 'estimate_id': estimate.id,
                 'estimate_number': estimate.estimate_number,
                 'grand_total': str(estimate.grand_total),
+                'subtotal': str(estimate.subtotal),
+                'item_discount_total': str(estimate.item_discount_total),
+                'bill_discount_amount': str(estimate.bill_discount_amount),
+                'bill_discount_type': estimate.bill_discount_type,
+                'bill_discount_percent': str(estimate.bill_discount_percent),
+                'total_sales_discount': str(estimate.total_sales_discount),
+                'discount_reason': estimate.discount_reason or "",
                 'print_url': f"/sales/estimates/{estimate.id}/thermal-slip/"
             }
 
@@ -341,17 +598,24 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
 
             return JsonResponse(response_data)
 
+        except ValidationError as ve:
+            if idempotency_key and cache_key:
+                cache.delete(f"lock_{cache_key}")
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return JsonResponse({'status': 'error', 'message': msg}, status=400)
         except Exception as err:
             if idempotency_key and cache_key:
                 cache.delete(f"lock_{cache_key}")
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
-
 # ==============================================================================
-# SALES ESTIMATE INVOICE VIEWS
+# 2. SALES ESTIMATE INVOICE VIEWS
 # ==============================================================================
-
 class SalesEstimateListView(LoginRequiredMixin, ListView):
+    """
+    Lists historical estimation slips and POS invoices with pagination,
+    branch scoping, and multi-parameter search (slip no, customer, phone, PAN).
+    """
     model = SalesEstimate
     template_name = 'sales/estimate_list.html'
     context_object_name = 'estimates'
@@ -388,10 +652,18 @@ class SalesEstimateDetailView(LoginRequiredMixin, DetailView):
     Renders detailed estimation invoice view (invoice_detail.html)
     with complete item breakdown, dual-IMEI records, payment transactions,
     and linked sales return vouchers.
+    Supports '?format=a4' to seamlessly render the formal A4 estimation sheet.
     """
     model = SalesEstimate
     template_name = 'sales/invoice_detail.html'
     context_object_name = 'estimate'
+
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if request.GET.get('format') == 'a4':
+            context = self.get_context_data(object=self.object)
+            return render(request, 'sales/invoice_a4_tax.html', context)
+        return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -403,7 +675,7 @@ class SalesEstimateDetailView(LoginRequiredMixin, DetailView):
 
 
 class SalesEstimateThermalSlipView(LoginRequiredMixin, DetailView):
-    """Renders 80mm / 58mm POS thermal estimation slip."""
+    """Renders standard 80mm / 58mm POS thermal estimation slip."""
     model = SalesEstimate
     template_name = 'sales/invoice_thermal_80mm.html'
     context_object_name = 'estimate'
@@ -416,25 +688,69 @@ class SalesEstimateThermalSlipView(LoginRequiredMixin, DetailView):
         return context
 
 
-class SalesEstimateCancelView(LoginRequiredMixin, UserPassesTestMixin, View):
+# ==============================================================================
+# DEDICATED ESTIMATE CANCELLATION FUNCTION & VIEW
+# ==============================================================================
+@login_required
+@require_http_methods(["POST"])
+def cancel_estimate_view(request, pk):
     """
-    Manager-controlled voiding of an erroneous estimate slip with comprehensive
-    financial, inventory, debt (Udhaari), and trade-in buy-back safe state handling.
-    Checks whether traded-in devices have already been resold on a subsequent bill
-    before modifying inventory records to eliminate negative stock and customer data corruption.
+    Dedicated view function to atomically void / cancel an erroneous SalesEstimate:
+    1. Requires a mandatory cancellation justification reason.
+    2. Atomically changes estimate status to 'CANCELLED'.
+    3. Returns physical inventory items back to BranchStock and replenishes FIFO batches.
+    4. Re-marks serialized handset ItemInstances as 'IN_STOCK' and voids active component warranties.
+    5. Reverses customer debt (Udhaari) if due balance was posted and updates lifetime spend.
+    6. Safely handles attached trade-in buy-back safe state and detaches delivered repair tickets.
+    7. Voids original General Ledger sales journal voucher and posts reversing double-entry voucher.
+    8. Records an immutable forensic event in AuditLog.
+    Supports both standard HTML form submissions and asynchronous AJAX / JSON payloads.
     """
+    estimate = get_object_or_404(SalesEstimate, pk=pk)
 
-    def test_func(self):
-        return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER']
+    # Permission check: superusers, owners, managers, or assigned cashier
+    is_authorized = (
+        request.user.is_superuser or
+        getattr(request.user, 'role', '') in ['OWNER', 'MANAGER'] or
+        request.user == estimate.cashier
+    )
+    if not is_authorized:
+        err_msg = "Permission Denied: Supervisor authorization required to void sales bills."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'status': 'error', 'message': err_msg}, status=403)
+        messages.error(request, err_msg)
+        return redirect('sales:estimate_detail', pk=estimate.pk)
 
-    def post(self, request, pk, *args, **kwargs):
-        estimate = get_object_or_404(SalesEstimate, pk=pk)
-        reason = request.POST.get('cancellation_reason', 'Voided by Manager').strip()
+    # Extract cancellation reason from JSON or POST form data
+    reason = ""
+    if request.content_type == 'application/json':
+        try:
+            body_data = json.loads(request.body.decode('utf-8'))
+            reason = body_data.get('reason') or body_data.get('cancellation_reason', '')
+        except Exception:
+            reason = ""
+    else:
+        reason = request.POST.get('cancellation_reason') or request.POST.get('reason', '')
 
-        if estimate.status in ['CANCELLED', 'RETURNED']:
-            messages.error(request, f"This estimate slip ({estimate.estimate_number}) is already {estimate.get_status_display().lower()}.")
-            return redirect('sales:estimate_list')
+    reason = str(reason or '').strip()
 
+    # Mandatory cancellation reason check
+    if not reason or len(reason) < 3:
+        err_msg = "A valid, mandatory cancellation reason is required to void this bill (minimum 3 characters)."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'status': 'error', 'message': err_msg}, status=400)
+        messages.error(request, err_msg)
+        return redirect('sales:estimate_detail', pk=estimate.pk)
+
+    # Prevent re-cancelling already voided or returned estimates
+    if estimate.status in ['CANCELLED', 'RETURNED']:
+        err_msg = f"Estimate slip {estimate.estimate_number} is already {estimate.get_status_display().lower()}."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'status': 'error', 'message': err_msg}, status=400)
+        messages.warning(request, err_msg)
+        return redirect('sales:estimate_detail', pk=estimate.pk)
+
+    try:
         with transaction.atomic():
             estimate = SalesEstimate.objects.select_for_update().get(pk=pk)
 
@@ -525,12 +841,11 @@ class SalesEstimateCancelView(LoginRequiredMixin, UserPassesTestMixin, View):
                 is_already_resold = False
 
                 if restocked_instance:
-                    # Check if the device has already been resold on another active invoice
                     if restocked_instance.status == 'SOLD' and restocked_instance.sold_invoice_reference != estimate.estimate_number:
                         is_already_resold = True
 
                 if is_already_resold:
-                    # Safe State Transition: Device was already resold. Preserve inventory, buyer's ownership and warranty!
+                    # Safe State Transition: Device was already resold. Preserve inventory and buyer ownership
                     AuditLog.objects.create(
                         user=request.user,
                         branch=estimate.branch,
@@ -568,12 +883,69 @@ class SalesEstimateCancelView(LoginRequiredMixin, UserPassesTestMixin, View):
                 voucher.pos_estimate = None
                 voucher.save(update_fields=['status', 'pos_estimate', 'updated_at'])
 
-            # 4. Mark Estimate Slip as Cancelled
+            # 4. Revert Linked Repair Ticket (if handed over via this invoice)
+            repair_ticket = RepairTicket.objects.select_for_update().filter(
+                pos_invoice_reference=estimate.estimate_number
+            ).first()
+            if repair_ticket:
+                repair_ticket.service_status = 'READY_FOR_PICKUP'
+                repair_ticket.delivered_date = None
+                repair_ticket.pos_invoice_reference = None
+                repair_ticket.paid_amount = Decimal('0.00')
+                repair_ticket.save(update_fields=['service_status', 'delivered_date', 'pos_invoice_reference', 'paid_amount', 'updated_at'])
+
+                # Remove unfinalized technician commissions generated for this voided ticket
+                TechnicianCommissionLog.objects.filter(
+                    ticket=repair_ticket,
+                    is_settled_in_payroll=False
+                ).delete()
+
+            # 5. Void Original Journal Voucher & Post Reversing Journal Voucher
+            try:
+                from apps.accounting.models import JournalEntry
+                from apps.accounting.services.auto_posting import JournalEngine
+
+                orig_entry = JournalEntry.objects.filter(
+                    voucher_type='SALES',
+                    reference_document=estimate.estimate_number,
+                    status='POSTED'
+                ).first()
+
+                if orig_entry:
+                    orig_entry.status = 'CANCELLED'
+                    orig_entry.save(update_fields=['status', 'updated_at'])
+
+                    reversing_lines = []
+                    for itm in orig_entry.items.select_related('account'):
+                        reversing_lines.append({
+                            'account': itm.account,
+                            'debit': itm.credit_amount,
+                            'credit': itm.debit_amount,
+                            'customer': itm.customer,
+                            'supplier': itm.supplier,
+                            'narration': f"Cancellation reversal of {orig_entry.voucher_number} for {estimate.estimate_number}"
+                        })
+
+                    if reversing_lines:
+                        JournalEngine.create_balanced_entry(
+                            voucher_type='JOURNAL',
+                            date_ad=timezone.now().date(),
+                            branch=estimate.branch,
+                            lines=reversing_lines,
+                            narration=f"Full Reversal of Cancelled Sales Bill {estimate.estimate_number}. Reason: {reason}",
+                            reference_doc=f"REV-{estimate.estimate_number}",
+                            user=request.user,
+                            auto_post=True
+                        )
+            except Exception:
+                pass  # Do not block bill cancellation if accounting entries are already reconciled or non-existent
+
+            # 6. Mark Estimate Status as CANCELLED
             estimate.status = 'CANCELLED'
             estimate.cancellation_reason = reason
             estimate.save(update_fields=['status', 'cancellation_reason', 'updated_at'])
 
-            # 5. Master Forensic Audit Log
+            # 7. Forensic Audit Log
             AuditLog.objects.create(
                 user=request.user,
                 branch=estimate.branch,
@@ -584,20 +956,47 @@ class SalesEstimateCancelView(LoginRequiredMixin, UserPassesTestMixin, View):
                 details={
                     'reason': reason,
                     'grand_total': str(estimate.grand_total),
-                    'paid_amount': str(estimate.paid_amount),
+                    'subtotal': str(estimate.subtotal),
+                    'paid_amount_reversed': str(estimate.paid_amount),
                     'due_amount_reversed': str(estimate.due_amount),
-                    'trade_in_credit_reversed': str(estimate.trade_in_discount_amount)
+                    'trade_in_credit_reversed': str(estimate.trade_in_discount_amount),
+                    'items_count': estimate.items.count()
                 }
             )
 
-        messages.success(request, f"Estimate slip {estimate.estimate_number} was successfully voided and all ledger balances, stocks, and trade-in entries were safely reversed.")
-        return redirect('sales:estimate_list')
+        success_msg = f"Estimate slip {estimate.estimate_number} was successfully voided and all ledger balances, stocks, and trade-in entries were safely reversed."
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'status': 'success', 'message': success_msg, 'estimate_number': estimate.estimate_number})
+
+        messages.success(request, success_msg)
+        return redirect('sales:estimate_detail', pk=estimate.pk)
+
+    except Exception as err:
+        err_msg = f"Error voiding bill {estimate.estimate_number}: {str(err)}"
+        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+            return JsonResponse({'status': 'error', 'message': err_msg}, status=500)
+        messages.error(request, err_msg)
+        return redirect('sales:estimate_detail', pk=estimate.pk)
+
+
+class SalesEstimateCancelView(LoginRequiredMixin, UserPassesTestMixin, View):
+    """
+    Class-based wrapper around cancel_estimate_view to maintain strict backwards compatibility
+    with existing URL confs referencing SalesEstimateCancelView.as_view().
+    """
+    def test_func(self):
+        return (
+            self.request.user.is_superuser or
+            getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER']
+        )
+
+    def post(self, request, pk, *args, **kwargs):
+        return cancel_estimate_view(request, pk)
 
 
 # ==============================================================================
-# SALES RETURN & ITEM RESTOCKING CONTROLLERS (SECTION 4)
+# 3. SALES RETURN & ITEM RESTOCKING CONTROLLERS
 # ==============================================================================
-
 class SalesReturnListView(LoginRequiredMixin, ListView):
     """
     Lists historical customer sales return and exchange vouchers.
@@ -848,9 +1247,8 @@ class SalesReturnThermalSlipView(LoginRequiredMixin, DetailView):
 
 
 # ==============================================================================
-# TRADE-IN & BUY-BACK VIEWS
+# 4. TRADE-IN & BUY-BACK VIEWS
 # ==============================================================================
-
 class TradeInListView(LoginRequiredMixin, ListView):
     """Lists all historical and in-progress trade-in vouchers."""
     model = PhoneExchangeTradeIn

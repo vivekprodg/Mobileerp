@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Record Operating Expense (दैनिक खर्च) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3" style="max-width: 1100px;">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:expense_list' %}" class="text-decoration-none text-muted">Expenses</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Log Daily Expense</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-money-bill-wave text-warning-emphasis"></i>
+                <span>Record Store Expense</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(दैनिक सञ्चालन खर्च प्रविष्टि)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Clean petty cash voucher entry for daily tea, utilities, rent, and store supplies</p>
+        </div>
+        <div>
+            <a href="{% url 'accounting:expense_list' %}" class="btn btn-outline-dark btn-sm rounded-pill px-3">
+                <i class="fas fa-arrow-left me-1"></i> Back to Expense Registry
+            </a>
+        </div>
+    </div>
+
+    <!-- Quick Expense Presets for Instant Counter Logging -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="fs-xs fw-bold text-dark text-uppercase tracking-wider">
+                <i class="fas fa-bolt text-warning me-1"></i> Quick Counter Presets (एक-क्लिक छनौट)
+            </span>
+            <small class="text-muted fs-2xs">Click a tile to instantly pre-fill category and memo</small>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
+                    onclick="applyPreset('Tea / Coffee / Staff Refreshment (खाजा तथा चिया)', 'Tea and snacks for staff and walk-in VIP clients', 'Local Tea Stall')">
+                ☕ Tea &amp; Refreshments
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
+                    onclick="applyPreset('Electricity & Water Charges (बिजुली तथा पानी)', 'Monthly shop electricity bill payment', 'Nepal Electricity Authority (NEA)')">
+                ⚡ Electricity &amp; Water
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
+                    onclick="applyPreset('Shop Rent (पसल भाडा)', 'Monthly store premises rent disbursement', 'Shop Landlord')">
+                🏢 Store Rent
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
+                    onclick="applyPreset('Internet & Telephone (इन्टरनेट तथा फोन)', 'High-speed fiber internet subscription renewal', 'ISP Provider (WorldLink/Vianet)')">
+                📶 Internet / Wi-Fi
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
+                    onclick="applyPreset('Printing & Stationery (कागज तथा स्टेशनरी)', 'Thermal paper rolls, billing receipts & pens', 'Stationery Shop')">
+                🧾 Thermal Rolls &amp; Paper
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
+                    onclick="applyPreset('Shop Cleaning & Sanitation', 'Daily dust cleaning, wipes & sanitizer for displays', 'Counter Boy')">
+                🧹 Cleaning &amp; Trash
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
+                    onclick="applyPreset('Repair Tooling & Consumables', 'B-7000 glue, solder paste & rework flux for technicians', 'Mobile Parts Supplier')">
+                🛠️ Workshop Consumables
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Expense Entry Card -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+        <div class="card-header bg-slate-900 text-white px-4 py-3 d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+                <i class="fas fa-file-invoice text-warning"></i>
+                <span class="fw-bold fs-sm text-uppercase tracking-wider">Expense Voucher Details</span>
+            </div>
+            <span class="badge bg-warning bg-opacity-20 text-warning fs-2xs font-mono">Auto-Balanced GL Voucher</span>
+        </div>
+
+        <form action="" method="post" enctype="multipart/form-data" id="expenseForm">
+            {% csrf_token %}
+            
+            <div class="p-4">
+                {% if form.non_field_errors %}
+                <div class="alert alert-danger rounded-3 p-3 mb-4 fs-xs">
+                    {{ form.non_field_errors }}
+                </div>
+                {% endif %}
+
+                <div class="row g-4">
+                    
+                    <!-- Left Column: Core Financials -->
+                    <div class="col-12 col-lg-7">
+                        <div class="card border border-slate-200 rounded-3 p-3 bg-slate-50 mb-3">
+                            <label class="form-label fs-xs fw-extrabold text-uppercase text-dark mb-1">
+                                Expense Amount * (खर्च रकम)
+                            </label>
+                            <div class="input-group input-group-lg">
+                                <span class="input-group-text bg-white border-end-0 fw-extrabold text-dark font-mono">Rs.</span>
+                                {{ form.amount }}
+                            </div>
+                            {% if form.amount.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.amount.errors }}</div>
+                            {% endif %}
+                            <div class="form-text fs-2xs">Enter the exact paid amount in Nepalese Rupees.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                Expense Account Category * (खर्च शीर्षक)
+                            </label>
+                            {{ form.expense_account }}
+                            {% if form.expense_account.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.expense_account.errors }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-12 col-md-6">
+                                <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                    Paid To / Payee Recipient * (रकम पाउने व्यक्ति/फर्म)
+                                </label>
+                                {{ form.payee_recipient }}
+                                {% if form.payee_recipient.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ form.payee_recipient.errors }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                    Bill / Cash Memo / Invoice Ref
+                                </label>
+                                {{ form.bill_invoice_number }}
+                                {% if form.bill_invoice_number.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ form.bill_invoice_number.errors }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                Operational Purpose / Detailed Narration * (कैफियत)
+                            </label>
+                            {{ form.description }}
+                            {% if form.description.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.description.errors }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Source, Date & Receipt Attachment -->
+                    <div class="col-12 col-lg-5">
+                        <div class="card border border-slate-200 rounded-3 p-3 bg-white h-100">
+                            <h6 class="fs-xs fw-extrabold text-uppercase text-muted tracking-wider mb-3">
+                                Disbursement Logistics
+                            </h6>
+
+                            <div class="mb-3">
+                                <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                    Store Branch * (शाखा)
+                                </label>
+                                {{ form.branch }}
+                                {% if form.branch.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ form.branch.errors }}</div>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                    Expense Date (AD) *
+                                </label>
+                                {{ form.expense_date }}
+                                {% if form.expense_date.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ form.expense_date.errors }}</div>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                    Paid From (Payment Account) * (भुक्तानी भएको खाता)
+                                </label>
+                                {{ form.payment_account }}
+                                {% if form.payment_account.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ form.payment_account.errors }}</div>
+                                {% endif %}
+                                <div class="form-text fs-2xs">Cash in Hand float or Bank Current Account.</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                    Payment Method * (भुक्तानी माध्यम)
+                                </label>
+                                {{ form.payment_method }}
+                                {% if form.payment_method.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ form.payment_method.errors }}</div>
+                                {% endif %}
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fs-xs fw-bold text-dark mb-1">
+                                    Bill / Receipt Photo (Optional)
+                                </label>
+                                {{ form.receipt_attachment }}
+                                <div class="form-text fs-2xs">Attach JPG, PNG photo or PDF memo.</div>
+                            </div>
+
+                            <!-- Real-time Double-Entry Posting Preview Box -->
+                            <div class="p-2 rounded-3 bg-light border border-slate-200 mt-auto">
+                                <span class="fs-2xs fw-bold text-muted text-uppercase d-block mb-1">
+                                    <i class="fas fa-arrows-split-up-and-left text-primary me-1"></i> Automatic Double-Entry:
+                                </span>
+                                <div class="fs-2xs font-mono text-dark">
+                                    <div><strong class="text-danger">Debit (Dr):</strong> <span id="previewDrAcc">[Selected Expense Account]</span></div>
+                                    <div><strong class="text-success">Credit (Cr):</strong> <span id="previewCrAcc">[Selected Payment Account]</span></div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="card-footer bg-light px-4 py-3 border-top d-flex align-items-center justify-content-between">
+                <a href="{% url 'accounting:expense_list' %}" class="btn btn-outline-secondary btn-sm px-4 rounded-pill">
+                    Cancel
+                </a>
+                <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill shadow-sm fw-bold">
+                    <i class="fas fa-check-circle me-1"></i> Save &amp; Post Expense Voucher
+                </button>
+            </div>
+        </form>
+    </div>
+
+</div>
+
+<script>
+    function applyPreset(accountTextPart, desc, payee) {
+        const select = document.getElementById('id_expense_account');
+        if (select) {
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].text.toLowerCase().includes(accountTextPart.toLowerCase().split('(')[0].trim())) {
+                    select.selectedIndex = i;
+                    break;
+                }
+            }
+        }
+        const descInput = document.getElementById('id_description');
+        if (descInput && (!descInput.value || descInput.value.trim() === '')) {
+            descInput.value = desc;
+        }
+        const payeeInput = document.getElementById('id_payee_recipient');
+        if (payeeInput && (!payeeInput.value || payeeInput.value.trim() === '')) {
+            payeeInput.value = payee;
+        }
+        updatePostingPreview();
+    }
+
+    function updatePostingPreview() {
+        const expSelect = document.getElementById('id_expense_account');
+        const paySelect = document.getElementById('id_payment_account');
+        
+        const drSpan = document.getElementById('previewDrAcc');
+        const crSpan = document.getElementById('previewCrAcc');
+
+        if (expSelect && drSpan) {
+            drSpan.textContent = expSelect.selectedIndex >= 0 ? expSelect.options[expSelect.selectedIndex].text : '[Expense Account]';
+        }
+        if (paySelect && crSpan) {
+            crSpan.textContent = paySelect.selectedIndex >= 0 ? paySelect.options[paySelect.selectedIndex].text : '[Payment Account]';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const expSelect = document.getElementById('id_expense_account');
+        const paySelect = document.getElementById('id_payment_account');
+        if (expSelect) expSelect.addEventListener('change', updatePostingPreview);
+        if (paySelect) paySelect.addEventListener('change', updatePostingPreview);
+        updatePostingPreview();
+    });
+</script>
+{% endblock %}

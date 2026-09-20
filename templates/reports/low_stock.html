@@ -1,0 +1,319 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Low Stock &amp; Reorder Intelligence | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.low-stock-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.low-stock-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-low-stock th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 12px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-low-stock td {
+    font-size: 0.8125rem;
+    padding: 10px 12px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1600px;">
+
+    <!-- Page Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-triangle-exclamation text-warning me-2"></i> Low Stock &amp; Reorder Intelligence
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Products falling below configured safety reorder thresholds, recommended replenishment quantities, and estimated capital outlay
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="{% url 'reports:export_csv' 'low_stock' %}?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'purchases:po_create' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-invoice me-1"></i> Create Purchase Order
+            </a>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 Key Performance Metrics -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="low-stock-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Low Stock SKUs</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-boxes-packing fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    {{ total_low_stock_items|default:records|length }}
+                </h3>
+                <small class="text-muted fs-2xs">Below minimum safety levels</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="low-stock-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Suggested Replenishment</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-dolly fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ total_reorder_units|floatformat:0|intcomma }} <span class="fs-6 fw-normal text-muted">Units</span>
+                </h3>
+                <small class="text-muted fs-2xs">Formula: (2 &times; Alert Level) - Current</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="low-stock-kpi-card border-start border-danger border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Estimated Capital Outlay</span>
+                    <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle">
+                        <i class="fas fa-coins fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    Rs. {{ total_reorder_cost|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Budget required at current cost rate</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="low-stock-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Active Outlet Context</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-store fs-6"></i>
+                    </span>
+                </div>
+                <h5 class="fw-bold text-dark mt-2 mb-0 text-truncate" title="{{ selected_branch.name|default:'All Branches' }}">
+                    {{ selected_branch.name|default:"All Store Outlets" }}
+                </h5>
+                <small class="text-muted fs-2xs">
+                    {% if selected_branch.code %}({{ selected_branch.code }}){% else %}Central Group{% endif %}
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Product Name, SKU, Barcode, Model, or Rack...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if request.GET.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if request.GET.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="brand" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Brands</option>
+                    {% for b in brands %}
+                        <option value="{{ b.id }}" {% if request.GET.brand == b.id|stringformat:"s" %}selected{% endif %}>
+                            {{ b.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.branch or request.GET.category or request.GET.brand %}
+                <a href="{% url 'reports:low_stock' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Low Stock Inventory Ledger Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Low Stock &amp; Suggested Orders
+            </h6>
+            <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 rounded-pill px-3">
+                {{ page_obj.paginator.count|default:records|length }} Items Listed
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-low-stock">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Product / Item Model</th>
+                        <th>Category &amp; Brand</th>
+                        <th>Branch</th>
+                        <th>Rack Location</th>
+                        <th class="text-center">Current Stock</th>
+                        <th class="text-center">Alert Level</th>
+                        <th class="text-center">Suggested Order</th>
+                        <th class="text-end">Unit Cost</th>
+                        <th class="text-end">Selling MRP</th>
+                        <th class="text-end">Reorder Outlay</th>
+                        <th class="pe-4">Last Supplier</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in records %}
+                    <tr>
+                        <td class="ps-4">
+                            <a href="{% url 'inventory:product_detail' item.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                {{ item.product.name }}
+                            </a>
+                            <div class="font-monospace text-muted fs-2xs mt-1">
+                                SKU: {{ item.product.sku }}
+                                {% if item.product.barcode %}&bull; Barcode: {{ item.product.barcode }}{% endif %}
+                                {% if item.is_serialized %}
+                                    <span class="badge bg-primary bg-opacity-10 text-primary ms-1" style="font-size: 8px;">IMEI</span>
+                                {% endif %}
+                            </div>
+                        </td>
+
+                        <td>
+                            <span class="fw-semibold text-dark">{{ item.product.category.name|default:"General" }}</span>
+                            <small class="text-muted d-block">{{ item.product.brand.name|default:"-" }}</small>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border">{{ item.branch.code }}</span>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-secondary border font-monospace fs-2xs">
+                                {{ item.rack_number }}
+                            </span>
+                        </td>
+
+                        <!-- Current Stock Level -->
+                        <td class="text-center">
+                            <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 fw-bold fs-xs col-num px-2 py-1">
+                                {{ item.current_qty|floatformat:1 }} {{ item.unit_code }}
+                            </span>
+                        </td>
+
+                        <!-- Low Stock Threshold -->
+                        <td class="text-center font-monospace text-muted fs-xs">
+                            {{ item.threshold|floatformat:1 }}
+                        </td>
+
+                        <!-- Suggested Replenishment Units -->
+                        <td class="text-center">
+                            <strong class="text-primary font-monospace fs-sm">
+                                +{{ item.suggested_reorder_qty|floatformat:1 }}
+                            </strong>
+                        </td>
+
+                        <td class="col-num text-dark">
+                            Rs. {{ item.cost_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <td class="col-num text-muted">
+                            Rs. {{ item.selling_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Estimated Outlay -->
+                        <td class="col-num fw-bold text-danger">
+                            Rs. {{ item.estimated_reorder_cost|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Last Known Supplier -->
+                        <td class="pe-4">
+                            <span class="text-dark fs-xs fw-semibold">{{ item.last_supplier }}</span>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="11" class="text-center py-5 text-muted">
+                            <i class="fas fa-circle-check fs-1 text-success opacity-50 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">All Stock Levels Healthy</h6>
+                            <p class="text-muted fs-xs mb-0">No products are currently running below their minimum reorder alert levels.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="6" class="ps-4 text-end text-uppercase text-white-50">Total Reorder Outlay Summary:</td>
+                        <td class="text-center col-num text-primary fs-6">+{{ total_reorder_units|floatformat:1 }}</td>
+                        <td colspan="2"></td>
+                        <td class="text-end col-num text-warning fs-6">Rs. {{ total_reorder_cost|floatformat:2|intcomma }}</td>
+                        <td class="pe-4 text-white-50 fs-2xs">Estimated Capital Needed</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

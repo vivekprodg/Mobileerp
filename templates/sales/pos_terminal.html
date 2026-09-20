@@ -43,6 +43,41 @@
     box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
 }
 
+/* Active Invoice Date Banner & Backdate Badges */
+.pos-date-strip {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 10px;
+    padding: 5px 10px;
+}
+
+.date-status-badge-today {
+    background-color: #0f172a;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+}
+
+.date-status-badge-backdated {
+    background-color: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 6px;
+    animation: backdateGlow 2s infinite alternate;
+}
+
+@keyframes backdateGlow {
+    from { box-shadow: 0 0 0 rgba(245, 158, 11, 0.2); }
+    to { box-shadow: 0 0 8px rgba(245, 158, 11, 0.5); }
+}
+
 /* Sequential Dual-IMEI Auto-Routing Dynamic Status Banner */
 .dual-imei-scanning-banner {
     border-radius: 12px;
@@ -253,6 +288,9 @@
     <div id="posTaxConfigMeta"
          data-tax-mode="{{ SHOP_TAX_MODE }}"
          data-default-vat-rate="{{ DEFAULT_TAX_RATE }}"
+         data-can-backdate="{% if IS_MANAGER or IS_OWNER or user.is_superuser %}true{% else %}false{% endif %}"
+         data-today-bs="{{ CURRENT_BS_DATE_EN }}"
+         data-today-bs-np="{{ CURRENT_BS_DATE_NP }}"
          style="display: none;">
     </div>
     
@@ -273,7 +311,7 @@
             <span class="badge bg-success text-white"><i class="fas fa-shield-halved me-1"></i> NTA MDMS Guard</span>
             {% endif %}
             <span class="badge bg-primary text-white">{{ STORE_OUTLET_NAME }} ({{ STORE_OUTLET_CODE }})</span>
-            <span class="badge bg-dark text-white">{{ CURRENT_BS_DATE_EN }} BS</span>
+            <span class="badge bg-dark text-white font-mono" id="topBarDateBadge">{{ CURRENT_BS_DATE_EN }} BS</span>
         </div>
     </div>
 
@@ -384,8 +422,73 @@
         <div class="col-12 col-lg-5 d-flex flex-column h-100">
             <div class="card border-0 shadow-sm rounded-4 bg-white d-flex flex-column h-100 overflow-hidden">
                 
-                <!-- Customer Selector Row -->
+                <!-- Active Invoice Header (CONFIRMED B.S. INVOICE DATE + BACKDATE CONTROLS) -->
                 <div class="p-2 border-bottom bg-light d-flex flex-column gap-2 flex-shrink-0">
+                    
+                    <!-- 1. B.S. Invoice Date Confirmation Strip -->
+                    <div class="pos-date-strip d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span class="fs-2xs text-muted text-uppercase fw-bold"><i class="far fa-calendar-check text-primary me-1"></i> Bill Date (मिति):</span>
+                            
+                            <!-- Visual B.S. Date Badge (Changes styling if backdated) -->
+                            <span id="activeBsDateBadge" class="date-status-badge-today">
+                                <span id="displayBillDateBs">{{ CURRENT_BS_DATE_EN }}</span> BS
+                            </span>
+                            
+                            <span class="text-muted fs-2xs" id="displayBillDateNp">
+                                ({{ CURRENT_BS_DATE_NP|default:"आज" }})
+                            </span>
+                        </div>
+                        
+                        <div class="d-flex align-items-center gap-1">
+                            <!-- Change / Backdate Button -->
+                            <button type="button" 
+                                    class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" 
+                                    id="btnChangeBillDate" 
+                                    title="Verify or Backdate Bill Date in B.S.">
+                                <i class="fas fa-calendar-days text-primary me-1"></i> <span id="changeDateBtnText">Change Date</span>
+                            </button>
+
+                            <!-- 1-Click Reset to Today (Shown only when backdated) -->
+                            <button type="button" 
+                                    class="btn btn-outline-dark btn-sm py-0 px-2 fs-2xs rounded-pill d-none" 
+                                    id="btnResetTodayDate" 
+                                    title="Reset bill date back to today's date">
+                                <i class="fas fa-rotate-left text-danger me-1"></i> Today
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 2. Hidden Collapsible B.S. Datepicker Input Bar (Revealed on Click) -->
+                    <div class="p-2 bg-white border rounded-3 d-none shadow-xs" id="customDatePickerWrapper">
+                        <div class="d-flex align-items-center gap-2">
+                            <label class="form-label fs-2xs fw-bold text-dark mb-0 text-nowrap">
+                                <i class="fas fa-pencil text-primary me-1"></i> Select B.S. Date:
+                            </label>
+                            
+                            <!-- B.S. Input Field bound to base.html Nepali Datepicker popup -->
+                            <input type="text" 
+                                   id="posBillDateBsInput" 
+                                   name="bill_date_bs" 
+                                   class="form-control form-control-sm font-mono fs-xs nepali-datepicker text-center fw-bold text-primary" 
+                                   value="{{ CURRENT_BS_DATE_EN }}" 
+                                   placeholder="YYYY-MM-DD (BS)" 
+                                   style="max-width: 145px;" 
+                                   autocomplete="off">
+
+                            <button type="button" class="btn btn-success btn-sm py-0 px-3 fs-2xs fw-bold rounded-pill" id="btnApplyCustomDate">
+                                <i class="fas fa-check me-1"></i> Apply
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" id="btnCancelCustomDate">
+                                Cancel
+                            </button>
+                        </div>
+                        <small class="text-muted fs-2xs mt-1 d-block">
+                            <i class="fas fa-circle-info text-info me-1"></i> Click to pick Nepali date. Authorized starting <strong>2080-04-01 B.S.</strong>
+                        </small>
+                    </div>
+
+                    <!-- 3. Customer & PAN Selector Row -->
                     <div class="d-flex align-items-center justify-content-between gap-2">
                         <div class="input-group input-group-sm flex-grow-1">
                             <span class="input-group-text bg-white border-0"><i class="fas fa-user text-muted"></i></span>
@@ -447,9 +550,41 @@
                     </div>
                     {% endif %}
 
+                    <!-- ENHANCED DUAL-MODE BILL DISCOUNT UI (PERCENTAGE VS FIXED AMOUNT) -->
                     <div class="d-flex justify-content-between align-items-center text-xs text-muted mb-2 px-1">
-                        <span>Cashier Discount (%):</span>
-                        <input type="number" id="posBillDiscountInput" class="form-control form-control-sm text-end p-0 px-2 border rounded font-monospace" style="width: 70px;" value="0" min="0" max="100" step="0.5">
+                        <div class="d-flex align-items-center gap-1">
+                            <span class="fw-semibold text-dark">Bill Discount:</span>
+                            <!-- Interactive Toggle Button Group [% | Rs.] -->
+                            <div class="btn-group btn-group-sm" role="group" id="billDiscountModeToggleGroup" style="height: 24px;">
+                                <button type="button" 
+                                        class="btn btn-primary px-2 py-0 fs-2xs font-mono fw-bold active" 
+                                        id="btnDiscountModePercent"
+                                        title="Percentage Discount (%)">
+                                    %
+                                </button>
+                                <button type="button" 
+                                        class="btn btn-outline-secondary px-2 py-0 fs-2xs font-mono fw-bold" 
+                                        id="btnDiscountModeFixed"
+                                        title="Fixed Cash Amount (Rs.)">
+                                    Rs.
+                                </button>
+                            </div>
+                            <!-- Hidden button preserving #posBillDiscountTypeToggleBtn ID for legacy script references -->
+                            <button type="button" id="posBillDiscountTypeToggleBtn" class="d-none">%</button>
+                        </div>
+                        
+                        <!-- Dynamic Input Group with Currency / Percent Symbol Badge -->
+                        <div class="input-group input-group-sm" style="width: 110px;">
+                            <span class="input-group-text bg-white border font-mono fs-2xs px-1 text-muted" id="billDiscountSymbolDisplay">%</span>
+                            <input type="number" 
+                                   id="posBillDiscountInput" 
+                                   class="form-control form-control-sm text-end p-0 px-2 border rounded-end font-monospace fs-xs" 
+                                   value="0" 
+                                   min="0" 
+                                   max="100" 
+                                   step="0.5" 
+                                   placeholder="%">
+                        </div>
                     </div>
 
                     <!-- Big Payable Total Display Box -->
@@ -569,7 +704,7 @@
 </div>
 
 <!-- =========================================================================
-     MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL (WITH COMPANY BRANDING)
+     MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL (WITH B.S. CONFIRMED DATE)
      ========================================================================= -->
 <div class="modal fade" id="receiptModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
@@ -597,7 +732,7 @@
                     </div>
 
                     <div>Slip No : <strong id="recSlipNo">EST-000000</strong></div>
-                    <div>Date    : <span>{{ CURRENT_BS_DATE_EN }} BS</span></div>
+                    <div>Date    : <span id="recBillDate">{{ CURRENT_BS_DATE_EN }} BS</span></div>
                     <div>Customer: <span id="recCustomer">Walk-in Customer</span></div>
                     
                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
@@ -648,33 +783,63 @@
 </div>
 
 <!-- ==========================================================================
-     MODAL 4: SUPERVISOR MANAGER OVERRIDE PIN MODAL
+     MODAL 4: SUPERVISOR MANAGER OVERRIDE PIN & REASON AUTHORIZATION MODAL
      ========================================================================= -->
 <div class="modal fade" id="posManagerPinModal" tabindex="-1" aria-labelledby="posManagerPinModalLabel" aria-hidden="true" data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
             <div class="modal-header bg-dark text-white border-0 py-2 px-3">
                 <div class="d-flex align-items-center gap-2">
                     <span class="badge bg-warning text-dark p-2 rounded-circle"><i class="fas fa-key"></i></span>
-                    <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posManagerPinModalLabel">Supervisor Override PIN</h6>
+                    <div>
+                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posManagerPinModalLabel">Supervisor Override Authorization</h6>
+                        <small class="text-white-50 fs-2xs">Manager PIN &amp; Commercial Justification</small>
+                    </div>
                 </div>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closePinModalBtn" aria-label="Close"></button>
             </div>
-            <div class="modal-body p-4 text-center">
-                <p class="fs-xs text-muted mb-3" id="posPinModalReasonText">
-                    This transaction requires Manager authorization for price override or discount.
+            <div class="modal-body p-4">
+                <p class="fs-xs text-muted text-center mb-3" id="posPinModalReasonText">
+                    This action requires Supervisor authorization PIN.
                 </p>
-                <div class="mb-3">
+
+                <!-- Supervisor Numeric PIN Input -->
+                <div class="mb-3 text-center">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">Enter 4-6 Digit Manager PIN <span class="text-danger">*</span></label>
                     <input type="password" id="posManagerPinInput" 
                            class="form-control form-control-lg text-center font-monospace fw-bold fs-4 letter-spacing-lg" 
                            placeholder="••••" maxlength="6" autocomplete="new-password">
                 </div>
+
+                <!-- Commercial Justification Dropdown Selection -->
+                <div class="mb-3">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">Commercial Justification / Reason <span class="text-danger">*</span></label>
+                    <select id="posDiscountReasonSelect" class="form-select form-select-sm fw-semibold">
+                        <option value="CUSTOMER_NEGOTIATION" selected>Customer Negotiation</option>
+                        <option value="COMPETITIVE_PRICE">Competitive Price Match</option>
+                        <option value="LOYALTY_REWARD">Loyalty Customer Reward</option>
+                        <option value="CLEARANCE_SALE">Clearance / Old Stock</option>
+                        <option value="DAMAGED_PACKAGING">Packaging Damage</option>
+                        <option value="MANAGEMENT_SPECIAL">Management Special Approval</option>
+                        <option value="OTHER">Other</option>
+                    </select>
+                </div>
+
+                <!-- Optional Free-Text Remarks Input -->
+                <div class="mb-3 d-none" id="posDiscountReasonNotesContainer">
+                    <label class="form-label fs-2xs fw-bold text-muted mb-1">Justification Details / Remarks <span class="text-danger">*</span></label>
+                    <input type="text" id="posDiscountReasonNotes" class="form-control form-control-sm" placeholder="Please specify other reason...">
+                </div>
+
+                <!-- Hidden Input Synced for POS Engine Payload Extraction -->
+                <input type="hidden" id="posDiscountReasonInput" name="discount_reason" value="CUSTOMER_NEGOTIATION">
+
                 <div id="posPinErrorAlert" class="alert alert-danger p-2 fs-2xs d-none mb-0"></div>
             </div>
             <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
                 <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="submitManagerPinBtn">
-                    Authorize Sale
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="submitManagerPinBtn">
+                    <i class="fas fa-check-circle me-1"></i> Authorize
                 </button>
             </div>
         </div>
@@ -754,10 +919,12 @@
 
 <script>
 /**
- * POS Full Operational Hardware & Camera Integration Script
+ * POS Interactive Controls, Nepali Date Confirmation & Backdating Controller
  */
 document.addEventListener('DOMContentLoaded', () => {
-    // 1. Online / Offline Connectivity Listeners
+    // =========================================================================
+    // 1. ONLINE / OFFLINE CONNECTIVITY LISTENERS
+    // =========================================================================
     const netStatusBadge = document.getElementById('posNetworkStatusBadge');
     window.addEventListener('online', () => {
         if (netStatusBadge) {
@@ -772,7 +939,279 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // 2. Camera Barcode Scanner Integration
+    // =========================================================================
+    // 2. ACTIVE INVOICE NEPALI B.S. DATE CONTROLLER & BACKDATING ENGINE
+    // =========================================================================
+    const taxMetaEl = document.getElementById('posTaxConfigMeta');
+    const todayBsDate = taxMetaEl ? (taxMetaEl.dataset.todayBs || '{{ CURRENT_BS_DATE_EN }}') : '{{ CURRENT_BS_DATE_EN }}';
+    const todayBsNpDate = taxMetaEl ? (taxMetaEl.dataset.todayBsNp || '{{ CURRENT_BS_DATE_NP }}') : '{{ CURRENT_BS_DATE_NP }}';
+    const canBackdate = taxMetaEl ? (taxMetaEl.dataset.canBackdate === 'true') : false;
+
+    let activeInvoiceBsDate = todayBsDate;
+    let isInvoiceBackdated = false;
+
+    const displayBillDateBs = document.getElementById('displayBillDateBs');
+    const displayBillDateNp = document.getElementById('displayBillDateNp');
+    const activeBsDateBadge = document.getElementById('activeBsDateBadge');
+    const topBarDateBadge = document.getElementById('topBarDateBadge');
+    const btnChangeBillDate = document.getElementById('btnChangeBillDate');
+    const btnResetTodayDate = document.getElementById('btnResetTodayDate');
+    const customDatePickerWrapper = document.getElementById('customDatePickerWrapper');
+    const posBillDateBsInput = document.getElementById('posBillDateBsInput');
+    const btnApplyCustomDate = document.getElementById('btnApplyCustomDate');
+    const btnCancelCustomDate = document.getElementById('btnCancelCustomDate');
+    const recBillDate = document.getElementById('recBillDate');
+
+    function updateConfirmedBillDateUI(newBsDate) {
+        activeInvoiceBsDate = newBsDate;
+        isInvoiceBackdated = (newBsDate !== todayBsDate);
+
+        if (displayBillDateBs) {
+            displayBillDateBs.innerText = newBsDate;
+        }
+
+        if (topBarDateBadge) {
+            topBarDateBadge.innerText = `${newBsDate} BS`;
+        }
+
+        if (recBillDate) {
+            recBillDate.innerText = `${newBsDate} BS`;
+        }
+
+        if (activeBsDateBadge) {
+            if (isInvoiceBackdated) {
+                activeBsDateBadge.className = 'date-status-badge-backdated';
+                activeBsDateBadge.innerHTML = `<i class="fas fa-clock-rotate-left me-1"></i> Backdated: ${newBsDate} BS`;
+                if (displayBillDateNp) displayBillDateNp.innerText = '(मिति परिवर्तन)';
+                if (btnResetTodayDate) btnResetTodayDate.classList.remove('d-none');
+            } else {
+                activeBsDateBadge.className = 'date-status-badge-today';
+                activeBsDateBadge.innerHTML = `<span id="displayBillDateBs">${newBsDate}</span> BS`;
+                if (displayBillDateNp) displayBillDateNp.innerText = `(${todayBsNpDate || 'आज'})`;
+                if (btnResetTodayDate) btnResetTodayDate.classList.add('d-none');
+            }
+        }
+    }
+
+    // Toggle custom date picker bar
+    if (btnChangeBillDate && customDatePickerWrapper) {
+        btnChangeBillDate.addEventListener('click', async () => {
+            if (customDatePickerWrapper.classList.contains('d-none')) {
+                // If cashier is not privileged, demand Supervisor PIN
+                if (!canBackdate) {
+                    if (window.smartPos && window.smartPos.checkout) {
+                        const pin = await window.smartPos.checkout.promptForManagerPin(
+                            "Supervisor PIN authorization is required to backdate sales estimates."
+                        );
+                        if (!pin) {
+                            if (window.smartPos) window.smartPos.showNotification("Backdating cancelled: Supervisor PIN required.", "warning");
+                            return;
+                        }
+                    }
+                }
+
+                customDatePickerWrapper.classList.remove('d-none');
+                if (posBillDateBsInput) {
+                    posBillDateBsInput.focus();
+                    if (window.initNepaliDatepickers) {
+                        window.initNepaliDatepickers(customDatePickerWrapper);
+                    }
+                }
+            } else {
+                customDatePickerWrapper.classList.add('d-none');
+            }
+        });
+    }
+
+    // Apply custom B.S. date
+    if (btnApplyCustomDate && posBillDateBsInput) {
+        btnApplyCustomDate.addEventListener('click', () => {
+            const chosenDate = posBillDateBsInput.value.trim();
+            if (!chosenDate || !/^\d{4}[-/]\d{2}[-/]\d{2}$/.test(chosenDate)) {
+                alert('Please enter a valid Nepali date in format YYYY-MM-DD (e.g. 2080-04-01).');
+                posBillDateBsInput.focus();
+                return;
+            }
+
+            const cleanYear = parseInt(chosenDate.substring(0, 4), 10);
+            if (cleanYear < 2080 || cleanYear > 2095) {
+                alert('Bills can only be created between 2080 BS and 2095 BS.');
+                posBillDateBsInput.focus();
+                return;
+            }
+
+            const normalizedDate = chosenDate.replace('/', '-');
+            updateConfirmedBillDateUI(normalizedDate);
+            customDatePickerWrapper.classList.add('d-none');
+
+            if (window.smartPos) {
+                window.smartPos.showNotification(
+                    isInvoiceBackdated ? `Invoice active date set to ${normalizedDate} BS (Backdated).` : `Invoice date restored to today (${normalizedDate} BS).`,
+                    isInvoiceBackdated ? 'warning' : 'success'
+                );
+            }
+        });
+    }
+
+    if (btnCancelCustomDate && customDatePickerWrapper) {
+        btnCancelCustomDate.addEventListener('click', () => {
+            customDatePickerWrapper.classList.add('d-none');
+            if (posBillDateBsInput) posBillDateBsInput.value = activeInvoiceBsDate;
+        });
+    }
+
+    // Reset date to today
+    if (btnResetTodayDate) {
+        btnResetTodayDate.addEventListener('click', () => {
+            updateConfirmedBillDateUI(todayBsDate);
+            if (posBillDateBsInput) posBillDateBsInput.value = todayBsDate;
+            customDatePickerWrapper.classList.add('d-none');
+            if (window.smartPos) window.smartPos.showNotification(`Invoice date reset to today (${todayBsDate} BS).`, 'info');
+        });
+    }
+
+    // Hook custom B.S. bill date into checkout payload builder
+    if (window.smartPos && window.smartPos.checkout) {
+        const originalBuildPayload = window.smartPos.checkout.buildPayload.bind(window.smartPos.checkout);
+        window.smartPos.checkout.buildPayload = function(payments) {
+            const payload = originalBuildPayload(payments);
+            if (activeInvoiceBsDate) {
+                payload.bill_date_bs = activeInvoiceBsDate;
+            }
+            return payload;
+        };
+    }
+
+    // =========================================================================
+    // 3. DUAL-MODE BILL DISCOUNT SWITCH [% | Rs.] CONTROLS
+    // =========================================================================
+    const btnDiscountPercent = document.getElementById('btnDiscountModePercent');
+    const btnDiscountFixed = document.getElementById('btnDiscountModeFixed');
+    const billDiscountSymbol = document.getElementById('billDiscountSymbolDisplay');
+    const billDiscountInput = document.getElementById('posBillDiscountInput');
+
+    function syncBillDiscountUI(mode) {
+        const isFixed = (mode === 'FIXED' || mode === 'AMOUNT');
+
+        if (btnDiscountPercent && btnDiscountFixed) {
+            if (isFixed) {
+                btnDiscountPercent.classList.remove('btn-primary', 'active');
+                btnDiscountPercent.classList.add('btn-outline-secondary');
+                btnDiscountFixed.classList.remove('btn-outline-secondary');
+                btnDiscountFixed.classList.add('btn-primary', 'active');
+            } else {
+                btnDiscountFixed.classList.remove('btn-primary', 'active');
+                btnDiscountFixed.classList.add('btn-outline-secondary');
+                btnDiscountPercent.classList.remove('btn-outline-secondary');
+                btnDiscountPercent.classList.add('btn-primary', 'active');
+            }
+        }
+
+        if (billDiscountSymbol) {
+            billDiscountSymbol.innerText = isFixed ? 'Rs.' : '%';
+        }
+
+        if (billDiscountInput) {
+            billDiscountInput.placeholder = isFixed ? 'Rs.' : '%';
+            if (isFixed) {
+                billDiscountInput.removeAttribute('max');
+                billDiscountInput.step = '1';
+            } else {
+                billDiscountInput.max = '100';
+                billDiscountInput.step = '0.5';
+                if (parseFloat(billDiscountInput.value) > 100) {
+                    billDiscountInput.value = '100';
+                }
+            }
+        }
+    }
+
+    function setBillDiscountMode(mode) {
+        if (!window.smartPos || !window.smartPos.cart) return;
+
+        if (window.smartPos.cart.billDiscountType !== mode) {
+            window.smartPos.cart.toggleBillDiscountType();
+        }
+
+        syncBillDiscountUI(window.smartPos.cart.billDiscountType || mode);
+    }
+
+    if (btnDiscountPercent) {
+        btnDiscountPercent.addEventListener('click', () => setBillDiscountMode('PERCENTAGE'));
+    }
+
+    if (btnDiscountFixed) {
+        btnDiscountFixed.addEventListener('click', () => setBillDiscountMode('FIXED'));
+    }
+
+    if (window.smartPos && window.smartPos.cart) {
+        syncBillDiscountUI(window.smartPos.cart.billDiscountType || 'PERCENTAGE');
+    }
+
+    // =========================================================================
+    // 4. SUPERVISOR OVERRIDE MODAL: DISCOUNT REASON DROPDOWN & NOTES SYNC
+    // =========================================================================
+    const reasonSelect = document.getElementById('posDiscountReasonSelect');
+    const reasonNotesContainer = document.getElementById('posDiscountReasonNotesContainer');
+    const reasonNotesInput = document.getElementById('posDiscountReasonNotes');
+    const reasonHiddenInput = document.getElementById('posDiscountReasonInput');
+    const submitPinBtn = document.getElementById('submitManagerPinBtn');
+
+    function syncDiscountReason() {
+        if (!reasonSelect || !reasonHiddenInput) return;
+
+        const selectedVal = reasonSelect.value;
+        const notesVal = reasonNotesInput ? reasonNotesInput.value.trim() : '';
+        let finalReason = selectedVal;
+
+        if (selectedVal === 'OTHER') {
+            finalReason = notesVal ? `OTHER: ${notesVal}` : 'OTHER';
+        } else if (notesVal) {
+            finalReason = `${selectedVal} (${notesVal})`;
+        }
+
+        reasonHiddenInput.value = finalReason;
+
+        if (window.smartPos && window.smartPos.cart) {
+            window.smartPos.cart.billDiscountReason = finalReason;
+        }
+    }
+
+    if (reasonSelect && reasonNotesContainer) {
+        reasonSelect.addEventListener('change', () => {
+            if (reasonSelect.value === 'OTHER') {
+                reasonNotesContainer.classList.remove('d-none');
+                if (reasonNotesInput) reasonNotesInput.focus();
+            } else {
+                reasonNotesContainer.classList.add('d-none');
+            }
+            syncDiscountReason();
+        });
+    }
+
+    if (reasonNotesInput) {
+        reasonNotesInput.addEventListener('input', syncDiscountReason);
+    }
+
+    if (submitPinBtn) {
+        submitPinBtn.addEventListener('click', (e) => {
+            syncDiscountReason();
+
+            if (reasonSelect && reasonSelect.value === 'OTHER' && reasonNotesInput && !reasonNotesInput.value.trim()) {
+                const errAlert = document.getElementById('posPinErrorAlert');
+                if (errAlert) {
+                    errAlert.innerText = 'Please specify justification notes when selecting "Other".';
+                    errAlert.classList.remove('d-none');
+                }
+                e.stopImmediatePropagation();
+                return false;
+            }
+        }, true);
+    }
+
+    // =========================================================================
+    // 5. CAMERA BARCODE SCANNER INTEGRATION
+    // =========================================================================
     const openCameraBtn = document.getElementById('posOpenCameraButton');
     const cameraModalEl = document.getElementById('posCameraScannerModal');
     const videoEl = document.getElementById('posCameraFeedVideo');
@@ -845,7 +1284,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Direct Image File Decode Listener
         if (fileInput) {
             fileInput.addEventListener('change', async (e) => {
                 if (e.target.files && e.target.files[0]) {
@@ -887,7 +1325,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Modal Close & Reset Focus Listeners
+    // =========================================================================
+    // 6. MODAL CLOSE & RESET FOCUS LISTENERS
+    // =========================================================================
     const finishReceiptBtn = document.getElementById('finishReceiptBtn');
     const closeReceiptBtn = document.getElementById('closeReceiptBtn');
     [finishReceiptBtn, closeReceiptBtn].forEach(btn => {
@@ -900,7 +1340,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Auto-focus search box on load
     const searchInput = document.getElementById('posProductSearchInput');
     if (searchInput) {
         searchInput.focus();

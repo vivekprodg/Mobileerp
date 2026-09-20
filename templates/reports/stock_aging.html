@@ -1,0 +1,406 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Stock Aging Analysis Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.aging-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.aging-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-aging th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-aging td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+/* Stacked Visual Distribution Progress Bar */
+.aging-progress-bar-container {
+    height: 14px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #e2e8f0;
+    display: flex;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.08);
+}
+.aging-progress-segment {
+    height: 100%;
+    transition: width 0.3s ease;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header & Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-hourglass-half text-warning me-2"></i> Stock Aging &amp; Depreciation Analysis
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Monitor inventory holding periods, audit smartphones depreciating in showcases, and identify capital locked in aging brackets
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="{% url 'reports:export_csv' 'aging' %}?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export Aging CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'reports:slow_moving' %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-snowflake me-1"></i> Dead / Slow-Moving
+            </a>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 Standard Retail Aging Bracket KPI Cards -->
+    <div class="row g-3 mb-4">
+        <!-- Bucket 1: 0 to 30 Days (Fresh Stock) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="aging-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">0 - 30 Days (Fresh Stock)</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-sparkles fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.cost_0_30|floatformat:2|intcomma }}
+                </h3>
+                <div class="d-flex justify-content-between align-items-center mt-1 text-muted fs-2xs">
+                    <span>{{ totals.units_0_30|floatformat:0 }} Units ({{ totals.count_0_30 }} items)</span>
+                    <strong class="text-success">{{ totals.pct_0_30 }}% of capital</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bucket 2: 31 to 60 Days (Normal Stock) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="aging-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-primary text-uppercase fw-bold fs-2xs">31 - 60 Days (Normal Stock)</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-box-open fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    Rs. {{ totals.cost_31_60|floatformat:2|intcomma }}
+                </h3>
+                <div class="d-flex justify-content-between align-items-center mt-1 text-muted fs-2xs">
+                    <span>{{ totals.units_31_60|floatformat:0 }} Units ({{ totals.count_31_60 }} items)</span>
+                    <strong class="text-primary">{{ totals.pct_31_60 }}% of capital</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bucket 3: 61 to 90 Days (Slow Stock) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="aging-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">61 - 90 Days (Slow Stock)</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-clock fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    Rs. {{ totals.cost_61_90|floatformat:2|intcomma }}
+                </h3>
+                <div class="d-flex justify-content-between align-items-center mt-1 text-muted fs-2xs">
+                    <span>{{ totals.units_61_90|floatformat:0 }} Units ({{ totals.count_61_90 }} items)</span>
+                    <strong class="text-warning-emphasis">{{ totals.pct_61_90 }}% of capital</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bucket 4: 90+ Days (At-Risk / Old Stock) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="aging-kpi-card border-start border-danger border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-danger text-uppercase fw-bold fs-2xs">90+ Days (At-Risk / Old)</span>
+                    <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle">
+                        <i class="fas fa-triangle-exclamation fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    Rs. {{ totals.cost_90_plus|floatformat:2|intcomma }}
+                </h3>
+                <div class="d-flex justify-content-between align-items-center mt-1 text-muted fs-2xs">
+                    <span>{{ totals.units_90_plus|floatformat:0 }} Units ({{ totals.count_90_plus }} items)</span>
+                    <strong class="text-danger">{{ totals.pct_90_plus }}% of capital</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Visual Capital Distribution Bar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-2 fs-xs">
+            <strong class="text-dark"><i class="fas fa-chart-bar text-primary me-1"></i> Capital Locked Distribution across Aging Brackets</strong>
+            <span class="text-muted">Total Inventory Capital: <strong class="text-dark font-monospace">Rs. {{ totals.total_capital|floatformat:2|intcomma }}</strong> &bull; Avg Age: <strong>{{ totals.avg_age_days }} Days</strong></span>
+        </div>
+        <div class="aging-progress-bar-container">
+            <div class="aging-progress-segment bg-success" style="width: {{ totals.pct_0_30 }}%;" title="0-30 Days: Rs. {{ totals.cost_0_30|floatformat:0|intcomma }} ({{ totals.pct_0_30 }}%)"></div>
+            <div class="aging-progress-segment bg-primary" style="width: {{ totals.pct_31_60 }}%;" title="31-60 Days: Rs. {{ totals.cost_31_60|floatformat:0|intcomma }} ({{ totals.pct_31_60 }}%)"></div>
+            <div class="aging-progress-segment bg-warning" style="width: {{ totals.pct_61_90 }}%;" title="61-90 Days: Rs. {{ totals.cost_61_90|floatformat:0|intcomma }} ({{ totals.pct_61_90 }}%)"></div>
+            <div class="aging-progress-segment bg-danger" style="width: {{ totals.pct_90_plus }}%;" title="90+ Days: Rs. {{ totals.cost_90_plus|floatformat:0|intcomma }} ({{ totals.pct_90_plus }}%)"></div>
+        </div>
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 fs-2xs text-muted">
+            <span><i class="fas fa-circle text-success me-1"></i> 0-30 Days ({{ totals.pct_0_30 }}%)</span>
+            <span><i class="fas fa-circle text-primary me-1"></i> 31-60 Days ({{ totals.pct_31_60 }}%)</span>
+            <span><i class="fas fa-circle text-warning me-1"></i> 61-90 Days ({{ totals.pct_61_90 }}%)</span>
+            <span><i class="fas fa-circle text-danger me-1"></i> 90+ Days ({{ totals.pct_90_plus }}%)</span>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center" id="agingFilterForm">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Product, SKU, Barcode, IMEI, S/N...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if filters.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="bracket" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Aging Brackets</option>
+                    <option value="0_30" {% if filters.bracket == '0_30' %}selected{% endif %}>0 - 30 Days (Fresh)</option>
+                    <option value="31_60" {% if filters.bracket == '31_60' %}selected{% endif %}>31 - 60 Days (Normal)</option>
+                    <option value="61_90" {% if filters.bracket == '61_90' %}selected{% endif %}>61 - 90 Days (Slow)</option>
+                    <option value="90_plus" {% if filters.bracket == '90_plus' %}selected{% endif %}>90+ Days (At-Risk / Old)</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="item_type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Item Types</option>
+                    <option value="handset" {% if filters.item_type == 'handset' %}selected{% endif %}>Handsets Only (IMEI)</option>
+                    <option value="accessory" {% if filters.item_type == 'accessory' %}selected{% endif %}>Accessories / Batches</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.branch or filters.category or filters.bracket or filters.item_type %}
+                <a href="{% url 'reports:stock_aging' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Stock Aging Ledger Table (Oldest to Newest) -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-ol text-secondary me-2"></i> Inventory Aging Ledger (Sorted by Oldest Stock First)
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Items Listed</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-aging">
+                <thead>
+                    <tr>
+                        <th class="ps-4" style="width: 40px;">#</th>
+                        <th>Classification</th>
+                        <th>Product / Device Description</th>
+                        <th>Identifier (IMEI / S/N / Batch)</th>
+                        <th>Outlet Branch</th>
+                        <th>Inward Date (AD / BS)</th>
+                        <th class="text-center">Age (Days)</th>
+                        <th>Aging Bracket</th>
+                        <th class="text-center">Quantity</th>
+                        <th class="text-end">Unit Cost</th>
+                        <th class="text-end">Landed Capital</th>
+                        <th class="text-end pe-4">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in records %}
+                    <tr>
+                        <td class="ps-4 text-center font-monospace text-muted">{{ forloop.counter }}</td>
+
+                        <!-- Classification Badge -->
+                        <td>
+                            {% if item.is_handset %}
+                                <span class="badge bg-primary bg-opacity-10 text-primary fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-mobile-screen me-1"></i> Handset (IMEI)
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-cubes me-1"></i> Batch / Bulk
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Product Description -->
+                        <td>
+                            <a href="{% url 'inventory:product_detail' item.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                {{ item.name }}
+                            </a>
+                            <small class="text-muted d-block font-monospace fs-2xs">SKU: {{ item.sku }}</small>
+                        </td>
+
+                        <!-- Hardware Identifier -->
+                        <td>
+                            <span class="font-monospace fw-bold text-dark fs-xs">{{ item.identifier }}</span>
+                        </td>
+
+                        <!-- Outlet Branch -->
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace">{{ item.branch.code }}</span>
+                            <small class="text-muted d-block fs-2xs">{{ item.branch.name }}</small>
+                        </td>
+
+                        <!-- Inward Date -->
+                        <td>
+                            <span class="text-dark">{{ item.inward_date_str }}</span>
+                            <small class="text-muted d-block font-monospace fs-2xs">{{ item.inward_date_bs }} BS</small>
+                        </td>
+
+                        <!-- Age in Days Badge -->
+                        <td class="text-center">
+                            {% if item.age_days >= 90 %}
+                                <span class="badge bg-danger text-white fw-bold fs-xs font-monospace px-2 py-1">
+                                    {{ item.age_days }} Days
+                                </span>
+                            {% elif item.age_days >= 61 %}
+                                <span class="badge bg-warning text-dark fw-bold fs-xs font-monospace px-2 py-1">
+                                    {{ item.age_days }} Days
+                                </span>
+                            {% elif item.age_days >= 31 %}
+                                <span class="badge bg-primary bg-opacity-10 text-primary fw-bold fs-xs font-monospace px-2 py-1">
+                                    {{ item.age_days }} Days
+                                </span>
+                            {% else %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs font-monospace px-2 py-1">
+                                    {{ item.age_days }} Days
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Bracket Label -->
+                        <td>
+                            <span class="badge bg-{{ item.bracket_badge }} bg-opacity-10 text-{{ item.bracket_badge }} fw-bold fs-2xs px-2 py-1">
+                                {{ item.bracket_label }}
+                            </span>
+                        </td>
+
+                        <!-- Quantity -->
+                        <td class="text-center font-monospace fw-bold">
+                            {{ item.quantity|floatformat:1 }} {{ item.unit_code }}
+                        </td>
+
+                        <!-- Unit Cost -->
+                        <td class="col-num text-dark">
+                            Rs. {{ item.unit_cost|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Capital Locked -->
+                        <td class="col-num fw-bold {% if item.age_days >= 90 %}text-danger{% else %}text-dark{% endif %}">
+                            Rs. {{ item.cost_value|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Action Link -->
+                        <td class="text-end pe-4">
+                            {% if item.is_handset and item.imei_1 %}
+                                <a href="{% url 'reports:imei_lifecycle' %}?imei={{ item.imei_1 }}" 
+                                   class="btn btn-outline-primary btn-sm rounded-pill px-2 py-0 fs-2xs fw-bold" 
+                                   title="View Single-IMEI Lifecycle">
+                                    Trace
+                                </a>
+                            {% else %}
+                                <a href="{% url 'inventory:product_detail' item.product.pk %}" 
+                                   class="btn btn-outline-secondary btn-sm rounded-pill px-2 py-0 fs-2xs">
+                                    Detail
+                                </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="12" class="text-center py-5 text-muted">
+                            <i class="fas fa-boxes-stacked fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Inventory Records Found</h6>
+                            <p class="text-muted fs-xs mb-0">No active stock matches the selected aging parameters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="8" class="ps-4 text-end text-uppercase text-white-50">Total Capital Locked:</td>
+                        <td class="text-center col-num text-primary fs-6">{{ totals.total_units|floatformat:1 }}</td>
+                        <td></td>
+                        <td class="text-end col-num text-warning fs-6">Rs. {{ totals.total_capital|floatformat:2|intcomma }}</td>
+                        <td class="pe-4 text-white-50 fs-2xs">Landed Cost</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,552 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Damaged &amp; Quarantined Defective Stock Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.damaged-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.damaged-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-damaged th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-damaged td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+.damaged-nav-tabs .nav-link {
+    font-weight: 700;
+    font-size: 0.84rem;
+    color: var(--erp-slate-600);
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 18px;
+    border-radius: 0;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.damaged-nav-tabs .nav-link:hover {
+    color: var(--erp-primary);
+    border-bottom-color: var(--erp-primary-border);
+}
+.damaged-nav-tabs .nav-link.active {
+    color: #dc2626 !important;
+    background: transparent !important;
+    border-bottom: 2px solid #dc2626 !important;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-heart-crack text-danger me-2"></i> Damaged &amp; Quarantined Defective Stock Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit broken parts from customer repairs, damaged phones, and defective inventory held in back-room quarantine for distributor RMA replacement
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <!-- RMA Dispatch Button -->
+            <a href="{% url 'inventory:vendor_rma_create' %}" class="btn btn-danger btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-truck-ramp-box me-1"></i> Batch into Vendor RMA Claim
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Quarantine Sheet
+            </button>
+            <a href="{% url 'inventory:vendor_rma_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                <i class="fas fa-truck-fast me-1"></i> RMA Claims Tracker
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Defective Stock KPI Cards -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Total Capital Locked -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="damaged-kpi-card border-start border-danger border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-danger text-uppercase fw-bold fs-2xs">Total Locked Capital</span>
+                    <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle">
+                        <i class="fas fa-coins fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    Rs. {{ totals.grand_total_locked_capital|default:total_quarantined_cost|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Cost tied up in broken parts &amp; phones</small>
+            </div>
+        </div>
+
+        <!-- 2. Quarantined Stock Units -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="damaged-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Quarantined Stock Units</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-boxes-packing fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    {{ totals.total_quarantined_units|default:total_quarantined_units|floatformat:0|intcomma }} <span class="fs-6 fw-normal text-muted">Units</span>
+                </h3>
+                <small class="text-muted fs-2xs">Isolated from sellable inventory</small>
+            </div>
+        </div>
+
+        <!-- 3. Defective Replaced Workshop Parts -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="damaged-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Workshop Replaced Parts</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-screwdriver-wrench fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.total_repair_parts_count|default:defective_parts|length }} <span class="fs-6 fw-normal text-muted">Parts</span>
+                </h3>
+                <small class="text-muted fs-2xs">Rs. {{ totals.total_repair_parts_cost|floatformat:2|intcomma }} RMA claim value</small>
+            </div>
+        </div>
+
+        <!-- 4. Defective Return Handsets -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="damaged-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Defective Handsets (DOA)</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-mobile-screen fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    {{ totals.total_handsets_count|default:defective_handsets|length }} <span class="fs-6 fw-normal text-muted">Phones</span>
+                </h3>
+                <small class="text-muted fs-2xs">Serialized dead / customer return phones</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Prompt Banner -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-danger bg-opacity-10 border border-danger border-opacity-25 mb-4">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge bg-danger text-white p-3 rounded-circle fs-5"><i class="fas fa-truck-ramp-box"></i></span>
+                <div>
+                    <h6 class="fw-bold text-dark mb-0">
+                        {{ totals.grand_total_defective_items|default:0 }} Defective Item(s) Ready for Distributor RMA Claim Dispatch
+                    </h6>
+                    <small class="text-muted">
+                        Recover Rs. {{ totals.grand_total_locked_capital|default:0|floatformat:2|intcomma }} in distributor replacements or ledger credit notes.
+                    </small>
+                </div>
+            </div>
+            <a href="{% url 'inventory:vendor_rma_create' %}" class="btn btn-danger btn-sm rounded-pill px-4 fw-bold shadow-xs">
+                <i class="fas fa-paper-plane me-1"></i> Dispatch RMA Challan &rarr;
+            </a>
+        </div>
+    </div>
+
+    <!-- Search & Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:filters.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Product, Serial, Ticket No, Defect Reason...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if request.GET.branch == br.id|stringformat:"s" or filters.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if request.GET.category == cat.id|stringformat:"s" or filters.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="brand" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Brands</option>
+                    {% for b in brands %}
+                        <option value="{{ b.id }}" {% if request.GET.brand == b.id|stringformat:"s" or filters.brand == b.id|stringformat:"s" %}selected{% endif %}>
+                            {{ b.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.branch or request.GET.category or request.GET.brand %}
+                <a href="{% url 'reports:damaged_stock' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- TAB NAVIGATION BAR FOR THREE DEFECTIVE SUB-SECTIONS -->
+    <ul class="nav nav-tabs damaged-nav-tabs border-bottom mb-3 bg-white px-3 pt-2 rounded-top-4 shadow-xs" id="damagedStockTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="stock-tab" data-bs-toggle="tab" data-bs-target="#tab-stock" type="button" role="tab">
+                <i class="fas fa-boxes-stacked"></i> 1. Quarantined Stock Balance
+                <span class="badge bg-danger rounded-pill ms-1 fs-2xs">{{ quarantined_stocks|length }}</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="parts-tab" data-bs-toggle="tab" data-bs-target="#tab-parts" type="button" role="tab">
+                <i class="fas fa-screwdriver-wrench"></i> 2. Replaced Workshop Defective Parts
+                <span class="badge bg-warning text-dark rounded-pill ms-1 fs-2xs">{{ defective_parts|length }}</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="handsets-tab" data-bs-toggle="tab" data-bs-target="#tab-handsets" type="button" role="tab">
+                <i class="fas fa-mobile-screen"></i> 3. Defective Handsets (IMEI Tracked)
+                <span class="badge bg-dark rounded-pill ms-1 fs-2xs">{{ defective_handsets|length }}</span>
+            </button>
+        </li>
+    </ul>
+
+    <!-- TAB CONTENT PANELS -->
+    <div class="tab-content" id="damagedStockTabsContent">
+
+        <!-- TAB 1: QUARANTINED WAREHOUSE STOCK (BranchStock) -->
+        <div class="tab-pane fade show active" id="tab-stock" role="tabpanel">
+            <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+                <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-boxes-stacked text-danger me-2"></i> Warehouse Stock in Defective Quarantine Status
+                    </h6>
+                    <span class="badge bg-danger rounded-pill px-3">{{ quarantined_stocks|length }} Product Models</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 table-damaged">
+                        <thead>
+                            <tr>
+                                <th class="ps-4">Product / Item Description</th>
+                                <th>Category &amp; Brand</th>
+                                <th>Outlet Branch</th>
+                                <th>Warehouse Rack</th>
+                                <th class="text-center">Quarantined Defective Qty</th>
+                                <th class="text-end">Unit Landed Cost</th>
+                                <th class="text-end">Total Locked Capital</th>
+                                <th>Last Known Supplier</th>
+                                <th class="text-end pe-4">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in quarantined_stocks %}
+                            <tr>
+                                <td class="ps-4">
+                                    <a href="{% url 'inventory:product_detail' row.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                        {{ row.product.name }}
+                                    </a>
+                                    <div class="font-monospace text-muted fs-2xs mt-1">
+                                        SKU: {{ row.product.sku }}
+                                    </div>
+                                </td>
+
+                                <td>
+                                    <span class="fw-semibold text-dark">{{ row.product.category.name|default:"General" }}</span>
+                                    <small class="text-muted d-block">{{ row.product.brand.name|default:"-" }}</small>
+                                </td>
+
+                                <td>
+                                    <span class="badge bg-light text-dark border">{{ row.branch.code }}</span>
+                                </td>
+
+                                <td>
+                                    <span class="badge bg-light text-secondary border font-monospace fs-2xs">
+                                        {{ row.rack_location }}
+                                    </span>
+                                </td>
+
+                                <td class="text-center">
+                                    <span class="badge bg-danger text-white fw-bold fs-xs col-num px-3 py-1">
+                                        {{ row.quantity|floatformat:1 }} {{ row.unit_code }}
+                                    </span>
+                                </td>
+
+                                <td class="col-num text-dark">
+                                    Rs. {{ row.cost_price|floatformat:2|intcomma }}
+                                </td>
+
+                                <td class="col-num fw-bold text-danger fs-xs">
+                                    Rs. {{ row.total_cost|floatformat:2|intcomma }}
+                                </td>
+
+                                <td>
+                                    <span class="text-dark fs-xs fw-semibold">{{ row.last_supplier }}</span>
+                                </td>
+
+                                <td class="text-end pe-4">
+                                    <a href="{% url 'inventory:vendor_rma_create' %}?product_id={{ row.product.id }}" 
+                                       class="btn btn-outline-danger btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold" 
+                                       title="Include this defective stock in RMA Dispatch">
+                                        <i class="fas fa-plus me-1"></i> Add to RMA
+                                    </a>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="9" class="text-center py-5 text-muted">
+                                    <i class="fas fa-shield-check fs-1 text-success opacity-50 d-block mb-3"></i>
+                                    <h6 class="fw-bold text-dark mb-1">No Defective Items in Quarantine</h6>
+                                    <p class="text-muted fs-xs mb-0">All warehouse stock counters are 100% sellable without defective quarantine units.</p>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        {% if quarantined_stocks %}
+                        <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                            <tr>
+                                <td colspan="4" class="ps-4 text-end text-uppercase text-white-50">Total Quarantined Capital:</td>
+                                <td class="text-center col-num text-danger fs-6">{{ totals.total_quarantined_units|floatformat:1 }}</td>
+                                <td></td>
+                                <td class="text-end col-num text-warning fs-6">Rs. {{ totals.total_quarantined_cost|floatformat:2|intcomma }}</td>
+                                <td colspan="2" class="pe-4 text-white-50 fs-2xs">Cost Value of Quarantined Stock</td>
+                            </tr>
+                        </tfoot>
+                        {% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: DEFECTIVE REPLACED WORKSHOP PARTS (RepairReplacedPart) -->
+        <div class="tab-pane fade" id="tab-parts" role="tabpanel">
+            <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+                <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-screwdriver-wrench text-warning-emphasis me-2"></i> Defective Parts Replaced from Customer Repairs
+                    </h6>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 rounded-pill px-3">
+                        {{ defective_parts|length }} Replaced Parts
+                    </span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 table-damaged">
+                        <thead>
+                            <tr>
+                                <th class="ps-4">Ticket Number</th>
+                                <th>Spare Part Description</th>
+                                <th>Defect Failure Reason</th>
+                                <th>Old Part Serial / Barcode</th>
+                                <th>Customer Device Model</th>
+                                <th>Technician</th>
+                                <th class="text-end">Landed Cost</th>
+                                <th>Inward Date</th>
+                                <th class="text-end pe-4">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in defective_parts %}
+                            <tr>
+                                <td class="ps-4 font-monospace fw-bold">
+                                    <a href="{% url 'repairs:ticket_detail' p.ticket.pk %}" class="text-decoration-none text-primary">
+                                        {{ p.ticket.ticket_number }}
+                                    </a>
+                                </td>
+
+                                <td>
+                                    <strong class="text-dark">{{ p.product.name }}</strong>
+                                    <small class="text-muted d-block">Qty: {{ p.quantity|floatformat:0 }}</small>
+                                </td>
+
+                                <td>
+                                    <span class="text-danger fs-xs fw-semibold">{{ p.defect_description }}</span>
+                                </td>
+
+                                <td class="font-monospace text-muted">
+                                    {{ p.serial_or_barcode }}
+                                </td>
+
+                                <td>
+                                    <strong>{{ p.ticket.product.name }}</strong>
+                                    <small class="text-muted d-block font-monospace">IMEI: {{ p.ticket.imei_or_serial|truncatechars:18 }}</small>
+                                </td>
+
+                                <td>
+                                    {{ p.technician.get_full_name|default:p.technician.username|default:"Lab Tech" }}
+                                </td>
+
+                                <td class="col-num text-dark fw-bold">
+                                    Rs. {{ p.total_cost|floatformat:2|intcomma }}
+                                </td>
+
+                                <td>
+                                    <span class="text-dark">{{ p.date_ad }}</span>
+                                    <small class="text-muted d-block fs-2xs font-monospace">{{ p.date_bs }} BS</small>
+                                </td>
+
+                                <td class="text-end pe-4">
+                                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-2xs px-2 py-1">
+                                        <i class="fas fa-clock me-1"></i> Ready for RMA
+                                    </span>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="9" class="text-center py-5 text-muted">
+                                    <i class="fas fa-screwdriver-wrench fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                                    <h6 class="fw-bold text-dark mb-1">No Workshop Defective Parts in Quarantine</h6>
+                                    <p class="text-muted fs-xs mb-0">No warranty-replaced screens, batteries, or boards currently awaiting RMA dispatch.</p>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        {% if defective_parts %}
+                        <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                            <tr>
+                                <td colspan="6" class="ps-4 text-end text-uppercase text-white-50">Total Replaced Parts Cost:</td>
+                                <td class="text-end col-num text-warning fs-6">Rs. {{ totals.total_repair_parts_cost|floatformat:2|intcomma }}</td>
+                                <td colspan="2" class="pe-4 text-white-50 fs-2xs">Replaced Parts Awaiting Supplier Credit</td>
+                            </tr>
+                        </tfoot>
+                        {% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 3: DEFECTIVE SERIALIZED HANDSETS (ItemInstance) -->
+        <div class="tab-pane fade" id="tab-handsets" role="tabpanel">
+            <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+                <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-mobile-screen text-danger me-2"></i> Serialized Smartphones in RETURNED_DEFECTIVE Status
+                    </h6>
+                    <span class="badge bg-danger rounded-pill px-3">{{ defective_handsets|length }} Defective Handsets</span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 table-damaged">
+                        <thead>
+                            <tr>
+                                <th class="ps-4">Handset Model</th>
+                                <th>Outlet Branch</th>
+                                <th>Primary IMEI 1</th>
+                                <th>Secondary IMEI 2</th>
+                                <th>NTA MDMS Status</th>
+                                <th>Failure / Return Reason</th>
+                                <th class="text-end">Landed Acquisition Cost</th>
+                                <th class="text-end pe-4">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for h in defective_handsets %}
+                            <tr>
+                                <td class="ps-4">
+                                    <a href="{% url 'inventory:product_detail' h.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                        {{ h.product.name }}
+                                    </a>
+                                    <small class="text-muted d-block font-monospace">SKU: {{ h.product.sku }}</small>
+                                </td>
+
+                                <td>
+                                    <span class="badge bg-light text-dark border">{{ h.branch.code }}</span>
+                                </td>
+
+                                <td class="font-monospace fw-bold text-danger">
+                                    {{ h.imei_1 }}
+                                </td>
+
+                                <td class="font-monospace text-muted">
+                                    {{ h.imei_2|default:"-" }}
+                                </td>
+
+                                <td>
+                                    <span class="badge bg-light text-dark border fs-2xs">{{ h.mdms_status }}</span>
+                                </td>
+
+                                <td>
+                                    <span class="text-danger fs-xs fw-semibold">{{ h.defect_note }}</span>
+                                </td>
+
+                                <td class="col-num text-dark fw-bold">
+                                    Rs. {{ h.landed_cost|floatformat:2|intcomma }}
+                                </td>
+
+                                <td class="text-end pe-4">
+                                    <a href="{% url 'reports:imei_lifecycle' %}?imei={{ h.imei_1 }}" 
+                                       class="btn btn-outline-primary btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold" 
+                                       title="View Full Device History">
+                                        <i class="fas fa-timeline me-1"></i> Audit Trail
+                                    </a>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="8" class="text-center py-5 text-muted">
+                                    <i class="fas fa-mobile-screen fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                                    <h6 class="fw-bold text-dark mb-1">No Defective Handsets in Quarantine</h6>
+                                    <p class="text-muted fs-xs mb-0">No active smartphones are logged as defective or DOA.</p>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        {% if defective_handsets %}
+                        <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                            <tr>
+                                <td colspan="6" class="ps-4 text-end text-uppercase text-white-50">Total Defective Handsets Cost:</td>
+                                <td class="text-end col-num text-warning fs-6">Rs. {{ totals.total_handsets_cost|floatformat:2|intcomma }}</td>
+                                <td class="pe-4 text-white-50 fs-2xs">Acquisition Capital</td>
+                            </tr>
+                        </tfoot>
+                        {% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}

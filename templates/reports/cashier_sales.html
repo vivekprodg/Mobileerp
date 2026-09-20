@@ -1,0 +1,341 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Cashier-Wise Collection &amp; Settlement Audit | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.sales-suite-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sales-suite-pill:hover, .sales-suite-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+.report-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.table-cashier-sales th {
+    font-size: 0.70rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-cashier-sales td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1760px;">
+
+    <!-- Sales Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Sales Suite:</span>
+        <a href="{% url 'reports:sales_summary' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-chart-pie text-secondary"></i> Daily Summary
+        </a>
+        <a href="{% url 'reports:item_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-list-check text-secondary"></i> Line Items
+        </a>
+        <a href="{% url 'reports:product_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-boxes-stacked text-secondary"></i> Product-Wise
+        </a>
+        <a href="{% url 'reports:brand_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-tags text-secondary"></i> Brand-Wise
+        </a>
+        <a href="{% url 'reports:category_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-folder-tree text-secondary"></i> Category-Wise
+        </a>
+        <a href="{% url 'reports:sold_imei' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-barcode text-secondary"></i> Sold IMEIs
+        </a>
+        <a href="{% url 'reports:salesperson_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-user-tie text-secondary"></i> Sales Reps
+        </a>
+        <a href="{% url 'reports:cashier_sales' %}" class="sales-suite-pill active text-nowrap">
+            <i class="fas fa-cash-register text-white"></i> Cashiers
+        </a>
+        <a href="{% url 'reports:payment_methods' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-wallet text-secondary"></i> Payment Modes
+        </a>
+        <a href="{% url 'reports:discount_overrides' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-percent text-secondary"></i> Discounts &amp; Overrides
+        </a>
+        <a href="{% url 'reports:trade_in_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-repeat text-secondary"></i> Trade-In Deals
+        </a>
+        <a href="{% url 'reports:gross_profit' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-coins text-warning"></i> Gross Profit
+        </a>
+        <a href="{% url 'reports:top_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-arrow-trend-up text-success"></i> Top Sellers
+        </a>
+        <a href="{% url 'reports:slow_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-snowflake text-info"></i> Slow Sellers
+        </a>
+        <a href="{% url 'reports:cancelled_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-ban text-danger"></i> Voided Bills
+        </a>
+    </div>
+
+    <!-- Page Header & Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-cash-register text-primary me-2"></i> Cashier-Wise Collection &amp; Settlement Audit Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit counter cashiers: Gross billing, concessions granted, net cash retained in drawer, digital QR wallet collections, and customer credit authorized
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'pos:session_list' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-clock-rotate-left me-1"></i> Shift Registers
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Cashier KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-success border-4 h-100">
+                <span class="text-success text-uppercase fw-bold fs-2xs">Net Cash Retained</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_cash_net|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Physical cash in counter drawers</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-primary border-4 h-100">
+                <span class="text-primary text-uppercase fw-bold fs-2xs">Digital Collections (QR / Wallets)</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_digital|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">FonePay: Rs. {{ totals.total_fonepay|floatformat:2|intcomma }} | eSewa: Rs. {{ totals.total_esewa|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-danger border-4 h-100">
+                <span class="text-danger text-uppercase fw-bold fs-2xs">Credit Given (Udhaari)</span>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_credit|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Authorized customer debt</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-dark border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Net Turnover Billed</span>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_net_turnover|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.total_invoices|default:0 }} Invoices across {{ totals.cashiers_count|default:0 }} Cashiers</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <input type="text" name="q" value="{{ filters.q|default:'' }}" class="form-control form-control-sm bg-light border-0" placeholder="Search Cashier Name or Username...">
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="cashier" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Cashiers</option>
+                    {% for c in cashiers %}
+                        <option value="{{ c.id }}" {% if filters.cashier_id == c.id|stringformat:"s" %}selected{% endif %}>{{ c.get_full_name|default:c.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>{{ br.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.cashier_id or filters.branch_id %}
+                <a href="{% url 'reports:cashier_sales' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Cashier Collections Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-cash-register text-secondary me-2"></i> Cashier Invoicing &amp; Payment Tender Ledger
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Cashier Records</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-cashier-sales table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Cashier Name</th>
+                        <th>Outlet Branch</th>
+                        <th class="text-center">Invoices</th>
+                        <th class="text-end">Gross Subtotal</th>
+                        <th class="text-end">Discounts Given</th>
+                        <th class="text-end">Net Turnover</th>
+                        <th class="text-end">Net Cash Retained</th>
+                        <th class="text-end">Change Given</th>
+                        <th class="text-end">FonePay QR</th>
+                        <th class="text-end">eSewa</th>
+                        <th class="text-end">Khalti</th>
+                        <th class="text-end">POS Card</th>
+                        <th class="text-end">Bank Transfer</th>
+                        <th class="text-end">Credit (Udhaari)</th>
+                        <th class="text-end pe-3">Refunds Issued</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td class="ps-3">
+                            <strong class="text-dark">{{ r.name }}</strong>
+                            <small class="text-muted d-block font-monospace fs-2xs">@{{ r.username }}</small>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs">{{ r.branch_name }}</span>
+                        </td>
+
+                        <td class="text-center font-monospace fw-bold">{{ r.invoices_count }}</td>
+                        <td class="col-num">Rs. {{ r.gross_subtotal|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger">{% if r.total_discounts > 0 %}-Rs. {{ r.total_discounts|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num fw-bold text-dark">Rs. {{ r.net_turnover|floatformat:2|intcomma }}</td>
+
+                        <!-- Net Cash Inflow Retained -->
+                        <td class="col-num fw-bold text-success">
+                            Rs. {{ r.cash_net_retained|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Change Returned on Cash Bills -->
+                        <td class="col-num text-muted">
+                            {% if r.change_given > 0 %}Rs. {{ r.change_given|floatformat:2|intcomma }}{% else %}-{% endif %}
+                        </td>
+
+                        <!-- Digital Payment Breakdowns -->
+                        <td class="col-num text-primary">{% if r.fonepay_collected > 0 %}Rs. {{ r.fonepay_collected|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num text-success">{% if r.esewa_collected > 0 %}Rs. {{ r.esewa_collected|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num text-info">{% if r.khalti_collected > 0 %}Rs. {{ r.khalti_collected|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num">{% if r.card_collected > 0 %}Rs. {{ r.card_collected|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num">{% if r.bank_collected > 0 %}Rs. {{ r.bank_collected|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+
+                        <!-- Credit (Udhaari) Authorized -->
+                        <td class="col-num fw-bold text-danger">
+                            {% if r.credit_authorized > 0 %}Rs. {{ r.credit_authorized|floatformat:2|intcomma }}{% else %}-{% endif %}
+                        </td>
+
+                        <!-- Refunds Paid Out on Sales Returns -->
+                        <td class="col-num pe-3 text-danger">
+                            {% if r.total_refunds_issued > 0 %}
+                                -Rs. {{ r.total_refunds_issued|floatformat:2|intcomma }}
+                                <small class="text-muted d-block fs-2xs">({{ r.returns_count }} Ret)</small>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="15" class="text-center py-5 text-muted">
+                            <i class="fas fa-cash-register fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Cashier Activity Recorded</h6>
+                            <p class="text-muted fs-xs mb-0">No sales transactions match the selected filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="2" class="ps-3 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="text-center col-num text-white fs-6">{{ totals.total_invoices }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_gross_subtotal|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning-emphasis">-Rs. {{ totals.total_discounts_given|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white fs-6">Rs. {{ totals.total_net_turnover|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success fs-6">Rs. {{ totals.total_cash_net|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_change_given|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_fonepay|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_esewa|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_khalti|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_card|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_bank|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger fs-6">Rs. {{ totals.total_credit|floatformat:2|intcomma }}</td>
+                        <td class="pe-3 col-num text-danger">-Rs. {{ totals.total_refunds_issued|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

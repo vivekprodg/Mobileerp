@@ -1,0 +1,365 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Trade-In &amp; Exchange Settlement Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.sales-suite-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sales-suite-pill:hover, .sales-suite-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+.report-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.table-tradein-sales th {
+    font-size: 0.69rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-tradein-sales td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1760px;">
+
+    <!-- Sales Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Sales Suite:</span>
+        <a href="{% url 'reports:sales_summary' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-chart-pie text-secondary"></i> Daily Summary
+        </a>
+        <a href="{% url 'reports:item_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-list-check text-secondary"></i> Line Items
+        </a>
+        <a href="{% url 'reports:product_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-boxes-stacked text-secondary"></i> Product-Wise
+        </a>
+        <a href="{% url 'reports:brand_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-tags text-secondary"></i> Brand-Wise
+        </a>
+        <a href="{% url 'reports:category_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-folder-tree text-secondary"></i> Category-Wise
+        </a>
+        <a href="{% url 'reports:sold_imei' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-barcode text-secondary"></i> Sold IMEIs
+        </a>
+        <a href="{% url 'reports:salesperson_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-user-tie text-secondary"></i> Sales Reps
+        </a>
+        <a href="{% url 'reports:cashier_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-cash-register text-secondary"></i> Cashiers
+        </a>
+        <a href="{% url 'reports:payment_methods' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-wallet text-secondary"></i> Payment Modes
+        </a>
+        <a href="{% url 'reports:discount_overrides' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-percent text-secondary"></i> Discounts &amp; Overrides
+        </a>
+        <a href="{% url 'reports:trade_in_sales' %}" class="sales-suite-pill active text-nowrap">
+            <i class="fas fa-repeat text-white"></i> Trade-In Deals
+        </a>
+        <a href="{% url 'reports:gross_profit' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-coins text-warning"></i> Gross Profit
+        </a>
+        <a href="{% url 'reports:top_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-arrow-trend-up text-success"></i> Top Sellers
+        </a>
+        <a href="{% url 'reports:slow_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-snowflake text-info"></i> Slow Sellers
+        </a>
+        <a href="{% url 'reports:cancelled_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-ban text-danger"></i> Voided Bills
+        </a>
+    </div>
+
+    <!-- Page Header & Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-repeat text-warning-emphasis me-2"></i> Trade-In &amp; Exchange Sales Settlement Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit combined transactions: New smartphone sold, old phone received, buy-back valuation credit applied, cash top-ups, and net deal margins
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'sales:trade_in_wizard' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-calculator me-1"></i> New Trade-In
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Trade-In KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Exchange Deals</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle"><i class="fas fa-repeat fs-6"></i></span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.total_deals_count|default:0 }} <span class="fs-6 fw-normal text-muted">Deals</span>
+                </h3>
+                <small class="text-muted fs-2xs">Combined new phone sales with buy-back</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-success border-4 h-100">
+                <span class="text-success text-uppercase fw-bold fs-2xs">New Phones Sold Value</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_new_phones_value|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Gross retail value of new handsets</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-warning border-4 h-100">
+                <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Trade-In Credit Applied</span>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    -Rs. {{ totals.total_trade_in_credits|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Deducted from customer bill payable</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-dark border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Combined Deal Gross Profit</span>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_combined_profit|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-success fs-2xs fw-bold">New phone margin + trade-in profit buffer</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-5">
+                <input type="text" name="q" value="{{ filters.q|default:'' }}" class="form-control form-control-sm bg-light border-0 font-monospace" placeholder="Search Bill No, Voucher No, Customer Name, Phone, Old Phone IMEI...">
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>{{ br.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.branch_id %}
+                <a href="{% url 'reports:trade_in_sales' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Trade-In Sales Settlement Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-repeat text-secondary me-2"></i> Handset Exchange Settlement Ledger
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Exchange Transactions</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-tradein-sales table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Estimate No &amp; Date</th>
+                        <th>Customer</th>
+                        <th>New Handset Sold</th>
+                        <th class="text-end">New Phone Price</th>
+                        <th>Traded Old Phone</th>
+                        <th>Old Phone IMEI 1</th>
+                        <th>Condition Grade</th>
+                        <th>NTA MDMS</th>
+                        <th class="text-end">Trade-In Credit</th>
+                        <th class="text-end">Cash Top-Up Paid</th>
+                        <th class="text-end">Due Balance</th>
+                        <th class="text-end">Deal Profit</th>
+                        <th class="text-center pe-3">Police KYC</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td class="ps-3 font-monospace">
+                            <a href="{% url 'sales:estimate_detail' r.estimate_pk %}" class="fw-bold text-primary text-decoration-none">
+                                {{ r.estimate_number }}
+                            </a>
+                            <small class="text-muted d-block fs-2xs">{{ r.date_ad_str }} ({{ r.date_bs_str }} BS)</small>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ r.customer_name }}</strong>
+                            <small class="text-muted d-block font-monospace fs-2xs"><i class="fas fa-phone me-1 text-success"></i>{{ r.customer_phone }}</small>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ r.new_phone_name }}</strong>
+                            {% if r.new_phone_imei %}
+                                <small class="text-muted d-block font-monospace fs-2xs">IMEI: {{ r.new_phone_imei }}</small>
+                            {% endif %}
+                        </td>
+
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ r.new_phone_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ r.old_phone_model }}</strong>
+                            <small class="text-muted d-block fs-2xs">{{ r.old_phone_specs }}</small>
+                        </td>
+
+                        <td class="font-monospace text-primary">
+                            {{ r.old_phone_imei }}
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs">{{ r.old_condition }}</span>
+                        </td>
+
+                        <td>
+                            {% if r.old_mdms == 'NTA MDMS Registered (Official Nepal Distributor)' or 'Registered' in r.old_mdms %}
+                                <span class="badge bg-success bg-opacity-10 text-success fs-2xs"><i class="fas fa-check me-1"></i>MDMS OK</span>
+                            {% else %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs"><i class="fas fa-triangle-exclamation me-1"></i>Gray</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Trade-In Credit Applied -->
+                        <td class="col-num text-danger fw-bold">
+                            -Rs. {{ r.trade_in_credit|floatformat:2|intcomma }}
+                            {% if r.voucher_number != '-' %}
+                                <small class="d-block font-monospace text-muted fs-2xs">{{ r.voucher_number }}</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Cash Top-Up Paid -->
+                        <td class="col-num text-success fw-bold">
+                            Rs. {{ r.cash_topup_paid|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Due Balance -->
+                        <td class="col-num font-monospace">
+                            {% if r.due_balance > 0 %}
+                                <span class="text-danger fw-bold">Rs. {{ r.due_balance|floatformat:2|intcomma }}</span>
+                            {% else %}
+                                <span class="text-muted">Rs. 0.00</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Combined Deal Profit -->
+                        <td class="col-num fw-bold text-success fs-xs">
+                            Rs. {{ r.deal_profit|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Police Legal Undertaking Status -->
+                        <td class="text-center pe-3">
+                            {% if r.undertaking_signed %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs">
+                                    <i class="fas fa-shield-check me-1"></i> Compliant
+                                </span>
+                            {% else %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs">
+                                    Pending
+                                </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="13" class="text-center py-5 text-muted">
+                            <i class="fas fa-repeat fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Exchange Deals Found</h6>
+                            <p class="text-muted fs-xs mb-0">No sales transactions included an old phone trade-in credit offset in this period.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="3" class="ps-3 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="col-num text-white fs-6">Rs. {{ totals.total_new_phones_value|floatformat:2|intcomma }}</td>
+                        <td colspan="4"></td>
+                        <td class="col-num text-warning-emphasis fs-6">-Rs. {{ totals.total_trade_in_credits|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success fs-6">Rs. {{ totals.total_cash_topup_collected|floatformat:2|intcomma }}</td>
+                        <td></td>
+                        <td class="col-num text-success fs-6">Rs. {{ totals.total_combined_profit|floatformat:2|intcomma }}</td>
+                        <td class="pe-3 text-center text-white-50 fs-2xs">{{ totals.total_deals_count }} Deals</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

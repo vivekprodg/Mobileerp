@@ -1,5 +1,20 @@
+"""
+Taxation & Proforma Book Report Generator (Annex 5 Sales Book & Annex 7 Purchase Book).
+File Path: apps/taxation/reports.py
+
+Capabilities:
+1. Generates Sales Register (Annex 5 style) in estimation / proforma breakdown format.
+   - Includes COMPLETED and PARTIALLY_RETURNED sales estimates.
+   - Accurately deducts return refunds and tax adjustments from taxable and non-taxable columns.
+2. Generates Purchase Register (Annex 7 style) for all verified GRN vouchers.
+   - Retrieves the complete set of GRN fields: gross subtotal, trade discount, input VAT,
+     shipping overheads (freight, customs, handling), landed inventory cost, net total,
+     spot cash paid, and outstanding balance added to the supplier ledger.
+   - Computes cumulative summary totals across all financial columns.
+"""
+
 from decimal import Decimal, ROUND_HALF_UP
-from django.db.models import Sum, Q, F, DecimalField, Value, ExpressionWrapper
+from django.db.models import Sum, Q, F, DecimalField, Value
 from django.db.models.functions import Coalesce
 
 from apps.sales.models import SalesEstimate, SalesReturn, SalesReturnItem
@@ -12,14 +27,14 @@ class TaxationReportGenerator:
     """
     Generates Sales Register (Annex 5 style) and Purchase Register (Annex 7 style)
     in estimation / proforma breakdown format.
-    Includes both COMPLETED and PARTIALLY_RETURNED sales estimates, accurately
-    deducting return refunds and tax adjustments from taxable and non-taxable columns.
-    Accurately places amounts in the Non-Taxable / Exempt column when the store
-    operates in PAN or No-Tax mode, and separates Taxable Base / VAT when in VAT mode.
     """
 
     @classmethod
     def generate_sales_book(cls, branch: Branch, start_date, end_date):
+        """
+        Compiles the Annex 5 Sales Book reconciling gross billing, customer returns,
+        taxable base, and output VAT.
+        """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
 
@@ -97,6 +112,10 @@ class TaxationReportGenerator:
 
     @classmethod
     def generate_purchase_book(cls, branch: Branch, start_date, end_date):
+        """
+        Compiles the Annex 7 Purchase Register retrieving all commercial GRN metrics:
+        gross, trade discount, input VAT, freight/customs overheads, landed costs, paid amounts, and due debts.
+        """
         config = SystemConfiguration.get_solo()
 
         qs = GoodsReceivedNote.objects.filter(
@@ -104,19 +123,38 @@ class TaxationReportGenerator:
             bill_date__gte=start_date,
             bill_date__lte=end_date,
             status='RECEIVED'
-        ).select_related('supplier').order_by('bill_date', 'grn_number')
+        ).select_related('supplier', 'branch', 'received_by').order_by('bill_date', 'grn_number')
 
         totals = qs.aggregate(
             total_gross=Coalesce(Sum('gross_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_discount=Coalesce(Sum('discount_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
             total_vat=Coalesce(Sum('vat_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
-            total_net=Coalesce(Sum('net_total_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+            total_freight=Coalesce(Sum('extra_freight_charge'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_customs=Coalesce(Sum('customs_import_charge'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_handling=Coalesce(Sum('other_handling_charge'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_landed=Coalesce(Sum('total_landed_cost'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_net=Coalesce(Sum('net_total_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_paid=Coalesce(Sum('paid_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_due=Coalesce(Sum('due_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
         )
+
+        total_overheads = (
+            totals['total_freight'] + totals['total_customs'] + totals['total_handling']
+        ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         return {
             'records': qs,
             'totals': {
                 'gross': totals['total_gross'],
+                'discount': totals['total_discount'],
                 'vat': totals['total_vat'],
+                'freight': totals['total_freight'],
+                'customs': totals['total_customs'],
+                'handling': totals['total_handling'],
+                'overheads': total_overheads,
+                'landed': totals['total_landed'],
                 'net': totals['total_net'],
+                'paid': totals['total_paid'],
+                'due': totals['total_due'],
             }
         }

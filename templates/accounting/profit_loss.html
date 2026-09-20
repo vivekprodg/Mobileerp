@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Profit & Loss Statement (नाफा नोक्सान हिसाब) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3" style="max-width: 1200px;">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 no-print">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Income Statement</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-chart-pie text-success"></i>
+                <span>Profit &amp; Loss Statement</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(नाफा नोक्सान हिसाब विवरण)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Executive Income Statement displaying Gross Profit from handset sales and deducting all operating expenses</p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print P&amp;L
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportPnlCSV()">
+                <i class="fas fa-file-excel me-1"></i> Export Excel (CSV)
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 no-print">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Nepali Fiscal Year</label>
+                {{ filter_form.fiscal_year }}
+            </div>
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Outlet Scope</label>
+                {{ filter_form.branch }}
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">From Date (AD)</label>
+                {{ filter_form.start_date }}
+            </div>
+            <div class="col-12 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">To Date (AD)</label>
+                {{ filter_form.end_date }}
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end pt-md-3">
+                <button type="submit" class="btn btn-dark btn-sm rounded-pill px-3 w-100 fw-bold">
+                    <i class="fas fa-filter me-1"></i> Recalculate
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- P&L Highlights KPI Grid -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-md-4">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-success border-4 h-100">
+                <span class="fs-2xs fw-bold text-uppercase text-muted">Operating Revenue (टर्नओभर)</span>
+                <h3 class="fw-extrabold text-success font-mono mt-1 mb-0">Rs. {{ pnl_data.total_revenue|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs mt-1 d-block">Handset Sales + Service Workshop Revenue</small>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fs-2xs fw-bold text-uppercase text-muted">Gross Profit (कूल नाफा)</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary font-mono fs-2xs">{{ pnl_data.gross_profit_margin_pct }}%</span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-mono mt-1 mb-0">Rs. {{ pnl_data.gross_profit|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs mt-1 d-block">Revenue minus Direct Landed COGS</small>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start {% if pnl_data.net_profit >= 0 %}border-dark{% else %}border-danger{% endif %} border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fs-2xs fw-bold text-uppercase text-muted">Net Operating Profit (खुद नाफा)</span>
+                    <span class="badge {% if pnl_data.net_profit >= 0 %}bg-success{% else %}bg-danger{% endif %} bg-opacity-10 text-{% if pnl_data.net_profit >= 0 %}success{% else %}danger{% endif %} font-mono fs-2xs">{{ pnl_data.net_profit_margin_pct }}%</span>
+                </div>
+                <h3 class="fw-extrabold {% if pnl_data.net_profit >= 0 %}text-dark{% else %}text-danger{% endif %} font-mono mt-1 mb-0">
+                    Rs. {{ pnl_data.net_profit|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs mt-1 d-block">Bottom-line earnings after all store expenses</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Executive Income Statement Sheet -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4" id="pnlPrintArea">
+        <div class="p-4 border-bottom text-center">
+            <h4 class="fw-extrabold text-dark mb-0">{{ COMPANY_NAME }}</h4>
+            <div class="fs-xs text-muted">{{ STORE_OUTLET_NAME }} | PAN: {{ SYS_CONFIG.pan_number|default:"999999999" }}</div>
+            <h5 class="fw-bold text-success mt-2 mb-0">STATEMENT OF PROFIT &amp; LOSS</h5>
+            <small class="text-muted fs-2xs font-mono">
+                For the period: {{ pnl_data.start_date|date:"Y-m-d" }} to {{ pnl_data.end_date|date:"Y-m-d" }} (FY {{ pnl_data.fiscal_year }})
+            </small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table align-middle mb-0 fs-sm" id="pnlTable">
+                <thead class="bg-slate-900 text-white text-uppercase fs-2xs tracking-wider">
+                    <tr>
+                        <th class="ps-4 py-3">Account Code &amp; Particulars</th>
+                        <th class="text-end pe-4" style="width: 250px;">Amount (NPR)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <!-- 1. Operating Revenue Section -->
+                    <tr class="table-light fw-bold">
+                        <td class="ps-4 text-primary text-uppercase fs-xs">
+                            <i class="fas fa-arrow-trend-up me-2"></i> 1. Operating Revenue (सञ्चालन आम्दानी)
+                        </td>
+                        <td class="text-end pe-4 font-mono"></td>
+                    </tr>
+                    {% for rev in pnl_data.revenue_lines %}
+                    <tr>
+                        <td class="ps-5">
+                            <span class="font-mono text-muted fs-2xs me-2">{{ rev.code }}</span>
+                            <span class="fw-semibold text-dark">{{ rev.name }}</span>
+                        </td>
+                        <td class="text-end pe-4 font-mono text-dark">
+                            Rs. {{ rev.amount|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td class="ps-5 text-muted fst-italic">No revenue recorded in this period.</td>
+                        <td class="text-end pe-4 font-mono">Rs. 0.00</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="fw-extrabold bg-slate-50 border-bottom">
+                        <td class="ps-4 text-end text-uppercase fs-xs">Total Operating Revenue [A]:</td>
+                        <td class="text-end pe-4 font-mono text-success fs-sm">Rs. {{ pnl_data.total_revenue|floatformat:2|intcomma }}</td>
+                    </tr>
+
+                    <!-- 2. Cost of Goods Sold (COGS) Section -->
+                    <tr class="table-light fw-bold">
+                        <td class="ps-4 text-danger text-uppercase fs-xs">
+                            <i class="fas fa-boxes-stacked me-2"></i> 2. Direct Costs &amp; COGS (बिक्री भएको सामानको लागत)
+                        </td>
+                        <td class="text-end pe-4 font-mono"></td>
+                    </tr>
+                    {% for cogs in pnl_data.cogs_lines %}
+                    <tr>
+                        <td class="ps-5">
+                            <span class="font-mono text-muted fs-2xs me-2">{{ cogs.code }}</span>
+                            <span class="fw-semibold text-dark">{{ cogs.name }}</span>
+                        </td>
+                        <td class="text-end pe-4 font-mono text-danger">
+                            Rs. {{ cogs.amount|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td class="ps-5 text-muted fst-italic">No COGS realized in this period.</td>
+                        <td class="text-end pe-4 font-mono">Rs. 0.00</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="fw-extrabold bg-slate-50 border-bottom">
+                        <td class="ps-4 text-end text-uppercase fs-xs">Total Direct Costs [B]:</td>
+                        <td class="text-end pe-4 font-mono text-danger fs-sm">Rs. {{ pnl_data.total_cogs|floatformat:2|intcomma }}</td>
+                    </tr>
+
+                    <!-- 3. Gross Profit Callout -->
+                    <tr class="bg-primary bg-opacity-10 border-top border-bottom border-primary fw-extrabold">
+                        <td class="ps-4 py-3 text-primary text-uppercase fs-sm">
+                            <i class="fas fa-coins me-2"></i> GROSS PROFIT REALIZATION (कूल नाफा) [A - B]:
+                        </td>
+                        <td class="text-end pe-4 py-3 font-mono text-primary fs-base">
+                            Rs. {{ pnl_data.gross_profit|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+
+                    <!-- 4. Operating Overhead Expenses Section -->
+                    <tr class="table-light fw-bold">
+                        <td class="ps-4 text-dark text-uppercase fs-xs">
+                            <i class="fas fa-money-bill-transfer me-2"></i> 3. Indirect Operating Expenses (सञ्चालन तथा प्रशासनिक खर्च)
+                        </td>
+                        <td class="text-end pe-4 font-mono"></td>
+                    </tr>
+                    {% for exp in pnl_data.expense_lines %}
+                    <tr>
+                        <td class="ps-5">
+                            <span class="font-mono text-muted fs-2xs me-2">{{ exp.code }}</span>
+                            <span class="fw-semibold text-dark">{{ exp.name }}</span>
+                        </td>
+                        <td class="text-end pe-4 font-mono text-dark">
+                            Rs. {{ exp.amount|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td class="ps-5 text-muted fst-italic">No operating expenses recorded.</td>
+                        <td class="text-end pe-4 font-mono">Rs. 0.00</td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="fw-extrabold bg-slate-50 border-bottom">
+                        <td class="ps-4 text-end text-uppercase fs-xs">Total Operating Expenses [C]:</td>
+                        <td class="text-end pe-4 font-mono text-danger fs-sm">Rs. {{ pnl_data.total_expenses|floatformat:2|intcomma }}</td>
+                    </tr>
+
+                    <!-- 5. Net Profit / Loss Final Callout -->
+                    <tr class="bg-slate-900 text-white fw-extrabold">
+                        <td class="ps-4 py-3 text-uppercase tracking-wider fs-sm">
+                            <i class="fas fa-trophy text-warning me-2"></i> NET OPERATING PROFIT / (LOSS) [GROSS PROFIT - C]:
+                        </td>
+                        <td class="text-end pe-4 py-3 font-mono fs-5 {% if pnl_data.net_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            Rs. {{ pnl_data.net_profit|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    function exportPnlCSV() {
+        const table = document.getElementById('pnlTable');
+        let csv = [];
+        for (let row of table.rows) {
+            let cols = [];
+            for (let cell of row.cells) {
+                let text = cell.innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+                text = `"${text.replace(/"/g, '""')}"`;
+                cols.push(text);
+            }
+            csv.push(cols.join(","));
+        }
+        const csvFile = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const downloadLink = document.createElement("a");
+        downloadLink.download = `Profit_Loss_Statement_{{ pnl_data.end_date|date:'Y_m_d' }}.csv`;
+        downloadLink.href = window.URL.createObjectURL(csvFile);
+        downloadLink.style.display = "none";
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+</script>
+{% endblock %}

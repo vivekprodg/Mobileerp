@@ -1,0 +1,279 @@
+{% load humanize static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock_Summary_Report_{{ start_date }}_{{ end_date }}</title>
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 8mm 10mm;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 8px;
+            color: #0f172a;
+            background-color: #ffffff;
+            line-height: 1.25;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .no-print {
+            background: #0f172a;
+            color: #ffffff;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 11px;
+            font-family: sans-serif;
+        }
+
+        .no-print button {
+            background: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 5px 16px;
+            border-radius: 999px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .header-section {
+            text-align: center;
+            margin-bottom: 8px;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 6px;
+        }
+
+        .header-title {
+            font-size: 14px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #0f172a;
+            letter-spacing: 0.04em;
+        }
+
+        .header-subtitle {
+            font-size: 9px;
+            color: #475569;
+            margin-top: 1px;
+        }
+
+        .meta-strip {
+            display: flex;
+            justify-content: space-between;
+            font-size: 8px;
+            margin: 4px 0 6px 0;
+            padding: 3px 6px;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 7.5px;
+        }
+
+        th, td {
+            border: 0.5px solid #64748b;
+            padding: 3px 4px;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+
+        th {
+            background-color: #1e293b;
+            color: #ffffff;
+            text-transform: uppercase;
+            font-size: 7px;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            text-align: center;
+        }
+
+        .text-left { text-align: left; }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .font-mono { font-family: 'Courier New', Courier, monospace; }
+        .fw-bold { font-weight: bold; }
+
+        .totals-row td {
+            background-color: #e2e8f0;
+            font-weight: bold;
+            border-top: 1.5px solid #0f172a;
+            border-bottom: 2px solid #0f172a;
+            font-size: 8px;
+        }
+
+        .signatures-area {
+            margin-top: 24px;
+            display: flex;
+            justify-content: space-between;
+            page-break-inside: avoid;
+        }
+
+        .sig-box {
+            width: 180px;
+            border-top: 1px solid #0f172a;
+            text-align: center;
+            font-size: 8px;
+            padding-top: 4px;
+        }
+
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                background: #ffffff !important;
+            }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+
+    <!-- Non-Print Toolbar -->
+    <div class="no-print">
+        <span><strong>STOCK SUMMARY REPORT</strong> &bull; Landscape Print Preview ({{ records|length }} items)</span>
+        <div>
+            <button onclick="window.print()">Print Report (A4)</button>
+            <button onclick="window.close()" style="background:#475569; margin-left: 6px;">Close</button>
+        </div>
+    </div>
+
+    <!-- Letterhead Header -->
+    <div class="header-section">
+        <div class="header-title">{{ selected_branch.display_company_name|default:COMPANY_NAME|upper }}</div>
+        {% if selected_branch.display_company_name_np or COMPANY_NAME_NP %}
+            <div style="font-size: 10px; font-weight: bold;">{{ selected_branch.display_company_name_np|default:COMPANY_NAME_NP }}</div>
+        {% endif %}
+        <div class="header-subtitle">
+            {{ selected_branch.address }}, {{ selected_branch.city }} | Phone: {{ selected_branch.phone_number }}
+            {% if SYS_CONFIG.pan_number %} | PAN: <strong>{{ SYS_CONFIG.pan_number }}</strong>{% endif %}
+        </div>
+    </div>
+
+    <!-- Filter Parameters Banner -->
+    <div class="meta-strip">
+        <div>
+            Report: <strong>INVENTORY STOCK SUMMARY</strong> &bull; 
+            Outlet: <strong>{{ selected_branch.name }} ({{ selected_branch.code }})</strong>
+        </div>
+        <div>
+            Date Scope: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong> 
+            (<strong>{{ start_date_bs }}</strong> to <strong>{{ end_date_bs }} BS</strong>)
+        </div>
+        <div>
+            Generated by: <strong>{{ request.user.username }}</strong> on {{ generated_at|date:"Y-m-d H:i" }}
+        </div>
+    </div>
+
+    <!-- Full 21-Column Data Table -->
+    <table>
+        <thead>
+            <tr>
+                <th>1. SKU</th>
+                <th>2. Barcode</th>
+                <th>3. Product</th>
+                <th>4. Category</th>
+                <th>5. Brand</th>
+                <th>6. Branch</th>
+                <th>7. Warehouse</th>
+                <th>8. Unit</th>
+                <th>9. Open</th>
+                <th>10. In</th>
+                <th>11. Out</th>
+                <th>12. Tr In</th>
+                <th>13. Tr Out</th>
+                <th>14. Ret</th>
+                <th>15. Adj</th>
+                <th>16. Res</th>
+                <th>17. Def</th>
+                <th>18. Avail</th>
+                <th>19. Close</th>
+                <th>20. Cost Val (NPR)</th>
+                <th>21. Retail Val (NPR)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in records %}
+            <tr>
+                <td class="font-mono text-center">{{ r.sku }}</td>
+                <td class="font-mono text-center">{{ r.barcode|default:"-" }}</td>
+                <td class="text-left fw-bold">{{ r.product_name|truncatechars:26 }}</td>
+                <td class="text-left">{{ r.category_name|truncatechars:14 }}</td>
+                <td class="text-left">{{ r.brand_name|truncatechars:12 }}</td>
+                <td class="text-center">{{ r.branch_code }}</td>
+                <td class="text-left">{{ r.warehouse|truncatechars:14 }}</td>
+                <td class="text-center">{{ r.unit_code }}</td>
+
+                <td class="col-num font-mono text-right">{{ r.opening_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ r.inward_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ r.outward_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ r.transfer_in|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ r.transfer_out|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ r.returns|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ r.adjustments|floatformat:1 }}</td>
+
+                <td class="col-num font-mono text-right">{{ r.reserved_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ r.defective_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right fw-bold">{{ r.available_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right fw-bold">{{ r.closing_qty|floatformat:1 }}</td>
+
+                <td class="col-num font-mono text-right">{{ r.cost_value|floatformat:2|intcomma }}</td>
+                <td class="col-num font-mono text-right fw-bold">{{ r.retail_value|floatformat:2|intcomma }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="21" class="text-center py-3">No inventory items matched the query criteria.</td>
+            </tr>
+            {% endfor %}
+
+            <!-- Totals Footer Row -->
+            <tr class="totals-row">
+                <td colspan="8" class="text-center">TOTALS ({{ summary_totals.records_count }} Items):</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_opening_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_inward_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_outward_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_transfer_in|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_transfer_out|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_returns|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_adjustments|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_reserved_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_defective_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_available_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">{{ summary_totals.total_closing_qty|floatformat:1 }}</td>
+                <td class="col-num font-mono text-right">Rs. {{ summary_totals.total_cost_value|floatformat:2|intcomma }}</td>
+                <td class="col-num font-mono text-right">Rs. {{ summary_totals.total_retail_value|floatformat:2|intcomma }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- Signatures Area -->
+    <div class="signatures-area">
+        <div class="sig-box">
+            Prepared By (Inventory Accountant)
+        </div>
+        <div class="sig-box">
+            Verified By (Store Manager)
+        </div>
+        <div class="sig-box">
+            Approved By (Proprietor / Auditor)
+        </div>
+    </div>
+
+</body>
+</html>

@@ -6,6 +6,10 @@ Features:
 - White-Label Branding: Streams uploaded company logo bitmaps directly to receipt printers (`GS v 0`).
 - Dynamic Store Company Name (English + Devanagari Unicode rasterization).
 - Dedicated, un-truncated dual IMEI line alignment (`[IMEI 1: ...]` & `[IMEI 2: ...]`).
+- Line-Item Concessions: Explicitly prints item discounts for both AMOUNT and PERCENTAGE modes:
+  - If discount_type == 'AMOUNT': `[Discount: -Rs. 2,500.00 (Amount) | Eff: 5.0%]`
+  - If discount_type == 'PERCENTAGE': `[Discount: -Rs. 2,500.00 (5.0%)]`
+  - If quantity > 1: prints per-unit discount equivalent.
 - Strict 48-column tabular grid formatting with dynamic tax breakdown.
 - Formats POS Sales Estimates, Repair Claim Intake Tokens, and Delivery Completion Slips.
 """
@@ -37,7 +41,7 @@ class Thermal80mmFormatter:
     def generate_slip_bytes(cls, estimate: SalesEstimate, config: SystemConfiguration) -> bytes:
         """
         Compiles complete 80mm thermal estimate slip byte stream with dynamic company branding,
-        optional logo bitmap rasterization, dual-IMEI alignment, and proforma disclaimers.
+        optional logo bitmap rasterization, itemized line discounts, dual-IMEI alignment, and proforma disclaimers.
         """
         builder = RawEscPosBuilder()
         branch = estimate.branch
@@ -50,7 +54,6 @@ class Thermal80mmFormatter:
         # ---------------------------------------------------------------------
         # 1. HEADER: OPTIONAL STORE LOGO & DYNAMIC COMPANY BRANDING
         # ---------------------------------------------------------------------
-        # If the branch has an uploaded logo, rasterize and print it at the top
         if branch and branch.logo:
             builder.print_logo_from_field(branch.logo, max_width=384, align='center')
 
@@ -160,8 +163,38 @@ class Thermal80mmFormatter:
                 color_str = f" {item.product.color_variant}" if item.product.color_variant else ""
                 builder.write_text(f"  [{item.product.ram}/{item.product.internal_storage}{color_str}]\n")
 
+            # Price Override Concession if catalog price was reduced
+            if item.official_unit_price and item.official_unit_price > item.unit_price:
+                override_amt = item.price_override_amount or ((item.official_unit_price - item.unit_price) * item.quantity)
+                builder.write_text(f"  [MRP: Rs. {item.official_unit_price:.2f} | Override: -Rs. {override_amt:.2f}]\n")
+
             # -----------------------------------------------------------------
-            # CLEAN DUAL-IMEI INDEPENDENT LINES (No mid-number wrapping)
+            # LINE ITEM DISCOUNT: AMOUNT vs PERCENTAGE
+            # -----------------------------------------------------------------
+            disc_amt = item.item_discount_amount if (item.item_discount_amount and item.item_discount_amount > Decimal('0.00')) else (item.discount_amount if item.discount_amount else Decimal('0.00'))
+            eff_pct = item.effective_discount_percent if (item.effective_discount_percent and item.effective_discount_percent > Decimal('0.00')) else (item.discount_percent if item.discount_percent else Decimal('0.00'))
+
+            if disc_amt > Decimal('0.00'):
+                is_amt = (item.discount_type in ['AMOUNT', 'FIXED'])
+                if is_amt:
+                    # e.g. [Discount: -Rs. 2,500.00 (Amount) | Eff: 5.0%]
+                    disc_str = f"  [Discount: -Rs. {disc_amt:,.2f} (Amount) | Eff: {eff_pct:.1f}%]"
+                else:
+                    # e.g. [Discount: -Rs. 2,500.00 (5.0%)]
+                    disc_str = f"  [Discount: -Rs. {disc_amt:,.2f} ({eff_pct:.1f}%)]"
+
+                if len(disc_str) > width:
+                    disc_str = disc_str[:width]
+                builder.write_text(f"{disc_str}\n")
+
+                # Multi-Quantity Per-Unit Discount Clarity
+                if item.quantity > Decimal('1.000') and item.unit_discount_amount > Decimal('0.00'):
+                    unit_disc_str = f"  (Rs. {item.unit_discount_amount:,.2f} disc per unit)"
+                    if len(unit_disc_str) <= width:
+                        builder.write_text(f"{unit_disc_str}\n")
+
+            # -----------------------------------------------------------------
+            # DUAL-IMEI INDEPENDENT LINES (No mid-number wrapping)
             # -----------------------------------------------------------------
             if item.imei_number:
                 builder.write_text(f"  [IMEI 1: {item.imei_number.strip()}]\n")
@@ -189,9 +222,15 @@ class Thermal80mmFormatter:
         builder.write(builder.ALIGN_RIGHT)
         builder.write_text(f"Gross Subtotal  : Rs. {estimate.subtotal:>10.2f}\n")
 
-        total_disc = estimate.item_discount_total + estimate.bill_discount_amount
+        total_disc = estimate.total_sales_discount if hasattr(estimate, 'total_sales_discount') else (estimate.item_discount_total + estimate.bill_discount_amount)
         if total_disc > Decimal('0.00'):
-            builder.write_text(f"Total Discount  : Rs. -{total_disc:>9.2f}\n")
+            disc_label = "Total Discount"
+            if estimate.bill_discount_amount > Decimal('0.00'):
+                if estimate.bill_discount_type in ['AMOUNT', 'FIXED']:
+                    disc_label = "Discount (Bill Amt)"
+                else:
+                    disc_label = f"Discount ({estimate.bill_discount_percent:.1f}%)"
+            builder.write_text(f"{disc_label:<16}: Rs. -{total_disc:>9.2f}\n")
 
         if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > Decimal('0.00'):
             trade_ref = f" ({estimate.trade_in_voucher_reference})" if estimate.trade_in_voucher_reference else ""
@@ -274,7 +313,6 @@ class Thermal80mmFormatter:
 
         company_title_en = branch.display_company_name if branch else config.company_name_en
 
-        # Print logo if uploaded
         if branch and branch.logo:
             builder.print_logo_from_field(branch.logo, max_width=384, align='center')
 
@@ -361,7 +399,6 @@ class Thermal80mmFormatter:
 
         company_title_en = branch.display_company_name if branch else config.company_name_en
 
-        # Print logo if uploaded
         if branch and branch.logo:
             builder.print_logo_from_field(branch.logo, max_width=384, align='center')
 

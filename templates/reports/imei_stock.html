@@ -1,0 +1,422 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Live IMEI &amp; Serial Stock Registry | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.imei-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.imei-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-imei-stock th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-imei-stock td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.imei-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    border-radius: 6px;
+    letter-spacing: 0.02em;
+}
+.btn-copy-imei {
+    border: none;
+    background: transparent;
+    color: #64748b;
+    padding: 0 3px;
+    cursor: pointer;
+    font-size: 0.72rem;
+    line-height: 1;
+    transition: all 0.15s ease;
+}
+.btn-copy-imei:hover {
+    color: var(--erp-primary);
+    transform: scale(1.15);
+}
+.btn-copy-imei.copied {
+    color: #10b981 !important;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-barcode text-primary me-2"></i> Live Handset IMEI &amp; Serial Registry
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Real-time showcase and safe audit for serialized smartphones, Dual-SIM sequential verification, and NTA MDMS compliance status
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="{% url 'reports:export_csv' 'imei_stock' %}?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs">
+                <i class="fas fa-cash-register me-1"></i> POS Counter
+            </a>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="imei-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Live In-Stock Handsets</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-mobile-screen fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.total_phones|default:0|intcomma }} <span class="fs-6 fw-normal text-muted">Units</span>
+                </h3>
+                <small class="text-muted fs-2xs">Physical smartphones in showcase &amp; vault</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="imei-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Landed Valuation</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-coins fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_landed_valuation|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Acquisition capital tied up in handsets</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="imei-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">IMEI 2 Pending Scan</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-triangle-exclamation fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    {{ totals.pending_imei2_count|default:0 }} <span class="fs-6 fw-normal text-muted">Devices</span>
+                </h3>
+                <small class="text-muted fs-2xs">Cashier prompted on POS checkout</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="imei-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">NTA MDMS Status</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-shield-halved fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    {{ totals.mdms_registered_count|default:0 }} <span class="fs-6 text-success fw-bold">OK</span>
+                </h3>
+                <small class="text-muted fs-2xs">
+                    {% if totals.gray_unregistered_count > 0 %}
+                        <span class="text-danger fw-bold"><i class="fas fa-circle-exclamation me-1"></i>{{ totals.gray_unregistered_count }} Gray Market</span>
+                    {% else %}
+                        <span class="text-success"><i class="fas fa-check me-1"></i>100% Registered Official</span>
+                    {% endif %}
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center" id="imeiFilterForm">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-barcode text-muted"></i></span>
+                    <input type="text" name="q" id="imeiScannerInput" value="{{ filters.q|default:'' }}" 
+                           class="form-control bg-light border-0 font-monospace" 
+                           placeholder="Scan or enter IMEI 1, IMEI 2, S/N, UID, Model..." autofocus>
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="brand" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Brands</option>
+                    {% for b in brands %}
+                        <option value="{{ b.id }}" {% if filters.brand == b.id|stringformat:"s" %}selected{% endif %}>
+                            {{ b.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="mdms_status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All NTA MDMS</option>
+                    <option value="REGISTERED_OFFICIAL" {% if filters.mdms_status == 'REGISTERED_OFFICIAL' %}selected{% endif %}>MDMS Registered Official</option>
+                    <option value="GRAY_UNREGISTERED" {% if filters.mdms_status == 'GRAY_UNREGISTERED' %}selected{% endif %}>Gray / Unregistered</option>
+                    <option value="INDIVIDUAL_CUSTOMS_PAID" {% if filters.mdms_status == 'INDIVIDUAL_CUSTOMS_PAID' %}selected{% endif %}>Customs Duty Paid</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="imei2_status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">Dual-SIM Status</option>
+                    <option value="pending" {% if filters.imei2_status == 'pending' %}selected{% endif %}>⚠️ IMEI 2 Pending Scan</option>
+                    <option value="captured" {% if filters.imei2_status == 'captured' %}selected{% endif %}>✅ IMEI 2 Captured</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.branch or filters.brand or filters.mdms_status or filters.imei2_status or filters.condition %}
+                <a href="{% url 'reports:imei_stock' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Live IMEI Registry Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-mobile-screen-button text-primary me-2"></i> Showcase Serialized Phone Inventory
+            </h6>
+            <span class="badge bg-primary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Units Logged</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-imei-stock">
+                <thead>
+                    <tr>
+                        <th class="ps-4" style="width: 40px;">#</th>
+                        <th>Product / Handset Model</th>
+                        <th>Outlet Branch</th>
+                        <th>Primary IMEI 1</th>
+                        <th>Secondary IMEI 2</th>
+                        <th>Dual-SIM Status</th>
+                        <th>Condition</th>
+                        <th>NTA MDMS Status</th>
+                        <th class="text-end">Landed Cost</th>
+                        <th class="text-end">Selling MRP</th>
+                        <th>Inward GRN Ref</th>
+                        <th class="text-end pe-4">Journey</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in records %}
+                    <tr>
+                        <td class="ps-4 text-center font-monospace text-muted">{{ forloop.counter }}</td>
+
+                        <!-- Product Description -->
+                        <td>
+                            <a href="{% url 'inventory:product_detail' item.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                {{ item.product.name }}
+                            </a>
+                            <div class="text-muted fs-2xs font-monospace mt-1">
+                                {% if item.product.ram and item.product.internal_storage %}
+                                    <span class="badge bg-light text-dark border">{{ item.product.ram }}/{{ item.product.internal_storage }}{% if item.product.color_variant %} &bull; {{ item.product.color_variant }}{% endif %}</span>
+                                {% endif %}
+                                <span class="ms-1">SKU: {{ item.product.sku }}</span>
+                            </div>
+                        </td>
+
+                        <!-- Branch Outlet -->
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace">{{ item.branch.code }}</span>
+                            <small class="text-muted d-block fs-2xs">{{ item.branch.name }}</small>
+                        </td>
+
+                        <!-- Primary IMEI 1 with 1-Click Clipboard Copy -->
+                        <td>
+                            {% if item.imei_1 %}
+                            <div class="imei-chip bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">
+                                <span class="fw-bold">{{ item.imei_1 }}</span>
+                                <button type="button" class="btn-copy-imei" onclick="copyImeiText('{{ item.imei_1 }}', this)" title="Copy IMEI 1">
+                                    <i class="far fa-copy"></i>
+                                </button>
+                            </div>
+                            {% else %}
+                                <span class="text-muted font-monospace fs-2xs">Pending Allocation</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Secondary IMEI 2 with 1-Click Clipboard Copy -->
+                        <td>
+                            {% if item.imei_2 %}
+                            <div class="imei-chip bg-info bg-opacity-10 text-info border border-info border-opacity-25">
+                                <span class="fw-bold">{{ item.imei_2 }}</span>
+                                <button type="button" class="btn-copy-imei" onclick="copyImeiText('{{ item.imei_2 }}', this)" title="Copy IMEI 2">
+                                    <i class="far fa-copy"></i>
+                                </button>
+                            </div>
+                            {% else %}
+                                <span class="text-muted font-monospace fs-2xs">---</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Dual-SIM Verification Status -->
+                        <td>
+                            {% if item.imei_2 %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-check-circle me-1"></i> Dual-SIM OK
+                                </span>
+                            {% elif item.imei_2_pending_scan %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-2xs px-2 py-1" title="Cashier must capture IMEI 2 on checkout">
+                                    <i class="fas fa-triangle-exclamation me-1"></i> Pending POS Scan
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-muted border fs-2xs">Single SIM / N/A</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Physical Condition Grade -->
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs">
+                                {{ item.get_condition_display }}
+                            </span>
+                            {% if item.source_type == 'CUSTOMER_EXCHANGE_TRADE_IN' %}
+                                <span class="badge bg-warning text-dark fs-2xs ms-1">Trade-In</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- NTA MDMS Compliance Badge -->
+                        <td>
+                            {% if item.mdms_status == 'REGISTERED_OFFICIAL' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-shield-check me-1"></i> MDMS OK
+                                </span>
+                            {% elif item.mdms_status == 'GRAY_UNREGISTERED' %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-triangle-exclamation me-1"></i> Gray Market
+                                </span>
+                            {% elif item.mdms_status == 'INDIVIDUAL_CUSTOMS_PAID' %}
+                                <span class="badge bg-info bg-opacity-10 text-info fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-passport me-1"></i> Customs Paid
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-muted border fs-2xs">Exempt</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Landed Cost & Selling Price -->
+                        <td class="col-num text-dark fw-bold">
+                            Rs. {{ item.landed_cost|default:item.product.purchase_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <td class="col-num text-primary fw-semibold">
+                            Rs. {{ item.product.selling_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Inward Tracking -->
+                        <td>
+                            <span class="font-monospace fs-2xs text-dark">{{ item.purchase_reference|default:"-" }}</span>
+                            {% if item.purchase_date %}
+                                <small class="text-muted d-block fs-2xs">{{ item.purchase_date }}</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Quick Action: Forensic Lifecycle Trace -->
+                        <td class="text-end pe-4">
+                            <a href="{% url 'reports:imei_lifecycle' %}?imei={{ item.imei_1|default:item.device_uid }}" 
+                               class="btn btn-outline-primary btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold" 
+                               title="View Full Cradle-to-Grave Audit Journey">
+                                <i class="fas fa-magnifying-glass-arrow-right me-1"></i> Journey
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="12" class="text-center py-5 text-muted">
+                            <i class="fas fa-barcode fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No In-Stock Handsets Found</h6>
+                            <p class="text-muted fs-xs mb-0">No serialized smartphone units match the selected filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="8" class="ps-4 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="col-num text-end text-white fs-6">Rs. {{ totals.total_landed_valuation|floatformat:2|intcomma }}</td>
+                        <td colspan="3" class="pe-4 text-white-50 fs-2xs">Landed Showcase Valuation</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+
+<script>
+function copyImeiText(text, btn) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = 'fas fa-check text-success';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            if (icon) icon.className = 'far fa-copy';
+            btn.classList.remove('copied');
+        }, 1500);
+    });
+}
+</script>
+{% endblock %}

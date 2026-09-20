@@ -1,8 +1,9 @@
 """
 Django Base Settings for Mobile Shop & Optical Inventory ERP (Nepal Context).
 Provides core configuration, multi-branch scoping, white-label branding,
-non-IRD proforma estimation rules, NTA MDMS compliance gateways, and
-pre-owned device trade-in / KYC document parameterization.
+non-IRD proforma estimation rules, NTA MDMS compliance gateways,
+pre-owned device trade-in / KYC document parameterization, and
+Double-Entry General Ledger Accounting.
 """
 
 import os
@@ -50,6 +51,7 @@ LOCAL_APPS = [
     'apps.repairs.apps.RepairsConfig',
     'apps.reports.apps.ReportsConfig',
     'apps.taxation.apps.TaxationConfig',
+    'apps.accounting.apps.AccountingConfig',
     'apps.integrations.apps.IntegrationsConfig',
 ]
 

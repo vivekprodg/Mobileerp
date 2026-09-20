@@ -1,10 +1,16 @@
+"""
+Purchases, Supplier Ledgers & Commercial Purchase Return URL Routes.
+File Path: apps/purchases/urls.py
+"""
+
 from django.urls import path
 from apps.purchases.views import (
     SupplierListView, SupplierDetailView, SupplierCreateView,
     SupplierUpdateView, SupplierPaymentRecordView,
     PurchaseOrderListView, PurchaseOrderCreateView,
     PurchaseOrderDetailView, PurchaseOrderStatusUpdateView,
-    GRNListView, GRNDetailView, GRNCreateView
+    GRNListView, GRNDetailView, GRNCreateView,
+    PurchaseReturnListView, PurchaseReturnCreateView, PurchaseReturnDetailView
 )
 
 app_name = 'purchases'
@@ -27,4 +33,9 @@ urlpatterns = [
     path('grn/', GRNListView.as_view(), name='grn_list'),
     path('grn/create/', GRNCreateView.as_view(), name='grn_create'),
     path('grn/<int:pk>/', GRNDetailView.as_view(), name='grn_detail'),
+
+    # Commercial Purchase Returns & Debit Notes
+    path('returns/', PurchaseReturnListView.as_view(), name='purchase_return_list'),
+    path('returns/create/', PurchaseReturnCreateView.as_view(), name='purchase_return_create'),
+    path('returns/<int:pk>/', PurchaseReturnDetailView.as_view(), name='purchase_return_detail'),
 ]

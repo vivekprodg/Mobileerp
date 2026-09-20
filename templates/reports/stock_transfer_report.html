@@ -1,0 +1,397 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Inter-Branch Transfers &amp; Logistics Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.transfer-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.transfer-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-transfers th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-transfers td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-dolly text-primary me-2"></i> Inter-Branch Transfers &amp; Logistics Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit consignment routing between store outlets, monitor shipments in transit, and track serialized handset movements
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="{% url 'reports:export_csv' 'transfers' %}?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'branches:transfer_create' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-plus me-1"></i> New Transfer Requisition
+            </a>
+            <a href="{% url 'branches:transfer_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Operations Desk
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Logistics KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="transfer-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Consignments</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-dolly fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.total_consignments|default:0 }}
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.total_units_moved|floatformat:0 }} Units across all shipments</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="transfer-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">In-Transit Consignments</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-truck-moving fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    {{ totals.in_transit_count|default:0 }} <span class="fs-6 fw-normal text-muted">Shipments</span>
+                </h3>
+                <small class="text-warning-emphasis fs-2xs fw-bold">
+                    Rs. {{ totals.in_transit_valuation|floatformat:2|intcomma }} In Transit
+                </small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="transfer-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Received &amp; Stocked</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-check-double fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    {{ totals.received_completed_count|default:0 }}
+                </h3>
+                <small class="text-muted fs-2xs">Successfully verified at destination</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="transfer-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Transferred Value</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-coins fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_valuation_moved|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Cumulative stock transferred at cost</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Transfer No, IMEI, Model, Notes...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="source_branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">Origin (All Outlets)</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if request.GET.source_branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            From: {{ br.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="destination_branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">Destination (All Outlets)</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if request.GET.destination_branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            To: {{ br.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Statuses</option>
+                    <option value="DRAFT" {% if request.GET.status == 'DRAFT' %}selected{% endif %}>Draft / Pending</option>
+                    <option value="DISPATCHED" {% if request.GET.status == 'DISPATCHED' %}selected{% endif %}>Dispatched / In-Transit</option>
+                    <option value="RECEIVED" {% if request.GET.status == 'RECEIVED' %}selected{% endif %}>Received &amp; Stocked</option>
+                    <option value="CANCELLED" {% if request.GET.status == 'CANCELLED' %}selected{% endif %}>Cancelled</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.source_branch or request.GET.destination_branch or request.GET.status or start_date or end_date %}
+                <a href="{% url 'reports:stock_transfers' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Consignments Ledger Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Inter-Branch Stock Consignments
+            </h6>
+            <span class="badge bg-primary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Consignments</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-transfers">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Transfer Requisition No</th>
+                        <th>Origin &rarr; Destination Route</th>
+                        <th>Transfer Date (AD / BS)</th>
+                        <th>Consignment Status</th>
+                        <th class="text-center">Line Items</th>
+                        <th class="text-center">Total Units</th>
+                        <th class="text-end">Transferred Value</th>
+                        <th>Personnel</th>
+                        <th class="text-end pe-4">Inspection</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trf in records %}
+                    <tr>
+                        <!-- Requisition No & Remarks -->
+                        <td class="ps-4 font-monospace fw-bold">
+                            <span class="text-primary">{{ trf.transfer_no }}</span>
+                            {% if trf.notes %}
+                                <small class="text-muted d-block font-sans fs-2xs">{{ trf.notes|truncatechars:35 }}</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Route -->
+                        <td>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-light text-dark border font-monospace">{{ trf.source_branch.code }}</span>
+                                <i class="fas fa-arrow-right text-muted fs-2xs"></i>
+                                <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 font-monospace">{{ trf.destination_branch.code }}</span>
+                            </div>
+                            <small class="text-muted d-block fs-2xs mt-1">{{ trf.source_branch.name }} &rarr; {{ trf.destination_branch.name }}</small>
+                        </td>
+
+                        <!-- Dates -->
+                        <td>
+                            <span class="text-dark fw-semibold">{{ trf.transfer_date_ad }}</span>
+                            <small class="text-muted d-block font-monospace fs-2xs">{{ trf.transfer_date_bs }} BS</small>
+                        </td>
+
+                        <!-- Status Badge -->
+                        <td>
+                            {% if trf.status == 'RECEIVED' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-check-circle me-1"></i> Received &amp; Stocked
+                                </span>
+                            {% elif trf.status == 'DISPATCHED' %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-truck-moving me-1"></i> In-Transit
+                                </span>
+                            {% elif trf.status == 'CANCELLED' %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">
+                                    Cancelled
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold fs-2xs px-2 py-1">
+                                    Draft
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Items Count -->
+                        <td class="text-center font-monospace">
+                            {{ trf.items_count }} Lines
+                        </td>
+
+                        <!-- Total Units -->
+                        <td class="text-center col-num fw-bold text-dark">
+                            {{ trf.total_units|floatformat:0 }}
+                        </td>
+
+                        <!-- Transferred Value -->
+                        <td class="col-num fw-bold text-primary">
+                            Rs. {{ trf.total_valuation|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Personnel -->
+                        <td>
+                            <small class="text-muted d-block">Req: <strong>{{ trf.requested_by.username|default:"System" }}</strong></small>
+                            {% if trf.dispatched_by %}
+                                <small class="text-muted d-block">Disp: {{ trf.dispatched_by.username }}</small>
+                            {% endif %}
+                            {% if trf.received_by %}
+                                <small class="text-success d-block">Recv: {{ trf.received_by.username }}</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Inspect Modal Trigger -->
+                        <td class="text-end pe-4">
+                            <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#inspectModal_{{ trf.id }}">
+                                <i class="fas fa-boxes-stacked me-1"></i> Items ({% if trf.imei_count > 0 %}{{ trf.imei_count }} IMEIs{% else %}{{ trf.total_units|floatformat:0 }}{% endif %})
+                            </button>
+                        </td>
+                    </tr>
+
+                    <!-- =========================================================
+                         INSPECT LINE ITEMS & IMEIS MODAL
+                         ========================================================= -->
+                    <div class="modal fade" id="inspectModal_{{ trf.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered modal-lg">
+                            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                                <div class="modal-header bg-dark text-white border-0 py-3 px-4">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-dolly"></i></span>
+                                        <div>
+                                            <h6 class="modal-title fs-sm fw-bold text-white mb-0 font-monospace">{{ trf.transfer_no }}</h6>
+                                            <small class="text-white-50 fs-2xs">{{ trf.source_branch.name }} &rarr; {{ trf.destination_branch.name }}</small>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body p-4">
+                                    <div class="p-3 bg-light rounded-3 border mb-3 fs-xs">
+                                        <div class="row g-2">
+                                            <div class="col-6">Status: <strong>{{ trf.status_display }}</strong></div>
+                                            <div class="col-6">Transfer Date: <strong>{{ trf.transfer_date_ad }} ({{ trf.transfer_date_bs }} BS)</strong></div>
+                                            <div class="col-6">Total Units: <strong>{{ trf.total_units|floatformat:0 }}</strong></div>
+                                            <div class="col-6">Valuation: <strong>Rs. {{ trf.total_valuation|floatformat:2|intcomma }}</strong></div>
+                                        </div>
+                                    </div>
+
+                                    <h6 class="fw-bold text-dark fs-xs mb-2">Itemized Shipment Products &amp; Scanned IMEIs:</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-bordered table-sm fs-xs mb-0">
+                                            <thead class="bg-light text-muted">
+                                                <tr>
+                                                    <th>#</th>
+                                                    <th>Product Name</th>
+                                                    <th class="text-center">Qty</th>
+                                                    <th>Scanned 15-Digit IMEI(s) / Serial</th>
+                                                    <th>Notes</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for line in trf.items_list %}
+                                                <tr>
+                                                    <td class="text-center text-muted">{{ forloop.counter }}</td>
+                                                    <td><strong>{{ line.product.name }}</strong></td>
+                                                    <td class="text-center fw-bold">{{ line.quantity|floatformat:0 }} {{ line.product.base_unit.code }}</td>
+                                                    <td class="font-monospace text-primary">
+                                                        {{ line.scanned_imei_or_serial|default:"Standard Batch (No IMEI)" }}
+                                                    </td>
+                                                    <td><small class="text-muted">{{ line.notes|default:"-" }}</small></td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="modal-footer bg-light border-0">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-dolly fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Stock Transfers Recorded</h6>
+                            <p class="text-muted fs-xs mb-0">No inter-branch consignments match the selected filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="5" class="ps-4 text-end text-uppercase text-white-50">Consignments Total:</td>
+                        <td class="text-center col-num text-primary fs-6">{{ totals.total_units_moved|floatformat:0 }}</td>
+                        <td class="text-end col-num text-warning fs-6">Rs. {{ totals.total_valuation_moved|floatformat:2|intcomma }}</td>
+                        <td colspan="2" class="pe-4 text-white-50 fs-2xs">Total Value Transferred</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

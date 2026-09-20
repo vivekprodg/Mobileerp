@@ -1,3 +1,4 @@
+import re
 from decimal import Decimal
 from PIL import Image
 
@@ -10,11 +11,9 @@ from apps.sales.models import (
 from apps.customers.models import Customer
 from apps.inventory.models import Product
 
-
 # ==============================================================================
 # KYC DOCUMENT FILE VALIDATION UTILITY
 # ==============================================================================
-
 KYC_ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp'}
 KYC_ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 KYC_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per document
@@ -58,11 +57,9 @@ def validate_kyc_document_image(file_obj, field_label="Uploaded document"):
 
     return file_obj
 
-
 # ==============================================================================
 # TRADE-IN & POLICE KYC UNDERTAKING FORMS
 # ==============================================================================
-
 class TradeInDeviceIntakeForm(forms.ModelForm):
     class Meta:
         model = PhoneExchangeTradeIn
@@ -88,7 +85,6 @@ class TradeInDeviceIntakeForm(forms.ModelForm):
             'evaluation_notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Inspector diagnostic observations...'}),
         }
 
-
 class TradeIn10PointChecklistForm(forms.ModelForm):
     class Meta:
         model = TradeInInspectionChecklist
@@ -111,7 +107,6 @@ class TradeIn10PointChecklistForm(forms.ModelForm):
             'account_lock_factory_reset': forms.Select(attrs={'class': 'form-select tradein-check-select'}),
             'technician_remarks': forms.TextInput(attrs={'class': 'form-control form-control-sm', 'placeholder': 'Specific hardware notes...'}),
         }
-
 
 class TradeInLegalUndertakingForm(forms.ModelForm):
     class Meta:
@@ -151,11 +146,9 @@ class TradeInLegalUndertakingForm(forms.ModelForm):
         file_obj = self.cleaned_data.get('customer_live_photo')
         return validate_kyc_document_image(file_obj, _("Customer Live Snapshot"))
 
-
 # ==============================================================================
 # SALES RETURN, HOLD & OVERRIDE FORMS
 # ==============================================================================
-
 class SalesReturnProcessForm(forms.Form):
     reason = forms.CharField(
         widget=forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Reason for return...'}),
@@ -174,7 +167,6 @@ class SalesReturnProcessForm(forms.Form):
         widget=forms.Select(attrs={'class': 'form-select'})
     )
 
-
 class SalesBillHoldForm(forms.ModelForm):
     class Meta:
         model = SalesEstimate
@@ -186,13 +178,114 @@ class SalesBillHoldForm(forms.ModelForm):
             'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
         }
 
-
 class ManagerDiscountOverrideForm(forms.Form):
+    """
+    Unified Manager Discount & Price Override Authorization Form.
+    Accepts supervisor PIN verification, defines target discount scope,
+    calculates percentage or fixed NPR concessions (AMOUNT), and captures standardized
+    commercial reasons for forensic audit trail accountability.
+    """
+    DISCOUNT_SCOPE_CHOICES = [
+        ('ITEM', _('Line Item Discount')),
+        ('BILL', _('Bill / Invoice Discount')),
+        ('PRICE_OVERRIDE', _('Price Override')),
+    ]
+
+    DISCOUNT_TYPE_CHOICES = [
+        ('PERCENTAGE', _('Percentage Concession (%)')),
+        ('AMOUNT', _('Fixed Cash Amount (Rs.)')),
+        ('FIXED', _('Fixed Cash Amount [Legacy Alias] (Rs.)')),
+    ]
+
+    DISCOUNT_REASON_CHOICES = [
+        ('CUSTOMER_NEGOTIATION', _('Customer Negotiation / Bargain')),
+        ('COMPETITIVE_PRICE', _('Matching Competitor Price')),
+        ('LOYALTY_REWARD', _('Regular / Loyalty Customer')),
+        ('CLEARANCE_SALE', _('Clearance / Old Stock')),
+        ('DAMAGED_PACKAGING', _('Minor Cosmetic Box Damage')),
+        ('MANAGEMENT_SPECIAL', _('Special Management Approval')),
+        ('OTHER', _('Other Justification')),
+    ]
+
     manager_pin = forms.CharField(
         max_length=6,
-        widget=forms.PasswordInput(attrs={'class': 'form-control', 'placeholder': 'Enter 4-6 digit Manager PIN'})
+        min_length=4,
+        widget=forms.PasswordInput(attrs={
+            'class': 'form-control form-control-lg text-center font-monospace fw-bold',
+            'placeholder': 'Enter 4-6 digit Manager PIN',
+            'autocomplete': 'new-password',
+            'maxlength': '6'
+        }),
+        label=_("Manager Override PIN")
     )
-    discount_percent = forms.DecimalField(
-        max_digits=5, decimal_places=2,
-        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.5'})
+
+    discount_scope = forms.ChoiceField(
+        choices=DISCOUNT_SCOPE_CHOICES,
+        initial='BILL',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label=_("Discount Scope")
     )
+
+    discount_type = forms.ChoiceField(
+        choices=DISCOUNT_TYPE_CHOICES,
+        initial='PERCENTAGE',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label=_("Discount Type")
+    )
+
+    discount_value = forms.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal('0.00'),
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control font-monospace',
+            'step': '0.01',
+            'placeholder': '0.00'
+        }),
+        label=_("Discount Value / Amount")
+    )
+
+    discount_reason = forms.ChoiceField(
+        choices=DISCOUNT_REASON_CHOICES,
+        initial='CUSTOMER_NEGOTIATION',
+        widget=forms.Select(attrs={'class': 'form-select'}),
+        label=_("Commercial Reason")
+    )
+
+    reason_notes = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Optional explanation or justification details...'
+        }),
+        label=_("Justification Notes")
+    )
+
+    def clean_manager_pin(self):
+        pin = self.cleaned_data.get('manager_pin', '').strip()
+        if not pin.isdigit() or not (4 <= len(pin) <= 6):
+            raise forms.ValidationError(_("Manager PIN must be between 4 and 6 numeric digits."))
+        return pin
+
+    def clean(self):
+        cleaned_data = super().clean()
+        disc_type = cleaned_data.get('discount_type')
+        disc_val = cleaned_data.get('discount_value')
+        reason = cleaned_data.get('discount_reason')
+        notes = (cleaned_data.get('reason_notes') or '').strip()
+
+        # Normalize legacy FIXED alias to AMOUNT
+        if disc_type == 'FIXED':
+            cleaned_data['discount_type'] = 'AMOUNT'
+            disc_type = 'AMOUNT'
+
+        if disc_val is not None:
+            if disc_val < Decimal('0.00'):
+                self.add_error('discount_value', _("Discount amount or percentage cannot be negative."))
+            if disc_type == 'PERCENTAGE' and disc_val > Decimal('100.00'):
+                self.add_error('discount_value', _("Percentage discount cannot exceed 100.00%."))
+
+        if reason == 'OTHER' and not notes:
+            self.add_error('reason_notes', _("Please provide explanatory notes when 'Other Justification' is selected."))
+
+        return cleaned_data

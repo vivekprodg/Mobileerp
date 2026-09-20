@@ -22,7 +22,8 @@ class SystemConfiguration(TimeStampedModel):
     """
     Central master parameter singleton governing shop tax registration identity,
     dynamic tax rates, estimate/proforma bill headers, manager discount thresholds,
-    NTA MDMS compliance policies, and second-hand phone trade-in margin buffers.
+    NTA MDMS compliance policies, trade-in margin buffers, and
+    dedicated Chart of Accounts control ledger bindings for automated journal entries.
     """
     CACHE_KEY = 'system_configuration_singleton'
 
@@ -139,6 +140,112 @@ class SystemConfiguration(TimeStampedModel):
         verbose_name=_("Police-Compliant Handover Undertaking Declaration (Nepali)")
     )
 
+    # =========================================================================
+    # DEFAULT CHART OF ACCOUNTS CONTROL LEDGER BINDINGS
+    # Strings use lazy references ('accounting.Account') to avoid circular imports.
+    # =========================================================================
+    # Liquid Funds & Digital Channels
+    default_cash_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_cash_accounts',
+        verbose_name=_("Default Cash in Hand Account (GL 1010)")
+    )
+    default_bank_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_bank_accounts',
+        verbose_name=_("Default Primary Bank Account (GL 1020)")
+    )
+    default_fonepay_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_fonepay_accounts',
+        verbose_name=_("Default FonePay QR Clearing Account (GL 1130)")
+    )
+    default_esewa_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_esewa_accounts',
+        verbose_name=_("Default eSewa Wallet Clearing Account (GL 1140)")
+    )
+    default_khalti_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_khalti_accounts',
+        verbose_name=_("Default Khalti Wallet Clearing Account (GL 1150)")
+    )
+    default_card_clearing_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_card_clearing_accounts',
+        verbose_name=_("Default POS Card Clearing Account (GL 1160)")
+    )
+
+    # Working Capital & Trade Debtors / Creditors
+    default_receivable_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_receivable_accounts',
+        verbose_name=_("Default Accounts Receivable / Debtors (GL 1200)")
+    )
+    default_payable_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_payable_accounts',
+        verbose_name=_("Default Accounts Payable / Creditors (GL 2010)")
+    )
+
+    # Merchandise Inventory & COGS
+    default_inventory_asset_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_inventory_accounts',
+        verbose_name=_("Default Merchandise Inventory Asset (GL 1300)")
+    )
+    default_cogs_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_cogs_accounts',
+        verbose_name=_("Default Cost of Goods Sold / COGS (GL 5010)")
+    )
+
+    # Operating Revenue & Deductions
+    default_sales_revenue_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_sales_accounts',
+        verbose_name=_("Default Sales Revenue Account (GL 4010)")
+    )
+    default_discount_expense_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_discount_accounts',
+        verbose_name=_("Default Sales Discount Expense Account (GL 4030)")
+    )
+
+    # IRD Taxes
+    default_vat_output_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_vat_output_accounts',
+        verbose_name=_("Default Output VAT Payable 13% (GL 2020)")
+    )
+    default_vat_input_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_vat_input_accounts',
+        verbose_name=_("Default Input VAT Receivable 13% (GL 1400)")
+    )
+
+    # Shrinkage, Commission, Financing & Equity
+    default_shrinkage_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_shrinkage_accounts',
+        verbose_name=_("Default Inventory Shrinkage & Loss Account (GL 5030)")
+    )
+    default_gateway_fee_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_gateway_fee_accounts',
+        verbose_name=_("Default Payment Gateway / MDR Fee Account (GL 6190)")
+    )
+    default_interest_expense_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_interest_accounts',
+        verbose_name=_("Default Finance & Loan Interest Account (GL 6210)")
+    )
+    default_drawings_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='config_drawings_accounts',
+        verbose_name=_("Default Owner Drawings Account (GL 3130)")
+    )
+
     class Meta:
         db_table = 'core_system_configuration'
         verbose_name = _('System Configuration')
@@ -199,15 +306,15 @@ class AuditLog(models.Model):
     id = models.BigAutoField(primary_key=True)
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='core_audit_logs',
-        db_index=True
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='core_audit_logs', db_index=True
     )
     branch = models.ForeignKey(
-        'branches.Branch', on_delete=models.SET_NULL, null=True, blank=True, related_name='audit_logs',
-        db_index=True
+        'branches.Branch', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='audit_logs', db_index=True
     )
     action_type = models.CharField(max_length=30, choices=ACTION_CHOICES, db_index=True)
-    module = models.CharField(max_length=50, db_index=True, help_text="e.g. POS, Inventory, TradeIn, MDMS, Purchases, Users")
+    module = models.CharField(max_length=50, db_index=True, help_text="e.g. POS, Inventory, TradeIn, MDMS, Purchases, Users, Accounting")
     object_repr = models.CharField(max_length=255)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     details = models.JSONField(default=dict, blank=True)

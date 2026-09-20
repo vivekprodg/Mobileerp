@@ -1,0 +1,361 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Batch-Wise Stock Report (FIFO) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.batch-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.batch-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-batch th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-batch td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+.depletion-progress {
+    height: 6px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+    margin-top: 3px;
+    width: 70px;
+}
+.depletion-bar {
+    height: 100%;
+    border-radius: inherit;
+    background: #10b981;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-cubes text-primary me-2"></i> Batch-Wise Stock Report (FIFO Inward Batches)
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit accessories and spare parts bought across different dates, supplier purchase landed costs, depletion velocity, and remaining valuation
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'purchases:grn_create' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-truck-ramp-box me-1"></i> Receive Inward (GRN)
+            </a>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Batch KPI Cards -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Active FIFO Batches -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="batch-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Active FIFO Batches</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-cubes fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.total_batches|default:0 }}
+                </h3>
+                <small class="text-muted fs-2xs">Active lots with stock remaining</small>
+            </div>
+        </div>
+
+        <!-- 2. Remaining Units in Batches -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="batch-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">Remaining Stock Units</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-boxes-stacked fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    {{ totals.total_units_remaining|floatformat:0|intcomma }} <span class="fs-6 fw-normal text-muted">Units</span>
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.total_units_received|floatformat:0 }} Units originally received</small>
+            </div>
+        </div>
+
+        <!-- 3. Total Landed Asset Valuation -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="batch-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Batch Value (Cost)</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-coins fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_cost_valuation|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Exact FIFO landed acquisition cost</small>
+            </div>
+        </div>
+
+        <!-- 4. Retail Valuation & Realizable Margin -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="batch-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Retail Valuation (MRP)</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-tags fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_retail_valuation|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-success fs-2xs fw-bold">
+                    +Rs. {{ totals.projected_margin|floatformat:2|intcomma }} Expected Margin
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Batch No, Product Name, SKU, Supplier, GRN Ref...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Store Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if filters.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="brand" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Brands</option>
+                    {% for b in brands %}
+                        <option value="{{ b.id }}" {% if filters.brand == b.id|stringformat:"s" %}selected{% endif %}>
+                            {{ b.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-1">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="active" {% if filters.status == 'active' or not filters.status %}selected{% endif %}>In Stock Only</option>
+                    <option value="depleted" {% if filters.status == 'depleted' %}selected{% endif %}>Depleted (0)</option>
+                    <option value="all" {% if filters.status == 'all' %}selected{% endif %}>All Batches</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.branch or filters.category or filters.brand or filters.status %}
+                <a href="{% url 'reports:batch_stock' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Batch Stock Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-cubes text-secondary me-2"></i> Inward FIFO Inventory Batches
+            </h6>
+            <span class="badge bg-primary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Batches Logged</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-batch">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Batch Number</th>
+                        <th>Inward Date (AD / BS)</th>
+                        <th>Product Description</th>
+                        <th>Category &amp; Brand</th>
+                        <th>Outlet Branch</th>
+                        <th>Supplier &amp; GRN Ref</th>
+                        <th class="text-center">Received</th>
+                        <th class="text-center">Remaining</th>
+                        <th class="text-center">Depletion %</th>
+                        <th class="text-end">Unit Cost</th>
+                        <th class="text-end">Selling MRP</th>
+                        <th class="text-end">Total Cost Value</th>
+                        <th class="text-end pe-4">Batch Age</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in records %}
+                    <tr>
+                        <!-- Batch Number -->
+                        <td class="ps-4 font-monospace fw-bold text-primary">
+                            {{ item.batch_number }}
+                        </td>
+
+                        <!-- Purchase Date -->
+                        <td>
+                            <span class="text-dark fw-semibold">{{ item.purchase_date_str }}</span>
+                            <small class="text-muted d-block font-monospace fs-2xs">{{ item.purchase_date_bs }} BS</small>
+                        </td>
+
+                        <!-- Product Description -->
+                        <td>
+                            <a href="{% url 'inventory:product_detail' item.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                {{ item.name }}
+                            </a>
+                            <small class="text-muted d-block font-monospace fs-2xs">SKU: {{ item.sku }}</small>
+                        </td>
+
+                        <!-- Category & Brand -->
+                        <td>
+                            <span class="fw-semibold text-dark">{{ item.product.category.name|default:"General" }}</span>
+                            <small class="text-muted d-block">{{ item.product.brand.name|default:"-" }}</small>
+                        </td>
+
+                        <!-- Branch -->
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace">{{ item.branch_code }}</span>
+                        </td>
+
+                        <!-- Supplier & GRN Ref -->
+                        <td>
+                            <strong class="text-dark fs-xs">{{ item.supplier_name }}</strong>
+                            <small class="text-muted d-block font-monospace fs-2xs">{{ item.grn_reference }}</small>
+                        </td>
+
+                        <!-- Received Qty -->
+                        <td class="text-center font-monospace text-muted">
+                            {{ item.quantity_received|floatformat:1 }}
+                        </td>
+
+                        <!-- Remaining Qty -->
+                        <td class="text-center font-monospace fw-bold text-dark">
+                            {{ item.quantity_remaining|floatformat:1 }} {{ item.unit_code }}
+                        </td>
+
+                        <!-- Depletion % Progress Bar -->
+                        <td class="text-center">
+                            <span class="font-monospace fs-2xs fw-bold">{{ item.depletion_pct }}%</span>
+                            <div class="depletion-progress mx-auto">
+                                <div class="depletion-bar" style="width: {{ item.depletion_pct }}%;"></div>
+                            </div>
+                        </td>
+
+                        <!-- Unit Purchase Cost -->
+                        <td class="col-num text-dark">
+                            Rs. {{ item.cost_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Selling MRP -->
+                        <td class="col-num text-primary fw-semibold">
+                            Rs. {{ item.selling_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Total Batch Value (Cost) -->
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ item.cost_valuation|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Batch Age -->
+                        <td class="text-end pe-4">
+                            {% if item.age_days >= 90 %}
+                                <span class="badge bg-danger text-white fw-bold fs-2xs px-2 py-1">
+                                    {{ item.age_days }} Days
+                                </span>
+                            {% elif item.age_days >= 60 %}
+                                <span class="badge bg-warning text-dark fw-bold fs-2xs px-2 py-1">
+                                    {{ item.age_days }} Days
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-muted border fs-2xs">
+                                    {{ item.age_days }} Days
+                                </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="13" class="text-center py-5 text-muted">
+                            <i class="fas fa-cubes fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No FIFO Batches Found</h6>
+                            <p class="text-muted fs-xs mb-0">No active inventory batches match the selected criteria.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="7" class="ps-4 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="text-center col-num text-primary fs-6">{{ totals.total_units_remaining|floatformat:1 }}</td>
+                        <td colspan="3"></td>
+                        <td class="text-end col-num text-warning fs-6">Rs. {{ totals.total_cost_valuation|floatformat:2|intcomma }}</td>
+                        <td class="pe-4 text-white-50 fs-2xs">Cost Value</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

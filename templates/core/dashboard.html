@@ -5,167 +5,665 @@
 
 {% block extra_head %}
 <style>
-.dashboard-kpi-card {
+/* ==========================================================================
+   CLIENT-REQUESTED DASHBOARD TILES & SHORT SUMMARY PANELS
+   ========================================================================== */
+.kpi-tile {
     background: #ffffff;
-    border: 1px solid var(--erp-slate-200) !important;
+    border: 1px solid var(--erp-card-border, #e2e8f0);
     border-radius: 16px;
-    padding: 20px;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 142px;
 }
-.dashboard-kpi-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
-    border-color: var(--erp-slate-400) !important;
+.kpi-tile:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 25px -4px rgba(15, 23, 42, 0.08);
+    border-color: #cbd5e1;
 }
-.launch-btn-card {
-    border-radius: 14px;
-    padding: 20px 16px;
+
+.kpi-top-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.kpi-title-stack {
+    display: flex;
+    flex-direction: column;
+}
+
+.kpi-title-en {
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+}
+
+.kpi-title-np {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-top: 1px;
+}
+
+.kpi-icon-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    font-size: 1.15rem;
+    flex-shrink: 0;
+}
+
+.kpi-value-text {
+    font-size: 1.65rem;
+    font-weight: 800;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
+    letter-spacing: -0.03em;
+    margin: 10px 0 2px 0;
+    line-height: 1.1;
+}
+
+.kpi-footer-meta {
+    font-size: 0.72rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #64748b;
+}
+
+/* Border Theme Accents */
+.border-theme-primary { border-top: 4px solid var(--erp-primary, #2563eb); }
+.border-theme-success { border-top: 4px solid var(--erp-success, #10b981); }
+.border-theme-warning { border-top: 4px solid var(--erp-warning, #f59e0b); }
+.border-theme-danger  { border-top: 4px solid var(--erp-danger, #ef4444); }
+.border-theme-info    { border-top: 4px solid var(--erp-info, #0ea5e9); }
+.border-theme-purple  { border-top: 4px solid #8b5cf6; }
+
+/* Icon Avatars */
+.icon-sales     { background-color: #eff6ff; color: #2563eb; }
+.icon-purchase  { background-color: #f0f9ff; color: #0ea5e9; }
+.icon-stock-amt { background-color: #f5f3ff; color: #8b5cf6; }
+.icon-profit    { background-color: #ecfdf5; color: #10b981; }
+.icon-customer  { background-color: #fef2f2; color: #ef4444; }
+.icon-supplier  { background-color: #fffbeb; color: #f59e0b; }
+.icon-stock-qty { background-color: #f1f5f9; color: #334155; }
+.icon-low-stock { background-color: #fef2f2; color: #dc2626; }
+
+/* Quick Action Launchpad Buttons */
+.quick-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
+    background-color: #ffffff;
+    color: #1e293b;
+    text-decoration: none !important;
     font-weight: 700;
-    transition: all 0.2s ease;
-    border: 1px solid transparent;
+    font-size: 0.8125rem;
+    transition: all 0.18s ease;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
-.launch-btn-card:hover {
+.quick-action-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+    border-color: #cbd5e1;
+    color: var(--erp-primary, #2563eb);
 }
+
+/* Summary Panels */
+.summary-panel-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
+    border-radius: 18px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    overflow: hidden;
+}
+
+.summary-panel-header {
+    padding: 16px 20px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--erp-slate-200, #e2e8f0);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.summary-table th {
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    background-color: #f8fafc;
+    border-bottom: 1px solid var(--erp-slate-200, #e2e8f0);
+    padding: 10px 14px;
+}
+
+.summary-table td {
+    padding: 12px 14px;
+    font-size: 0.8125rem;
+    vertical-align: middle;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.summary-table tbody tr:hover {
+    background-color: #fafcff;
+}
+
+/* Tender Badges */
+.badge-pill-tender {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
+}
+.badge-cash    { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.badge-fonepay { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.badge-esewa   { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.badge-credit  { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4">
-    <!-- Non-IRD Proforma Disclaimer & White-Label Header Banner -->
-    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 shadow-sm">
-        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
-            <div class="d-flex align-items-center gap-3">
-                {% if HAS_COMPANY_LOGO %}
-                    <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="rounded-3 bg-white p-1 shadow-xs" style="height: 44px; width: auto; object-fit: contain;">
-                {% else %}
-                    <span class="badge bg-warning text-dark p-2 rounded-circle fs-5"><i class="fas fa-file-invoice"></i></span>
-                {% endif %}
-                <div>
-                    <h6 class="fw-bold text-dark mb-0">{{ COMPANY_NAME }} &bull; {{ SYS_CONFIG.bill_header_title }}</h6>
-                    <p class="text-muted fs-xs mb-0">{{ SYS_CONFIG.bill_estimate_disclaimer }}</p>
-                </div>
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Proforma Estimation & White-Label Compliance Notice Bar -->
+    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 shadow-xs">
+        <div class="d-flex align-items-center gap-3">
+            <span class="badge bg-warning text-dark p-2 rounded-circle fs-6"><i class="fas fa-file-invoice"></i></span>
+            <div>
+                <h6 class="fw-bold text-dark mb-0">{{ COMPANY_NAME }} &bull; {{ BILL_HEADER_TITLE|default:"SALES ESTIMATE SLIP" }}</h6>
+                <small class="text-muted">{{ ESTIMATE_DISCLAIMER }}</small>
             </div>
-            <div class="d-flex align-items-center gap-2 flex-shrink-0">
-                <span class="badge bg-primary text-white px-3 py-2 rounded-pill fs-xs">
-                    Mode: {{ SHOP_TAX_MODE }}
-                </span>
-                <span class="badge bg-dark text-white px-3 py-2 rounded-pill fs-xs font-monospace">
-                    <i class="far fa-calendar-alt text-warning me-1"></i> {{ CURRENT_BS_DATE_EN }} BS
-                </span>
-            </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-success text-white px-3 py-2 rounded-pill fs-xs">
+                <i class="fas fa-shield-halved me-1"></i> NTA MDMS Guard: Active
+            </span>
+            <span class="badge bg-dark text-white px-3 py-2 rounded-pill fs-xs font-mono">
+                Mode: {{ SHOP_TAX_MODE }}
+            </span>
         </div>
     </div>
 
-    <!-- 4 High-Priority KPI Cards -->
+    <!-- =====================================================================
+         8 CORE CLIENT REQUIREMENTS (KPI TILES 1 TO 8)
+         ===================================================================== -->
+    <h6 class="fw-bold text-dark mb-3 d-flex align-items-center gap-2">
+        <i class="fas fa-chart-pie text-primary"></i>
+        <span>आजको मुख्य वित्तीय स्थिति (Key Business Performance Today)</span>
+    </h6>
+
     <div class="row g-3 mb-4">
+        
+        <!-- 1. Today's Sales Amount (आजको कुल बिक्री) -->
         <div class="col-12 col-sm-6 col-xl-3">
-            <div class="dashboard-kpi-card h-100">
-                <div class="d-flex align-items-center justify-content-between">
-                    <div>
-                        <span class="text-muted text-uppercase fw-bold fs-2xs">Today's Sales (Estimate)</span>
-                        <h3 class="fw-extrabold text-primary font-monospace mt-1 mb-0">
-                            Rs. {{ daily_sales_total|floatformat:2|intcomma }}
-                        </h3>
-                        <small class="text-success fs-xs fw-semibold"><i class="fas fa-arrow-trend-up me-1"></i> Live Active Counter</small>
+            <div class="kpi-tile border-theme-primary">
+                <div class="kpi-top-row">
+                    <div class="kpi-title-stack">
+                        <span class="kpi-title-en">Today's Sales</span>
+                        <span class="kpi-title-np">आजको कुल बिक्री रकम</span>
                     </div>
-                    <div class="bg-primary bg-opacity-10 p-3 rounded-4 text-primary">
-                        <i class="fas fa-wallet fs-4"></i>
+                    <div class="kpi-icon-avatar icon-sales">
+                        <i class="fas fa-receipt"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-value-text text-primary">
+                        Rs. {{ daily_sales_total|default:"0.00"|floatformat:2|intcomma }}
+                    </div>
+                    <div class="kpi-footer-meta">
+                        <span><strong class="text-dark">{{ today_sales_count|default:"0" }}</strong> Invoices finalized</span>
+                        <a href="{% url 'sales:estimate_list' %}" class="text-primary text-decoration-none fw-bold">Bills &rarr;</a>
                     </div>
                 </div>
             </div>
         </div>
 
+        <!-- 2. Today's Purchase Amount (आजको खरिद) -->
         <div class="col-12 col-sm-6 col-xl-3">
-            <div class="dashboard-kpi-card h-100">
-                <div class="d-flex align-items-center justify-content-between">
-                    <div>
-                        <span class="text-muted text-uppercase fw-bold fs-2xs">Total Customer Udhaari</span>
-                        <h3 class="fw-extrabold text-danger font-monospace mt-1 mb-0">
-                            Rs. {{ total_udhaari|floatformat:2|intcomma }}
-                        </h3>
-                        <small class="text-danger fs-xs fw-semibold"><i class="fas fa-hand-holding-dollar me-1"></i> Outstanding Receivable</small>
+            <div class="kpi-tile border-theme-info">
+                <div class="kpi-top-row">
+                    <div class="kpi-title-stack">
+                        <span class="kpi-title-en">Today's Purchase</span>
+                        <span class="kpi-title-np">आजको खरिद (GRN Inward)</span>
                     </div>
-                    <div class="bg-danger bg-opacity-10 p-3 rounded-4 text-danger">
-                        <i class="fas fa-file-invoice-dollar fs-4"></i>
+                    <div class="kpi-icon-avatar icon-purchase">
+                        <i class="fas fa-truck-ramp-box"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-value-text text-info">
+                        Rs. {{ today_purchase_total|default:"0.00"|floatformat:2|intcomma }}
+                    </div>
+                    <div class="kpi-footer-meta">
+                        <span><strong class="text-dark">{{ today_grn_count|default:"0" }}</strong> Inward Shipments</span>
+                        <a href="{% url 'purchases:grn_list' %}" class="text-info text-decoration-none fw-bold">GRN &rarr;</a>
                     </div>
                 </div>
             </div>
         </div>
 
+        <!-- 3. Current Stock Amount (मौज्दात रकम) -->
         <div class="col-12 col-sm-6 col-xl-3">
-            <div class="dashboard-kpi-card h-100">
-                <div class="d-flex align-items-center justify-content-between">
-                    <div>
-                        <span class="text-muted text-uppercase fw-bold fs-2xs">Low Stock Alert</span>
-                        <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-1 mb-0">
-                            {{ low_stock_count }} <span class="fs-6 fw-normal text-muted">Items</span>
-                        </h3>
-                        <a href="{% url 'inventory:product_list' %}?stock_status=low" class="text-warning-emphasis text-decoration-none fs-xs fw-bold">
-                            View Reorder List &rarr;
-                        </a>
+            <div class="kpi-tile border-theme-purple">
+                <div class="kpi-top-row">
+                    <div class="kpi-title-stack">
+                        <span class="kpi-title-en">Current Stock Value</span>
+                        <span class="kpi-title-np">हालको मौज्दात रकम (Landed)</span>
                     </div>
-                    <div class="bg-warning bg-opacity-10 p-3 rounded-4 text-warning-emphasis">
-                        <i class="fas fa-boxes-packing fs-4"></i>
+                    <div class="kpi-icon-avatar icon-stock-amt">
+                        <i class="fas fa-coins"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-value-text text-purple">
+                        Rs. {{ current_stock_valuation|default:"0.00"|floatformat:2|intcomma }}
+                    </div>
+                    <div class="kpi-footer-meta">
+                        <span>Retail MRP: <strong class="text-dark font-mono">Rs. {{ current_stock_retail|default:"0.00"|floatformat:2|intcomma }}</strong></span>
+                        <a href="{% url 'reports:inventory_valuation' %}" class="text-dark fw-bold text-decoration-none">Valuation &rarr;</a>
                     </div>
                 </div>
             </div>
         </div>
 
+        <!-- 4. Today's Profit (आजको नाफा) -->
         <div class="col-12 col-sm-6 col-xl-3">
-            <div class="dashboard-kpi-card h-100">
-                <div class="d-flex align-items-center justify-content-between">
-                    <div>
-                        <span class="text-muted text-uppercase fw-bold fs-2xs">Active Workshop Queue</span>
-                        <h3 class="fw-extrabold text-info font-monospace mt-1 mb-0">
-                            {{ active_repair_count }} <span class="fs-6 fw-normal text-muted">Jobs</span>
-                        </h3>
-                        <a href="{% url 'repairs:dashboard' %}" class="text-info text-decoration-none fs-xs fw-bold">
-                            View Repair Queue &rarr;
-                        </a>
+            <div class="kpi-tile border-theme-success">
+                <div class="kpi-top-row">
+                    <div class="kpi-title-stack">
+                        <span class="kpi-title-en">Today's Profit</span>
+                        <span class="kpi-title-np">आजको कुल नाफा (Gross Margin)</span>
                     </div>
-                    <div class="bg-info bg-opacity-10 p-3 rounded-4 text-info">
-                        <i class="fas fa-screwdriver-wrench fs-4"></i>
+                    <div class="kpi-icon-avatar icon-profit">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-value-text text-success">
+                        Rs. {{ today_profit|default:"0.00"|floatformat:2|intcomma }}
+                    </div>
+                    <div class="kpi-footer-meta">
+                        <span>Margin: <strong class="text-success">{{ today_profit_margin_pct|default:"0.0" }}%</strong></span>
+                        <a href="{% url 'reports:daily_sales' %}" class="text-success text-decoration-none fw-bold">P&amp;L Report &rarr;</a>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- 5. Customer Credit / Due (ग्राहक उधारो) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="kpi-tile border-theme-danger">
+                <div class="kpi-top-row">
+                    <div class="kpi-title-stack">
+                        <span class="kpi-title-en">Customer Credit (Due)</span>
+                        <span class="kpi-title-np">ग्राहक बाँकी / कुल उधारो</span>
+                    </div>
+                    <div class="kpi-icon-avatar icon-customer">
+                        <i class="fas fa-hand-holding-dollar"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-value-text text-danger">
+                        Rs. {{ total_udhaari|default:"0.00"|floatformat:2|intcomma }}
+                    </div>
+                    <div class="kpi-footer-meta">
+                        <span><strong class="text-danger">{{ debtor_customers_count|default:"0" }}</strong> Debtors</span>
+                        <a href="{% url 'reports:customer_udhaari' %}" class="text-danger fw-bold text-decoration-none">Udhaari Book &rarr;</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. Supplier Payable (सप्लायरलाई तिर्न बाँकी) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="kpi-tile border-theme-warning">
+                <div class="kpi-top-row">
+                    <div class="kpi-title-stack">
+                        <span class="kpi-title-en">Supplier Payable</span>
+                        <span class="kpi-title-np">सप्लायरलाई तिर्न बाँकी</span>
+                    </div>
+                    <div class="kpi-icon-avatar icon-supplier">
+                        <i class="fas fa-building-user"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-value-text text-warning-emphasis">
+                        Rs. {{ supplier_payable_total|default:"0.00"|floatformat:2|intcomma }}
+                    </div>
+                    <div class="kpi-footer-meta">
+                        <span><strong class="text-dark">{{ active_suppliers_count|default:"0" }}</strong> Vendors</span>
+                        <a href="{% url 'reports:supplier_outstanding' %}" class="text-dark fw-bold text-decoration-none">Payables &rarr;</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 7. Total Stock Quantity (कुल स्टक संख्या) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="kpi-tile border-theme-primary">
+                <div class="kpi-top-row">
+                    <div class="kpi-title-stack">
+                        <span class="kpi-title-en">Total Stock Quantity</span>
+                        <span class="kpi-title-np">कुल स्टक संख्या (भौतिक गन्ती)</span>
+                    </div>
+                    <div class="kpi-icon-avatar icon-stock-qty">
+                        <i class="fas fa-boxes-stacked"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-value-text text-dark">
+                        {{ total_stock_quantity|default:0|floatformat:0|intcomma }} <span class="fs-6 fw-bold text-muted">Pcs</span>
+                    </div>
+                    <div class="kpi-footer-meta">
+                        <span><strong class="text-primary font-mono">{{ total_phones_in_stock|default:"0" }}</strong> Phones</span>
+                        <!-- FIXED URL BELOW: reports:current_stock -->
+                        <a href="{% url 'reports:current_stock' %}" class="text-dark text-decoration-none fw-bold">Live Stock &rarr;</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 8. Low Stock Alert (न्यून मौज्दात चेतावनी) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="kpi-tile border-theme-danger">
+                <div class="kpi-top-row">
+                    <div class="kpi-title-stack">
+                        <span class="kpi-title-en">Low Stock Alert</span>
+                        <span class="kpi-title-np">न्यून मौज्दात चेतावनी (रि-अर्डर)</span>
+                    </div>
+                    <div class="kpi-icon-avatar icon-low-stock">
+                        <i class="fas fa-triangle-exclamation"></i>
+                    </div>
+                </div>
+                <div>
+                    <div class="kpi-value-text text-danger">
+                        {{ low_stock_count|default:0 }} <span class="fs-6 fw-bold text-muted">Items</span>
+                    </div>
+                    <div class="kpi-footer-meta">
+                        <span class="text-danger fw-bold"><i class="fas fa-bell me-1"></i>Reorder Required</span>
+                        <a href="{% url 'reports:low_stock' %}" class="text-danger fw-bold text-decoration-none">Review List &rarr;</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
-    <!-- Quick Action Launchpad -->
-    <div class="card border-0 shadow-sm rounded-4 mb-4 p-4 bg-white">
+    <!-- =====================================================================
+         QUICK ACTION TOOLS LAUNCHPAD
+         ===================================================================== -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-rocket text-primary me-2"></i> Quick Action Launchpad</h6>
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-rocket text-primary me-2"></i> Quick Action Tools (छिटो कार्यहरू)
+            </h6>
             <span class="text-muted fs-xs">Active Counter: <strong class="text-primary">{{ STORE_OUTLET_NAME }} ({{ STORE_OUTLET_CODE }})</strong></span>
         </div>
-        <div class="row g-3">
-            <div class="col-6 col-md-3">
-                <a href="{% url 'sales:pos_terminal' %}" class="launch-btn-card bg-warning text-dark d-flex flex-column align-items-center justify-content-center text-decoration-none shadow-sm h-100">
-                    <i class="fas fa-cash-register fs-3 mb-2 text-dark"></i>
-                    <span class="fs-sm">Open POS Terminal</span>
+
+        <div class="row g-2">
+            <div class="col-6 col-md-4 col-xl-2">
+                <a href="{% url 'sales:pos_terminal' %}" class="quick-action-btn">
+                    <i class="fas fa-cash-register text-warning"></i>
+                    <span>POS Billing</span>
                 </a>
             </div>
-            <div class="col-6 col-md-3">
-                <a href="{% url 'sales:trade_in_wizard' %}" class="launch-btn-card bg-primary text-white d-flex flex-column align-items-center justify-content-center text-decoration-none shadow-sm h-100">
-                    <i class="fas fa-repeat fs-3 mb-2"></i>
-                    <span class="fs-sm">Old Phone Trade-In</span>
+            <div class="col-6 col-md-4 col-xl-2">
+                <a href="{% url 'purchases:grn_create' %}" class="quick-action-btn">
+                    <i class="fas fa-truck-ramp-box text-primary"></i>
+                    <span>Receive GRN</span>
                 </a>
             </div>
-            <div class="col-6 col-md-3">
-                <a href="{% url 'repairs:ticket_create' %}" class="launch-btn-card bg-info text-white d-flex flex-column align-items-center justify-content-center text-decoration-none shadow-sm h-100">
-                    <i class="fas fa-clipboard-check fs-3 mb-2"></i>
-                    <span class="fs-sm">Service Intake Desk</span>
+            <div class="col-6 col-md-4 col-xl-2">
+                <a href="{% url 'sales:trade_in_wizard' %}" class="quick-action-btn">
+                    <i class="fas fa-repeat text-success"></i>
+                    <span>Old Phone Exchange</span>
                 </a>
             </div>
-            <div class="col-6 col-md-3">
-                <a href="{% url 'purchases:grn_create' %}" class="launch-btn-card bg-dark text-white d-flex flex-column align-items-center justify-content-center text-decoration-none shadow-sm h-100">
-                    <i class="fas fa-truck-ramp-box fs-3 mb-2 text-warning"></i>
-                    <span class="fs-sm">Receive Goods (GRN)</span>
+            <div class="col-6 col-md-4 col-xl-2">
+                <a href="{% url 'repairs:ticket_create' %}" class="quick-action-btn">
+                    <i class="fas fa-screwdriver-wrench text-info"></i>
+                    <span>Repair Intake</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <a href="{% url 'reports:customer_udhaari' %}" class="quick-action-btn">
+                    <i class="fas fa-hand-holding-dollar text-danger"></i>
+                    <span>Receive Udhaari</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+                <a href="{% url 'products:barcode_print' %}" class="quick-action-btn">
+                    <i class="fas fa-barcode text-dark"></i>
+                    <span>Print Barcodes</span>
                 </a>
             </div>
         </div>
     </div>
+
+    <!-- =====================================================================
+         SHORT SUMMARY PANELS: SALES & PURCHASES (SIDE-BY-SIDE)
+         ===================================================================== -->
+    <div class="row g-4 mb-4">
+        
+        <!-- LEFT: TODAY'S SALES SHORT SUMMARY (आजको बिक्री संक्षेप) -->
+        <div class="col-12 col-lg-6">
+            <div class="summary-panel-card h-100">
+                <div class="summary-panel-header">
+                    <div>
+                        <h6 class="summary-panel-title">
+                            <i class="fas fa-receipt text-primary"></i>
+                            <span>Today's Sales Summary (आजको बिक्री संक्षेप)</span>
+                        </h6>
+                        <small class="text-muted fs-2xs">Latest counter estimates and invoice settlements</small>
+                    </div>
+                    <span class="badge bg-primary bg-opacity-10 text-primary font-mono fs-xs fw-bold px-3 py-1">
+                        Rs. {{ daily_sales_total|default:"0.00"|floatformat:2|intcomma }}
+                    </span>
+                </div>
+
+                <!-- Tender Breakdown Strip -->
+                <div class="p-3 bg-light border-bottom d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="badge-pill-tender badge-cash">Cash: Rs. {{ today_cash_sales|default:"0.00"|floatformat:0|intcomma }}</span>
+                        <span class="badge-pill-tender badge-fonepay">FonePay: Rs. {{ today_fonepay_sales|default:"0.00"|floatformat:0|intcomma }}</span>
+                        <span class="badge-pill-tender badge-esewa">eSewa: Rs. {{ today_esewa_sales|default:"0.00"|floatformat:0|intcomma }}</span>
+                        <span class="badge-pill-tender badge-credit">Udhaari: Rs. {{ today_credit_sales|default:"0.00"|floatformat:0|intcomma }}</span>
+                    </div>
+                    <small class="text-muted font-mono fs-2xs">{{ today_sales_count|default:"0" }} Invoices</small>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table summary-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Slip No</th>
+                                <th>Customer</th>
+                                <th>Payment</th>
+                                <th class="text-end">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sale in recent_sales %}
+                            <tr>
+                                <td class="font-mono text-primary fw-bold">
+                                    <a href="{% url 'sales:estimate_detail' sale.pk %}" class="text-decoration-none">
+                                        {{ sale.estimate_number }}
+                                    </a>
+                                </td>
+                                <td>
+                                    <strong class="text-dark">{{ sale.recipient_display_name }}</strong>
+                                    {% if sale.customer_phone_manual %}
+                                        <small class="text-muted d-block font-mono fs-2xs">{{ sale.customer_phone_manual }}</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if sale.payment_status == 'PAID' %}
+                                        <span class="badge-pill-tender badge-cash">Paid</span>
+                                    {% elif sale.payment_status == 'PARTIAL' %}
+                                        <span class="badge-pill-tender badge-fonepay">Partial</span>
+                                    {% else %}
+                                        <span class="badge-pill-tender badge-credit">Due (Udhaari)</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end font-mono fw-bold text-dark">
+                                    Rs. {{ sale.grand_total|floatformat:2|intcomma }}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center py-4 text-muted fs-xs">
+                                    No sales estimates generated yet today.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="p-3 bg-light border-top text-center">
+                    <a href="{% url 'sales:estimate_list' %}" class="btn btn-outline-primary btn-sm rounded-pill px-4 fw-bold">
+                        View All Sales Invoices &rarr;
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: RECENT PURCHASES SHORT SUMMARY (खरिद संक्षेप - GRN) -->
+        <div class="col-12 col-lg-6">
+            <div class="summary-panel-card h-100">
+                <div class="summary-panel-header">
+                    <div>
+                        <h6 class="summary-panel-title">
+                            <i class="fas fa-truck-ramp-box text-info"></i>
+                            <span>Recent Purchases Summary (खरिद संक्षेप - GRN)</span>
+                        </h6>
+                        <small class="text-muted fs-2xs">Inward shipments received from distributors</small>
+                    </div>
+                    <span class="badge bg-info bg-opacity-10 text-info font-mono fs-xs fw-bold px-3 py-1">
+                        Today: Rs. {{ today_purchase_total|default:"0.00"|floatformat:2|intcomma }}
+                    </span>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table summary-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>GRN No</th>
+                                <th>Supplier / Distributor</th>
+                                <th>Bill / Challan No</th>
+                                <th class="text-end">Landed Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for grn in recent_purchases %}
+                            <tr>
+                                <td class="font-mono text-dark fw-bold">
+                                    <a href="{% url 'purchases:grn_detail' grn.pk %}" class="text-decoration-none">
+                                        {{ grn.grn_number }}
+                                    </a>
+                                </td>
+                                <td>
+                                    <strong class="text-dark">{{ grn.supplier.company_name }}</strong>
+                                    <small class="text-muted d-block fs-2xs">{{ grn.bill_date }}</small>
+                                </td>
+                                <td><code class="text-dark">{{ grn.supplier_bill_no }}</code></td>
+                                <td class="text-end font-mono fw-bold text-dark">
+                                    Rs. {{ grn.net_total_amount|floatformat:2|intcomma }}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center py-4 text-muted fs-xs">
+                                    No inward purchases recorded today.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="p-3 bg-light border-top text-center">
+                    <a href="{% url 'taxation:purchase_register' %}" class="btn btn-outline-info btn-sm rounded-pill px-4 fw-bold">
+                        View Purchase Register (Annex 7) &rarr;
+                    </a>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- =====================================================================
+         LOW STOCK REORDER RADAR TABLE
+         ===================================================================== -->
+    <div class="summary-panel-card mb-4" id="lowStockSection">
+        <div class="summary-panel-header">
+            <div>
+                <h6 class="summary-panel-title text-danger">
+                    <i class="fas fa-triangle-exclamation"></i>
+                    <span>Low Stock Alert &amp; Reorder Radar (न्यून मौज्दात सूची)</span>
+                </h6>
+                <small class="text-muted fs-2xs">Items currently running at or below safety reorder threshold</small>
+            </div>
+            <span class="badge bg-danger rounded-pill px-3 py-1 font-mono fs-xs">
+                {{ low_stock_count|default:0 }} Critical Items
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table summary-table mb-0">
+                <thead>
+                    <tr>
+                        <th>Product Name</th>
+                        <th>Category</th>
+                        <th>Current Stock</th>
+                        <th>Alert Threshold</th>
+                        <th>Rack Location</th>
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in low_stock_items %}
+                    <tr>
+                        <td>
+                            <strong class="text-dark">{{ item.product.name }}</strong>
+                            <small class="text-muted d-block font-mono fs-2xs">SKU: {{ item.product.sku }}</small>
+                        </td>
+                        <td><span class="badge bg-light text-dark border">{{ item.product.category.name|default:"General" }}</span></td>
+                        <td><strong class="text-danger font-mono fs-sm">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</strong></td>
+                        <td class="font-mono text-muted">{{ item.low_stock_threshold|floatformat:0 }} {{ item.product.base_unit.code }}</td>
+                        <td><span class="badge bg-light text-muted border font-mono">{{ item.product.rack_number|default:"-" }}</span></td>
+                        <td class="text-end">
+                            <a href="{% url 'purchases:po_create' %}?product_id={{ item.product.id }}" class="btn btn-primary btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold">
+                                <i class="fas fa-cart-plus me-1"></i> Reorder
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center py-4 text-success fs-xs fw-semibold">
+                            <i class="fas fa-circle-check me-1"></i> All stock levels are currently healthy!
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
 </div>
 {% endblock %}

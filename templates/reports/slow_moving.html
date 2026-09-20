@@ -1,0 +1,387 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Dead &amp; Slow-Moving Stock Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.slow-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.slow-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-slow-stock th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-slow-stock td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+.threshold-pill {
+    padding: 5px 14px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s ease;
+}
+.threshold-pill:hover, .threshold-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-snowflake text-info me-2"></i> Dead &amp; Slow-Moving Inventory Analysis
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Identify products on the shelf with zero sales over {{ days_threshold }} days, compute capital stagnation, and plan clearance markdowns
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'reports:stock_aging' %}" class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold text-dark">
+                <i class="fas fa-hourglass-half me-1"></i> Stock Aging (4-Buckets)
+            </a>
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs">
+                <i class="fas fa-cash-register me-1"></i> POS Clearance
+            </a>
+            <a href="{% url 'inventory:product_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Catalog
+            </a>
+        </div>
+    </div>
+
+    <!-- Quick Inactivity Threshold Buttons -->
+    <div class="d-flex align-items-center gap-2 mb-4 p-2 bg-white rounded-4 border shadow-xs flex-wrap">
+        <span class="fs-xs fw-bold text-muted ps-2"><i class="fas fa-filter text-primary me-1"></i> Inactivity Threshold:</span>
+        <a href="?days=30{% if filters.branch %}&branch={{ filters.branch }}{% endif %}{% if filters.category %}&category={{ filters.category }}{% endif %}" 
+           class="threshold-pill {% if days_threshold == 30 %}active{% endif %}">30 Days</a>
+        <a href="?days=60{% if filters.branch %}&branch={{ filters.branch }}{% endif %}{% if filters.category %}&category={{ filters.category }}{% endif %}" 
+           class="threshold-pill {% if days_threshold == 60 %}active{% endif %}">60 Days (Standard)</a>
+        <a href="?days=90{% if filters.branch %}&branch={{ filters.branch }}{% endif %}{% if filters.category %}&category={{ filters.category }}{% endif %}" 
+           class="threshold-pill {% if days_threshold == 90 %}active{% endif %}">90 Days (Stale)</a>
+        <a href="?days=120{% if filters.branch %}&branch={{ filters.branch }}{% endif %}{% if filters.category %}&category={{ filters.category }}{% endif %}" 
+           class="threshold-pill {% if days_threshold == 120 %}active{% endif %}">120 Days</a>
+        <a href="?days=180{% if filters.branch %}&branch={{ filters.branch }}{% endif %}{% if filters.category %}&category={{ filters.category }}{% endif %}" 
+           class="threshold-pill {% if days_threshold == 180 %}active{% endif %}">180+ Days (Dead Stock)</a>
+    </div>
+
+    <!-- 4 High-Priority Inactivity Metric Cards -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Tied-up Capital (Landed Cost) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="slow-kpi-card border-start border-danger border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-danger text-uppercase fw-bold fs-2xs">Tied-Up Capital (Cost)</span>
+                    <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle">
+                        <i class="fas fa-coins fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_dormant_capital|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Landed cost locked in unsold items</small>
+            </div>
+        </div>
+
+        <!-- 2. Dormant Units on Shelf -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="slow-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Dormant Units on Shelf</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-boxes-packing fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    {{ totals.total_dormant_units|floatformat:0|intcomma }} <span class="fs-6 fw-normal text-muted">Units</span>
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.total_slow_items }} Distinct product models</small>
+            </div>
+        </div>
+
+        <!-- 3. Potential Retail Value -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="slow-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Potential Retail Turnover</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-tags fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_potential_retail|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Estimated gross sales at current counter MRP</small>
+            </div>
+        </div>
+
+        <!-- 4. Never Sold Items -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="slow-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Zero Sales Ever Logged</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-ban fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    {{ totals.never_sold_count }} <span class="fs-6 fw-normal text-muted">SKUs</span>
+                </h3>
+                <small class="text-muted fs-2xs">Received in GRN but never sold at counter</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <input type="hidden" name="days" value="{{ days_threshold }}">
+
+            <div class="col-12 col-md-4">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Product, SKU, Barcode, Model, Rack...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Store Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if filters.category == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="brand" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Brands</option>
+                    {% for b in brands %}
+                        <option value="{{ b.id }}" {% if filters.brand == b.id|stringformat:"s" %}selected{% endif %}>
+                            {{ b.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-1">
+                <select name="inactivity_type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Inactivity</option>
+                    <option value="never_sold" {% if filters.inactivity_type == 'never_sold' %}selected{% endif %}>Never Sold</option>
+                    <option value="dormant" {% if filters.inactivity_type == 'dormant' %}selected{% endif %}>Stale Past Sales</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.branch or filters.category or filters.brand or filters.inactivity_type %}
+                <a href="{% url 'reports:slow_moving' %}?days={{ days_threshold }}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Slow-Moving Inventory Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Inactive Items Ledger (&gt; {{ days_threshold }} Days Inactive)
+            </h6>
+            <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 rounded-pill px-3">
+                {{ page_obj.paginator.count|default:records|length }} Products Queued
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-slow-stock">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Product / Item Model</th>
+                        <th>Category &amp; Brand</th>
+                        <th>Outlet Branch</th>
+                        <th>Rack Location</th>
+                        <th class="text-center">On-Hand Stock</th>
+                        <th>Last Sold Date (AD / BS)</th>
+                        <th class="text-center">Inactivity Duration</th>
+                        <th class="text-end">Unit Cost</th>
+                        <th class="text-end">Selling MRP</th>
+                        <th class="text-end">Tied Capital (Cost)</th>
+                        <th>Suggested Action</th>
+                        <th class="text-end pe-4">Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in records %}
+                    <tr>
+                        <td class="ps-4">
+                            <a href="{% url 'inventory:product_detail' item.product.pk %}" class="fw-bold text-dark text-decoration-none">
+                                {{ item.name }}
+                            </a>
+                            <div class="font-monospace text-muted fs-2xs mt-1">
+                                SKU: {{ item.sku }}
+                                {% if item.barcode %}&bull; Barcode: {{ item.barcode }}{% endif %}
+                                {% if item.is_serialized %}
+                                    <span class="badge bg-primary bg-opacity-10 text-primary ms-1" style="font-size: 8px;">IMEI</span>
+                                {% endif %}
+                            </div>
+                        </td>
+
+                        <td>
+                            <span class="fw-semibold text-dark">{{ item.product.category.name|default:"General" }}</span>
+                            <small class="text-muted d-block">{{ item.product.brand.name|default:"-" }}</small>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace">{{ item.branch.code }}</span>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-secondary border font-monospace fs-2xs">
+                                {{ item.rack_number }}
+                            </span>
+                        </td>
+
+                        <!-- On-Hand Stock -->
+                        <td class="text-center font-monospace fw-bold text-dark">
+                            {{ item.quantity|floatformat:1 }} {{ item.unit_code }}
+                        </td>
+
+                        <!-- Last Sold Date -->
+                        <td>
+                            {% if item.dormancy_code == 'NEVER_SOLD' %}
+                                <span class="badge bg-dark text-white fs-2xs">Never Sold</span>
+                            {% else %}
+                                <span class="text-dark fw-semibold">{{ item.last_sold_ad_str }}</span>
+                                <small class="text-muted d-block font-monospace fs-2xs">{{ item.last_sold_bs_str }} BS</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Inactivity Duration Badge -->
+                        <td class="text-center">
+                            {% if item.dormancy_code == 'NEVER_SOLD' %}
+                                <span class="badge bg-secondary text-white fw-bold fs-2xs px-2 py-1">
+                                    Zero Sales Logged
+                                </span>
+                            {% elif item.days_dormant >= 90 %}
+                                <span class="badge bg-danger text-white fw-bold fs-xs font-monospace px-2 py-1">
+                                    {{ item.days_dormant }} Days Empty
+                                </span>
+                            {% else %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 fw-bold fs-xs font-monospace px-2 py-1">
+                                    {{ item.days_dormant }} Days Empty
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td class="col-num text-dark">
+                            Rs. {{ item.cost_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <td class="col-num text-muted">
+                            Rs. {{ item.selling_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Tied Capital Value -->
+                        <td class="col-num fw-bold text-danger">
+                            Rs. {{ item.tied_capital|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Suggested Action Badge -->
+                        <td>
+                            <span class="badge bg-{{ item.rec_badge }} bg-opacity-10 text-{{ item.rec_badge }} border border-{{ item.rec_badge }} border-opacity-25 fs-2xs px-2 py-1">
+                                {{ item.recommendation }}
+                            </span>
+                        </td>
+
+                        <td class="text-end pe-4">
+                            <a href="{% url 'inventory:product_detail' item.product.pk %}" 
+                               class="btn btn-outline-primary btn-sm rounded-pill px-2 py-0 fs-2xs" 
+                               title="View Product Details">
+                                Detail
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="12" class="text-center py-5 text-muted">
+                            <i class="fas fa-circle-check fs-1 text-success opacity-50 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Dead or Slow-Moving Items Found</h6>
+                            <p class="text-muted fs-xs mb-0">All products in this branch have recorded customer sales within the last {{ days_threshold }} days.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="4" class="ps-4 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="text-center col-num text-primary fs-6">{{ totals.total_dormant_units|floatformat:1 }}</td>
+                        <td colspan="4"></td>
+                        <td class="text-end col-num text-danger fs-6">Rs. {{ totals.total_dormant_capital|floatformat:2|intcomma }}</td>
+                        <td colspan="2" class="pe-4 text-white-50 fs-2xs">Total Locked Capital</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

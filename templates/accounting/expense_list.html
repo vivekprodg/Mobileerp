@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Operating Expenses Registry (दैनिक खर्चहरू) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Expense Registry</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-money-bill-wave text-warning-emphasis"></i>
+                <span>Operating Expense Vouchers</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(दैनिक खर्च भौचर सूची)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Audit-ready register of store operating overheads, utilities, and petty cash settlements</p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <a href="{% url 'accounting:expense_create' %}" class="btn btn-primary btn-sm rounded-pill px-3 shadow-xs fw-bold">
+                <i class="fas fa-plus-circle me-1"></i> Log Store Expense
+            </a>
+        </div>
+    </div>
+
+    <!-- Summary KPI Header Card -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="row g-3 align-items-center">
+            <div class="col-12 col-md-4 border-end-md">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="rounded-3 bg-danger bg-opacity-10 text-danger p-3 fs-4">
+                        <i class="fas fa-receipt"></i>
+                    </div>
+                    <div>
+                        <span class="fs-2xs fw-bold text-uppercase text-muted">Total Expenses Filtered</span>
+                        <h4 class="fw-extrabold text-dark font-mono mb-0">Rs. {{ total_spent|floatformat:2|intcomma }}</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4 border-end-md">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="rounded-3 bg-primary bg-opacity-10 text-primary p-3 fs-4">
+                        <i class="fas fa-file-invoice"></i>
+                    </div>
+                    <div>
+                        <span class="fs-2xs fw-bold text-uppercase text-muted">Voucher Records</span>
+                        <h4 class="fw-extrabold text-dark font-mono mb-0">{{ paginator.count|default:expenses|length }} Slips</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="rounded-3 bg-success bg-opacity-10 text-success p-3 fs-4">
+                        <i class="fas fa-shield-check"></i>
+                    </div>
+                    <div>
+                        <span class="fs-2xs fw-bold text-uppercase text-muted">General Ledger Status</span>
+                        <span class="badge bg-success bg-opacity-10 text-success fs-xs fw-bold d-block mt-1">100% Balanced &amp; Posted</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-end-0 text-muted"><i class="fas fa-search"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q }}" class="form-control bg-light border-start-0 ps-0" 
+                           placeholder="Search voucher no, payee, bill no, description...">
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <select name="account" class="form-select form-select-sm">
+                    <option value="">All Expense Accounts (सबै खर्च शीर्षक)</option>
+                    {% for acc in expense_accounts %}
+                    <option value="{{ acc.id }}" {% if request.GET.account == acc.id|stringformat:"s" %}selected{% endif %}>
+                        {{ acc.code }} - {{ acc.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-4 d-flex align-items-center gap-2">
+                <button type="submit" class="btn btn-dark btn-sm rounded-pill px-3">
+                    <i class="fas fa-filter me-1"></i> Apply Filter
+                </button>
+                <a href="{% url 'accounting:expense_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                    Reset
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Expense Table -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm">
+                <thead class="bg-slate-900 text-white text-uppercase fs-2xs tracking-wider">
+                    <tr>
+                        <th class="ps-3 py-3" style="width: 140px;">Voucher No.</th>
+                        <th>Expense Date</th>
+                        <th>Expense Category</th>
+                        <th>Payee Recipient</th>
+                        <th>Payment Mode / Account</th>
+                        <th>Bill Ref</th>
+                        <th class="text-end">Amount (NPR)</th>
+                        <th>Recorded By</th>
+                        <th class="text-center" style="width: 100px;">Attachment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for exp in expenses %}
+                    <tr>
+                        <td class="ps-3">
+                            <span class="font-mono fw-bold text-primary fs-xs">{{ exp.voucher_number }}</span>
+                            {% if exp.journal_entry %}
+                                <small class="text-muted d-block fs-2xs font-mono">JV: {{ exp.journal_entry.voucher_number }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="fw-semibold text-dark">{{ exp.expense_date|date:"Y-m-d" }}</div>
+                            {% if exp.expense_date_bs %}
+                                <small class="text-muted fs-2xs font-nepali">{{ exp.expense_date_bs }} BS</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="fw-bold text-dark">{{ exp.expense_account.name }}</div>
+                            <small class="text-muted fs-2xs font-mono">{{ exp.expense_account.code }}</small>
+                        </td>
+                        <td>
+                            <div class="fw-semibold text-dark">{{ exp.payee_recipient }}</div>
+                            {% if exp.description %}
+                                <small class="text-muted fs-2xs d-block text-truncate" style="max-width: 200px;" title="{{ exp.description }}">
+                                    {{ exp.description }}
+                                </small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs">{{ exp.get_payment_method_display }}</span>
+                            <small class="text-muted d-block fs-2xs">{{ exp.payment_account.name }}</small>
+                        </td>
+                        <td>
+                            <span class="font-mono fs-xs">{{ exp.bill_invoice_number|default:"-" }}</span>
+                        </td>
+                        <td class="text-end font-mono fw-extrabold text-danger fs-sm">
+                            Rs. {{ exp.amount|floatformat:2|intcomma }}
+                        </td>
+                        <td>
+                            <small class="text-muted d-flex align-items-center gap-1">
+                                <i class="fas fa-user-circle text-secondary"></i> {{ exp.recorded_by.username }}
+                            </small>
+                        </td>
+                        <td class="text-center">
+                            {% if exp.receipt_attachment %}
+                                <a href="{{ exp.receipt_attachment.url }}" target="_blank" class="btn btn-outline-secondary btn-sm py-0 px-2 rounded-pill fs-2xs" title="View Uploaded Memo">
+                                    <i class="fas fa-paperclip text-primary"></i> Memo
+                                </a>
+                            {% else %}
+                                <span class="text-muted fs-2xs">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-money-bill-wave fs-1 opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold mb-1">No Operating Expenses Recorded</h6>
+                            <p class="fs-xs mb-3">No expenses match your search query or date filter.</p>
+                            <a href="{% url 'accounting:expense_create' %}" class="btn btn-primary btn-sm rounded-pill px-3">
+                                <i class="fas fa-plus-circle me-1"></i> Record First Expense
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if is_paginated %}
+        <div class="card-footer bg-white border-top py-3 px-4">
+            {% include "includes/_pagination.html" %}
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

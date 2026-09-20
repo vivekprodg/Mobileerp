@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Trial Balance Sheet (सन्तुलन परीक्षण) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumb & Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 no-print">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-xs">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+                    <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Trial Balance</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-scale-balanced text-success"></i>
+                <span>Trial Balance Sheet</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(सन्तुलन परीक्षण खाता)</span>
+            </h4>
+            <p class="text-muted fs-xs mb-0">Complete verification of double-entry ledger equality: Total Debits ($\sum\text{Dr}$) = Total Credits ($\sum\text{Cr}$)</p>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportTrialBalanceCSV()">
+                <i class="fas fa-file-excel me-1"></i> Export Excel (CSV)
+            </button>
+        </div>
+    </div>
+
+    <!-- Mathematical Equality Verification Alert Banner -->
+    <div class="alert {% if tb_data.is_balanced %}bg-success bg-opacity-10 border-success text-success{% else %}bg-danger bg-opacity-10 border-danger text-danger{% endif %} rounded-4 p-3 mb-4 border d-flex align-items-center justify-content-between">
+        <div class="d-flex align-items-center gap-3">
+            <i class="fas {% if tb_data.is_balanced %}fa-check-double fs-3 text-success{% else %}fa-triangle-exclamation fs-3 text-danger{% endif %}"></i>
+            <div>
+                <h6 class="fw-bold mb-0">
+                    {% if tb_data.is_balanced %}
+                        TRIAL BALANCE IS MATHEMATICALLY BALANCED (सन्तुलन परीक्षण मिलेको छ)
+                    {% else %}
+                        UNBALANCED TRIAL BALANCE DETECTED (अन्तर पत्ता लाग्यो)!
+                    {% endif %}
+                </h6>
+                <small class="fs-xs {% if tb_data.is_balanced %}text-success text-opacity-75{% else %}text-danger text-opacity-75{% endif %}">
+                    {% if tb_data.is_balanced %}
+                        Sum of all Debit balances exactly matches Sum of all Credit balances with 0.00 variance.
+                    {% else %}
+                        Debit and Credit mismatch detected. Discrepancy amount: Rs. {{ tb_data.discrepancy|floatformat:2|intcomma }}.
+                    {% endif %}
+                </small>
+            </div>
+        </div>
+        <div class="text-end font-mono">
+            <div class="fs-xs text-muted">As of AD: <strong>{{ tb_data.as_of_date_ad|date:"Y-m-d" }}</strong></div>
+            <div class="fs-2xs text-muted font-nepali">Fiscal Year: <strong>{{ tb_data.fiscal_year }}</strong></div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 no-print">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Bikram Sambat Fiscal Year</label>
+                {{ filter_form.fiscal_year }}
+            </div>
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Outlet Scope</label>
+                {{ filter_form.branch }}
+            </div>
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">As of Date (AD)</label>
+                <input type="date" name="as_of_date" value="{{ tb_data.as_of_date_ad|date:'Y-m-d' }}" class="form-control form-control-sm font-mono">
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end pt-md-3">
+                <button type="submit" class="btn btn-dark btn-sm rounded-pill px-3 w-100 fw-bold">
+                    <i class="fas fa-filter me-1"></i> Recalculate
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Traditional Multi-Column Trial Balance Sheet -->
+    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4" id="trialBalancePrintArea">
+        
+        <!-- Print Header -->
+        <div class="p-4 border-bottom text-center">
+            <h4 class="fw-extrabold text-dark mb-0">{{ COMPANY_NAME }}</h4>
+            <div class="fs-xs text-muted">{{ STORE_OUTLET_NAME }} | PAN: {{ SYS_CONFIG.pan_number|default:"999999999" }}</div>
+            <h5 class="fw-bold text-primary mt-2 mb-0">TRIAL BALANCE SHEET</h5>
+            <small class="text-muted fs-2xs font-mono">As of Date: {{ tb_data.as_of_date_ad|date:"F d, Y" }} (Fiscal Year: {{ tb_data.fiscal_year }})</small>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover align-middle mb-0 fs-sm" id="trialBalanceTable">
+                <thead class="bg-slate-900 text-white text-uppercase fs-2xs tracking-wider text-center">
+                    <tr>
+                        <th rowspan="2" class="ps-3 text-start align-middle" style="width: 110px;">GL Code</th>
+                        <th rowspan="2" class="text-start align-middle">General Ledger Account</th>
+                        <th rowspan="2" class="text-start align-middle">Group / Classification</th>
+                        <th colspan="2" class="border-bottom border-slate-700 py-2">Total Activity (Turnover)</th>
+                        <th colspan="2" class="border-bottom border-slate-700 py-2 bg-slate-800">Net Closing Balance</th>
+                    </tr>
+                    <tr>
+                        <th class="py-1 font-mono" style="width: 140px;">Debit (Dr)</th>
+                        <th class="py-1 font-mono" style="width: 140px;">Credit (Cr)</th>
+                        <th class="py-1 font-mono bg-slate-800 text-info" style="width: 150px;">Debit (Dr)</th>
+                        <th class="py-1 font-mono bg-slate-800 text-warning" style="width: 150px;">Credit (Cr)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in tb_data.rows %}
+                    <tr>
+                        <td class="ps-3 font-mono fw-bold text-primary fs-xs">{{ row.code }}</td>
+                        <td>
+                            <a href="{% url 'accounting:general_ledger_account' row.account.id %}" class="fw-semibold text-dark text-decoration-none">
+                                {{ row.name }}
+                            </a>
+                            {% if row.name_np %}
+                                <div class="text-muted fs-2xs font-nepali">{{ row.name_np }}</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-muted border fs-2xs">{{ row.group }}</span>
+                        </td>
+                        <td class="text-end font-mono fs-xs text-muted">
+                            {% if row.total_dr > 0 %}Rs. {{ row.total_dr|floatformat:2|intcomma }}{% else %}-{% endif %}
+                        </td>
+                        <td class="text-end font-mono fs-xs text-muted">
+                            {% if row.total_cr > 0 %}Rs. {{ row.total_cr|floatformat:2|intcomma }}{% else %}-{% endif %}
+                        </td>
+                        <td class="text-end font-mono fw-bold fs-xs text-dark bg-light">
+                            {% if row.closing_dr > 0 %}
+                                Rs. {{ row.closing_dr|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="text-end font-mono fw-bold fs-xs text-dark bg-light">
+                            {% if row.closing_cr > 0 %}
+                                Rs. {{ row.closing_cr|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            <i class="fas fa-scale-balanced fs-1 opacity-25 d-block mb-3"></i>
+                            No posted financial accounts found.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot class="bg-slate-900 text-white font-mono fw-extrabold fs-sm">
+                    <tr>
+                        <td colspan="3" class="text-end text-uppercase tracking-wider pe-3 align-middle">
+                            Grand Verification Totals:
+                        </td>
+                        <td class="text-end text-slate-300 fs-xs">Rs. {{ tb_data.total_period_dr|floatformat:2|intcomma }}</td>
+                        <td class="text-end text-slate-300 fs-xs">Rs. {{ tb_data.total_period_cr|floatformat:2|intcomma }}</td>
+                        <td class="text-end text-info bg-slate-800">Rs. {{ tb_data.total_dr_balance|floatformat:2|intcomma }}</td>
+                        <td class="text-end text-warning bg-slate-800">Rs. {{ tb_data.total_cr_balance|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    function exportTrialBalanceCSV() {
+        const table = document.getElementById('trialBalanceTable');
+        let csv = [];
+        for (let row of table.rows) {
+            let cols = [];
+            for (let cell of row.cells) {
+                let text = cell.innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+                text = `"${text.replace(/"/g, '""')}"`;
+                cols.push(text);
+            }
+            csv.push(cols.join(","));
+        }
+        const csvFile = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const downloadLink = document.createElement("a");
+        downloadLink.download = `Trial_Balance_{{ tb_data.as_of_date_ad|date:'Y_m_d' }}.csv`;
+        downloadLink.href = window.URL.createObjectURL(csvFile);
+        downloadLink.style.display = "none";
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+    }
+</script>
+{% endblock %}

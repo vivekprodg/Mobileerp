@@ -1,266 +1,502 @@
-<div class="p-3 d-flex flex-column h-100 w-100 overflow-hidden">
-    <!-- Sidebar Meta Header (Desktop only) -->
-    <div class="d-flex align-items-center justify-content-between pb-2 mb-2 border-bottom flex-shrink-0 nav-header">
+{% load static %}
+<div class="sidebar-scroll-viewport">
+    
+    <!-- Sidebar Meta Header (Desktop Brand Caption) -->
+    <div class="d-flex align-items-center justify-content-between pb-2 mb-2 border-bottom flex-shrink-0 sidebar-label-wrap">
         <span class="text-uppercase fs-2xs fw-bold text-muted tracking-wider text-truncate" title="{{ COMPANY_NAME }}">
-            {{ COMPANY_NAME|truncatechars:18 }}
+            {{ COMPANY_NAME|default:"Smart Mobile Hub"|truncatechars:18 }}
         </span>
         <span class="badge bg-success bg-opacity-10 text-success rounded-pill px-2 py-1 fs-2xs">
             <i class="fas fa-circle fs-2xs me-1"></i> Live
         </span>
     </div>
 
-    <!-- Navigation Scroll Container -->
-    <ul class="nav nav-pills d-flex flex-column flex-nowrap w-100 gap-1 flex-grow-1 overflow-y-auto overflow-x-hidden list-unstyled m-0 p-0">
-        
-        <!-- 1. Central Dashboard -->
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'core:dashboard' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'core' and request.resolver_match.url_name == 'dashboard' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm fw-semibold w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Dashboard">
-                <i class="fas fa-chart-pie fa-fw text-primary"></i> 
-                <span class="nav-text">Dashboard</span>
-            </a>
-        </li>
+    <!-- 1. Main Dashboard -->
+    <a href="{% url 'core:dashboard' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'core' and request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Dashboard">
+        <i class="fas fa-chart-pie"></i>
+        <span class="sidebar-label-wrap">Dashboard</span>
+    </a>
 
-        <!-- 2. Fast POS Terminal Hero Item -->
-        <li class="nav-item w-100 flex-shrink-0 my-1">
-            <a href="{% url 'sales:pos_terminal' %}" 
-               class="nav-link text-dark bg-warning bg-opacity-25 fw-bold d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100 border border-warning border-opacity-50 shadow-xs"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="POS Billing Terminal">
-                <i class="fas fa-cash-register fa-fw text-warning-emphasis"></i> 
-                <span class="nav-text">POS Billing</span>
-                <span class="badge bg-warning text-dark ms-auto fs-2xs badge-hide-collapsed">FAST</span>
-            </a>
-        </li>
+    <!-- 2. Sales & Billing Section -->
+    <div class="sidebar-section-heading">Sales &amp; Billing</div>
 
-        <!-- SECTION: Trade-In & Exchange -->
-        <li class="nav-item w-100 flex-shrink-0 mt-2">
-            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Trade-In &amp; Exchange</h6>
-        </li>
+    <!-- Fast POS Terminal Hero Link -->
+    <a href="{% url 'sales:pos_terminal' %}" 
+       class="sidebar-nav-item hero-pos-link"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="POS Billing Terminal">
+        <i class="fas fa-cash-register text-warning-emphasis"></i>
+        <span class="sidebar-label-wrap">POS Billing</span>
+        <span class="badge bg-warning text-dark ms-auto fs-2xs badge-pill-tag">FAST</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'sales:trade_in_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'sales' and 'trade_in' in request.resolver_match.url_name and request.resolver_match.url_name != 'trade_in_wizard' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Trade-In Vouchers">
-                <i class="fas fa-repeat fa-fw text-warning-emphasis"></i> 
-                <span class="nav-text">Phone Exchange / Trade-In</span>
-            </a>
-        </li>
+    <!-- Estimation Slips -->
+    <a href="{% url 'sales:estimate_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'sales' and request.resolver_match.url_name == 'estimate_list' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Estimation Slips">
+        <i class="fas fa-receipt text-secondary"></i>
+        <span class="sidebar-label-wrap">Estimation Slips</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'sales:trade_in_wizard' %}" 
-               class="nav-link {% if request.resolver_match.url_name == 'trade_in_wizard' %}active text-white bg-primary{% else %}text-dark bg-primary bg-opacity-10{% endif %} fw-semibold d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Valuation Wizard">
-                <i class="fas fa-calculator fa-fw text-primary"></i> 
-                <span class="nav-text">Buy-Back Wizard</span>
-            </a>
-        </li>
+    <!-- Sales Returns & Exchanges -->
+    <a href="{% url 'sales:return_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'sales' and 'return' in request.resolver_match.url_name and 'purchase' not in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Sales Returns &amp; Exchanges">
+        <i class="fas fa-rotate-left text-danger"></i>
+        <span class="sidebar-label-wrap">Sales Returns &amp; Exchanges</span>
+    </a>
 
-        <!-- SECTION: Service Workshop & Warranty -->
-        <li class="nav-item w-100 flex-shrink-0 mt-2">
-            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Service Workshop</h6>
-        </li>
+    <!-- Customers & Udhaari Directory -->
+    <a href="{% url 'customers:customer_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'customers' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Customers &amp; Udhaari">
+        <i class="fas fa-users text-primary"></i>
+        <span class="sidebar-label-wrap">Customers &amp; Udhaari</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'repairs:dashboard' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'dashboard' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Repair Workshop Queue">
-                <i class="fas fa-screwdriver-wrench fa-fw text-warning-emphasis"></i> 
-                <span class="nav-text">Repair Workshop Queue</span>
-            </a>
-        </li>
+    <!-- 3. Purchases & Procurement -->
+    <div class="sidebar-section-heading">Purchases &amp; Procurement</div>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'repairs:ticket_create' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'ticket_create' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Intake Inspection Desk">
-                <i class="fas fa-clipboard-check fa-fw text-primary"></i> 
-                <span class="nav-text">Intake Inspection Desk</span>
-            </a>
-        </li>
+    <a href="{% url 'purchases:grn_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'purchases' and request.resolver_match.url_name == 'grn_list' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Purchases &amp; Inward GRN">
+        <i class="fas fa-truck-ramp-box text-secondary"></i>
+        <span class="sidebar-label-wrap">Purchases &amp; Inward GRN</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'repairs:optical_desk' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'optical_desk' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Optical Prescription Desk">
-                <i class="fas fa-glasses fa-fw text-info"></i> 
-                <span class="nav-text">Optical &amp; Eyewear Desk</span>
-            </a>
-        </li>
+    <a href="{% url 'purchases:po_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'purchases' and 'po_' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Purchase Orders (PO)">
+        <i class="fas fa-file-invoice text-secondary"></i>
+        <span class="sidebar-label-wrap">Purchase Orders (PO)</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'inventory:vendor_rma_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'inventory' and 'rma' in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Vendor RMA Claims">
-                <i class="fas fa-truck-ramp-box fa-fw text-danger"></i> 
-                <span class="nav-text">Vendor RMA Claims</span>
-            </a>
-        </li>
+    <a href="{% url 'purchases:purchase_return_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'purchases' and 'purchase_return' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Purchase Returns (Debit Notes)">
+        <i class="fas fa-arrow-rotate-left text-danger"></i>
+        <span class="sidebar-label-wrap">Purchase Returns (Debit Notes)</span>
+    </a>
 
-        <!-- SECTION: Catalog & Contacts -->
-        <li class="nav-item w-100 flex-shrink-0 mt-2">
-            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Catalog &amp; Contacts</h6>
-        </li>
+    <a href="{% url 'purchases:supplier_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'purchases' and request.resolver_match.url_name == 'supplier_list' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Suppliers Directory">
+        <i class="fas fa-building-user text-secondary"></i>
+        <span class="sidebar-label-wrap">Suppliers Directory</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'inventory:product_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'inventory' and 'category' not in request.resolver_match.url_name and 'rma' not in request.resolver_match.url_name and 'unit' not in request.resolver_match.url_name and 'imei_registry' not in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Inventory Catalog">
-                <i class="fas fa-boxes-stacked fa-fw text-secondary"></i> 
-                <span class="nav-text">Inventory Catalog</span>
-            </a>
-        </li>
+    <!-- 4. Service & Repairs -->
+    <div class="sidebar-section-heading">Service &amp; Repairs</div>
 
-        <!-- Central IMEI & Serial Registry -->
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'inventory:imei_registry' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'inventory' and request.resolver_match.url_name == 'imei_registry' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="IMEI &amp; Serial Registry">
-                <i class="fas fa-barcode fa-fw text-primary"></i> 
-                <span class="nav-text">IMEI &amp; Serial Registry</span>
-            </a>
-        </li>
+    <a href="{% url 'repairs:dashboard' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Repair Workshop Queue">
+        <i class="fas fa-screwdriver-wrench text-warning-emphasis"></i>
+        <span class="sidebar-label-wrap">Repair Workshop Queue</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'inventory:unit_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'inventory' and 'unit' in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Units of Measurement">
-                <i class="fas fa-scale-balanced fa-fw text-secondary"></i> 
-                <span class="nav-text">Units of Measurement (UOM)</span>
-            </a>
-        </li>
+    <a href="{% url 'repairs:ticket_create' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'ticket_create' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Intake Inspection Desk">
+        <i class="fas fa-clipboard-check text-primary"></i>
+        <span class="sidebar-label-wrap">Intake Inspection Desk</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'inventory:category_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'inventory' and 'category' in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Categories">
-                <i class="fas fa-tags fa-fw text-secondary"></i> 
-                <span class="nav-text">Product Categories</span>
-            </a>
-        </li>
+    <a href="{% url 'repairs:optical_desk' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'repairs' and request.resolver_match.url_name == 'optical_desk' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Optical Prescription Desk">
+        <i class="fas fa-glasses text-info"></i>
+        <span class="sidebar-label-wrap">Optical &amp; Eyewear Desk</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'customers:customer_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'customers' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Customers &amp; Udhaari">
-                <i class="fas fa-users fa-fw text-secondary"></i> 
-                <span class="nav-text">Customers &amp; Udhaari</span>
-            </a>
-        </li>
+    <!-- 5. Inventory & Stock (Operational Tools) -->
+    <div class="sidebar-section-heading">Inventory &amp; Stock</div>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'purchases:grn_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'purchases' and request.resolver_match.url_name == 'grn_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Purchases &amp; GRN">
-                <i class="fas fa-truck-ramp-box fa-fw text-secondary"></i> 
-                <span class="nav-text">Purchases &amp; GRN</span>
-            </a>
-        </li>
+    <a href="{% url 'inventory:product_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'inventory' and 'category' not in request.resolver_match.url_name and 'rma' not in request.resolver_match.url_name and 'unit' not in request.resolver_match.url_name and 'imei_registry' not in request.resolver_match.url_name and 'excel' not in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Inventory Catalog">
+        <i class="fas fa-boxes-stacked text-secondary"></i>
+        <span class="sidebar-label-wrap">Inventory Catalog</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'purchases:supplier_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'purchases' and request.resolver_match.url_name == 'supplier_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Suppliers">
-                <i class="fas fa-building-user fa-fw text-secondary"></i> 
-                <span class="nav-text">Suppliers Directory</span>
-            </a>
-        </li>
+    <a href="{% url 'inventory:imei_registry' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'inventory' and request.resolver_match.url_name == 'imei_registry' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="IMEI &amp; Serial Registry">
+        <i class="fas fa-barcode text-primary"></i>
+        <span class="sidebar-label-wrap">IMEI &amp; Serial Registry</span>
+    </a>
 
-        <!-- SECTION: Operations & Registers -->
-        <li class="nav-item w-100 flex-shrink-0 mt-2">
-            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Operations &amp; Reports</h6>
-        </li>
+    <a href="{% url 'branches:transfer_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'branches' and request.resolver_match.url_name == 'transfer_list' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Branch Transfers">
+        <i class="fas fa-dolly text-secondary"></i>
+        <span class="sidebar-label-wrap">Branch Transfers</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'sales:estimate_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'sales' and request.resolver_match.url_name == 'estimate_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Estimation Slips">
-                <i class="fas fa-receipt fa-fw text-secondary"></i> 
-                <span class="nav-text">Estimation Slips</span>
-            </a>
-        </li>
+    <a href="{% url 'inventory:category_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'inventory' and 'category' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Product Categories">
+        <i class="fas fa-tags text-secondary"></i>
+        <span class="sidebar-label-wrap">Product Categories</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'sales:return_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'sales' and 'return' in request.resolver_match.url_name %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Sales Returns &amp; Exchanges">
-                <i class="fas fa-rotate-left fa-fw text-danger"></i> 
-                <span class="nav-text">Sales Returns &amp; Exchanges</span>
-            </a>
-        </li>
+    <a href="{% url 'inventory:unit_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'inventory' and 'unit' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Units of Measurement">
+        <i class="fas fa-scale-balanced text-secondary"></i>
+        <span class="sidebar-label-wrap">Units of Measurement</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'branches:transfer_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'branches' and request.resolver_match.url_name == 'transfer_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Branch Transfers">
-                <i class="fas fa-dolly fa-fw text-secondary"></i> 
-                <span class="nav-text">Branch Transfers</span>
-            </a>
-        </li>
+    <!-- 6. Trade-In & Exchange -->
+    <div class="sidebar-section-heading">Trade-In &amp; Exchange</div>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'reports:daily_sales' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'reports' and request.resolver_match.url_name == 'daily_sales' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Daily Sales &amp; Gross Profit">
-                <i class="fas fa-chart-line fa-fw text-secondary"></i> 
-                <span class="nav-text">Sales &amp; Margin Reports</span>
-            </a>
-        </li>
+    <a href="{% url 'sales:trade_in_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'sales' and 'trade_in' in request.resolver_match.url_name and request.resolver_match.url_name != 'trade_in_wizard' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Phone Exchange Directory">
+        <i class="fas fa-repeat text-warning-emphasis"></i>
+        <span class="sidebar-label-wrap">Phone Exchange Directory</span>
+    </a>
 
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'taxation:dashboard' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'taxation' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Tax &amp; Proforma Books">
-                <i class="fas fa-calculator fa-fw text-secondary"></i> 
-                <span class="nav-text">Proforma / Tax Books</span>
-            </a>
-        </li>
+    <a href="{% url 'sales:trade_in_wizard' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.url_name == 'trade_in_wizard' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Buy-Back Valuation Wizard">
+        <i class="fas fa-calculator text-primary"></i>
+        <span class="sidebar-label-wrap">Buy-Back Wizard</span>
+    </a>
 
-        <!-- Administrator Controls (Accessible to Super Admin, Owners, and Branch Managers) -->
-        {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
-        <li class="nav-item w-100 flex-shrink-0 mt-2">
-            <h6 class="nav-header text-uppercase text-muted fw-bold fs-2xs px-2 mb-1">Administration</h6>
-        </li>
+    <!-- =========================================================================
+         7. FINANCIAL ACCOUNTING & GENERAL LEDGER (ROLE SCOPED: OWNER, MGR, ACCT)
+         ========================================================================= -->
+    {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' or user.role == 'ACCOUNTANT' %}
+    <div class="sidebar-section-heading">Financial Accounting &amp; GL</div>
 
-        <!-- Store Outlets: Accessible to Central Super Admins & Owners -->
-        {% if user.is_superuser or user.role == 'OWNER' %}
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'branches:branch_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'branches' and request.resolver_match.url_name == 'branch_list' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Store Outlets &amp; Branding">
-                <i class="fas fa-store fa-fw text-primary"></i> 
-                <span class="nav-text">Store Outlets</span>
-            </a>
-        </li>
+    <!-- Chart of Accounts -->
+    <a href="{% url 'accounting:coa' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and request.resolver_match.url_name == 'coa' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Chart of Accounts">
+        <i class="fas fa-sitemap text-primary"></i>
+        <span class="sidebar-label-wrap">Chart of Accounts</span>
+    </a>
 
-        <!-- Forensic Security Audit Logs -->
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'core:audit_logs' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'core' and request.resolver_match.url_name == 'audit_logs' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Security Audit Logs">
-                <i class="fas fa-fingerprint fa-fw text-danger"></i> 
-                <span class="nav-text">Security Audit Logs</span>
-            </a>
-        </li>
-        {% endif %}
+    <!-- Operating Expenses & Vouchers -->
+    <a href="{% url 'accounting:expense_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and 'expense' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Operating Expenses &amp; Vouchers">
+        <i class="fas fa-money-bill-wave text-warning-emphasis"></i>
+        <span class="sidebar-label-wrap">Operating Expenses</span>
+    </a>
 
-        <!-- Staff Accounts -->
-        <li class="nav-item w-100 flex-shrink-0">
-            <a href="{% url 'users:user_list' %}" 
-               class="nav-link {% if request.resolver_match.app_name == 'users' %}active text-white bg-primary{% else %}text-dark{% endif %} d-flex align-items-center gap-2 py-2 px-3 rounded-3 fs-sm w-100"
-               data-bs-toggle="tooltip" data-bs-placement="right" title="Staff Accounts">
-                <i class="fas fa-user-shield fa-fw text-secondary"></i> 
-                <span class="nav-text">Staff &amp; Roles</span>
-            </a>
-        </li>
-        {% endif %}
-    </ul>
+    <!-- General Journal Entries -->
+    <a href="{% url 'accounting:journal_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and 'journal' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="General Journal Entries">
+        <i class="fas fa-book-journal-whills text-secondary"></i>
+        <span class="sidebar-label-wrap">Journal Entries</span>
+    </a>
 
-    <!-- Non-IRD Disclaimer Footer Badge -->
-    <div class="mt-auto pt-2 border-top text-center flex-shrink-0 w-100 sidebar-footer-disclaimer">
-        <div class="badge bg-warning bg-opacity-10 text-dark border border-warning border-opacity-25 w-100 py-2 fs-2xs lh-sm text-wrap">
-            <i class="fas fa-file-invoice text-warning me-1"></i> Proforma Mode<br>
-            <span class="text-muted" style="font-size: 0.65rem;">Non-IRD Estimate Voucher</span>
+    <!-- General Ledger -->
+    <a href="{% url 'accounting:general_ledger' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and 'general_ledger' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="General Ledger Statements">
+        <i class="fas fa-book-bookmark text-info"></i>
+        <span class="sidebar-label-wrap">General Ledger</span>
+    </a>
+
+    <!-- Trial Balance -->
+    <a href="{% url 'accounting:trial_balance' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and request.resolver_match.url_name == 'trial_balance' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Trial Balance">
+        <i class="fas fa-scale-balanced text-success"></i>
+        <span class="sidebar-label-wrap">Trial Balance</span>
+    </a>
+
+    <!-- Profit & Loss Statement -->
+    <a href="{% url 'accounting:profit_loss' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and request.resolver_match.url_name == 'profit_loss' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Profit &amp; Loss Statement">
+        <i class="fas fa-chart-pie text-success"></i>
+        <span class="sidebar-label-wrap">Profit &amp; Loss (P&amp;L)</span>
+    </a>
+
+    <!-- Balance Sheet -->
+    <a href="{% url 'accounting:balance_sheet' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and request.resolver_match.url_name == 'balance_sheet' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Balance Sheet">
+        <i class="fas fa-building-columns text-primary"></i>
+        <span class="sidebar-label-wrap">Balance Sheet</span>
+    </a>
+
+    <!-- Bank Reconciliation -->
+    <a href="{% url 'accounting:reconciliation' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and request.resolver_match.url_name == 'reconciliation' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Bank Reconciliation">
+        <i class="fas fa-landmark-dome text-secondary"></i>
+        <span class="sidebar-label-wrap">Bank Reconciliation</span>
+    </a>
+    {% endif %}
+
+    <!-- 8. Reports & Accounts Suites -->
+    <div class="sidebar-section-heading">Reports &amp; Analytics</div>
+
+    <!-- DEDICATED SALES REPORTS SUITE ACCORDION (15 SUITE) -->
+    <div class="sidebar-subgroup-wrap">
+        <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupSalesSuite', this)">
+            <i class="fas fa-chart-line text-success"></i>
+            <span class="sidebar-label-wrap flex-grow-1">Sales Reports</span>
+            <span class="badge bg-success text-white fs-2xs me-1 badge-pill-tag">15 SUITE</span>
+            <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
         </div>
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'sales_summary,item_sales,product_sales,brand_sales,category_sales,sold_imei,trade_in_sales,salesperson_sales,cashier_sales,payment_methods,gross_profit,discount_overrides,top_selling,slow_selling,cancelled_sales,daily_sales' %}d-none{% endif %}" id="subgroupSalesSuite">
+            
+            <!-- Executive & Revenue -->
+            <span class="text-uppercase fw-bold text-muted px-2 pt-2 pb-1 d-block" style="font-size: 0.65rem; letter-spacing: 0.06em;">
+                Executive &amp; Revenue
+            </span>
+            <a href="{% url 'reports:daily_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'daily_sales' %}active{% endif %}">
+                <i class="fas fa-calendar-day fs-2xs me-1 text-primary"></i> Daily Sales &amp; Margins
+            </a>
+            <a href="{% url 'reports:sales_summary' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'sales_summary' %}active{% endif %}">
+                <i class="fas fa-chart-pie fs-2xs me-1 text-success"></i> Sales Summary (Date-Wise)
+            </a>
+            <a href="{% url 'reports:item_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'item_sales' %}active{% endif %}">
+                <i class="fas fa-list-check fs-2xs me-1 text-info"></i> Item-Wise Detailed Sales
+            </a>
+            <a href="{% url 'reports:product_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'product_sales' %}active{% endif %}">
+                <i class="fas fa-boxes-stacked fs-2xs me-1 text-secondary"></i> Product-Wise Volume
+            </a>
+            <a href="{% url 'reports:brand_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'brand_sales' %}active{% endif %}">
+                <i class="fas fa-tags fs-2xs me-1 text-primary"></i> Brand-Wise Sales
+            </a>
+            <a href="{% url 'reports:category_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'category_sales' %}active{% endif %}">
+                <i class="fas fa-folder-tree fs-2xs me-1 text-secondary"></i> Category-Wise Sales
+            </a>
+
+            <!-- Handset & IMEI -->
+            <span class="text-uppercase fw-bold text-muted px-2 pt-2 pb-1 d-block border-top mt-1" style="font-size: 0.65rem; letter-spacing: 0.06em;">
+                Handset &amp; IMEI
+            </span>
+            <a href="{% url 'reports:sold_imei' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'sold_imei' %}active{% endif %}">
+                <i class="fas fa-barcode fs-2xs me-1 text-primary"></i> Sold Handset IMEIs
+            </a>
+            <a href="{% url 'reports:trade_in_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'trade_in_sales' %}active{% endif %}">
+                <i class="fas fa-repeat fs-2xs me-1 text-warning"></i> Trade-In Exchange Deals
+            </a>
+
+            <!-- Staff & Collections -->
+            <span class="text-uppercase fw-bold text-muted px-2 pt-2 pb-1 d-block border-top mt-1" style="font-size: 0.65rem; letter-spacing: 0.06em;">
+                Staff &amp; Collections
+            </span>
+            <a href="{% url 'reports:salesperson_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'salesperson_sales' %}active{% endif %}">
+                <i class="fas fa-user-tie fs-2xs me-1 text-info"></i> Salesperson Performance
+            </a>
+            <a href="{% url 'reports:cashier_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'cashier_sales' %}active{% endif %}">
+                <i class="fas fa-cash-register fs-2xs me-1 text-success"></i> Cashier Collections
+            </a>
+            <a href="{% url 'reports:payment_methods' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'payment_methods' %}active{% endif %}">
+                <i class="fas fa-wallet fs-2xs me-1 text-primary"></i> Payment Methods Inflow
+            </a>
+
+            <!-- Audit & Profit (Part A) -->
+            <span class="text-uppercase fw-bold text-muted px-2 pt-2 pb-1 d-block border-top mt-1" style="font-size: 0.65rem; letter-spacing: 0.06em;">
+                Audit &amp; Profit
+            </span>
+            <a href="{% url 'reports:gross_profit' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'gross_profit' %}active{% endif %}">
+                <i class="fas fa-coins fs-2xs me-1 text-warning"></i> Gross Profit &amp; Margins
+            </a>
+            <a href="{% url 'reports:discount_overrides' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'discount_overrides' %}active{% endif %}">
+                <i class="fas fa-percent fs-2xs me-1 text-danger"></i> Discounts &amp; Overrides
+            </a>
+            <a href="{% url 'reports:top_selling' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'top_selling' %}active{% endif %}">
+                <i class="fas fa-arrow-trend-up fs-2xs me-1 text-success"></i> Top-Selling Products
+            </a>
+            <a href="{% url 'reports:slow_selling' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'slow_selling' %}active{% endif %}">
+                <i class="fas fa-snowflake fs-2xs me-1 text-info"></i> Slow-Selling Products
+            </a>
+            <a href="{% url 'reports:cancelled_sales' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'cancelled_sales' %}active{% endif %}">
+                <i class="fas fa-ban fs-2xs me-1 text-danger"></i> Cancelled Bills Audit
+            </a>
+        </div>
+    </div>
+
+    <!-- DEDICATED PURCHASE REPORTS SUITE (7 ESSENTIAL REPORTS - PART B INCLUDED) -->
+    <div class="sidebar-subgroup-wrap">
+        <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupPurchasesSuite', this)">
+            <i class="fas fa-cart-flatbed text-warning"></i>
+            <span class="sidebar-label-wrap flex-grow-1">Purchase Reports</span>
+            <span class="badge bg-warning text-dark fs-2xs me-1 badge-pill-tag">7 SUITE</span>
+            <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
+        </div>
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'purchase_register,supplier_purchases,product_purchases,purchase_return_list,supplier_outstanding,cancelled_purchases,price_history' %}d-none{% endif %}" id="subgroupPurchasesSuite">
+            <a href="{% url 'taxation:purchase_register' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'purchase_register' %}active{% endif %}">
+                <i class="fas fa-book-open fs-2xs me-1"></i> Purchase Register
+            </a>
+            <a href="{% url 'reports:supplier_purchases' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'supplier_purchases' %}active{% endif %}">
+                <i class="fas fa-building-user fs-2xs me-1"></i> Supplier Purchases
+            </a>
+            <a href="{% url 'reports:product_purchases' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'product_purchases' %}active{% endif %}">
+                <i class="fas fa-boxes-stacked fs-2xs me-1"></i> Product Purchases
+            </a>
+            <a href="{% url 'purchases:purchase_return_list' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'purchase_return_list' %}active{% endif %}">
+                <i class="fas fa-arrow-rotate-left fs-2xs text-danger me-1"></i> Purchase Returns
+            </a>
+            <a href="{% url 'reports:supplier_outstanding' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'supplier_outstanding' %}active{% endif %}">
+                <i class="fas fa-hand-holding-dollar fs-2xs text-warning me-1"></i> Supplier Udhaari
+            </a>
+            <a href="{% url 'reports:cancelled_purchases' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'cancelled_purchases' %}active{% endif %}">
+                <i class="fas fa-ban fs-2xs text-danger me-1"></i> Cancelled Purchases
+            </a>
+            <a href="{% url 'reports:price_history' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'price_history' %}active{% endif %}">
+                <i class="fas fa-timeline fs-2xs text-info me-1"></i> Price History
+            </a>
+        </div>
+    </div>
+
+    <!-- Sub-Group A: Financial Ledgers & Taxes -->
+    <div class="sidebar-subgroup-wrap">
+        <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupA', this)">
+            <i class="fas fa-book-bookmark text-success"></i>
+            <span class="sidebar-label-wrap flex-grow-1">Customer &amp; Tax Books</span>
+            <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
+        </div>
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'customer_udhaari' and request.resolver_match.app_name != 'taxation' or request.resolver_match.url_name == 'purchase_register' %}d-none{% endif %}" id="subgroupA">
+            <a href="{% url 'reports:customer_udhaari' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'customer_udhaari' %}active{% endif %}">
+                Customer Udhaari Book
+            </a>
+            <a href="{% url 'taxation:dashboard' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name != 'purchase_register' %}active{% endif %}">
+                Proforma / Tax Books
+            </a>
+        </div>
+    </div>
+
+    <!-- Sub-Group B: Core Stock Control -->
+    <div class="sidebar-subgroup-wrap">
+        <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupB', this)">
+            <i class="fas fa-boxes-stacked text-primary"></i>
+            <span class="sidebar-label-wrap flex-grow-1">Core Stock Control</span>
+            <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
+        </div>
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'stock_summary,current_stock,stock_detail,low_stock,out_of_stock,inventory_valuation' %}d-none{% endif %}" id="subgroupB">
+            <a href="{% url 'reports:stock_summary' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'stock_summary' %}active{% endif %}">
+                Stock Summary (21-Col)
+            </a>
+            <a href="{% url 'reports:current_stock' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'current_stock' %}active{% endif %}">
+                Current Stock Snapshot
+            </a>
+            <a href="{% url 'reports:stock_detail' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'stock_detail' %}active{% endif %}">
+                Stock Detail (Bin Card)
+            </a>
+            <a href="{% url 'reports:low_stock' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'low_stock' %}active{% endif %}">
+                Low Stock / Reorder Alert
+            </a>
+            <a href="{% url 'reports:out_of_stock' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'out_of_stock' %}active{% endif %}">
+                Out of Stock (Zero Items)
+            </a>
+            <a href="{% url 'reports:inventory_valuation' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'inventory_valuation' %}active{% endif %}">
+                Stock Asset Valuation
+            </a>
+        </div>
+    </div>
+
+    <!-- Sub-Group C: Handset & IMEI Tracking -->
+    <div class="sidebar-subgroup-wrap">
+        <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupC', this)">
+            <i class="fas fa-mobile-screen text-info"></i>
+            <span class="sidebar-label-wrap flex-grow-1">Handset &amp; IMEI</span>
+            <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
+        </div>
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'imei_stock,imei_lifecycle,trade_in_inventory' %}d-none{% endif %}" id="subgroupC">
+            <a href="{% url 'reports:imei_stock' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'imei_stock' %}active{% endif %}">
+                Live IMEI Stock Registry
+            </a>
+            <a href="{% url 'reports:imei_lifecycle' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'imei_lifecycle' %}active{% endif %}">
+                IMEI Device Lifecycle
+            </a>
+            <a href="{% url 'reports:trade_in_inventory' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'trade_in_inventory' %}active{% endif %}">
+                Pre-Owned / Trade-In Stock
+            </a>
+        </div>
+    </div>
+
+    <!-- Sub-Group D: Movements & Quality -->
+    <div class="sidebar-subgroup-wrap">
+        <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupD', this)">
+            <i class="fas fa-truck-ramp-box text-secondary"></i>
+            <span class="sidebar-label-wrap flex-grow-1">Movements &amp; Quality</span>
+            <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
+        </div>
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'stock_transfers,stock_adjustments,damaged_stock,vendor_rma' %}d-none{% endif %}" id="subgroupD">
+            <a href="{% url 'reports:stock_transfers' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'stock_transfers' %}active{% endif %}">
+                Inter-Branch Transfers
+            </a>
+            <a href="{% url 'reports:stock_adjustments' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'stock_adjustments' %}active{% endif %}">
+                Stock Adjustments Log
+            </a>
+            <a href="{% url 'reports:damaged_stock' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'damaged_stock' %}active{% endif %}">
+                Damaged / Defective Stock
+            </a>
+            <a href="{% url 'reports:vendor_rma' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'vendor_rma' %}active{% endif %}">
+                Vendor RMA Claims
+            </a>
+        </div>
+    </div>
+
+    <!-- Sub-Group E: Inventory Intelligence -->
+    <div class="sidebar-subgroup-wrap">
+        <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupE', this)">
+            <i class="fas fa-brain text-warning-emphasis"></i>
+            <span class="sidebar-label-wrap flex-grow-1">Stock Intelligence</span>
+            <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
+        </div>
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'stock_aging,slow_moving,batch_stock' %}d-none{% endif %}" id="subgroupE">
+            <a href="{% url 'reports:stock_aging' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'stock_aging' %}active{% endif %}">
+                Stock Aging Analysis
+            </a>
+            <a href="{% url 'reports:slow_moving' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'slow_moving' %}active{% endif %}">
+                Dead / Slow-Moving Stock
+            </a>
+            <a href="{% url 'reports:batch_stock' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'batch_stock' %}active{% endif %}">
+                Batch-Wise Stock (FIFO)
+            </a>
+        </div>
+    </div>
+
+    <!-- 9. Administration (Role Scoped) -->
+    {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
+    <div class="sidebar-section-heading">Administration</div>
+
+    {% if user.is_superuser or user.role == 'OWNER' %}
+    <a href="{% url 'branches:branch_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'branches' and request.resolver_match.url_name == 'branch_list' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Store Outlets &amp; Multi-Branch">
+        <i class="fas fa-store text-primary"></i>
+        <span class="sidebar-label-wrap">Store Outlets &amp; Branding</span>
+    </a>
+
+    <a href="{% url 'core:audit_logs' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'core' and request.resolver_match.url_name == 'audit_logs' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Security Audit Logs">
+        <i class="fas fa-fingerprint text-danger"></i>
+        <span class="sidebar-label-wrap">Security Audit Logs</span>
+    </a>
+    {% endif %}
+
+    <a href="{% url 'users:user_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'users' and request.resolver_match.url_name == 'user_list' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Staff Accounts &amp; Roles">
+        <i class="fas fa-user-shield text-secondary"></i>
+        <span class="sidebar-label-wrap">Staff Accounts &amp; Roles</span>
+    </a>
+    {% endif %}
+
+</div>
+
+<!-- Non-IRD Proforma Disclaimer Inset -->
+<div class="sidebar-disclaimer-wrap">
+    <div class="p-2 bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-3 text-center">
+        <div class="fs-2xs fw-bold text-dark mb-0">
+            <i class="fas fa-file-invoice text-warning me-1"></i> Proforma Non-IRD Mode
+        </div>
+        <small class="text-muted" style="font-size: 0.65rem;">Internal Store Quotations &amp; Slips</small>
     </div>
 </div>

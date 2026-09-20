@@ -1,23 +1,30 @@
 /**
  * POS Counter Terminal & Parked Bill Engine (Smart Multi-Attribute Matching & Zero Storage Architecture)
- * File Path: D:\Mobile Shop\Inventory\static\js\pos_engine.js
  *
  * Core Capabilities:
- * 1. Multi-Attribute Smart Category Filtering:
- *    - "📱 Smartphones" dynamically checks Category Key, IMEI flags, RAM/Storage presence,
- *      and smartphone naming patterns (e.g., '15 128 Black-O', '16 128 Pink 1', 'iPhone', 'Galaxy').
- *    - Supports real Database Category IDs (`data-category-id="<id>"`) from dynamic category pills.
- * 2. Instant Gun Scanner Routing & Dual-IMEI Auto-Match: Automatically matches and pairs
- *    IMEI 1 & IMEI 2 from catalog/server without displaying unnecessary popups on exact match.
- * 3. Interactive IMEI Capture Modal: Provides in-stock handset dropdown selection and live
- *    auto-matching of secondary IMEI when IMEI 1 is typed or scanned.
- * 4. Price & Discount Preservation on Hold/Recall (F9/F10): Full preservation of rates,
- *    quantities, discounts, and IMEI serials when parking and restoring bills.
- * 5. Strict Walk-In Credit (Udhaari) Guard: Blocks credit sales for anonymous walk-ins,
- *    mandating a registered customer profile.
- * 6. Server-Side Catalog Price Integrity (SEC-01) & Salted Manager PIN Overrides (SEC-02).
- * 7. Multi-Mode & Split Checkout (F8) with Trade-In Buy-Back Credit deductions.
- * 8. Emergency Offline Safety Net (IndexedDB `pending_sales` queue) & Web Audio chime synthesis.
+ * 1. Explicit Item Discount Types:
+ *    - Three discrete modes per line item: NONE, PERCENTAGE (%), and AMOUNT (Rs.).
+ *    - Mode toggles: [None | % | Rs.] segmented control on every cart row.
+ *    - Direct Amount Usage: In AMOUNT mode, entered value is deducted directly as cash concession without rounding leakage.
+ *    - Real-Time Effective Percentage: Displays exact mathematical concession percentage against line gross.
+ *    - Multi-Quantity Clarity: When Quantity > 1, indicates total line deduction, per-unit discount, and effective percentage.
+ *    - Supervisor Limit Warning: Real-time badge alerting if concession exceeds product max discount or store threshold.
+ *    - Non-Discountable Enforcement: Disables discount controls when product.is_discountable is false.
+ * 2. Dual-Mode Bill-Level Discounts:
+ *    - Interactive toggle [% | Rs.] with proportional allocation across discountable items.
+ * 3. Parked Bill State Preservation (F9 / F10):
+ *    - Serializes and restores exact line discount types (NONE, PERCENTAGE, AMOUNT), input values, and reasons.
+ * 4. Multi-Attribute Smart Category Filtering:
+ *    - Dynamic category filtering with smart keyword patterns and database Category IDs.
+ * 5. Instant Gun Scanner Routing & Dual-IMEI Auto-Match:
+ *    - Automatically pairs IMEI 1 and IMEI 2 from catalog/server without unnecessary modal prompts on exact match.
+ * 6. Interactive Dual-IMEI Capture Modal:
+ *    - Handset box picker and auto-matched secondary IMEI.
+ * 7. Strict Walk-In Credit (Udhaari) Guard:
+ *    - Blocks credit sales for anonymous walk-ins, mandating a registered customer profile.
+ * 8. Server-Side Catalog Price Integrity (SEC-01) & Salted Manager PIN Overrides (SEC-02).
+ * 9. Multi-Mode & Split Checkout (F8) with Trade-In Buy-Back Credit deductions & Transaction Ref Tracking.
+ * 10. Emergency Offline Safety Net (IndexedDB `pending_sales` queue) & Web Audio chime synthesis.
  */
 
 // ============================================================================
@@ -376,7 +383,7 @@ class POSCustomerManager {
 }
 
 // ============================================================================
-// 3. CART & PRICING ENGINE MODULE (WITH FULL DUAL-IMEI SUPPORT)
+// 3. CART & PRICING ENGINE MODULE (EXPLICIT NONE, %, AND AMOUNT (Rs.) MODES)
 // ============================================================================
 class POSCart {
     constructor(engine) {
@@ -386,7 +393,12 @@ class POSCart {
         this.customerPhone = '';
         this.customerPan = '';
         this.customerType = 'RETAIL';
+
+        // Dual-Mode Bill Discount State
+        this.billDiscountType = 'PERCENTAGE'; // 'PERCENTAGE' or 'AMOUNT'
+        this.billDiscountValue = 0;
         this.billDiscountPercent = 0;
+        this.billDiscountReason = '';
         this.activeCartIdempotencyKey = generateUUID();
 
         this.cartTableBody = document.getElementById('posCartTableBody') || document.getElementById('cartItemsContainer');
@@ -395,36 +407,125 @@ class POSCart {
         this.vatRow = document.getElementById('posVatRow');
         this.grandTotalText = document.getElementById('posGrandTotalText') || document.getElementById('billGrandTotalText');
 
+        this.initBillDiscountControls();
         this.bindEvents();
+    }
+
+    initBillDiscountControls() {
+        const discInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
+        if (!discInput) return;
+
+        const parent = discInput.parentElement;
+        if (parent && !document.getElementById('posBillDiscountTypeToggleBtn')) {
+            const labelSpan = parent.querySelector('span');
+            if (labelSpan) {
+                labelSpan.innerHTML = `<span>Bill Discount:</span>`;
+            }
+
+            // Input group with compact toggle button [% | Rs.]
+            const group = document.createElement('div');
+            group.className = 'input-group input-group-sm';
+            group.style.width = '135px';
+
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.id = 'posBillDiscountTypeToggleBtn';
+            toggleBtn.className = 'btn btn-outline-secondary px-2 py-0 fw-bold fs-2xs font-mono';
+            toggleBtn.innerText = this.billDiscountType === 'AMOUNT' ? 'Rs.' : '%';
+            toggleBtn.title = 'Toggle between Percentage (%) and Cash Amount (Rs.)';
+
+            discInput.parentNode.insertBefore(group, discInput);
+            group.appendChild(toggleBtn);
+            group.appendChild(discInput);
+
+            discInput.style.width = '';
+            discInput.classList.add('flex-grow-1', 'text-end', 'font-mono');
+            discInput.placeholder = this.billDiscountType === 'AMOUNT' ? 'Rs.' : '%';
+
+            toggleBtn.addEventListener('click', () => {
+                this.toggleBillDiscountType();
+            });
+        }
+    }
+
+    toggleBillDiscountType() {
+        this.billDiscountType = this.billDiscountType === 'AMOUNT' ? 'PERCENTAGE' : 'AMOUNT';
+        const toggleBtn = document.getElementById('posBillDiscountTypeToggleBtn');
+        if (toggleBtn) {
+            toggleBtn.innerText = this.billDiscountType === 'AMOUNT' ? 'Rs.' : '%';
+            toggleBtn.classList.toggle('btn-primary', this.billDiscountType === 'AMOUNT');
+            toggleBtn.classList.toggle('btn-outline-secondary', this.billDiscountType !== 'AMOUNT');
+        }
+
+        const discInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
+        if (discInput) {
+            if (this.billDiscountType === 'PERCENTAGE') {
+                discInput.max = '100';
+                discInput.step = '0.5';
+                discInput.placeholder = '%';
+                if (parseFloat(discInput.value) > 100) discInput.value = '100';
+            } else {
+                discInput.removeAttribute('max');
+                discInput.step = '1';
+                discInput.placeholder = 'Rs.';
+            }
+            this.billDiscountValue = Math.max(0, parseFloat(discInput.value) || 0);
+        }
+
+        this.render();
     }
 
     bindEvents() {
         if (this.cartTableBody) {
+            // Change event handler for quantities, prices, and discounts
             this.cartTableBody.addEventListener('change', (e) => {
                 const qtyInput = e.target.closest('.cart-qty-input');
                 if (qtyInput) {
                     const idx = parseInt(qtyInput.dataset.cartIndex, 10);
                     this.updateQuantity(idx, qtyInput.value);
+                    return;
                 }
 
                 const priceInput = e.target.closest('.cart-price-input');
                 if (priceInput) {
                     const idx = parseInt(priceInput.dataset.cartIndex, 10);
                     this.updatePrice(idx, priceInput.value);
+                    return;
                 }
 
                 const discInput = e.target.closest('.cart-disc-input');
                 if (discInput) {
                     const idx = parseInt(discInput.dataset.cartIndex, 10);
-                    this.updateItemDiscount(idx, discInput.value);
+                    this.updateItemDiscount(idx, discInput.value, true);
+                    return;
                 }
             });
 
+            // Real-time live input listener for discount amounts and rates
+            this.cartTableBody.addEventListener('input', (e) => {
+                const discInput = e.target.closest('.cart-disc-input');
+                if (discInput) {
+                    const idx = parseInt(discInput.dataset.cartIndex, 10);
+                    this.updateItemDiscount(idx, discInput.value, false);
+                    return;
+                }
+            });
+
+            // Click event handler for remove and discrete 3-way discount mode toggles
             this.cartTableBody.addEventListener('click', (e) => {
                 const removeBtn = e.target.closest('.cart-remove-btn');
                 if (removeBtn) {
                     const idx = parseInt(removeBtn.dataset.cartIndex, 10);
                     this.removeItem(idx);
+                    return;
+                }
+
+                const modeBtn = e.target.closest('.cart-disc-mode-btn');
+                if (modeBtn) {
+                    const idx = parseInt(modeBtn.dataset.cartIndex, 10);
+                    const mode = modeBtn.dataset.mode; // 'NONE', 'PERCENTAGE', 'AMOUNT'
+                    this.setItemDiscountMode(idx, mode);
+                    return;
                 }
             });
         }
@@ -457,7 +558,7 @@ class POSCart {
         const incomingImei1 = (product.imei_1 || product.imei1 || product.imei_number || '').trim();
         const incomingImei2 = (product.imei_2 || product.imei2 || product.secondary_imei || '').trim();
 
-        // 1. Dual-IMEI Collision Check across SIM 1 and SIM 2 slots of all cart items
+        // 1. Dual-IMEI Collision Check across all items
         if (isImei && (incomingImei1 || incomingImei2)) {
             const duplicateItem = this.items.find(existingItem => {
                 const existingImei1 = (existingItem.imei_number || existingItem.imei_1 || existingItem.imei1 || '').trim();
@@ -495,9 +596,11 @@ class POSCart {
         }
 
         const extractedPrice = Math.max(0, rawPrice);
-        const extractedCatalogPrice = (product.catalog_price !== undefined && product.catalog_price !== null && !isNaN(parseFloat(product.catalog_price)))
-            ? parseFloat(product.catalog_price)
-            : extractedPrice;
+        const extractedCatalogPrice = (product.official_unit_price !== undefined && product.official_unit_price !== null && !isNaN(parseFloat(product.official_unit_price)))
+            ? parseFloat(product.official_unit_price)
+            : ((product.catalog_price !== undefined && product.catalog_price !== null && !isNaN(parseFloat(product.catalog_price)))
+                ? parseFloat(product.catalog_price)
+                : extractedPrice);
 
         const extractedCostPrice = (product.cost_price !== undefined && product.cost_price !== null && !isNaN(parseFloat(product.cost_price)))
             ? parseFloat(product.cost_price)
@@ -507,13 +610,37 @@ class POSCart {
             ? parseFloat(product.quantity)
             : 1;
 
-        const extractedDiscountPercent = (product.discount_percent !== undefined && product.discount_percent !== null && !isNaN(parseFloat(product.discount_percent)))
-            ? parseFloat(product.discount_percent)
-            : 0;
+        // 3. Discount Initialization (Explicitly NONE, PERCENTAGE, or AMOUNT)
+        let discountType = 'NONE';
+        const rawDiscType = String(product.discount_type || '').toUpperCase().trim();
+        if (rawDiscType === 'AMOUNT' || rawDiscType === 'FIXED') {
+            discountType = 'AMOUNT';
+        } else if (rawDiscType === 'PERCENTAGE') {
+            discountType = 'PERCENTAGE';
+        }
 
+        let discountValue = 0;
+        if (product.discount_value !== undefined && product.discount_value !== null && !isNaN(parseFloat(product.discount_value))) {
+            discountValue = Math.max(0, parseFloat(product.discount_value));
+        } else if (product.discount_percent !== undefined && product.discount_percent !== null && !isNaN(parseFloat(product.discount_percent))) {
+            discountValue = Math.max(0, parseFloat(product.discount_percent));
+        }
+
+        if (discountValue > 0 && discountType === 'NONE') {
+            discountType = 'PERCENTAGE';
+        }
+
+        const isDiscountable = product.is_discountable !== undefined ? Boolean(product.is_discountable) : true;
+        const maxDiscountPercent = product.max_discount_percent !== undefined ? parseFloat(product.max_discount_percent) : 10;
         const conversionId = product.package_conversion_id || product.conversion_id || product.unit_conversion_id || null;
 
-        // 3. Group non-serialized accessories if already present
+        // Non-discountable items are strictly initialized to NONE with 0 discount
+        if (!isDiscountable) {
+            discountType = 'NONE';
+            discountValue = 0;
+        }
+
+        // 4. Group non-serialized accessories if already present
         const nonImeiMatch = !isImei
             ? this.items.find(i => (i.product_id === (product.product_id || product.id)) && ((i.conversion_id || null) === conversionId))
             : null;
@@ -537,11 +664,16 @@ class POSCart {
                 name: product.name,
                 unit_price: extractedPrice,
                 price: extractedPrice,
+                official_unit_price: extractedCatalogPrice,
                 catalog_price: extractedCatalogPrice,
                 cost_price: extractedCostPrice,
                 quantity: extractedQuantity,
                 unit_code: product.unit_code || 'Pcs',
-                discount_percent: extractedDiscountPercent,
+                discount_type: discountType,
+                discount_value: discountValue,
+                discount_percent: discountType === 'PERCENTAGE' ? discountValue : 0,
+                is_discountable: isDiscountable,
+                max_discount_percent: maxDiscountPercent,
                 tax_pricing_type: taxMode,
                 vat_rate: vatRate,
                 requires_imei: isImei,
@@ -572,6 +704,13 @@ class POSCart {
         const val = parseFloat(quantity);
         if (this.items[index]) {
             this.items[index].quantity = val > 0 ? val : 1;
+            // Bound amount discount if quantity decreases
+            if (this.items[index].discount_type === 'AMOUNT') {
+                const lineGross = this.items[index].quantity * (this.items[index].unit_price || 0);
+                if (this.items[index].discount_value > lineGross) {
+                    this.items[index].discount_value = lineGross;
+                }
+            }
             this.render();
         }
     }
@@ -581,29 +720,162 @@ class POSCart {
         if (this.items[index] && !isNaN(val) && val >= 0) {
             this.items[index].unit_price = val;
             this.items[index].price = val;
+            // Bound amount discount if line gross decreases
+            if (this.items[index].discount_type === 'AMOUNT') {
+                const lineGross = this.items[index].quantity * val;
+                if (this.items[index].discount_value > lineGross) {
+                    this.items[index].discount_value = lineGross;
+                }
+            }
             this.render();
         }
     }
 
-    updateItemDiscount(index, discountPercent) {
-        let val = parseFloat(discountPercent);
-        if (isNaN(val) || val < 0) val = 0;
-        if (val > 100) val = 100;
+    setItemDiscountMode(index, mode) {
+        if (!this.items[index]) return;
+        if (this.items[index].is_discountable === false) {
+            this.engine.showNotification('This item is designated as non-discountable.', 'warning');
+            return;
+        }
+
+        const validModes = ['NONE', 'PERCENTAGE', 'AMOUNT'];
+        const normalizedMode = validModes.includes(mode) ? mode : 'NONE';
+        const price = (this.items[index].unit_price !== undefined) ? this.items[index].unit_price : (this.items[index].price || 0);
+        const lineGross = this.items[index].quantity * price;
+
+        this.items[index].discount_type = normalizedMode;
+
+        if (normalizedMode === 'NONE') {
+            this.items[index].discount_value = 0;
+            this.items[index].discount_percent = 0;
+        } else if (normalizedMode === 'PERCENTAGE') {
+            const currentVal = parseFloat(this.items[index].discount_value) || 0;
+            this.items[index].discount_value = Math.min(100, Math.max(0, currentVal));
+            this.items[index].discount_percent = this.items[index].discount_value;
+        } else if (normalizedMode === 'AMOUNT') {
+            const currentVal = parseFloat(this.items[index].discount_value) || 0;
+            this.items[index].discount_value = Math.min(lineGross, Math.max(0, currentVal));
+            this.items[index].discount_percent = lineGross > 0 ? ((this.items[index].discount_value / lineGross) * 100) : 0;
+        }
+
+        this.render();
+    }
+
+    updateItemDiscount(index, discountVal, shouldFullRender = true) {
+        let num = parseFloat(discountVal);
+        if (isNaN(num) || num < 0) num = 0;
+
         if (this.items[index]) {
-            this.items[index].discount_percent = val;
-            this.render();
+            if (this.items[index].is_discountable === false) {
+                this.items[index].discount_type = 'NONE';
+                this.items[index].discount_value = 0;
+                this.items[index].discount_percent = 0;
+                if (shouldFullRender) this.render();
+                return;
+            }
+
+            const type = this.items[index].discount_type || 'NONE';
+            const price = (this.items[index].unit_price !== undefined) ? this.items[index].unit_price : (this.items[index].price || 0);
+            const lineGross = this.items[index].quantity * price;
+
+            if (type === 'NONE') {
+                this.items[index].discount_value = 0;
+                this.items[index].discount_percent = 0;
+            } else if (type === 'PERCENTAGE') {
+                num = Math.min(100, Math.max(0, num));
+                this.items[index].discount_value = num;
+                this.items[index].discount_percent = num;
+            } else if (type === 'AMOUNT') {
+                num = Math.min(lineGross, Math.max(0, num));
+                this.items[index].discount_value = num;
+                this.items[index].discount_percent = lineGross > 0 ? ((num / lineGross) * 100) : 0;
+            }
+
+            if (shouldFullRender) {
+                this.render();
+            } else {
+                this.updateLiveRowCalculations(index);
+                this.refreshSummaryDisplays();
+            }
+        }
+    }
+
+    /**
+     * Updates in-row discount details and warning badges live on input without losing focus
+     */
+    updateLiveRowCalculations(index) {
+        const item = this.items[index];
+        if (!item) return;
+
+        const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
+        const lineGross = item.quantity * price;
+        const type = item.discount_type || 'NONE';
+        const val = parseFloat(item.discount_value) || 0;
+
+        let lineDisc = 0;
+        let effectivePct = 0;
+
+        if (item.is_discountable !== false && type !== 'NONE') {
+            if (type === 'AMOUNT') {
+                lineDisc = Math.min(val, lineGross);
+                effectivePct = lineGross > 0 ? ((lineDisc / lineGross) * 100) : 0;
+            } else {
+                effectivePct = Math.min(100, Math.max(0, val));
+                lineDisc = lineGross * (effectivePct / 100);
+            }
+        }
+
+        const lineTotal = Math.max(0, lineGross - lineDisc);
+        const allowedThreshold = item.max_discount_percent !== undefined ? parseFloat(item.max_discount_percent) : 10;
+        const supervisorLimit = this.engine.supervisorThreshold || 10;
+        const effectiveLimit = Math.min(allowedThreshold, supervisorLimit);
+        const exceedsLimit = effectivePct > effectiveLimit;
+
+        // Update live row total text
+        const totalEl = document.getElementById(`cartLineTotal_${index}`);
+        if (totalEl) totalEl.innerText = `Rs. ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+        // Update detail message element
+        const detailEl = document.getElementById(`cartDiscDetail_${index}`);
+        if (detailEl) {
+            if (lineDisc > 0) {
+                const perUnitDisc = item.quantity > 0 ? (lineDisc / item.quantity) : 0;
+                let text = '';
+                if (item.quantity > 1) {
+                    text = `<span class="text-danger font-mono fs-2xs">-Rs. ${lineDisc.toFixed(2)} line discount (Rs. ${perUnitDisc.toFixed(2)}/unit) &bull; Effective: <strong>${effectivePct.toFixed(2)}%</strong></span>`;
+                } else {
+                    text = `<span class="text-danger font-mono fs-2xs">-Rs. ${lineDisc.toFixed(2)} &bull; Effective: <strong>${effectivePct.toFixed(2)}%</strong></span>`;
+                }
+
+                if (exceedsLimit) {
+                    text += ` <span class="badge bg-warning text-dark border border-warning fs-2xs px-1 py-0 ms-1" title="Exceeds allowed ${effectiveLimit}% limit - Manager PIN required at checkout"><i class="fas fa-key me-1"></i>PIN Required (&gt;${effectiveLimit}%)</span>`;
+                }
+                detailEl.innerHTML = text;
+            } else {
+                detailEl.innerHTML = '';
+            }
         }
     }
 
     clear() {
         this.items = [];
+        this.billDiscountType = 'PERCENTAGE';
+        this.billDiscountValue = 0;
         this.billDiscountPercent = 0;
+        this.billDiscountReason = '';
+
         const discInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
         if (discInput) discInput.value = '0';
+        const toggleBtn = document.getElementById('posBillDiscountTypeToggleBtn');
+        if (toggleBtn) toggleBtn.innerText = '%';
+
         this.renewIdempotencyKey();
         this.render();
     }
 
+    /**
+     * Exact Total Calculation with Support for Dual-Mode Concessions
+     */
     calculateTotals() {
         let subtotal = 0;
         let itemDiscountTotal = 0;
@@ -611,13 +883,38 @@ class POSCart {
         for (const item of this.items) {
             const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
             const lineGross = item.quantity * price;
-            const lineDisc = lineGross * ((item.discount_percent || 0) / 100);
+
+            let lineDisc = 0;
+            if (item.is_discountable !== false) {
+                const discType = item.discount_type || 'NONE';
+                const discVal = Math.max(0, parseFloat(item.discount_value !== undefined ? item.discount_value : (item.discount_percent || 0)) || 0);
+
+                if (discType === 'AMOUNT' || discType === 'FIXED') {
+                    lineDisc = Math.min(discVal, lineGross);
+                } else if (discType === 'PERCENTAGE') {
+                    const pct = Math.min(100, discVal);
+                    lineDisc = lineGross * (pct / 100);
+                }
+            }
+
             subtotal += lineGross;
             itemDiscountTotal += lineDisc;
         }
 
         const netAfterItemDisc = Math.max(0, subtotal - itemDiscountTotal);
-        const billDiscountAmt = netAfterItemDisc * (this.billDiscountPercent / 100);
+
+        let billDiscountAmt = 0;
+        const billDiscType = this.billDiscountType || 'PERCENTAGE';
+        const billDiscVal = Math.max(0, parseFloat(this.billDiscountValue) || 0);
+
+        if (billDiscType === 'AMOUNT' || billDiscType === 'FIXED') {
+            billDiscountAmt = Math.min(billDiscVal, netAfterItemDisc);
+        } else {
+            const billPct = Math.min(100, billDiscVal);
+            billDiscountAmt = netAfterItemDisc * (billPct / 100);
+        }
+
+        this.billDiscountPercent = netAfterItemDisc > 0 ? ((billDiscountAmt / netAfterItemDisc) * 100) : 0;
 
         let taxableTotal = 0;
         let nonTaxableTotal = 0;
@@ -627,8 +924,19 @@ class POSCart {
         for (const item of this.items) {
             const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
             const lineGross = item.quantity * price;
-            const lineDisc = lineGross * ((item.discount_percent || 0) / 100);
-            const lineNet = lineGross - lineDisc;
+
+            let lineDisc = 0;
+            if (item.is_discountable !== false) {
+                const discType = item.discount_type || 'NONE';
+                const discVal = Math.max(0, parseFloat(item.discount_value !== undefined ? item.discount_value : (item.discount_percent || 0)) || 0);
+                if (discType === 'AMOUNT' || discType === 'FIXED') {
+                    lineDisc = Math.min(discVal, lineGross);
+                } else if (discType === 'PERCENTAGE') {
+                    lineDisc = lineGross * (Math.min(100, discVal) / 100);
+                }
+            }
+
+            const lineNet = Math.max(0, lineGross - lineDisc);
 
             let lineBillDisc = 0;
             if (netAfterItemDisc > 0 && billDiscountAmt > 0) {
@@ -679,6 +987,21 @@ class POSCart {
         };
     }
 
+    refreshSummaryDisplays() {
+        const totals = this.calculateTotals();
+        if (this.subtotalText) this.subtotalText.innerText = `Rs. ${totals.subtotal.toFixed(2)}`;
+        if (this.grandTotalText) this.grandTotalText.innerText = `Rs. ${totals.grandTotal.toFixed(2)}`;
+
+        if (this.engine.isVatMode && totals.totalVat > 0) {
+            if (this.vatRow) this.vatRow.style.display = 'flex';
+            if (this.vatText) this.vatText.innerText = `Rs. ${totals.totalVat.toFixed(2)}`;
+        } else if (this.vatRow) {
+            this.vatRow.style.display = 'none';
+        }
+
+        this.engine.tradeInManager.updateUi(totals.tradeInCredit);
+    }
+
     render() {
         if (!this.cartTableBody) return;
         const totals = this.calculateTotals();
@@ -704,40 +1027,116 @@ class POSCart {
                 `;
             }
         } else {
+            const supervisorLimit = this.engine.supervisorThreshold || 10;
+
             if (isSimpleDivContainer) {
                 this.cartTableBody.innerHTML = this.items.map((item, idx) => {
                     const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
-                    const lineTotal = item.quantity * price * (1 - ((item.discount_percent || 0) / 100));
+                    const lineGross = item.quantity * price;
+                    const type = item.discount_type || 'NONE';
+                    const val = parseFloat(item.discount_value) || 0;
+
+                    let lineDisc = 0;
+                    let effectivePct = 0;
+
+                    if (item.is_discountable !== false && type !== 'NONE') {
+                        if (type === 'AMOUNT') {
+                            lineDisc = Math.min(val, lineGross);
+                            effectivePct = lineGross > 0 ? ((lineDisc / lineGross) * 100) : 0;
+                        } else {
+                            effectivePct = Math.min(100, Math.max(0, val));
+                            lineDisc = lineGross * (effectivePct / 100);
+                        }
+                    }
+
+                    const lineTotal = Math.max(0, lineGross - lineDisc);
                     const primaryImei = item.imei_number || item.imei_1 || item.imei1 || '';
                     const secondaryImei = item.secondary_imei || item.imei_2 || item.imei2 || '';
+                    const isDiscountDisabled = item.is_discountable === false;
+
+                    const allowedLimit = Math.min(
+                        item.max_discount_percent !== undefined ? parseFloat(item.max_discount_percent) : 10,
+                        supervisorLimit
+                    );
+                    const exceedsLimit = effectivePct > allowedLimit;
+                    const perUnitDisc = item.quantity > 0 ? (lineDisc / item.quantity) : 0;
 
                     return `
-                        <div class="cart-row d-flex align-items-center justify-content-between p-2 border-bottom">
-                            <div style="width: 48%;">
-                                <strong class="text-dark fs-xs d-block text-truncate" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong>
-                                ${primaryImei ? `
-                                    <div class="d-flex flex-wrap gap-1 mt-1">
-                                        <span class="badge bg-primary bg-opacity-10 text-primary font-mono" style="font-size: 8.5px;">
-                                            SIM 1: ${escapeHtml(primaryImei)}
-                                        </span>
-                                        ${secondaryImei ? `
-                                            <span class="badge bg-info bg-opacity-10 text-info font-mono" style="font-size: 8.5px;">
-                                                SIM 2: ${escapeHtml(secondaryImei)}
+                        <div class="cart-row p-2 border-bottom">
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <div style="width: 50%;">
+                                    <strong class="text-dark fs-xs d-block text-truncate" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong>
+                                    ${primaryImei ? `
+                                        <div class="d-flex flex-wrap gap-1 mt-1">
+                                            <span class="badge bg-primary bg-opacity-10 text-primary font-mono" style="font-size: 8.5px;">
+                                                SIM 1: ${escapeHtml(primaryImei)}
                                             </span>
+                                            ${secondaryImei ? `
+                                                <span class="badge bg-info bg-opacity-10 text-info font-mono" style="font-size: 8.5px;">
+                                                    SIM 2: ${escapeHtml(secondaryImei)}
+                                                </span>
+                                            ` : ''}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <div style="width: 15%;" class="text-center font-mono fs-xs">
+                                    <input type="number" class="form-control form-control-sm text-center p-0 font-mono cart-qty-input fs-xs" 
+                                           data-cart-index="${idx}" value="${item.quantity}" min="1" ${item.requires_imei ? 'readonly' : ''}>
+                                </div>
+                                <div style="width: 25%;" class="text-end font-mono fs-xs fw-bold text-dark" id="cartLineTotal_${idx}">
+                                    Rs. ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                <div style="width: 10%;" class="text-end">
+                                    <button type="button" class="btn btn-link text-danger p-0 border-0 cart-remove-btn" data-cart-index="${idx}">
+                                        <i class="fas fa-times-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Discrete 3-Way Line-Level Discount Controls [None | % | Rs.] -->
+                            <div class="d-flex align-items-center justify-content-between pt-1 mt-1 border-top border-light flex-wrap gap-1">
+                                <span class="text-muted fs-2xs fw-semibold">Discount:</span>
+                                <div class="d-flex align-items-center gap-1">
+                                    ${isDiscountDisabled ? `
+                                        <span class="badge bg-secondary bg-opacity-10 text-secondary border fs-2xs" title="Non-Discountable Item">
+                                            <i class="fas fa-ban me-1"></i>No Disc
+                                        </span>
+                                    ` : `
+                                        <!-- Segmented 3-Way Mode Control -->
+                                        <div class="btn-group btn-group-sm" role="group" style="height: 22px;">
+                                            <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'NONE' ? 'btn-dark active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="NONE" title="No Discount">None</button>
+                                            <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'PERCENTAGE' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="PERCENTAGE" title="Percentage (%)">%</button>
+                                            <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'AMOUNT' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="AMOUNT" title="Fixed Amount (Rs.)">Rs.</button>
+                                        </div>
+
+                                        <!-- Numeric Input Container (Active only when mode != NONE) -->
+                                        ${type !== 'NONE' ? `
+                                            <div class="input-group input-group-sm" style="width: 95px; height: 22px;">
+                                                <span class="input-group-text p-0 px-1 fs-2xs font-mono bg-light text-muted">${type === 'AMOUNT' ? 'Rs.' : '%'}</span>
+                                                <input type="number" 
+                                                       class="form-control form-control-sm text-end p-0 px-1 cart-disc-input font-mono fs-2xs" 
+                                                       data-cart-index="${idx}"
+                                                       value="${val}"
+                                                       min="0"
+                                                       ${type === 'PERCENTAGE' ? 'max="100" step="0.5"' : `max="${lineGross}" step="1"`}>
+                                            </div>
                                         ` : ''}
-                                    </div>
+                                    `}
+                                </div>
+                            </div>
+
+                            <!-- Live Concession Details Display -->
+                            <div class="d-flex justify-content-end align-items-center mt-1" id="cartDiscDetail_${idx}">
+                                ${lineDisc > 0 ? `
+                                    <span class="text-danger font-mono fs-2xs">
+                                        -Rs. ${lineDisc.toFixed(2)} ${item.quantity > 1 ? `(Rs. ${perUnitDisc.toFixed(2)}/unit)` : ''} &bull; Effective: <strong>${effectivePct.toFixed(2)}%</strong>
+                                    </span>
+                                    ${exceedsLimit ? `
+                                        <span class="badge bg-warning text-dark border border-warning fs-2xs px-1 py-0 ms-1" title="Exceeds allowed ${effectiveLimit}% limit - Manager PIN required at checkout">
+                                            <i class="fas fa-key me-1"></i>PIN Req
+                                        </span>
+                                    ` : ''}
                                 ` : ''}
-                            </div>
-                            <div style="width: 15%;" class="text-center font-mono fs-xs">
-                                ${item.quantity}
-                            </div>
-                            <div style="width: 27%;" class="text-end font-mono fs-xs fw-bold text-dark">
-                                Rs. ${lineTotal.toLocaleString()}
-                            </div>
-                            <div style="width: 10%;" class="text-end">
-                                <button type="button" class="btn btn-link text-danger p-0 border-0 cart-remove-btn" data-cart-index="${idx}">
-                                    <i class="fas fa-times-circle"></i>
-                                </button>
                             </div>
                         </div>
                     `;
@@ -745,9 +1144,34 @@ class POSCart {
             } else {
                 this.cartTableBody.innerHTML = this.items.map((item, idx) => {
                     const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
-                    const lineTotal = item.quantity * price * (1 - ((item.discount_percent || 0) / 100));
+                    const lineGross = item.quantity * price;
+                    const type = item.discount_type || 'NONE';
+                    const val = parseFloat(item.discount_value) || 0;
+
+                    let lineDisc = 0;
+                    let effectivePct = 0;
+
+                    if (item.is_discountable !== false && type !== 'NONE') {
+                        if (type === 'AMOUNT') {
+                            lineDisc = Math.min(val, lineGross);
+                            effectivePct = lineGross > 0 ? ((lineDisc / lineGross) * 100) : 0;
+                        } else {
+                            effectivePct = Math.min(100, Math.max(0, val));
+                            lineDisc = lineGross * (effectivePct / 100);
+                        }
+                    }
+
+                    const lineTotal = Math.max(0, lineGross - lineDisc);
                     const primaryImei = item.imei_number || item.imei_1 || item.imei1 || '';
                     const secondaryImei = item.secondary_imei || item.imei_2 || item.imei2 || '';
+                    const isDiscountDisabled = item.is_discountable === false;
+
+                    const allowedLimit = Math.min(
+                        item.max_discount_percent !== undefined ? parseFloat(item.max_discount_percent) : 10,
+                        supervisorLimit
+                    );
+                    const exceedsLimit = effectivePct > allowedLimit;
+                    const perUnitDisc = item.quantity > 0 ? (lineDisc / item.quantity) : 0;
 
                     return `
                         <tr class="scan-flash">
@@ -757,18 +1181,62 @@ class POSCart {
                                     ${primaryImei ? `<span class="badge bg-primary bg-opacity-10 text-primary font-monospace fs-2xs"><i class="fas fa-barcode me-1"></i>SIM 1: ${escapeHtml(primaryImei)}</span>` : ''}
                                     ${secondaryImei ? `<span class="badge bg-info bg-opacity-10 text-info font-monospace fs-2xs"><i class="fas fa-barcode me-1"></i>SIM 2: ${escapeHtml(secondaryImei)}</span>` : ''}
                                 </div>
+                                
+                                <!-- Discrete 3-Way Line-Level Discount Controls [None | % | Rs.] -->
+                                <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                    <span class="text-muted fs-2xs fw-semibold">Disc:</span>
+                                    ${isDiscountDisabled ? `
+                                        <span class="badge bg-secondary bg-opacity-10 text-secondary border fs-2xs" title="Non-Discountable Item">
+                                            <i class="fas fa-ban me-1"></i>No Disc
+                                        </span>
+                                    ` : `
+                                        <div class="btn-group btn-group-sm" role="group" style="height: 22px;">
+                                            <button type="button" class="btn btn-xs py-0 px-2 font-mono fs-2xs cart-disc-mode-btn ${type === 'NONE' ? 'btn-dark active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="NONE" title="No Discount">None</button>
+                                            <button type="button" class="btn btn-xs py-0 px-2 font-mono fs-2xs cart-disc-mode-btn ${type === 'PERCENTAGE' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="PERCENTAGE" title="Percentage (%)">%</button>
+                                            <button type="button" class="btn btn-xs py-0 px-2 font-mono fs-2xs cart-disc-mode-btn ${type === 'AMOUNT' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="AMOUNT" title="Fixed Amount (Rs.)">Rs.</button>
+                                        </div>
+
+                                        ${type !== 'NONE' ? `
+                                            <div class="input-group input-group-sm" style="width: 105px; height: 22px;">
+                                                <span class="input-group-text p-0 px-1 fs-2xs font-mono bg-light text-muted">${type === 'AMOUNT' ? 'Rs.' : '%'}</span>
+                                                <input type="number" 
+                                                       class="form-control form-control-sm text-end p-0 px-1 cart-disc-input font-mono fs-2xs" 
+                                                       data-cart-index="${idx}"
+                                                       value="${val}"
+                                                       min="0"
+                                                       ${type === 'PERCENTAGE' ? 'max="100" step="0.5"' : `max="${lineGross}" step="1"`}>
+                                            </div>
+                                        ` : ''}
+                                    `}
+                                </div>
+
+                                <!-- Live Effective Percentage & Concession Feedback -->
+                                <div class="mt-1" id="cartDiscDetail_${idx}">
+                                    ${lineDisc > 0 ? `
+                                        <span class="text-danger font-mono fs-2xs">
+                                            -Rs. ${lineDisc.toFixed(2)} ${item.quantity > 1 ? `(Rs. ${perUnitDisc.toFixed(2)}/unit)` : ''} &bull; Effective: <strong>${effectivePct.toFixed(2)}%</strong>
+                                        </span>
+                                        ${exceedsLimit ? `
+                                            <span class="badge bg-warning text-dark border border-warning fs-2xs px-1 py-0 ms-1" title="Exceeds allowed ${effectiveLimit}% limit - Manager PIN required at checkout">
+                                                <i class="fas fa-key me-1"></i>PIN Req (&gt;${effectiveLimit}%)
+                                            </span>
+                                        ` : ''}
+                                    ` : ''}
+                                </div>
                             </td>
                             <td class="text-center" style="width: 75px;">
                                 <input type="number" class="form-control form-control-sm text-center p-1 cart-qty-input font-monospace"
                                        data-cart-index="${idx}"
                                        value="${item.quantity}" min="1" ${item.requires_imei ? 'readonly' : ''}>
                             </td>
-                            <td class="text-end" style="width: 100px;">
+                            <td class="text-end" style="width: 105px;">
                                 <input type="number" step="0.01" class="form-control form-control-sm text-end p-1 cart-price-input font-monospace"
                                        data-cart-index="${idx}"
                                        value="${price.toFixed(2)}">
                             </td>
-                            <td class="text-end fw-bold font-monospace fs-xs">Rs. ${lineTotal.toFixed(2)}</td>
+                            <td class="text-end fw-bold font-monospace fs-xs" id="cartLineTotal_${idx}">
+                                Rs. ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
                             <td class="text-center" style="width: 30px;">
                                 <button type="button" class="btn btn-link text-danger p-0 border-0 cart-remove-btn" data-cart-index="${idx}">
                                     <i class="fas fa-trash-can"></i>
@@ -780,17 +1248,7 @@ class POSCart {
             }
         }
 
-        if (this.subtotalText) this.subtotalText.innerText = `Rs. ${totals.subtotal.toFixed(2)}`;
-        if (this.grandTotalText) this.grandTotalText.innerText = `Rs. ${totals.grandTotal.toFixed(2)}`;
-
-        if (this.engine.isVatMode && totals.totalVat > 0) {
-            if (this.vatRow) this.vatRow.style.display = 'flex';
-            if (this.vatText) this.vatText.innerText = `Rs. ${totals.totalVat.toFixed(2)}`;
-        } else if (this.vatRow) {
-            this.vatRow.style.display = 'none';
-        }
-
-        this.engine.tradeInManager.updateUi(totals.tradeInCredit);
+        this.refreshSummaryDisplays();
     }
 }
 
@@ -916,10 +1374,16 @@ class POSHoldCartManager {
         const customerPhone = this.engine.cart.customerPhone || '';
         const notes = prompt('Enter a short note for this held cart (optional):') || 'Held at counter';
 
+        // Full preservation of line items and discrete discount modes
         const serializedItems = this.engine.cart.items.map(item => ({
             ...item,
             unit_price: (item.unit_price !== undefined) ? item.unit_price : (item.price || 0),
-            price: (item.unit_price !== undefined) ? item.unit_price : (item.price || 0)
+            price: (item.unit_price !== undefined) ? item.unit_price : (item.price || 0),
+            official_unit_price: item.official_unit_price || item.catalog_price || item.unit_price,
+            discount_type: item.discount_type || 'NONE',
+            discount_value: item.discount_value !== undefined ? parseFloat(item.discount_value) : (item.discount_percent || 0),
+            discount_percent: item.discount_percent || 0,
+            is_discountable: item.is_discountable !== false
         }));
 
         const payload = {
@@ -927,6 +1391,10 @@ class POSHoldCartManager {
             subtotal: totals.subtotal,
             customer_name: customerName,
             customer_phone: customerPhone,
+            bill_discount_type: this.engine.cart.billDiscountType || 'PERCENTAGE',
+            bill_discount_value: this.engine.cart.billDiscountValue || 0,
+            bill_discount_percent: this.engine.cart.billDiscountPercent || 0,
+            discount_reason: this.engine.cart.billDiscountReason || '',
             notes: notes
         };
 
@@ -1039,9 +1507,41 @@ class POSHoldCartManager {
             if (items.length > 0) {
                 this.engine.cart.clear();
 
+                // Restore items preserving discount modes and values
                 items.forEach(item => {
-                    this.engine.cart.addItem(item);
+                    let dType = 'NONE';
+                    if (item.discount_type === 'AMOUNT' || item.discount_type === 'FIXED') {
+                        dType = 'AMOUNT';
+                    } else if (item.discount_type === 'PERCENTAGE') {
+                        dType = 'PERCENTAGE';
+                    }
+
+                    this.engine.cart.addItem({
+                        ...item,
+                        discount_type: dType,
+                        discount_value: item.discount_value !== undefined ? item.discount_value : (item.discount_percent || 0),
+                        is_discountable: item.is_discountable !== false
+                    });
                 });
+
+                // Restore bill-level discount configuration
+                let billDiscType = (data.cart_payload && data.cart_payload.bill_discount_type) ? data.cart_payload.bill_discount_type : 'PERCENTAGE';
+                if (billDiscType === 'FIXED') billDiscType = 'AMOUNT';
+
+                const billDiscVal = (data.cart_payload && data.cart_payload.bill_discount_value !== undefined) ? data.cart_payload.bill_discount_value : (data.discount_percent || 0);
+
+                this.engine.cart.billDiscountType = billDiscType;
+                this.engine.cart.billDiscountValue = parseFloat(billDiscVal) || 0;
+                this.engine.cart.billDiscountReason = (data.cart_payload && data.cart_payload.discount_reason) ? data.cart_payload.discount_reason : '';
+
+                const discInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
+                if (discInput) discInput.value = this.engine.cart.billDiscountValue;
+                const toggleBtn = document.getElementById('posBillDiscountTypeToggleBtn');
+                if (toggleBtn) {
+                    toggleBtn.innerText = this.engine.cart.billDiscountType === 'AMOUNT' ? 'Rs.' : '%';
+                    toggleBtn.classList.toggle('btn-primary', this.engine.cart.billDiscountType === 'AMOUNT');
+                    toggleBtn.classList.toggle('btn-outline-secondary', this.engine.cart.billDiscountType !== 'AMOUNT');
+                }
 
                 if (data.customer_name && data.customer_name !== 'Walk-in' && data.customer_name !== 'Walk-in Customer') {
                     const custInput = document.getElementById('posCustomerInput');
@@ -1057,7 +1557,8 @@ class POSHoldCartManager {
                 const modal = bootstrap.Modal.getInstance(this.modalEl);
                 if (modal) modal.hide();
 
-                this.engine.showNotification(`Restored held cart ${reference} with accurate pricing.`, 'success');
+                this.engine.cart.render();
+                this.engine.showNotification(`Restored held cart ${reference} with accurate pricing and discounts.`, 'success');
             }
         } catch (err) {
             console.error('[POSHoldCartManager] Recall error:', err);
@@ -1224,7 +1725,7 @@ class POSCheckout {
         }
 
         const totals = this.engine.cart.calculateTotals();
-        const payload = this.buildPayload([{ mode: 'CASH', amount: totals.grandTotal }]);
+        const payload = this.buildPayload([{ mode: 'CASH', amount: totals.grandTotal, transaction_ref: '' }]);
 
         this.setButtonsDisabled(true);
         await this.executeSubmit(payload, 'CASH (नगद)');
@@ -1240,19 +1741,50 @@ class POSCheckout {
 
         const totals = this.engine.cart.calculateTotals();
         const cash = parseFloat(document.getElementById('splitCashAmt')?.value) || 0;
+
+        // Extract Amounts and Explicit Transaction References
         const fonepay = parseFloat(document.getElementById('splitFonepayAmt')?.value) || 0;
+        const fonepayRef = (document.getElementById('splitFonepayRef')?.value || '').trim();
+
         const esewa = parseFloat(document.getElementById('splitEsewaAmt')?.value) || 0;
+        const esewaRef = (document.getElementById('splitEsewaRef')?.value || '').trim();
+
+        const khalti = parseFloat(document.getElementById('splitKhaltiAmt')?.value) || 0;
+        const khaltiRef = (document.getElementById('splitKhaltiRef')?.value || '').trim();
+
         const card = parseFloat(document.getElementById('splitCardAmt')?.value) || 0;
+        const cardRef = (document.getElementById('splitCardRef')?.value || '').trim();
+
+        const bank = parseFloat(document.getElementById('splitBankAmt')?.value) || 0;
+        const bankRef = (document.getElementById('splitBankRef')?.value || '').trim();
+
         const credit = parseFloat(document.getElementById('splitCreditAmt')?.value) || 0;
+        const creditRef = (document.getElementById('splitCreditRef')?.value || '').trim();
 
         const payments = [];
-        if (cash > 0) payments.push({ mode: 'CASH', amount: cash });
-        if (fonepay > 0) payments.push({ mode: 'FONEPAY', amount: fonepay });
-        if (esewa > 0) payments.push({ mode: 'ESEWA', amount: esewa });
-        if (card > 0) payments.push({ mode: 'CARD', amount: card });
-        if (credit > 0) payments.push({ mode: 'CREDIT', amount: credit });
+        if (cash > 0) {
+            payments.push({ mode: 'CASH', amount: cash, transaction_ref: '' });
+        }
+        if (fonepay > 0) {
+            payments.push({ mode: 'FONEPAY', amount: fonepay, transaction_ref: fonepayRef });
+        }
+        if (esewa > 0) {
+            payments.push({ mode: 'ESEWA', amount: esewa, transaction_ref: esewaRef });
+        }
+        if (khalti > 0) {
+            payments.push({ mode: 'KHALTI', amount: khalti, transaction_ref: khaltiRef });
+        }
+        if (card > 0) {
+            payments.push({ mode: 'CARD', amount: card, transaction_ref: cardRef });
+        }
+        if (bank > 0) {
+            payments.push({ mode: 'BANK', amount: bank, transaction_ref: bankRef });
+        }
+        if (credit > 0) {
+            payments.push({ mode: 'CREDIT', amount: credit, transaction_ref: creditRef });
+        }
 
-        const totalEntered = cash + fonepay + esewa + card + credit;
+        const totalEntered = cash + fonepay + esewa + khalti + card + bank + credit;
         if (Math.abs(totalEntered - totals.grandTotal) > 0.5) {
             this.engine.showNotification(`Entered payments total (Rs. ${totalEntered.toFixed(2)}) must equal Grand Total (Rs. ${totals.grandTotal.toFixed(2)}).`, 'danger');
             return;
@@ -1299,33 +1831,84 @@ class POSCheckout {
                         document.getElementById('posCustomerPanInput')?.value.trim() || 
                         (this.engine.customerManager.selectedCustomer ? this.engine.customerManager.selectedCustomer.pan : '') || '';
 
-        const packagedCartItems = this.engine.cart.items.map(item => ({
-            product_id: item.product_id,
-            item_instance_id: item.item_instance_id || null,
-            unit_price: (item.unit_price !== undefined) ? item.unit_price : (item.price || 0),
-            price: (item.unit_price !== undefined) ? item.unit_price : (item.price || 0),
-            quantity: item.quantity,
-            discount_percent: item.discount_percent || 0,
-            tax_pricing_type: item.tax_pricing_type || 'EXEMPT',
-            vat_rate: item.vat_rate || 0,
-            requires_imei: Boolean(item.requires_imei),
-            imei_1: item.imei_number || item.imei_1 || item.imei1 || '',
-            imei_number: item.imei_number || item.imei_1 || item.imei1 || '',
-            imei_2: item.secondary_imei || item.imei_2 || item.imei2 || '',
-            secondary_imei: item.secondary_imei || item.imei_2 || item.imei2 || '',
-            unit_conversion_id: item.conversion_id || null,
-            conversion_id: item.conversion_id || null
+        // Line-Item Packaging: Strictly sending discount_type: "AMOUNT", "PERCENTAGE", or "NONE"
+        const packagedCartItems = this.engine.cart.items.map(item => {
+            const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
+            const discType = item.discount_type || 'NONE';
+            const discVal = item.discount_value !== undefined ? parseFloat(item.discount_value) : 0;
+            const lineGross = item.quantity * price;
+
+            let effectivePct = 0;
+            if (discType === 'PERCENTAGE') {
+                effectivePct = discVal;
+            } else if (discType === 'AMOUNT' && lineGross > 0) {
+                effectivePct = (Math.min(discVal, lineGross) / lineGross) * 100;
+            }
+
+            return {
+                product_id: item.product_id,
+                item_instance_id: item.item_instance_id || null,
+                unit_price: price,
+                price: price,
+                official_unit_price: item.official_unit_price || item.catalog_price || price,
+                catalog_price: item.catalog_price || item.official_unit_price || price,
+                quantity: item.quantity,
+                discount_type: discType, // "NONE", "PERCENTAGE", or "AMOUNT"
+                discount_value: discVal,
+                discount_input_value: discVal,
+                discount_percent: effectivePct,
+                is_discountable: item.is_discountable !== false,
+                tax_pricing_type: item.tax_pricing_type || 'EXEMPT',
+                vat_rate: item.vat_rate || 0,
+                requires_imei: Boolean(item.requires_imei),
+                imei_1: item.imei_number || item.imei_1 || item.imei1 || '',
+                imei_number: item.imei_number || item.imei_1 || item.imei1 || '',
+                imei_2: item.secondary_imei || item.imei_2 || item.imei2 || '',
+                secondary_imei: item.secondary_imei || item.imei_2 || item.imei2 || '',
+                unit_conversion_id: item.conversion_id || null,
+                conversion_id: item.conversion_id || null
+            };
+        });
+
+        const totals = this.engine.cart.calculateTotals();
+        let billDiscType = this.engine.cart.billDiscountType || 'PERCENTAGE';
+        if (billDiscType === 'FIXED') billDiscType = 'AMOUNT';
+
+        const billDiscVal = this.engine.cart.billDiscountValue !== undefined ? parseFloat(this.engine.cart.billDiscountValue) : 0;
+        const netAfterItem = Math.max(0, totals.subtotal - totals.itemDiscountTotal);
+
+        let effectiveBillPct = 0;
+        if (billDiscType === 'PERCENTAGE') {
+            effectiveBillPct = billDiscVal;
+        } else if (netAfterItem > 0) {
+            effectiveBillPct = (Math.min(billDiscVal, netAfterItem) / netAfterItem) * 100;
+        }
+
+        const discountReason = document.getElementById('posDiscountReasonInput')?.value.trim() ||
+                               this.engine.cart.billDiscountReason ||
+                               '';
+
+        // Securely standardize payment objects with explicit transaction_ref
+        const standardizedPayments = (payments || []).map(p => ({
+            mode: p.mode,
+            amount: parseFloat(p.amount) || 0,
+            transaction_ref: (p.transaction_ref || p.reference || '').trim()
         }));
 
         return {
             idempotency_key: this.engine.cart.activeCartIdempotencyKey,
             cart: packagedCartItems,
-            payments: payments,
+            payments: standardizedPayments,
             customer_id: this.engine.cart.customer ? this.engine.cart.customer.id : null,
             customer_name: custName,
             customer_phone: this.engine.cart.customerPhone || '',
             customer_pan: custPan,
-            discount_percent: this.engine.cart.billDiscountPercent,
+            bill_discount_type: billDiscType, // "AMOUNT", "PERCENTAGE", or "NONE"
+            bill_discount_value: billDiscVal,
+            bill_discount_input_value: billDiscVal,
+            bill_discount_percent: effectiveBillPct,
+            discount_percent: effectiveBillPct, // Backwards-compatibility alias
+            discount_reason: discountReason,
             trade_in_voucher_id: this.engine.tradeInManager.voucherId,
             manager_pin: this.managerPin || '',
             repair_ticket_id: this.engine.repairTicketId || null,
@@ -1374,7 +1957,7 @@ class POSCheckout {
             if (response.ok && data.status === 'success') {
                 this.managerPin = null;
                 const totals = this.engine.cart.calculateTotals();
-                
+
                 // Show Thermal Receipt
                 this.engine.showThermalReceipt(data.estimate_number, payload.customer_name, payModeDisplay, totals);
 
@@ -1448,6 +2031,7 @@ class SmartPOSEngine {
         this.shopTaxMode = taxConfigEl ? taxConfigEl.dataset.taxMode : 'PAN';
         this.isVatMode = this.shopTaxMode === 'VAT';
         this.defaultVatRate = taxConfigEl ? parseFloat(taxConfigEl.dataset.defaultVatRate || 0) : 0;
+        this.supervisorThreshold = taxConfigEl ? parseFloat(taxConfigEl.dataset.managerApprovalDiscount || 10) : 10;
 
         this.currentCategory = 'ALL';
         this.currentCategoryId = null;
@@ -1588,20 +2172,24 @@ class SmartPOSEngine {
             });
         }
 
-        // Cart Actions
+        // Bill Discount Input Listener
         if (this.discountInput) {
             ['input', 'change'].forEach(evt => {
                 this.discountInput.addEventListener(evt, (e) => {
                     let val = parseFloat(e.target.value) || 0;
-                    val = Math.max(0, Math.min(100, val));
-                    this.cart.billDiscountPercent = val;
+                    if (this.cart.billDiscountType === 'PERCENTAGE') {
+                        val = Math.max(0, Math.min(100, val));
+                    } else {
+                        val = Math.max(0, val);
+                    }
+                    this.cart.billDiscountValue = val;
                     this.cart.render();
                 });
             });
         }
 
         if (this.clearCartBtn) {
-            this.clearCartBtn.addEventListener('click', () => this.clearCart());
+            this.clearCartBtn.addEventListener('click', () => this.cart.clear());
         }
 
         if (this.quickCashBtn) {
@@ -1613,7 +2201,7 @@ class SmartPOSEngine {
                 if (document.getElementById('splitPaymentModal')) {
                     this.openSplitPaymentModal();
                 } else {
-                    this.checkout.processCheckout('DIGITAL / QR (eSewa / FonePay)');
+                    this.checkout.processDirectCash();
                 }
             });
         }
@@ -1689,9 +2277,6 @@ class SmartPOSEngine {
         }
     }
 
-    /**
-     * Helper to reliably determine if an item is a smartphone based on multiple attributes.
-     */
     isPhoneProduct(p) {
         if (!p) return false;
         if (p.category_key === 'PHONES') return true;
@@ -1706,19 +2291,15 @@ class SmartPOSEngine {
         ];
         if (phoneKeywords.some(kw => text.includes(kw))) return true;
 
-        // Model patterns like '15 128', '16 256', '14 pro', etc.
         const phoneRegex = /\b(1[1-6]|se)\s+(128|256|512|64|32|1tb)\b|\b(1[1-6])\s+(pro|plus|max|promax|ultra)\b|\b\d{1,2}\s+\d{2,4}\s+(black|blue|pink|white|green|gold|silver|titanium|yellow|purple)\b/i;
         return phoneRegex.test(text);
     }
 
-    // =========================================================================
-    // 1. INSTANT GUN SCANNER LOGIC: AUTO-FETCHES BOTH IMEIS
-    // =========================================================================
     async handleDirectImeiOrBarcodeScan(scannedCode) {
         if (!scannedCode) return;
         const cleanCode = scannedCode.trim();
 
-        // 1. First check in-memory loaded products for instant zero-latency match
+        // 1. Check in-memory catalog
         for (const prod of this.allLoadedProducts) {
             if (prod.in_stock_units && prod.in_stock_units.length > 0) {
                 const matchedUnit = prod.in_stock_units.find(
@@ -1746,7 +2327,7 @@ class SmartPOSEngine {
             }
         }
 
-        // 2. If not found in memory, query server live
+        // 2. Query server live
         try {
             const customerType = this.cart.customerType || 'RETAIL';
             const resp = await fetch(`/products/api/search/?q=${encodeURIComponent(cleanCode)}&customer_type=${customerType}`);
@@ -1783,16 +2364,12 @@ class SmartPOSEngine {
         }
     }
 
-    // =========================================================================
-    // 2. MULTI-ATTRIBUTE SMART FILTERING & ZERO-STORAGE CATALOG RENDERING
-    // =========================================================================
     filterCatalogBySearch(query = '') {
         const cleanQuery = query.toLowerCase().trim();
 
         const filtered = this.allLoadedProducts.filter(p => {
             let matchesCat = false;
 
-            // Direct Database Category ID Match
             if (this.currentCategoryId) {
                 matchesCat = (p.category_id && parseInt(p.category_id, 10) === this.currentCategoryId);
             } else if (this.currentCategory === 'ALL') {
@@ -1815,7 +2392,6 @@ class SmartPOSEngine {
                 matchesCat = (p.category_key === this.currentCategory || (p.category_name && p.category_name.toUpperCase() === this.currentCategory));
             }
 
-            // Search query filter
             const matchesQuery = cleanQuery === '' || 
                 (p.name && p.name.toLowerCase().includes(cleanQuery)) || 
                 (p.brand_name && p.brand_name.toLowerCase().includes(cleanQuery)) || 
@@ -1893,9 +2469,6 @@ class SmartPOSEngine {
         });
     }
 
-    // =========================================================================
-    // 3. PRODUCT CLICK: DUAL-IMEI AUTO-FILL MODAL
-    // =========================================================================
     handleProductCardClick(product) {
         if (this.isPhoneProduct(product)) {
             this.pendingPhoneProduct = product;
@@ -1904,7 +2477,6 @@ class SmartPOSEngine {
                 titleEl.innerText = `${product.name} (${product.specs || ''})`;
             }
 
-            // Populate In-Stock IMEI dropdown
             if (this.modalInStockSelect) {
                 this.modalInStockSelect.innerHTML = '<option value="">-- Choose from In-Stock Phone Boxes --</option>';
                 if (product.in_stock_units && product.in_stock_units.length > 0) {
@@ -1979,9 +2551,6 @@ class SmartPOSEngine {
         POSAudioSynthesizer.play('success');
     }
 
-    // =========================================================================
-    // 4. OLD PHONE EXCHANGE & SPLIT MODAL HELPERS
-    // =========================================================================
     applyExchangeDiscount() {
         const modelInput = document.getElementById('exchangePhoneModel');
         const valueInput = document.getElementById('exchangePhoneValue');
@@ -2018,10 +2587,28 @@ class SmartPOSEngine {
             if (splitFonepay) splitFonepay.value = '';
             const splitEsewa = document.getElementById('splitEsewaAmt');
             if (splitEsewa) splitEsewa.value = '';
+            const splitKhalti = document.getElementById('splitKhaltiAmt');
+            if (splitKhalti) splitKhalti.value = '';
             const splitCard = document.getElementById('splitCardAmt');
             if (splitCard) splitCard.value = '';
+            const splitBank = document.getElementById('splitBankAmt');
+            if (splitBank) splitBank.value = '';
             const splitCredit = document.getElementById('splitCreditAmt');
             if (splitCredit) splitCredit.value = '';
+
+            // Explicitly clear all transaction reference inputs
+            const refIds = [
+                'splitFonepayRef',
+                'splitEsewaRef',
+                'splitKhaltiRef',
+                'splitCardRef',
+                'splitBankRef',
+                'splitCreditRef'
+            ];
+            refIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
 
             const remBal = document.getElementById('splitRemainingBalance');
             if (remBal) remBal.innerText = 'Rs. 0.00';
@@ -2043,9 +2630,6 @@ class SmartPOSEngine {
         }
     }
 
-    // =========================================================================
-    // 5. THERMAL RECEIPT MODAL PRESENTATION
-    // =========================================================================
     showThermalReceipt(slipNo, custName, payMode, totals) {
         const slipEl = document.getElementById('recSlipNo');
         const custEl = document.getElementById('recCustomer');

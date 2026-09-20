@@ -1,0 +1,402 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Discount &amp; Price Override Concession Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.sales-suite-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sales-suite-pill:hover, .sales-suite-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+.report-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.table-disc-override th {
+    font-size: 0.69rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-disc-override td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.disc-mode-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1760px;">
+
+    <!-- Sales Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Sales Suite:</span>
+        <a href="{% url 'reports:sales_summary' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-chart-pie text-secondary"></i> Daily Summary
+        </a>
+        <a href="{% url 'reports:item_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-list-check text-secondary"></i> Line Items
+        </a>
+        <a href="{% url 'reports:product_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-boxes-stacked text-secondary"></i> Product-Wise
+        </a>
+        <a href="{% url 'reports:brand_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-tags text-secondary"></i> Brand-Wise
+        </a>
+        <a href="{% url 'reports:category_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-folder-tree text-secondary"></i> Category-Wise
+        </a>
+        <a href="{% url 'reports:sold_imei' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-barcode text-secondary"></i> Sold IMEIs
+        </a>
+        <a href="{% url 'reports:salesperson_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-user-tie text-secondary"></i> Sales Reps
+        </a>
+        <a href="{% url 'reports:cashier_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-cash-register text-secondary"></i> Cashiers
+        </a>
+        <a href="{% url 'reports:payment_methods' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-wallet text-secondary"></i> Payment Modes
+        </a>
+        <a href="{% url 'reports:discount_overrides' %}" class="sales-suite-pill active text-nowrap">
+            <i class="fas fa-percent text-white"></i> Discounts &amp; Overrides
+        </a>
+        <a href="{% url 'reports:trade_in_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-repeat text-secondary"></i> Trade-In Deals
+        </a>
+        <a href="{% url 'reports:gross_profit' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-coins text-warning"></i> Gross Profit
+        </a>
+        <a href="{% url 'reports:top_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-arrow-trend-up text-success"></i> Top Sellers
+        </a>
+        <a href="{% url 'reports:slow_selling' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-snowflake text-info"></i> Slow Sellers
+        </a>
+        <a href="{% url 'reports:cancelled_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-ban text-danger"></i> Voided Bills
+        </a>
+    </div>
+
+    <!-- Page Header & Actions -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-percent text-danger me-2"></i> Discount &amp; Price Override Concession Audit Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit cashier concessions: Line-level Amount/Percentage discounts, bill-level discounts, catalog price overrides, authorizing supervisors, and justifications
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Audit Sheet
+            </button>
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs">
+                <i class="fas fa-cash-register me-1"></i> Open POS Terminal
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Concession KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-danger border-4 h-100">
+                <span class="text-danger text-uppercase fw-bold fs-2xs">Total Concessions Granted</span>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    -Rs. {{ totals.total_concessions_granted|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.total_lines|default:0 }} Lines with commercial concessions</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-warning border-4 h-100">
+                <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Catalog Price Overrides</span>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    -Rs. {{ totals.total_price_overrides|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Official catalog rates marked down</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-primary border-4 h-100">
+                <span class="text-primary text-uppercase fw-bold fs-2xs">Item-Level Discounts</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    -Rs. {{ totals.total_item_disc_amount_type|add:totals.total_item_disc_percent_type|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Amount: Rs. {{ totals.total_item_disc_amount_type|floatformat:2|intcomma }} | %: Rs. {{ totals.total_item_disc_percent_type|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-dark border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Allocated Bill Discounts</span>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    -Rs. {{ totals.total_bill_disc_alloc|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Proportionately distributed to lines</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <input type="text" name="q" value="{{ filters.q|default:'' }}" class="form-control form-control-sm bg-light border-0 font-monospace" placeholder="Search Product, SKU, IMEI, Bill No, Reason...">
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="concession_type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Concession Types</option>
+                    <option value="amount" {% if filters.concession_type == 'amount' %}selected{% endif %}>Amount Discounts (Rs.)</option>
+                    <option value="percentage" {% if filters.concession_type == 'percentage' %}selected{% endif %}>Percentage Discounts (%)</option>
+                    <option value="price_override" {% if filters.concession_type == 'price_override' %}selected{% endif %}>Price Overrides Only</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="manager" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Supervisors</option>
+                    {% for mgr in managers %}
+                        <option value="{{ mgr.id }}" {% if filters.manager_id == mgr.id|stringformat:"s" %}selected{% endif %}>{{ mgr.get_full_name|default:mgr.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>{{ br.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.concession_type or filters.manager_id or filters.branch_id %}
+                <a href="{% url 'reports:discount_overrides' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Concession Audit Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-file-invoice-dollar text-secondary me-2"></i> Authorized Concessions &amp; Price Overrides Log
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Concession Lines</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-disc-override table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Estimate No &amp; Date</th>
+                        <th>Customer</th>
+                        <th>Product / Handset Model</th>
+                        <th class="text-center">Qty</th>
+                        <th class="text-end">Official Price</th>
+                        <th class="text-end">Billed Rate</th>
+                        <th class="text-end">Price Override</th>
+                        <th>Disc Mode</th>
+                        <th class="text-end">Item Discount</th>
+                        <th class="text-end">Effective %</th>
+                        <th class="text-end">Allocated Bill Disc</th>
+                        <th class="text-end">Total Concession</th>
+                        <th class="text-end">Net Line Total</th>
+                        <th>Authorized By</th>
+                        <th class="pe-3">Justification Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td class="ps-3 font-monospace">
+                            <a href="{% url 'sales:estimate_detail' r.estimate_pk %}" class="fw-bold text-primary text-decoration-none">
+                                {{ r.estimate_number }}
+                            </a>
+                            <small class="text-muted d-block fs-2xs">{{ r.date_ad_str }} ({{ r.date_bs_str }} BS)</small>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ r.customer_name }}</strong>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ r.product_name }}</strong>
+                            {% if r.imei_number %}
+                                <small class="text-muted d-block font-monospace fs-2xs">IMEI: {{ r.imei_number }}</small>
+                            {% else %}
+                                <small class="text-muted d-block font-monospace fs-2xs">SKU: {{ r.sku }}</small>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-center font-monospace fw-bold">{{ r.quantity|floatformat:0 }}</td>
+
+                        <!-- Official vs Billed Rates -->
+                        <td class="col-num text-muted">Rs. {{ r.official_unit_price|floatformat:2|intcomma }}</td>
+                        <td class="col-num fw-bold text-dark">Rs. {{ r.unit_price|floatformat:2|intcomma }}</td>
+
+                        <!-- Price Override Concession -->
+                        <td class="col-num">
+                            {% if r.price_override_amount > 0 %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis font-monospace fw-bold fs-2xs">
+                                    -Rs. {{ r.price_override_amount|floatformat:2|intcomma }}
+                                </span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <!-- Discount Mode Indicator -->
+                        <td>
+                            {% if r.discount_type == 'AMOUNT' or r.discount_type == 'FIXED' %}
+                                <span class="disc-mode-tag bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">Amount</span>
+                            {% elif r.discount_type == 'PERCENTAGE' %}
+                                <span class="disc-mode-tag bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25">Percent</span>
+                            {% else %}
+                                <span class="text-muted fs-2xs">None</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Item Discount Deduction -->
+                        <td class="col-num text-danger fw-bold">
+                            {% if r.item_discount_amount > 0 %}
+                                -Rs. {{ r.item_discount_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <!-- Effective Percentage -->
+                        <td class="col-num font-monospace">
+                            {% if r.effective_discount_percent > 0 %}
+                                {{ r.effective_discount_percent|floatformat:1 }}%
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <!-- Allocated Bill Discount -->
+                        <td class="col-num text-danger">
+                            {% if r.allocated_bill_discount > 0 %}
+                                -Rs. {{ r.allocated_bill_discount|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <!-- Total Line Concession -->
+                        <td class="col-num fw-bold text-danger fs-xs">
+                            -Rs. {{ r.total_line_concession|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Net Line Total -->
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ r.line_total|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Authorizing Manager -->
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs">
+                                <i class="fas fa-user-shield text-warning me-1"></i>{{ r.manager_override_by }}
+                            </span>
+                        </td>
+
+                        <!-- Commercial Reason -->
+                        <td class="pe-3">
+                            <span class="text-dark fs-2xs fw-semibold">{{ r.discount_reason }}</span>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="15" class="text-center py-5 text-muted">
+                            <i class="fas fa-percent fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Concession Records Found</h6>
+                            <p class="text-muted fs-xs mb-0">No sales transactions included discounts or price overrides matching these filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="6" class="ps-3 text-end text-uppercase text-white-50">Grand Concession Totals:</td>
+                        <td class="col-num text-warning-emphasis">-Rs. {{ totals.total_price_overrides|floatformat:2|intcomma }}</td>
+                        <td></td>
+                        <td class="col-num text-warning-emphasis">-Rs. {{ totals.total_item_disc_amount_type|add:totals.total_item_disc_percent_type|floatformat:2|intcomma }}</td>
+                        <td></td>
+                        <td class="col-num text-warning-emphasis">-Rs. {{ totals.total_bill_disc_alloc|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger fs-6">-Rs. {{ totals.total_concessions_granted|floatformat:2|intcomma }}</td>
+                        <td colspan="3" class="pe-3 text-white-50 fs-2xs">{{ totals.total_lines }} Lines Concession Granted</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

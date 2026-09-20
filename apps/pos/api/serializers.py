@@ -21,5 +21,6 @@ class POSHoldCartSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'hold_reference', 'customer', 'customer_name',
             'customer_phone', 'cart_payload', 'subtotal',
-            'discount_percent', 'notes', 'created_at'
+            'bill_discount_type', 'bill_discount_value', 'discount_percent',
+            'notes', 'created_at'
         ]

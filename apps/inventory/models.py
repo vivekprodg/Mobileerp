@@ -1,3 +1,8 @@
+"""
+Inventory & Product Catalog Models: Warehouses, Physical Shelf Stock,
+IMEI Handset Instances, FIFO Batches, Warranties, and Immutable Audit Logs.
+"""
+
 import uuid
 from decimal import Decimal
 from datetime import date
@@ -31,6 +36,7 @@ class ProductCategory(TimeStampedModel):
     name_np = models.CharField(max_length=100, blank=True, null=True, verbose_name=_("Category Name (Nepali)"))
     code = models.CharField(max_length=20, unique=True, verbose_name=_("Code (e.g. MOB, ACC, OPT)"))
     description = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True, db_index=True)
 
     class Meta:
         db_table = 'inv_categories'
@@ -77,6 +83,7 @@ class Product(TimeStampedModel):
     Comprehensive product catalog supporting Brand-New Phones, Pre-Owned (Trade-In) Handsets,
     Accessories, Watches, and Optical equipment with NTA MDMS compliance classification.
     Barcode is fully optional (null=True, blank=True).
+    Supports is_discountable for non-discountable goods (e.g., recharge cards, fixed-rate items).
     """
     TRACKING_TYPE_CHOICES = [
         ('STANDARD', 'Standard Quantity / Batch Tracking'),
@@ -170,6 +177,11 @@ class Product(TimeStampedModel):
     selling_price = models.DecimalField(max_digits=12, decimal_places=2, verbose_name=_("Selling Price / MRP (NPR)"))
     wholesale_price = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
     max_discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('10.00'))
+    is_discountable = models.BooleanField(
+        default=True,
+        verbose_name=_("Discount Allowed"),
+        help_text=_("If unchecked, no item-level or bill-level discount may be applied to this product.")
+    )
     
     tax_pricing_type = models.CharField(
         max_length=20,
@@ -396,7 +408,6 @@ class ItemInstance(TimeStampedModel):
     imei_1 = models.CharField(max_length=35, blank=True, null=True, db_index=True, verbose_name=_("IMEI 1"))
     imei_2 = models.CharField(max_length=35, blank=True, null=True, db_index=True, verbose_name=_("IMEI 2"))
     
-    # Dual-IMEI Sequential Auto-Routing Flag
     imei_2_pending_scan = models.BooleanField(
         default=False,
         db_index=True,
@@ -521,7 +532,6 @@ class ItemInstance(TimeStampedModel):
         else:
             self.serial_number = None
 
-        # Self-healing logic for IMEI 2 pending scan status
         if self.product and self.product.requires_imei_tracking:
             is_dual_sim = getattr(self.product, 'sim_configuration', 'DUAL_SIM') in ['DUAL_SIM', 'ESIM_DUAL']
             if is_dual_sim and not self.imei_2 and self.status == 'IN_STOCK':
@@ -681,7 +691,6 @@ class StockMovementLog(TimeStampedModel):
             models.Index(fields=['movement_type', 'created_at'], name='idx_movelog_type_date'),
             models.Index(fields=['reference_document'], name='idx_movelog_ref_doc'),
         ]
-
 
 # Backward compatibility alias
 IMEIEntry = ItemInstance

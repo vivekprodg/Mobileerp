@@ -61,6 +61,9 @@ urlpatterns = [
     # Proforma Taxation & Annex Books
     path('taxation/', include('apps.taxation.urls', namespace='taxation')),
 
+    # Double-Entry General Ledger & Financial Accounting
+    path('accounting/', include('apps.accounting.urls', namespace='accounting')),
+
     # PWA Offline Screen
     path('offline/', TemplateView.as_view(template_name='offline.html'), name='offline'),
 ]

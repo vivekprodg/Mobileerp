@@ -1,17 +1,157 @@
+"""
+Purchase GRN & Commercial Purchase Return (Debit Note) Services.
+File Path: apps/purchases/services.py
+
+Core Capabilities:
+1. Value-Based Overhead Distribution:
+   - Shipping, freight, customs duty, and handling fees are allocated proportionally
+     based on each item's monetary value rather than raw unit box counts.
+2. Strict Serialized & Dual-IMEI Enforcement:
+   - Mandates that if N units of a smartphone are received, exactly N valid IMEI pairs
+     (IMEI 1 & optional IMEI 2) must be scanned and verified against active stock before
+     inventory is approved.
+3. Thread-Safe Supplier Ledger Reconciliation:
+   - Atomically updates supplier outstanding balances with row-level locking (select_for_update)
+     and logs double-entry ledger transactions.
+4. Product Master & Multi-Branch FIFO Updates:
+   - Adjusts landed cost, updates counter MRPs, records historical price fluctuations,
+     and initializes serialized ItemInstances with NTA MDMS certification.
+5. Strict Atomic General Ledger Double-Entry Accounting Integration:
+   - Inward GRN verification automatically debits Merchandise Inventory Asset & Input VAT
+     and credits Accounts Payable / Cash via post_grn_journal / post_grn_receipt.
+   - Purchase Return (Debit Note) verification automatically debits Accounts Payable / Cash
+     and credits Merchandise Inventory Asset & Input VAT via post_purchase_return_journal.
+   - All GL postings are strictly bound to the database transaction. If GL voucher creation
+     fails, the entire procurement/return transaction rolls back cleanly.
+"""
+
 import re
 import uuid
+import logging
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, timedelta
 from typing import List, Tuple, Dict, Any, Optional
+
 from django.db import transaction
 from django.db.models import Q
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
-from apps.purchases.models import GoodsReceivedNote, GRNItem, Supplier, SupplierUdhaariLedger
+from apps.purchases.models import (
+    GoodsReceivedNote, GRNItem, Supplier, SupplierUdhaariLedger,
+    PurchaseReturn, PurchaseReturnItem
+)
 from apps.inventory.models import Product, ItemInstance, ProductBatch, BranchStock
 from apps.inventory.services import InventoryService
+from apps.branches.models import Branch, BranchDocumentSequence
 from apps.reports.models import ProductCostHistory
 from apps.core.models import AuditLog
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# GENERAL LEDGER DISPATCHER BRIDGES (STRICT TRANSACTIONAL INTEGRITY)
+# =============================================================================
+
+def _post_purchase_return_direct(purchase_return: PurchaseReturn, user=None):
+    """
+    Direct General Ledger poster for commercial purchase returns (Debit Notes).
+    - Debit: Accounts Payable (Supplier Ledger) OR Cash in Hand (if cash refund)
+    - Credit: Merchandise Inventory Asset (at total return value)
+    - Credit: Input VAT 13% (reversing input tax if tax invoice)
+
+    Errors bubble up to enforce atomic rollback across stock and ledger.
+    """
+    from apps.accounting.models import JournalEntry
+    from apps.accounting.services.auto_posting import JournalEngine, AutoPostingService
+
+    existing = JournalEntry.objects.filter(
+        voucher_type='DEBIT_NOTE',
+        reference_document=purchase_return.return_number,
+        status='POSTED'
+    ).first()
+    if existing:
+        return existing
+
+    branch = purchase_return.branch
+    date_ad = purchase_return.return_date
+
+    ap_acc = AutoPostingService.get_or_create_control_account(
+        branch, 'ACCOUNTS_PAYABLE', '2010', 'Accounts Payable (Creditors)', 'LIABILITY', 'CREDIT'
+    )
+    cash_acc = AutoPostingService.get_or_create_control_account(
+        branch, 'CASH', '1010', 'Cash in Hand', 'ASSET', 'DEBIT'
+    )
+    inv_asset_acc = AutoPostingService.get_or_create_control_account(
+        branch, 'INVENTORY_ASSET', '1040', 'Merchandise Inventory Asset', 'ASSET', 'DEBIT'
+    )
+    input_vat_acc = AutoPostingService.get_or_create_control_account(
+        branch, 'INPUT_VAT', '1050', 'Input VAT 13%', 'ASSET', 'DEBIT'
+    )
+
+    lines: List[Dict[str, Any]] = []
+
+    # 1. Debit: Accounts Payable (Deduct from Supplier Udhaari) OR Cash in Hand
+    if purchase_return.refund_mode == 'CASH_REFUND':
+        lines.append({
+            'account': cash_acc,
+            'debit': purchase_return.net_refund_amount,
+            'credit': Decimal('0.00'),
+            'supplier': purchase_return.supplier,
+            'narration': f"Cash refund received on Debit Note {purchase_return.return_number}"
+        })
+    else:
+        lines.append({
+            'account': ap_acc,
+            'debit': purchase_return.net_refund_amount,
+            'credit': Decimal('0.00'),
+            'supplier': purchase_return.supplier,
+            'narration': f"Accounts Payable reduced on Debit Note {purchase_return.return_number}"
+        })
+
+    # 2. Credit: Merchandise Inventory Asset (at purchase value)
+    lines.append({
+        'account': inv_asset_acc,
+        'debit': Decimal('0.00'),
+        'credit': purchase_return.total_return_amount,
+        'supplier': purchase_return.supplier,
+        'narration': f"Merchandise inventory returned to vendor {purchase_return.supplier.company_name}"
+    })
+
+    # 3. Credit: Input VAT 13% (reversing input tax if applicable)
+    if purchase_return.tax_amount > Decimal('0.00'):
+        lines.append({
+            'account': input_vat_acc,
+            'debit': Decimal('0.00'),
+            'credit': purchase_return.tax_amount,
+            'supplier': purchase_return.supplier,
+            'narration': f"Input VAT claimed reversal on Debit Note {purchase_return.return_number}"
+        })
+
+    narration = f"Purchase Return / Debit Note {purchase_return.return_number} to {purchase_return.supplier.company_name}"
+    return JournalEngine.create_balanced_entry(
+        voucher_type='DEBIT_NOTE',
+        date_ad=date_ad,
+        branch=branch,
+        lines=lines,
+        narration=narration,
+        reference_doc=purchase_return.return_number,
+        user=user or purchase_return.processed_by,
+        auto_post=True
+    )
+
+
+# Ensure post_grn_journal and post_purchase_return_journal exist on auto_posting module
+try:
+    import apps.accounting.services.auto_posting as _ap_mod
+    if not hasattr(_ap_mod, 'post_grn_journal'):
+        if hasattr(_ap_mod, 'AutoPostingService') and hasattr(_ap_mod.AutoPostingService, 'post_grn_receipt'):
+            _ap_mod.post_grn_journal = _ap_mod.AutoPostingService.post_grn_receipt
+    if not hasattr(_ap_mod, 'post_purchase_return_journal'):
+        _ap_mod.post_purchase_return_journal = _post_purchase_return_direct
+except Exception:
+    pass
 
 
 class PurchaseService:
@@ -27,6 +167,8 @@ class PurchaseService:
        outstanding balance with row-level locking (select_for_update) and logs ledger transactions.
     4. Product Master & Multi-Branch FIFO Updates: Adjusts landed cost, updates counter MRPs,
        records historical price fluctuations, and initializes serialized ItemInstances.
+    5. Fail-Closed General Ledger Auto-Posting: Dispatches balanced vouchers upon GRN verification.
+       If voucher creation fails, the transaction is rolled back completely.
     """
 
     @classmethod
@@ -72,6 +214,22 @@ class PurchaseService:
 
         # Step 5: Post to Supplier Ledger with Row-Level Locking & Audit Trail
         cls._post_supplier_ledger(grn=grn, net_total=net_total, user=user)
+
+        # Step 6: Post General Ledger Double-Entry Journal (Debit Inventory Asset, Credit Accounts Payable)
+        # Execution is strict; errors bubble up to enforce atomic rollback across stock and ledger.
+        import apps.accounting.services.auto_posting as auto_posting_module
+        if hasattr(auto_posting_module, 'post_grn_journal'):
+            auto_posting_module.post_grn_journal(grn, user=user)
+        elif hasattr(auto_posting_module, 'AutoPostingService'):
+            service = auto_posting_module.AutoPostingService
+            if hasattr(service, 'post_grn_journal'):
+                service.post_grn_journal(grn, user=user)
+            elif hasattr(service, 'post_grn_receipt'):
+                service.post_grn_receipt(grn=grn, user=user)
+            else:
+                raise ValidationError("AutoPostingService has no post_grn_journal or post_grn_receipt implementation.")
+        else:
+            raise ValidationError("Accounting auto_posting module is unavailable for GRN journal posting.")
 
         return grn
 
@@ -434,7 +592,7 @@ class PurchaseService:
         grn.vat_amount = total_tax
         grn.total_landed_cost = total_landed
         grn.net_total_amount = net_total
-        
+
         paid = grn.paid_amount or Decimal('0.00')
         grn.due_amount = max(Decimal('0.00'), net_total - paid)
         grn.status = 'RECEIVED'
@@ -499,3 +657,325 @@ class PurchaseService:
                 'new_supplier_balance': str(new_bal)
             }
         )
+
+
+class PurchaseReturnService:
+    """
+    Commercial Purchase Return / Debit Note Processing Engine.
+    Executes atomic merchandise return to suppliers:
+    1. Pre-validates that stock and serialized IMEIs are currently available in IN_STOCK status at the branch.
+    2. Deducts physical inventory from BranchStock via InventoryService.adjust_stock.
+    3. For serialized smartphones (IMEI), marks ItemInstance status as 'RETURNED_TO_SUPPLIER'
+       so it is permanently removed from active sellable inventory.
+    4. Deducts quantity from active non-serialized inventory FIFO batches.
+    5. If refund_mode is 'DEDUCT_FROM_BALANCE', atomically reduces the supplier's
+       outstanding debt balance in Supplier and records a 'PURCHASE_RETURN' transaction in SupplierUdhaariLedger.
+    6. If refund_mode is 'CASH_REFUND', logs the cash inflow in the supplier ledger.
+    7. Records detailed movement logs in StockMovementLog and forensics in AuditLog.
+    8. Automatically posts double-entry General Ledger reversal vouchers fail-closed.
+    """
+
+    @staticmethod
+    def generate_return_number(branch: Branch) -> str:
+        """
+        Atomically allocates a strictly unique sequential debit note number
+        using database row-level locking.
+        """
+        try:
+            return BranchDocumentSequence.get_next_sequence_number(
+                branch=branch,
+                document_type='PURCHASE_RETURN',
+                prefix_override=f"DN-{branch.code}",
+                padding=6
+            )
+        except Exception:
+            return f"DN-{branch.code}-{uuid.uuid4().hex[:6].upper()}"
+
+    @classmethod
+    @transaction.atomic
+    def process_purchase_return(
+        cls,
+        purchase_return: PurchaseReturn,
+        user=None
+    ) -> PurchaseReturn:
+        """
+        Main transactional entry point coordinating purchase return approval,
+        inventory deduction, IMEI locking, supplier udhaari ledger reconciliation,
+        and double-entry General Ledger voucher posting.
+        """
+        items = list(purchase_return.items.select_related('product', 'product__base_unit', 'unit_conversion').all())
+        if not items:
+            raise ValidationError("Cannot process a purchase return without line items. Please add at least one product.")
+
+        # Step 1: Pre-validation of Stock Availability & Serialized IMEI Ownership
+        cls._validate_return_items(purchase_return, items)
+
+        # Step 2: Deduct Stock, Batches & Update Serialized IMEI Units
+        total_return_val, total_tax_val = cls._deduct_stock_and_update_imeis(
+            purchase_return=purchase_return,
+            items=items,
+            user=user
+        )
+
+        net_refund_val = (total_return_val + total_tax_val).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        purchase_return.total_return_amount = total_return_val
+        purchase_return.tax_amount = total_tax_val
+        purchase_return.net_refund_amount = net_refund_val
+        purchase_return.status = 'CONFIRMED'
+        purchase_return.processed_by = user
+        purchase_return.save(update_fields=['total_return_amount', 'tax_amount', 'net_refund_amount', 'status', 'processed_by', 'updated_at'])
+
+        # Step 3: Settle Supplier Debt Ledger & Post Financial Adjustment
+        cls._reconcile_supplier_ledger(purchase_return, net_refund_val, user)
+
+        # Step 4: Post Double-Entry Journal to General Ledger (Debit AP/Cash, Credit Inventory Asset & Input VAT)
+        # Execution is strict; errors bubble up to enforce atomic rollback across stock and ledger.
+        import apps.accounting.services.auto_posting as auto_posting_module
+        if hasattr(auto_posting_module, 'post_purchase_return_journal'):
+            auto_posting_module.post_purchase_return_journal(purchase_return, user=user)
+        elif hasattr(auto_posting_module, 'AutoPostingService'):
+            service = auto_posting_module.AutoPostingService
+            if hasattr(service, 'post_purchase_return_journal'):
+                service.post_purchase_return_journal(purchase_return, user=user)
+            elif hasattr(service, 'post_purchase_return'):
+                service.post_purchase_return(purchase_return, user=user)
+            else:
+                _post_purchase_return_direct(purchase_return, user=user)
+        else:
+            _post_purchase_return_direct(purchase_return, user=user)
+
+        # Step 5: Audit Trail
+        AuditLog.objects.create(
+            user=user,
+            branch=purchase_return.branch,
+            action_type='UPDATE',
+            module='PurchaseReturn',
+            object_repr=purchase_return.return_number,
+            details={
+                'supplier': purchase_return.supplier.company_name,
+                'net_refund_amount': str(net_refund_val),
+                'refund_mode': purchase_return.refund_mode,
+                'items_count': len(items),
+                'original_bill_reference': purchase_return.original_bill_reference or "",
+            }
+        )
+
+        return purchase_return
+
+    @classmethod
+    def _validate_return_items(cls, purchase_return: PurchaseReturn, items: List[PurchaseReturnItem]) -> None:
+        """
+        Strictly verifies that:
+        - Quantities are strictly positive.
+        - Branch has sufficient sellable stock to cover the return without going negative.
+        - For serialized items, the specified IMEIs currently exist in available IN_STOCK status at this branch.
+        """
+        for item in items:
+            product = item.product
+            factor = item.conversion_factor if item.conversion_factor > Decimal('0.000') else Decimal('1.000')
+            base_qty = (item.returned_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+
+            if base_qty <= Decimal('0.000'):
+                raise ValidationError(f"Return quantity for item '{product.name}' must be greater than zero.")
+
+            # Check branch stock level
+            branch_stock = BranchStock.objects.filter(
+                branch=purchase_return.branch,
+                product=product
+            ).first()
+
+            available_stock = branch_stock.quantity if branch_stock else Decimal('0.000')
+            if available_stock < base_qty:
+                raise ValidationError(
+                    f"Insufficient stock for '{product.name}' at {purchase_return.branch.name}. "
+                    f"Available in warehouse: {available_stock} {product.base_unit.code}, Requested return: {base_qty}."
+                )
+
+            # Validate serialized IMEIs
+            if product.requires_imei_tracking or product.requires_serial_tracking:
+                expected_units = int(base_qty)
+                raw_imei = item.returned_imei_list or ''
+                tokens = [t.strip() for t in re.split(r'[\n,;]+', raw_imei) if t.strip()]
+
+                if len(tokens) != expected_units:
+                    raise ValidationError(
+                        f"IMEI Count Mismatch on '{product.name}': Returning {expected_units} unit(s), "
+                        f"but received {len(tokens)} IMEI(s). Exactly {expected_units} IMEI(s) are required."
+                    )
+
+                for token in tokens:
+                    clean_imei = token.split('|')[0].strip()
+                    instance = ItemInstance.objects.filter(
+                        Q(imei_1=clean_imei) | Q(imei_2=clean_imei) | Q(serial_number=clean_imei),
+                        branch=purchase_return.branch,
+                        status='IN_STOCK'
+                    ).first()
+
+                    if not instance:
+                        raise ValidationError(
+                            f"Device with IMEI / Serial '{clean_imei}' for product '{product.name}' "
+                            f"was not found in available active stock at {purchase_return.branch.name}."
+                        )
+
+    @classmethod
+    def _deduct_stock_and_update_imeis(
+        cls,
+        purchase_return: PurchaseReturn,
+        items: List[PurchaseReturnItem],
+        user=None
+    ) -> Tuple[Decimal, Decimal]:
+        """
+        Deducts physical branch stock, deducts non-serialized FIFO batches,
+        locks serialized phone instances as 'RETURNED_TO_SUPPLIER', and computes financial totals.
+        """
+        total_return_val = Decimal('0.00')
+        total_tax_val = Decimal('0.00')
+
+        for item in items:
+            product = item.product
+            factor = item.conversion_factor if item.conversion_factor > Decimal('0.000') else Decimal('1.000')
+            base_qty = (item.returned_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            item.base_unit_quantity = base_qty
+
+            gross = (item.returned_quantity * (item.purchase_rate or Decimal('0.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            tax_rate = item.tax_rate or Decimal('0.00')
+            tax = (gross * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if tax_rate > Decimal('0.00') else Decimal('0.00')
+            line_tot = gross + tax
+
+            item.tax_amount = tax
+            item.line_total = line_tot
+            item.save(update_fields=['base_unit_quantity', 'tax_amount', 'line_total', 'updated_at'])
+
+            total_return_val += gross
+            total_tax_val += tax
+
+            # 1. Deduct sellable stock from BranchStock via InventoryService
+            InventoryService.adjust_stock(
+                product=product,
+                branch=purchase_return.branch,
+                quantity_delta=-base_qty,
+                movement_type='RMA_VENDOR_DISPATCH',
+                reference_doc=purchase_return.return_number,
+                imei_or_serial=item.returned_imei_list or "",
+                remarks=(
+                    f"Commercial Purchase Return (Debit Note: {purchase_return.return_number}) "
+                    f"to {purchase_return.supplier.company_name}. Reason: {item.return_reason or 'Stock Return'}"
+                ),
+                user=user,
+                allow_negative=False
+            )
+
+            # 2. Update Serialized Phone ItemInstances to RETURNED_TO_SUPPLIER
+            if product.requires_imei_tracking or product.requires_serial_tracking:
+                if item.returned_imei_list:
+                    tokens = [t.strip() for t in re.split(r'[\n,;]+', item.returned_imei_list) if t.strip()]
+                    for token in tokens:
+                        clean_imei = token.split('|')[0].strip()
+                        instance = ItemInstance.objects.select_for_update().filter(
+                            Q(imei_1=clean_imei) | Q(imei_2=clean_imei) | Q(serial_number=clean_imei),
+                            branch=purchase_return.branch,
+                            status='IN_STOCK'
+                        ).first()
+
+                        if instance:
+                            instance.status = 'RETURNED_TO_SUPPLIER'
+                            instance.save(update_fields=['status', 'updated_at'])
+                            if not item.item_instance:
+                                item.item_instance = instance
+                                item.save(update_fields=['item_instance', 'updated_at'])
+
+            # 3. Deduct from active non-serialized inventory FIFO batches
+            else:
+                batches = ProductBatch.objects.select_for_update().filter(
+                    product=product,
+                    branch=purchase_return.branch,
+                    is_depleted=False
+                ).order_by('-purchase_date', '-created_at')
+
+                qty_needed = base_qty
+                for batch in batches:
+                    if batch.quantity_remaining >= qty_needed:
+                        batch.quantity_remaining -= qty_needed
+                        batch.is_depleted = (batch.quantity_remaining <= Decimal('0.000'))
+                        batch.save(update_fields=['quantity_remaining', 'is_depleted', 'updated_at'])
+                        qty_needed = Decimal('0.000')
+                        break
+                    else:
+                        qty_needed -= batch.quantity_remaining
+                        batch.quantity_remaining = Decimal('0.000')
+                        batch.is_depleted = True
+                        batch.save(update_fields=['quantity_remaining', 'is_depleted', 'updated_at'])
+
+        return total_return_val, total_tax_val
+
+    @classmethod
+    def _reconcile_supplier_ledger(
+        cls,
+        purchase_return: PurchaseReturn,
+        net_refund_amount: Decimal,
+        user=None
+    ) -> None:
+        """
+        Adjusts supplier debt ledger according to selected refund mode:
+        - DEDUCT_FROM_BALANCE: Reduces supplier current balance (owing less to supplier).
+        - CASH_REFUND: Logs cash inflow from supplier without altering debt balance.
+        - REPLACEMENT: Logs return awaiting replacement consignment.
+        """
+        supplier = Supplier.objects.select_for_update().get(pk=purchase_return.supplier_id)
+        prev_bal = supplier.current_balance or Decimal('0.00')
+
+        if purchase_return.refund_mode == 'DEDUCT_FROM_BALANCE':
+            new_bal = prev_bal - net_refund_amount
+            supplier.current_balance = new_bal
+            supplier.save(update_fields=['current_balance', 'updated_at'])
+
+            SupplierUdhaariLedger.objects.create(
+                supplier=supplier,
+                branch=purchase_return.branch,
+                transaction_type='PURCHASE_RETURN',
+                amount=net_refund_amount,
+                previous_balance=prev_bal,
+                resulting_balance=new_bal,
+                payment_mode='OTHER',
+                reference_number=purchase_return.return_number,
+                recorded_by=user,
+                remarks=(
+                    f"Debit Note {purchase_return.return_number}: Stock returned to supplier "
+                    f"{supplier.company_name}. Balance deducted by Rs. {net_refund_amount:.2f}. "
+                    f"Original Ref: {purchase_return.original_bill_reference or '-'}"
+                )
+            )
+
+        elif purchase_return.refund_mode == 'CASH_REFUND':
+            SupplierUdhaariLedger.objects.create(
+                supplier=supplier,
+                branch=purchase_return.branch,
+                transaction_type='PURCHASE_RETURN',
+                amount=net_refund_amount,
+                previous_balance=prev_bal,
+                resulting_balance=prev_bal,
+                payment_mode='CASH',
+                reference_number=purchase_return.return_number,
+                recorded_by=user,
+                remarks=(
+                    f"Debit Note {purchase_return.return_number}: Cash refund received of "
+                    f"Rs. {net_refund_amount:.2f} from {supplier.company_name}."
+                )
+            )
+
+        elif purchase_return.refund_mode == 'REPLACEMENT':
+            SupplierUdhaariLedger.objects.create(
+                supplier=supplier,
+                branch=purchase_return.branch,
+                transaction_type='PURCHASE_RETURN',
+                amount=net_refund_amount,
+                previous_balance=prev_bal,
+                resulting_balance=prev_bal,
+                payment_mode='OTHER',
+                reference_number=purchase_return.return_number,
+                recorded_by=user,
+                remarks=(
+                    f"Debit Note {purchase_return.return_number}: Stock returned awaiting replacement "
+                    f"consignment from {supplier.company_name} (Value: Rs. {net_refund_amount:.2f})."
+                )
+            )

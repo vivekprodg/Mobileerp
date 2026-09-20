@@ -1,0 +1,354 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Supplier Purchase Report | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.supplier-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.supplier-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-supplier-purchase th {
+    font-size: 0.70rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-supplier-purchase td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.purchase-nav-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.purchase-nav-pill:hover, .purchase-nav-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1720px;">
+
+    <!-- Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Purchase Suite:</span>
+        <a href="{% url 'taxation:purchase_register' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-book-open text-secondary"></i> Purchase Register
+        </a>
+        <a href="{% url 'reports:supplier_purchases' %}" class="purchase-nav-pill active text-nowrap">
+            <i class="fas fa-building-user text-white"></i> Supplier Purchases
+        </a>
+        <a href="{% url 'reports:product_purchases' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-boxes-stacked text-secondary"></i> Product Purchases
+        </a>
+        <a href="{% url 'purchases:purchase_return_list' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-arrow-rotate-left text-danger"></i> Purchase Returns (Debit Notes)
+        </a>
+        <a href="{% url 'reports:supplier_outstanding' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-hand-holding-dollar text-warning"></i> Supplier Udhaari (Payables)
+        </a>
+        <a href="{% url 'reports:price_history' %}" class="purchase-nav-pill text-nowrap">
+            <i class="fas fa-timeline text-info"></i> Purchase Price History
+        </a>
+    </div>
+
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-building-user text-primary me-2"></i> Supplier-Wise Purchase Turnover &amp; Net Spend Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Distributor procurement volume, gross spend, trade discounts, input VAT, returns deductions, and current accounts payable debt
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet
+            </button>
+            <a href="{% url 'purchases:supplier_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                <i class="fas fa-address-book me-1"></i> Suppliers Directory
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Procurement KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="supplier-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Purchases (Landed Cost)</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-truck-ramp-box fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_landed|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.total_bills_count|default:0 }} Inward GRN Bills Billed</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="supplier-kpi-card border-start border-danger border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-danger text-uppercase fw-bold fs-2xs">Supplier Returns (Debit Notes)</span>
+                    <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle">
+                        <i class="fas fa-arrow-rotate-left fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    -Rs. {{ totals.total_returns_amount|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Merchandise returned to vendors</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="supplier-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">Net Procurement Spend</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-wallet fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_net_procurement|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-success fs-2xs fw-bold">Actual capital retained in stock</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="supplier-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Active Distributors / Suppliers</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-building-user fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    {{ totals.total_suppliers_active|default:0 }} <span class="fs-6 fw-normal text-muted">Vendors</span>
+                </h3>
+                <small class="text-danger fs-2xs fw-bold">Rs. {{ totals.total_current_debt|default:0|floatformat:2|intcomma }} Current Udhaari Debt</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search Supplier Name, Code, Phone, PAN...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <select name="supplier" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Suppliers / Distributors</option>
+                    {% for sup in suppliers %}
+                        <option value="{{ sup.id }}" {% if filters.supplier_id == sup.id|stringformat:"s" %}selected{% endif %}>
+                            {{ sup.company_name }} ({{ sup.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-control bg-light border-0" title="End Date">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.supplier_id or filters.branch_id or start_date or end_date %}
+                <a href="{% url 'reports:supplier_purchases' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 pt-2 border-top fs-2xs text-muted">
+            <span>Date Range: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong> ({{ start_date_bs }} to {{ end_date_bs }} BS)</span>
+            <span>Active Context: <strong>{{ selected_branch.name|default:"All Branches" }}</strong></span>
+        </div>
+    </div>
+
+    <!-- Main Supplier Purchases Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Supplier Procurement &amp; Returns Turnover
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Suppliers Active</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-supplier-purchase table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Supplier Code</th>
+                        <th>Supplier / Distributor Name</th>
+                        <th>Contact Person &amp; Phone</th>
+                        <th>Classification</th>
+                        <th class="text-center">Bills</th>
+                        <th class="text-center">Returns</th>
+                        <th class="text-end">Gross Inward</th>
+                        <th class="text-end">Discounts</th>
+                        <th class="text-end">Input VAT</th>
+                        <th class="text-end">Overheads</th>
+                        <th class="text-end">Landed Purchases</th>
+                        <th class="text-end">Returns Value</th>
+                        <th class="text-end">Net Spend</th>
+                        <th class="text-end">Paid Amount</th>
+                        <th class="text-end pe-3">Current Udhaari</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td class="ps-3 font-monospace text-primary fw-bold">{{ r.supplier_code }}</td>
+
+                        <td>
+                            <a href="{% url 'purchases:supplier_detail' r.supplier_id %}" class="fw-bold text-dark text-decoration-none">
+                                {{ r.company_name }}
+                            </a>
+                            {% if r.pan_number and r.pan_number != '-' %}
+                                <small class="text-muted d-block font-monospace fs-2xs">PAN: {{ r.pan_number }}</small>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <span>{{ r.contact_person }}</span>
+                            <small class="text-muted d-block font-monospace fs-2xs"><i class="fas fa-phone me-1 text-success"></i>{{ r.phone_number }}</small>
+                        </td>
+
+                        <td>
+                            <span class="badge bg-light text-dark border fs-2xs">{{ r.supplier_type }}</span>
+                            {% if r.is_authorized_distributor %}
+                                <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 fs-2xs ms-1">Authorized</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-center font-monospace">{{ r.bills_count }}</td>
+                        <td class="text-center font-monospace">{% if r.returns_count > 0 %}<span class="text-danger fw-bold">{{ r.returns_count }}</span>{% else %}0{% endif %}</td>
+
+                        <td class="col-num">Rs. {{ r.gross_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-muted">-Rs. {{ r.discount_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success">Rs. {{ r.vat_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning-emphasis">+Rs. {{ r.overhead_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num fw-bold text-dark">Rs. {{ r.landed_purchases|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger fw-bold">{% if r.returns_amount > 0 %}-Rs. {{ r.returns_amount|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        <td class="col-num fw-bold text-primary">Rs. {{ r.net_procurement|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success">Rs. {{ r.paid_amount|floatformat:2|intcomma }}</td>
+                        
+                        <td class="col-num pe-3">
+                            {% if r.current_outstanding > 0 %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace fs-xs">
+                                    Rs. {{ r.current_outstanding|floatformat:2|intcomma }}
+                                </span>
+                            {% elif r.current_outstanding < 0 %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold font-monospace fs-xs">
+                                    Adv: Rs. {{ r.current_outstanding|stringformat:".2f"|slice:"1:" }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted font-monospace fs-xs">Clear (0.00)</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="15" class="text-center py-5 text-muted">
+                            <i class="fas fa-building-user fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Supplier Purchase Activity Found</h6>
+                            <p class="text-muted fs-xs mb-0">No GRN inward transactions or purchase returns match the selected filters and date range.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="4" class="ps-3 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="text-center col-num text-white-50">{{ totals.total_bills_count }}</td>
+                        <td class="text-center col-num text-danger">{{ totals.total_returns_amount|yesno:"-,0" }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_gross|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">-Rs. {{ totals.total_discount|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success">Rs. {{ totals.total_vat|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning">+Rs. {{ totals.total_overheads|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white fs-6">Rs. {{ totals.total_landed|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger fs-6">-Rs. {{ totals.total_returns_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning fs-6">Rs. {{ totals.total_net_procurement|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success fs-6">Rs. {{ totals.total_paid|floatformat:2|intcomma }}</td>
+                        <td class="col-num pe-3 text-danger fs-6">Rs. {{ totals.total_current_debt|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,417 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Pre-Owned &amp; Trade-In Phone Inventory | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.tradein-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: all 0.2s ease;
+}
+.tradein-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+.table-tradein th {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 10px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-tradein td {
+    font-size: 0.8125rem;
+    padding: 10px 10px;
+    vertical-align: middle;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+}
+.copy-imei-btn {
+    border: none;
+    background: transparent;
+    color: #64748b;
+    padding: 0 2px;
+    cursor: pointer;
+    font-size: 0.7rem;
+    transition: all 0.15s ease;
+}
+.copy-imei-btn:hover {
+    color: var(--erp-primary);
+    transform: scale(1.15);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1680px;">
+
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-repeat text-primary me-2"></i> Pre-Owned &amp; Trade-In Phone Inventory Report
+            </h4>
+            <p class="text-muted fs-xs mb-0">
+                Audit second-hand phone buy-backs, condition grades, resale profit margins, and statutory police anti-theft legal undertakings
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <a href="{% url 'reports:export_csv' 'trade_in' %}?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Report
+            </button>
+            <a href="{% url 'sales:trade_in_wizard' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+                <i class="fas fa-plus-circle me-1"></i> New Trade-In Buy-Back
+            </a>
+            <a href="{% url 'sales:trade_in_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Vouchers Directory
+            </a>
+        </div>
+    </div>
+
+    <!-- 4 High-Priority Trade-In Financial KPI Cards -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Total Handsets Acquired -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="tradein-kpi-card border-start border-primary border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Total Pre-Owned Handsets</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
+                        <i class="fas fa-repeat fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.total_traded_phones|default:0 }} <span class="fs-6 fw-normal text-muted">Devices</span>
+                </h3>
+                <small class="text-muted fs-2xs">Rs. {{ totals.total_buyback_capital|floatformat:2|intcomma }} Total Acquisition Payout</small>
+            </div>
+        </div>
+
+        <!-- 2. Active In-Stock Showcase Inventory -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="tradein-kpi-card border-start border-success border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-success text-uppercase fw-bold fs-2xs">In-Stock Used Handsets</span>
+                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
+                        <i class="fas fa-mobile-screen fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    {{ totals.in_stock_count|default:0 }} <span class="fs-6 fw-normal text-muted">In Stock</span>
+                </h3>
+                <small class="text-muted fs-2xs">Rs. {{ totals.in_stock_capital|floatformat:2|intcomma }} Capital currently on shelf</small>
+            </div>
+        </div>
+
+        <!-- 3. Resold Phones & Revenue -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="tradein-kpi-card border-start border-dark border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs">Resold Handsets (Turnover)</span>
+                    <span class="badge bg-dark bg-opacity-10 text-dark p-2 rounded-circle">
+                        <i class="fas fa-receipt fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_resale_revenue|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">{{ totals.sold_count }} Devices successfully re-sold</small>
+            </div>
+        </div>
+
+        <!-- 4. Realized Gross Profit & Police Compliance -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="tradein-kpi-card border-start border-warning border-4 h-100">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Gross Profit Realized</span>
+                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
+                        <i class="fas fa-chart-line fs-6"></i>
+                    </span>
+                </div>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_realized_profit|floatformat:2|intcomma }}
+                </h3>
+                <div class="d-flex justify-content-between align-items-center mt-1">
+                    <small class="text-success fs-2xs fw-bold">{{ totals.overall_margin_pct }}% Average Margin</small>
+                    <small class="text-muted fs-2xs"><i class="fas fa-shield-check text-primary me-1"></i>{{ totals.compliance_rate }}% Police KYC</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                           class="form-control bg-light border-0 font-monospace" 
+                           placeholder="Search Voucher, IMEI, Model, Seller, Buyer...">
+                </div>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }} ({{ br.code }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="status" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Inventory Statuses</option>
+                    <option value="IN_STOCK" {% if filters.status == 'IN_STOCK' %}selected{% endif %}>In Stock (Available)</option>
+                    <option value="SOLD" {% if filters.status == 'SOLD' %}selected{% endif %}>Sold to Customer</option>
+                    <option value="UNDER_SERVICE" {% if filters.status == 'UNDER_SERVICE' %}selected{% endif %}>In Workshop</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="condition_grade" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Condition Grades</option>
+                    <option value="USED_GRADE_A" {% if filters.condition_grade == 'USED_GRADE_A' %}selected{% endif %}>Grade A (Flawless)</option>
+                    <option value="USED_GRADE_B" {% if filters.condition_grade == 'USED_GRADE_B' %}selected{% endif %}>Grade B (Minor Scuffs)</option>
+                    <option value="USED_GRADE_C" {% if filters.condition_grade == 'USED_GRADE_C' %}selected{% endif %}>Grade C (Heavy Wear)</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-2">
+                <select name="undertaking" class="form-select form-select-sm bg-light border-0">
+                    <option value="">Police Undertaking</option>
+                    <option value="signed" {% if filters.undertaking == 'signed' %}selected{% endif %}>Signed &amp; Verified</option>
+                    <option value="pending" {% if filters.undertaking == 'pending' %}selected{% endif %}>Pending KYC</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.branch or filters.status or filters.condition_grade or filters.undertaking %}
+                <a href="{% url 'reports:trade_in_inventory' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Trade-In Inventory Ledger Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-list-check text-secondary me-2"></i> Pre-Owned Phone Inventory &amp; Resale Margin Ledger
+            </h6>
+            <span class="badge bg-primary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Handset Records</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-tradein">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Voucher No</th>
+                        <th>Device Model &amp; Specs</th>
+                        <th>Primary IMEI 1</th>
+                        <th>Condition Grade</th>
+                        <th>NTA MDMS</th>
+                        <th>Seller Customer</th>
+                        <th class="text-end">Buyback Landed Payout</th>
+                        <th class="text-end">Resale Price</th>
+                        <th class="text-end">Margin (Rs. / %)</th>
+                        <th>Inventory Status</th>
+                        <th>Police Undertaking</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <!-- Voucher No -->
+                        <td class="ps-4 font-monospace fw-bold">
+                            {% if r.voucher_pk %}
+                                <a href="{% url 'sales:trade_in_detail' r.voucher_pk %}" class="text-decoration-none text-primary">
+                                    {{ r.voucher_number }}
+                                </a>
+                            {% else %}
+                                <span class="text-dark">{{ r.voucher_number }}</span>
+                            {% endif %}
+                            <small class="text-muted d-block font-sans fs-2xs">{{ r.created_at|date:"M d, Y" }}</small>
+                        </td>
+
+                        <!-- Device Model -->
+                        <td>
+                            <strong class="text-dark">{{ r.brand_name }} {{ r.model_name }}</strong>
+                            {% if r.specs %}
+                                <small class="text-muted d-block">{{ r.specs }}</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- IMEI 1 with Copy Button -->
+                        <td>
+                            <span class="font-monospace fw-bold text-dark fs-xs">{{ r.imei_1 }}</span>
+                            <button type="button" class="copy-imei-btn" onclick="copyImeiText('{{ r.imei_1 }}', this)" title="Copy IMEI 1">
+                                <i class="far fa-copy"></i>
+                            </button>
+                        </td>
+
+                        <!-- Condition Grade Badge -->
+                        <td>
+                            {% if r.condition_grade == 'USED_GRADE_A' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    Grade A (Flawless)
+                                </span>
+                            {% elif r.condition_grade == 'USED_GRADE_B' %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-2xs px-2 py-1">
+                                    Grade B (Fair)
+                                </span>
+                            {% else %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">
+                                    Grade C (Heavy Wear)
+                                </span>
+                            {% endif %}
+                            {% if r.score_percent %}
+                                <small class="text-muted d-block font-monospace fs-2xs">{{ r.score_percent|floatformat:0 }}% Score</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- NTA MDMS -->
+                        <td>
+                            {% if r.mdms_status == 'REGISTERED_OFFICIAL' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fs-2xs"><i class="fas fa-check me-1"></i>MDMS OK</span>
+                            {% else %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs"><i class="fas fa-triangle-exclamation me-1"></i>Gray</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Seller Info -->
+                        <td>
+                            <strong class="text-dark fs-xs">{{ r.seller_name }}</strong>
+                            {% if r.seller_phone %}
+                                <small class="text-muted d-block font-monospace"><i class="fas fa-phone fs-2xs me-1"></i>{{ r.seller_phone }}</small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Buyback Cost -->
+                        <td class="col-num text-dark fw-bold">
+                            Rs. {{ r.buyback_cost|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Resale Selling Price -->
+                        <td class="col-num text-primary fw-semibold">
+                            Rs. {{ r.selling_price|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Margin Realized -->
+                        <td class="col-num">
+                            <strong class="{% if r.realized_margin > 0 %}text-success{% elif r.realized_margin < 0 %}text-danger{% else %}text-muted{% endif %}">
+                                {% if r.realized_margin > 0 %}+{% endif %}Rs. {{ r.realized_margin|floatformat:2|intcomma }}
+                            </strong>
+                            <small class="text-muted d-block fs-2xs">({{ r.margin_percent }}%)</small>
+                        </td>
+
+                        <!-- Status -->
+                        <td>
+                            {% if r.is_sold %}
+                                <span class="badge bg-secondary text-white fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-check me-1"></i> Sold on Bill
+                                </span>
+                                <small class="text-muted d-block font-monospace fs-2xs">{{ r.sold_invoice }}</small>
+                            {% else %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
+                                    <i class="fas fa-box me-1"></i> In Stock (Showcase)
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Police Legal Undertaking Status -->
+                        <td>
+                            {% if r.has_undertaking %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs px-2 py-1 fw-bold">
+                                    <i class="fas fa-shield-check me-1"></i> Signed &amp; Compliant
+                                </span>
+                            {% else %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-2xs px-2 py-1 fw-bold">
+                                    <i class="fas fa-triangle-exclamation me-1"></i> Pending KYC
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Actions -->
+                        <td class="text-end pe-4">
+                            <div class="d-inline-flex gap-1">
+                                {% if r.voucher_pk %}
+                                    <a href="{% url 'sales:trade_in_undertaking_print' r.voucher_pk %}" 
+                                       target="_blank" 
+                                       class="btn btn-outline-danger btn-sm rounded-circle p-2" 
+                                       title="Print Police Undertaking (A4)">
+                                        <i class="fas fa-file-pdf"></i>
+                                    </a>
+                                {% endif %}
+                                <a href="{% url 'reports:imei_lifecycle' %}?imei={{ r.imei_1 }}" 
+                                   class="btn btn-outline-primary btn-sm rounded-pill px-2 py-0 fs-2xs fw-bold" 
+                                   title="Audit Device Journey">
+                                    Trace
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="12" class="text-center py-5 text-muted">
+                            <i class="fas fa-repeat fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Trade-In Handsets Found</h6>
+                            <p class="text-muted fs-xs mb-0">No pre-owned buy-back records match the selected filters.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="6" class="ps-4 text-end text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="text-end col-num text-white fs-6">Rs. {{ totals.total_buyback_capital|floatformat:2|intcomma }}</td>
+                        <td class="text-end col-num text-primary fs-6">Rs. {{ totals.total_resale_revenue|floatformat:2|intcomma }}</td>
+                        <td class="text-end col-num text-success fs-6">+Rs. {{ totals.total_realized_profit|floatformat:2|intcomma }}</td>
+                        <td colspan="3" class="pe-4 text-white-50 fs-2xs">Realized / Projected Profit</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+
+<script>
+function copyImeiText(text, btn) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = 'fas fa-check text-success';
+        setTimeout(() => {
+            if (icon) icon.className = 'far fa-copy';
+        }, 1500);
+    });
+}
+</script>
+{% endblock %}
