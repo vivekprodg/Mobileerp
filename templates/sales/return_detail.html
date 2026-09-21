@@ -1,0 +1,331 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Credit Note / Return Voucher {{ sales_return.return_number }} | {{ SYS_CONFIG.company_name_en|default:COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* A4 Credit Note Sheet Layout for Screen & Print */
+.credit-note-container {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: var(--erp-shadow-sm, 0 1px 3px rgba(0,0,0,0.06));
+}
+
+.credit-note-table th {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    vertical-align: middle;
+}
+
+.credit-note-table td {
+    padding: 10px 8px;
+    vertical-align: middle;
+}
+
+.imei-print-pill {
+    display: inline-block;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    margin: 2px 2px 0 0;
+}
+
+.signature-box-print {
+    border-top: 1.5px solid #0f172a;
+    width: 220px;
+    text-align: center;
+    padding-top: 6px;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+@media print {
+    @page {
+        size: A4 portrait;
+        margin: 10mm 12mm;
+    }
+
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 11px;
+    }
+
+    .no-print, header, aside, footer, nav, .btn, #sidebarOffcanvas {
+        display: none !important;
+    }
+
+    .credit-note-container {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    .credit-note-table th {
+        background-color: #1e293b !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1280px;">
+    <!-- Top Action Navigation Bar (Hidden in Print) -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 no-print">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-danger fs-xs font-monospace px-3 py-1 rounded-pill">{{ sales_return.return_number }}</span>
+                <h4 class="fw-bold text-dark mb-0">Customer Credit Note / Sales Return</h4>
+                {% if sales_return.refund_mode == 'CASH' %}
+                    <span class="badge bg-success bg-opacity-10 text-success fs-xs px-3 py-1 rounded-pill fw-bold border border-success">
+                        <i class="fas fa-money-bill-wave me-1"></i> Cash Refund
+                    </span>
+                {% elif sales_return.refund_mode == 'STORE_CREDIT' %}
+                    <span class="badge bg-info bg-opacity-10 text-info fs-xs px-3 py-1 rounded-pill fw-bold border border-info">
+                        <i class="fas fa-wallet me-1"></i> Store Credit
+                    </span>
+                {% else %}
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary fs-xs px-3 py-1 rounded-pill fw-bold border border-secondary">
+                        {{ sales_return.get_refund_mode_display }}
+                    </span>
+                {% endif %}
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Issued for Bill: 
+                <a href="{% url 'sales:estimate_detail' sales_return.original_estimate.pk %}" class="fw-bold text-primary text-decoration-none">
+                    {{ sales_return.original_estimate.estimate_number }}
+                </a> &bull; Customer: <strong>{{ sales_return.customer.name|default:sales_return.original_estimate.recipient_display_name }}</strong>
+                &bull; Date: <strong>{{ sales_return.return_date_ad }} ({{ sales_return.return_date_bs }} BS)</strong>
+            </p>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <button type="button" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Credit Note (A4)
+            </button>
+            <a href="{% url 'sales:return_thermal_slip' sales_return.pk %}" target="_blank" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-receipt me-1"></i> Thermal Slip (80mm)
+            </a>
+            <a href="{% url 'sales:estimate_detail' sales_return.original_estimate.pk %}" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold">
+                <i class="fas fa-file-invoice me-1"></i> View Original Bill
+            </a>
+            <a href="{% url 'sales:return_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Returns List
+            </a>
+        </div>
+    </div>
+
+    <!-- Official Printable A4 Credit Note Sheet Container -->
+    <div class="credit-note-container">
+        <!-- 1. Header with Store Branding & Legal Profile -->
+        <div class="text-center border-bottom pb-3 mb-3">
+            {% if sales_return.branch.logo_url %}
+                <img src="{{ sales_return.branch.logo_url }}" alt="{{ sales_return.branch.display_company_name }}" class="mb-2" style="max-height: 52px; max-width: 220px; object-fit: contain;">
+            {% elif COMPANY_LOGO_URL %}
+                <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="mb-2" style="max-height: 52px; max-width: 220px; object-fit: contain;">
+            {% endif %}
+
+            <h3 class="fw-extrabold text-dark mb-0" style="letter-spacing: -0.02em;">
+                {{ sales_return.branch.display_company_name|default:COMPANY_NAME|upper }}
+            </h3>
+            {% if sales_return.branch.display_company_name_np or COMPANY_NAME_NP %}
+                <h6 class="text-secondary fw-bold mb-1">{{ sales_return.branch.display_company_name_np|default:COMPANY_NAME_NP }}</h6>
+            {% endif %}
+            
+            <div class="fs-xs text-muted">
+                {{ sales_return.branch.address }}, {{ sales_return.branch.city }} | Phone: {{ sales_return.branch.phone_number }}
+                {% if config.pan_number %} &bull; <strong>PAN: {{ config.pan_number }}</strong>{% endif %}
+                {% if config.vat_number and config.tax_system_mode == 'VAT' %} &bull; VAT Reg: {{ config.vat_number }}{% endif %}
+            </div>
+
+            <div class="mt-3">
+                <span class="badge bg-danger text-white px-4 py-2 fs-6 fw-bold rounded-pill text-uppercase" style="letter-spacing: 0.08em;">
+                    CREDIT NOTE / बिक्री फिर्ता पुर्जी
+                </span>
+            </div>
+        </div>
+
+        <!-- 2. Metadata Grid (Customer Details, Original Invoice, Voucher Info) -->
+        <div class="row g-3 mb-4 fs-xs">
+            <div class="col-6 col-md-6">
+                <div class="p-3 bg-light rounded-3 border h-100">
+                    <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Customer Details:</span>
+                    <h6 class="fw-bold text-dark mb-1">{{ sales_return.customer.name|default:sales_return.original_estimate.recipient_display_name }}</h6>
+                    {% if sales_return.customer %}
+                        <div class="text-secondary">{{ sales_return.customer.address|default:'' }}</div>
+                        <div class="text-secondary">Phone: <strong>{{ sales_return.customer.phone_number|default:'N/A' }}</strong></div>
+                        {% if sales_return.customer.pan_number %}
+                            <div class="font-monospace text-dark mt-1">PAN: <strong>{{ sales_return.customer.pan_number }}</strong></div>
+                        {% endif %}
+                    {% else %}
+                        <div class="text-secondary">Phone: <strong>{{ sales_return.original_estimate.customer_phone_manual|default:'N/A' }}</strong></div>
+                        {% if sales_return.original_estimate.customer_pan %}
+                            <div class="font-monospace text-dark mt-1">PAN: <strong>{{ sales_return.original_estimate.customer_pan }}</strong></div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="col-6 col-md-6">
+                <div class="p-3 bg-light rounded-3 border h-100">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Credit Note No:</span>
+                        <strong class="font-monospace text-danger fs-sm">{{ sales_return.return_number }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Original Sales Bill:</span>
+                        <a href="{% url 'sales:estimate_detail' sales_return.original_estimate.pk %}" class="font-monospace fw-bold text-primary text-decoration-none">
+                            {{ sales_return.original_estimate.estimate_number }}
+                        </a>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Return Date (AD):</span>
+                        <strong class="text-dark">{{ sales_return.return_date_ad }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Return Date (BS):</span>
+                        <strong class="text-primary font-monospace">{{ sales_return.return_date_bs|default:'' }} BS (FY: {{ sales_return.fiscal_year|default:'' }})</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Settlement Mode:</span>
+                        <span class="badge bg-primary bg-opacity-10 text-primary fw-bold fs-2xs">
+                            {{ sales_return.get_refund_mode_display }}
+                        </span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">Processed By:</span>
+                        <strong class="text-dark">{{ sales_return.processed_by.get_full_name|default:sales_return.processed_by.username }}</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Line Items Table with Restock Routing & IMEI breakdown -->
+        <div class="table-responsive mb-4">
+            <table class="table table-bordered align-middle mb-0 credit-note-table">
+                <thead>
+                    <tr>
+                        <th class="ps-3 text-center" style="width: 45px;">#</th>
+                        <th>Product / Model Description</th>
+                        <th class="text-center" style="width: 75px;">Unit</th>
+                        <th class="text-center" style="width: 80px;">Return Qty</th>
+                        <th class="text-end" style="width: 120px;">Sold Price</th>
+                        <th class="text-center" style="width: 140px;">Inventory Status</th>
+                        <th class="text-end pe-3" style="width: 140px;">Refund Total (NPR)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td class="ps-3 text-center text-muted fw-bold">{{ forloop.counter }}</td>
+                        <td>
+                            <strong class="text-dark">{{ item.product.name }}</strong>
+                            {% if item.product.ram and item.product.internal_storage %}
+                                <span class="text-muted fs-2xs">({{ item.product.ram }}/{{ item.product.internal_storage }}{% if item.product.color_variant %} - {{ item.product.color_variant }}{% endif %})</span>
+                            {% endif %}
+                            <small class="text-muted d-block font-monospace fs-2xs">SKU: {{ item.product.sku }}</small>
+
+                            <!-- Serialized IMEI Pill -->
+                            {% if item.returned_imei %}
+                                <div class="mt-1">
+                                    <span class="text-muted fs-2xs fw-bold">Returned IMEI:</span>
+                                    <span class="imei-print-pill text-dark font-monospace">{{ item.returned_imei }}</span>
+                                </div>
+                            {% endif %}
+
+                            <!-- Defect / Damage Notes -->
+                            {% if item.is_defective and item.defect_reason %}
+                                <div class="text-danger fs-2xs mt-1">
+                                    <i class="fas fa-triangle-exclamation me-1"></i> Fault: <strong>{{ item.defect_reason }}</strong>
+                                </div>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-center">{{ item.product.base_unit.code|default:"Pcs" }}</td>
+                        <td class="text-center font-monospace fw-bold">{{ item.return_quantity|floatformat:0 }}</td>
+                        <td class="text-end font-monospace">Rs. {{ item.estimate_item.unit_price|floatformat:2|intcomma }}</td>
+                        <td class="text-center">
+                            {% if item.is_defective %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger fs-2xs">
+                                    <i class="fas fa-biohazard me-1"></i> Defective / RMA
+                                </span>
+                            {% elif item.restock_to_inventory %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success fs-2xs">
+                                    <i class="fas fa-check-circle me-1"></i> Restocked
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs">
+                                    Not Restocked
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end pe-3 font-monospace fw-bold text-danger">Rs. {{ item.refund_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                <!-- Financial Totals Summary Footers -->
+                <tfoot class="border-top">
+                    <tr class="bg-light">
+                        <td colspan="6" class="text-end fw-extrabold text-dark text-uppercase fs-sm">Total Refund Amount Issued:</td>
+                        <td class="text-end pe-3 font-monospace fw-extrabold text-danger fs-5">Rs. {{ sales_return.total_refund_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <!-- 4. Remarks & Diagnostic Findings -->
+        <div class="row g-3 mb-4 fs-xs">
+            <div class="col-12 col-md-6">
+                <div class="p-3 bg-light rounded-3 border h-100">
+                    <strong class="text-dark d-block mb-1">
+                        <i class="fas fa-comment-dots text-primary me-1"></i> Return Reason / Justification:
+                    </strong>
+                    <p class="text-secondary mb-0">{{ sales_return.reason|default:"Standard Customer Return"|linebreaks }}</p>
+                </div>
+            </div>
+            <div class="col-12 col-md-6">
+                <div class="p-3 bg-light rounded-3 border h-100">
+                    <strong class="text-dark d-block mb-1">
+                        <i class="fas fa-stethoscope text-danger me-1"></i> Diagnostic / Inspection Findings:
+                    </strong>
+                    <p class="text-secondary mb-0">{{ sales_return.technician_notes|default:"No hardware defect reported. Item accepted in good restockable condition."|linebreaks }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. Formal Signatures & Acknowledgement Area -->
+        <div class="d-flex justify-content-between align-items-end mt-5 pt-4">
+            <div class="signature-box-print">
+                <div class="mb-5"></div>
+                <div>Customer Signature</div>
+                <small class="text-muted fw-normal">(Goods Returned / Refund Received)</small>
+            </div>
+
+            <div class="text-center text-muted fs-2xs" style="max-width: 320px;">
+                * This Credit Note acknowledges the physical return of merchandise. Corresponding inventory, warranty certificates, and accounts have been adjusted.
+            </div>
+
+            <div class="signature-box-print">
+                <div class="mb-5"></div>
+                <div>Authorized Store Signature &amp; Stamp</div>
+                <small class="text-muted fw-normal">({{ sales_return.branch.name }})</small>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

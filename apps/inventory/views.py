@@ -6,6 +6,7 @@ from decimal import Decimal
 from datetime import date
 import pandas as pd
 
+from django import forms
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, View, FormView, TemplateView
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -32,6 +33,27 @@ from apps.inventory.forms import (
 )
 from apps.inventory.services import InventoryService, ExcelProductImporter
 from apps.core.models import AuditLog
+
+
+# ==============================================================================
+# BRAND FORM HELPER
+# ==============================================================================
+
+class BrandForm(forms.ModelForm):
+    class Meta:
+        model = Brand
+        fields = ['name', 'origin_country']
+        widgets = {
+            'name': forms.TextInput(attrs={
+                'class': 'inv-form-input',
+                'placeholder': 'e.g. Samsung, Apple, Xiaomi',
+                'required': 'required'
+            }),
+            'origin_country': forms.TextInput(attrs={
+                'class': 'inv-form-input',
+                'placeholder': 'e.g. South Korea, USA, China, Nepal'
+            }),
+        }
 
 
 # ==============================================================================
@@ -602,6 +624,153 @@ class SubCategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, Vie
                     'category_name': category.name
                 }
             })
+
+        except Exception as err:
+            return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
+
+
+# ==============================================================================
+# BRAND MANAGEMENT & QUICK CREATE API VIEWS
+# ==============================================================================
+
+class BrandListView(LoginRequiredMixin, ListView):
+    model = Brand
+    template_name = 'inventory/brand_list.html'
+    context_object_name = 'brands'
+    paginate_by = 25
+
+    def get_queryset(self):
+        qs = Brand.objects.annotate(product_count=Count('products')).order_by('name')
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            qs = qs.filter(
+                Q(name__icontains=query) |
+                Q(origin_country__icontains=query)
+            )
+        return qs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['brand_form'] = BrandForm()
+        return context
+
+
+class BrandCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
+    model = Brand
+    form_class = BrandForm
+    template_name = 'inventory/brand_form.html'
+    success_url = reverse_lazy('inventory:brand_list')
+
+    def test_func(self):
+        return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER', 'STAFF']
+
+    def form_valid(self, form):
+        with transaction.atomic():
+            response = super().form_valid(form)
+            AuditLog.objects.create(
+                user=self.request.user,
+                branch=getattr(self.request, 'active_branch', None) or Branch.get_default_main_branch(),
+                action_type='CREATE',
+                module='InventoryBrand',
+                object_repr=str(self.object),
+                ip_address=self.request.META.get('REMOTE_ADDR'),
+                details={
+                    'name': self.object.name,
+                    'origin_country': self.object.origin_country
+                }
+            )
+        messages.success(self.request, f"Brand '{self.object.name}' created successfully.")
+        return response
+
+
+class BrandUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
+    model = Brand
+    form_class = BrandForm
+    template_name = 'inventory/brand_form.html'
+    success_url = reverse_lazy('inventory:brand_list')
+
+    def test_func(self):
+        return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER', 'STAFF']
+
+    def form_valid(self, form):
+        with transaction.atomic():
+            response = super().form_valid(form)
+            AuditLog.objects.create(
+                user=self.request.user,
+                branch=getattr(self.request, 'active_branch', None) or Branch.get_default_main_branch(),
+                action_type='UPDATE',
+                module='InventoryBrand',
+                object_repr=str(self.object),
+                ip_address=self.request.META.get('REMOTE_ADDR'),
+                details={'updated_fields': list(form.changed_data)}
+            )
+        messages.success(self.request, f"Brand '{self.object.name}' updated successfully.")
+        return response
+
+
+class BrandQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
+    """
+    Lightweight JSON endpoint to create a Brand dynamically from modals
+    or the quick-add button in product creation interfaces.
+    """
+
+    def test_func(self):
+        return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER', 'STAFF']
+
+    def post(self, request, *args, **kwargs):
+        try:
+            if request.content_type == 'application/json':
+                data = json.loads(request.body.decode('utf-8'))
+            else:
+                data = request.POST
+
+            name = data.get('name', '').strip()
+            origin_country = data.get('origin_country', '').strip()
+
+            if not name:
+                return JsonResponse({'status': 'error', 'message': 'Brand name is required.'}, status=400)
+
+            with transaction.atomic():
+                existing = Brand.objects.filter(name__iexact=name).first()
+                if existing:
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': 'Brand already exists.',
+                        'brand': {
+                            'id': existing.id,
+                            'name': existing.name,
+                            'origin_country': existing.origin_country
+                        }
+                    })
+
+                brand = Brand.objects.create(
+                    name=name,
+                    origin_country=origin_country or "Nepal"
+                )
+
+                AuditLog.objects.create(
+                    user=request.user,
+                    branch=getattr(request, 'active_branch', None) or Branch.get_default_main_branch(),
+                    action_type='CREATE',
+                    module='InventoryBrand',
+                    object_repr=str(brand),
+                    ip_address=request.META.get('REMOTE_ADDR'),
+                    details={
+                        'name': brand.name,
+                        'origin_country': brand.origin_country,
+                        'source': 'QuickCreateModal'
+                    }
+                )
+
+            return JsonResponse({
+                'status': 'success',
+                'message': f"Brand '{brand.name}' registered successfully.",
+                'brand': {
+                    'id': brand.id,
+                    'name': brand.name,
+                    'origin_country': brand.origin_country
+                }
+            }, status=201)
 
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)

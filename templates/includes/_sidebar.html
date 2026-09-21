@@ -114,7 +114,7 @@
     <div class="sidebar-section-heading">Inventory &amp; Stock</div>
 
     <a href="{% url 'inventory:product_list' %}" 
-       class="sidebar-nav-item {% if request.resolver_match.app_name == 'inventory' and 'category' not in request.resolver_match.url_name and 'rma' not in request.resolver_match.url_name and 'unit' not in request.resolver_match.url_name and 'imei_registry' not in request.resolver_match.url_name and 'excel' not in request.resolver_match.url_name %}active{% endif %}"
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'inventory' and 'category' not in request.resolver_match.url_name and 'rma' not in request.resolver_match.url_name and 'unit' not in request.resolver_match.url_name and 'imei_registry' not in request.resolver_match.url_name and 'excel' not in request.resolver_match.url_name and 'brand' not in request.resolver_match.url_name %}active{% endif %}"
        data-bs-toggle="tooltip" data-bs-placement="right" title="Inventory Catalog">
         <i class="fas fa-boxes-stacked text-secondary"></i>
         <span class="sidebar-label-wrap">Inventory Catalog</span>
@@ -139,6 +139,13 @@
        data-bs-toggle="tooltip" data-bs-placement="right" title="Product Categories">
         <i class="fas fa-tags text-secondary"></i>
         <span class="sidebar-label-wrap">Product Categories</span>
+    </a>
+
+    <a href="{% url 'inventory:brand_list' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'inventory' and 'brand' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Product Brands">
+        <i class="fas fa-copyright text-secondary"></i>
+        <span class="sidebar-label-wrap">Brands</span>
     </a>
 
     <a href="{% url 'inventory:unit_list' %}" 

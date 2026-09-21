@@ -692,7 +692,7 @@
     gap: 10px;
 }
 
-/* Quick Add Category/SubCategory/Unit Button (Prominent 28x28px) */
+/* Quick Add Category/SubCategory/Brand/Unit Button (Prominent 28x28px) */
 .inv-quick-add-btn {
     display: inline-flex;
     align-items: center;
@@ -878,7 +878,7 @@
                     {% endfor %}
                 </select>
 
-                <select class="inv-select" name="brand" onchange="document.getElementById('filterForm').submit()">
+                <select class="inv-select" name="brand" id="catalogBrandFilter" onchange="document.getElementById('filterForm').submit()">
                     <option value="all">All Brands</option>
                     {% for b in brands %}
                         <option value="{{ b.id }}" {% if request.GET.brand == b.id|stringformat:"s" %}selected{% endif %}>
@@ -1186,9 +1186,15 @@
                     </select>
                 </div>
 
+                <!-- BRAND DROPDOWN WITH QUICK-ADD TRIGGER BUTTON -->
                 <div class="inv-form-group">
-                    <label class="inv-form-label">Brand</label>
-                    <select class="inv-form-input" name="brand">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="inv-form-label mb-0">Brand</label>
+                        <button type="button" class="inv-quick-add-btn" id="openQuickBrandBtn" title="Quick Add New Brand" data-bs-toggle="tooltip">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <select class="inv-form-input" name="brand" id="productBrandSelect">
                         <option value="">-- Select Brand --</option>
                         {% for b in brands %}
                             <option value="{{ b.id }}">{{ b.name }}</option>
@@ -1215,7 +1221,7 @@
                     <label class="inv-form-label">Network Type</label>
                     <select class="inv-form-input" name="network_type">
                         <option value="5G">5G / LTE</option>
-                        <option value="4G">4G VoLTE</option>
+                        <option value="4G">4G / VoLTE</option>
                         <option value="WIFI_ONLY">Wi-Fi Only</option>
                     </select>
                 </div>
@@ -1358,7 +1364,44 @@
 </div>
 
 <!-- =========================================================
-     4. QUICK ADD UNIT OF MEASUREMENT (UOM) POPUP MODAL
+     4. QUICK ADD BRAND POPUP MODAL
+     ========================================================= -->
+<div class="inv-modal-overlay" id="quickBrandModal" style="z-index: 1060;">
+    <div class="inv-modal" style="width: min(440px, 100%);">
+        <div class="inv-modal-header" style="background:#f8fafc;">
+            <div>
+                <div class="inv-modal-title" style="font-size:14px;"><i class="fas fa-copyright text-primary me-2"></i> Quick Add Brand</div>
+                <div class="inv-modal-description">Instantly register a brand name without leaving this screen.</div>
+            </div>
+            <button type="button" class="inv-modal-close" id="closeQuickBrandBtn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <form class="inv-form" id="quickBrandForm">
+            {% csrf_token %}
+            <div class="d-flex flex-column gap-3">
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Brand Name *</label>
+                    <input class="inv-form-input" id="quickBrandNameInput" required placeholder="e.g. Nothing, OnePlus, Realme">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Origin Country (Optional)</label>
+                    <input class="inv-form-input" id="quickBrandCountryInput" placeholder="e.g. South Korea, China, India, Nepal">
+                </div>
+            </div>
+
+            <div class="inv-modal-footer">
+                <button type="button" class="inv-btn" id="cancelQuickBrandBtn">Cancel</button>
+                <button type="submit" class="inv-btn inv-btn-primary" id="saveQuickBrandBtn">Save Brand</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- =========================================================
+     5. QUICK ADD UNIT OF MEASUREMENT (UOM) POPUP MODAL
      ========================================================= -->
 <div class="inv-modal-overlay" id="quickUnitModal" style="z-index: 1060;">
     <div class="inv-modal" style="width: min(460px, 100%);">
@@ -1407,7 +1450,7 @@
 </div>
 
 <!-- =========================================================
-     5. EXPLANATORY WARNING MODAL FOR IMEI ZERO-STOCK RULES
+     6. EXPLANATORY WARNING MODAL FOR IMEI ZERO-STOCK RULES
      ========================================================= -->
 <div class="inv-modal-overlay" id="productWarningModal" style="z-index: 1070;">
     <div class="inv-modal" style="width: min(520px, 100%);">
@@ -1470,6 +1513,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const subCatCodeInput = document.getElementById('quickSubCatCodeInput');
     const productSubCategorySelect = document.getElementById('productSubCategorySelect');
 
+    const brandModal = document.getElementById('quickBrandModal');
+    const openBrandBtn = document.getElementById('openQuickBrandBtn');
+    const closeBrandBtn = document.getElementById('closeQuickBrandBtn');
+    const cancelBrandBtn = document.getElementById('cancelQuickBrandBtn');
+    const quickBrandForm = document.getElementById('quickBrandForm');
+    const brandNameInput = document.getElementById('quickBrandNameInput');
+    const brandCountryInput = document.getElementById('quickBrandCountryInput');
+    const productBrandSelect = document.getElementById('productBrandSelect');
+    const catalogBrandFilter = document.getElementById('catalogBrandFilter');
+
     const unitModal = document.getElementById('quickUnitModal');
     const openUnitBtn = document.getElementById('openQuickUnitBtn');
     const closeUnitBtn = document.getElementById('closeQuickUnitBtn');
@@ -1493,6 +1546,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeProductBtn) closeProductBtn.addEventListener('click', () => closeModal(productModal));
     if (cancelProductBtn) cancelProductBtn.addEventListener('click', () => closeModal(productModal));
 
+    // Category Modal triggers
     if (openCatBtn) {
         openCatBtn.addEventListener('click', () => {
             if (catNameInput) catNameInput.value = '';
@@ -1504,6 +1558,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeCatBtn) closeCatBtn.addEventListener('click', () => closeModal(categoryModal));
     if (cancelCatBtn) cancelCatBtn.addEventListener('click', () => closeModal(categoryModal));
 
+    // SubCategory Modal triggers
     if (openSubCatBtn) {
         openSubCatBtn.addEventListener('click', () => {
             if (subCatNameInput) subCatNameInput.value = '';
@@ -1518,6 +1573,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeSubCatBtn) closeSubCatBtn.addEventListener('click', () => closeModal(subCategoryModal));
     if (cancelSubCatBtn) cancelSubCatBtn.addEventListener('click', () => closeModal(subCategoryModal));
 
+    // Brand Modal triggers
+    if (openBrandBtn) {
+        openBrandBtn.addEventListener('click', () => {
+            if (brandNameInput) brandNameInput.value = '';
+            if (brandCountryInput) brandCountryInput.value = '';
+            openModal(brandModal);
+            setTimeout(() => brandNameInput && brandNameInput.focus(), 100);
+        });
+    }
+    if (closeBrandBtn) closeBrandBtn.addEventListener('click', () => closeModal(brandModal));
+    if (cancelBrandBtn) cancelBrandBtn.addEventListener('click', () => closeModal(brandModal));
+
+    // Unit Modal triggers
     if (openUnitBtn) {
         openUnitBtn.addEventListener('click', () => {
             if (unitNameInput) unitNameInput.value = '';
@@ -1534,7 +1602,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeWarningBtn) closeWarningBtn.addEventListener('click', () => window.location.reload());
     if (acknowledgeWarningBtn) acknowledgeWarningBtn.addEventListener('click', () => window.location.reload());
 
-    [productModal, categoryModal, subCategoryModal, unitModal].forEach(modalEl => {
+    [productModal, categoryModal, subCategoryModal, brandModal, unitModal].forEach(modalEl => {
         if (modalEl) {
             modalEl.addEventListener('click', (e) => {
                 if (e.target === modalEl) closeModal(modalEl);
@@ -1546,6 +1614,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') {
             if (warningModal && warningModal.classList.contains('show')) window.location.reload();
             else if (unitModal && unitModal.classList.contains('show')) closeModal(unitModal);
+            else if (brandModal && brandModal.classList.contains('show')) closeModal(brandModal);
             else if (subCategoryModal && subCategoryModal.classList.contains('show')) closeModal(subCategoryModal);
             else if (categoryModal && categoryModal.classList.contains('show')) closeModal(categoryModal);
             else if (productModal && productModal.classList.contains('show')) closeModal(productModal);
@@ -1677,7 +1746,72 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 3. AJAX Handler: Quick Unit of Measurement (UOM) Creation
+    // 3. AJAX Handler: Quick Brand Creation
+    if (quickBrandForm) {
+        quickBrandForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = brandNameInput ? brandNameInput.value.trim() : '';
+            const country = brandCountryInput ? brandCountryInput.value.trim() : '';
+
+            if (!name) { alert('Please enter a brand name.'); return; }
+
+            const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
+            const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
+            const saveBtn = document.getElementById('saveQuickBrandBtn');
+            saveBtn.disabled = true;
+            saveBtn.innerText = 'Saving...';
+
+            try {
+                const resp = await fetch("{% url 'inventory:brand_quick_create_api' %}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    body: JSON.stringify({ name: name, origin_country: country })
+                });
+
+                const data = await resp.json();
+
+                if (data.status === 'success' && data.brand) {
+                    const newId = data.brand.id;
+                    const newName = data.brand.name;
+
+                    if (productBrandSelect) {
+                        let exists = false;
+                        for (let opt of productBrandSelect.options) {
+                            if (opt.value == newId) { exists = true; break; }
+                        }
+                        if (!exists) {
+                            const newOption = new Option(newName, newId, true, true);
+                            productBrandSelect.add(newOption);
+                        }
+                        productBrandSelect.value = newId;
+                    }
+
+                    if (catalogBrandFilter) {
+                        let existsInFilter = false;
+                        for (let opt of catalogBrandFilter.options) {
+                            if (opt.value == newId) { existsInFilter = true; break; }
+                        }
+                        if (!existsInFilter) {
+                            const filterOption = new Option(newName, newId, false, false);
+                            catalogBrandFilter.add(filterOption);
+                        }
+                    }
+
+                    closeModal(brandModal);
+                } else {
+                    alert('Error: ' + (data.message || 'Could not create brand.'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Failed to connect to server.');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerText = 'Save Brand';
+            }
+        });
+    }
+
+    // 4. AJAX Handler: Quick Unit of Measurement (UOM) Creation
     if (quickUnitForm) {
         quickUnitForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -1734,7 +1868,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 4. AJAX Handler: Quick Product Creation
+    // 5. AJAX Handler: Quick Product Creation
     if (quickProductForm) {
         quickProductForm.addEventListener('submit', async (e) => {
             e.preventDefault();

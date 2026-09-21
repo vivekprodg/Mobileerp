@@ -3,6 +3,7 @@ from apps.inventory.views import (
     ProductListView, ProductDetailView, ProductCreateView, ProductUpdateView,
     ProductStockAdjustmentView, CategoryListView, CategoryCreateView,
     CategoryUpdateView, CategoryQuickCreateAPIView, SubCategoryQuickCreateAPIView,
+    BrandListView, BrandCreateView, BrandUpdateView, BrandQuickCreateAPIView,
     UnitListView, UnitCreateView, UnitUpdateView, UnitQuickCreateAPIView,
     ItemInstanceListView,
     VendorRMAListView, VendorRMACreateView, VendorRMADetailView,
@@ -34,6 +35,12 @@ urlpatterns = [
     path('categories/<int:pk>/edit/', CategoryUpdateView.as_view(), name='category_edit'),
     path('api/categories/quick-create/', CategoryQuickCreateAPIView.as_view(), name='category_quick_create_api'),
     path('api/subcategories/quick-create/', SubCategoryQuickCreateAPIView.as_view(), name='subcategory_quick_create_api'),
+
+    # Brand Management & Quick Create API
+    path('brands/', BrandListView.as_view(), name='brand_list'),
+    path('brands/create/', BrandCreateView.as_view(), name='brand_create'),
+    path('brands/<int:pk>/edit/', BrandUpdateView.as_view(), name='brand_edit'),
+    path('api/brands/quick-create/', BrandQuickCreateAPIView.as_view(), name='brand_quick_create_api'),
 
     # Vendor RMA Claims
     path('rma/', VendorRMAListView.as_view(), name='vendor_rma_list'),
