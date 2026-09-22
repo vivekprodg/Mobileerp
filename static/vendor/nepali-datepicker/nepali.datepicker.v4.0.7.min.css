@@ -1,0 +1,12 @@
+/* Nepali Datepicker v4.0.7 Structural CSS */
+#ndp-nepali-box, .ndp-nepali-box {
+    position: absolute;
+    display: none;
+    z-index: 99999;
+    background: #ffffff;
+    box-sizing: border-box;
+}
+.ndp-header { display: flex; justify-content: space-between; align-items: center; }
+.ndp-days { border-collapse: collapse; width: 100%; }
+.ndp-days th, .ndp-days td { text-align: center; padding: 3px; }
+.ndp-days td a { display: block; text-decoration: none; padding: 4px; }

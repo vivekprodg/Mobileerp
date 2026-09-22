@@ -2,29 +2,32 @@
  * POS Counter Terminal & Parked Bill Engine (Smart Multi-Attribute Matching & Zero Storage Architecture)
  *
  * Core Capabilities:
- * 1. Explicit Item Discount Types:
+ * 1. Optimized Terminal Boot:
+ *    - Replaced the full-inventory query (?q=a) with top 24 frequently sold items.
+ *    - On-demand debounced server-side catalog searching & category-scoped queries.
+ * 2. Explicit Item Discount Types:
  *    - Three discrete modes per line item: NONE, PERCENTAGE (%), and AMOUNT (Rs.).
  *    - Mode toggles: [None | % | Rs.] segmented control on every cart row.
- *    - Direct Amount Usage: In AMOUNT mode, entered value is deducted directly as cash concession without rounding leakage.
+ *    - Direct Amount Usage: In AMOUNT mode, entered value is deducted directly as cash concession.
  *    - Real-Time Effective Percentage: Displays exact mathematical concession percentage against line gross.
  *    - Multi-Quantity Clarity: When Quantity > 1, indicates total line deduction, per-unit discount, and effective percentage.
  *    - Supervisor Limit Warning: Real-time badge alerting if concession exceeds product max discount or store threshold.
  *    - Non-Discountable Enforcement: Disables discount controls when product.is_discountable is false.
- * 2. Dual-Mode Bill-Level Discounts:
+ * 3. Dual-Mode Bill-Level Discounts:
  *    - Interactive toggle [% | Rs.] with proportional allocation across discountable items.
- * 3. Parked Bill State Preservation (F9 / F10):
+ * 4. Parked Bill State Preservation (F9 / F10):
  *    - Serializes and restores exact line discount types (NONE, PERCENTAGE, AMOUNT), input values, and reasons.
- * 4. Multi-Attribute Smart Category Filtering:
+ * 5. Multi-Attribute Smart Category Filtering:
  *    - Dynamic category filtering with smart keyword patterns and database Category IDs.
- * 5. Instant Gun Scanner Routing & Dual-IMEI Auto-Match:
+ * 6. Instant Gun Scanner Routing & Dual-IMEI Auto-Match:
  *    - Automatically pairs IMEI 1 and IMEI 2 from catalog/server without unnecessary modal prompts on exact match.
- * 6. Interactive Dual-IMEI Capture Modal:
+ * 7. Interactive Dual-IMEI Capture Modal:
  *    - Handset box picker and auto-matched secondary IMEI.
- * 7. Strict Walk-In Credit (Udhaari) Guard:
+ * 8. Strict Walk-In Credit (Udhaari) Guard:
  *    - Blocks credit sales for anonymous walk-ins, mandating a registered customer profile.
- * 8. Server-Side Catalog Price Integrity (SEC-01) & Salted Manager PIN Overrides (SEC-02).
- * 9. Multi-Mode & Split Checkout (F8) with Trade-In Buy-Back Credit deductions & Transaction Ref Tracking.
- * 10. Emergency Offline Safety Net (IndexedDB `pending_sales` queue) & Web Audio chime synthesis.
+ * 9. Server-Side Catalog Price Integrity (SEC-01) & Salted Manager PIN Overrides (SEC-02).
+ * 10. Multi-Mode & Split Checkout (F8) with Trade-In Buy-Back Credit deductions & Transaction Ref Tracking.
+ * 11. Emergency Offline Safety Net (IndexedDB `pending_sales` queue) & Web Audio chime synthesis.
  */
 
 // ============================================================================
@@ -704,7 +707,6 @@ class POSCart {
         const val = parseFloat(quantity);
         if (this.items[index]) {
             this.items[index].quantity = val > 0 ? val : 1;
-            // Bound amount discount if quantity decreases
             if (this.items[index].discount_type === 'AMOUNT') {
                 const lineGross = this.items[index].quantity * (this.items[index].unit_price || 0);
                 if (this.items[index].discount_value > lineGross) {
@@ -720,7 +722,6 @@ class POSCart {
         if (this.items[index] && !isNaN(val) && val >= 0) {
             this.items[index].unit_price = val;
             this.items[index].price = val;
-            // Bound amount discount if line gross decreases
             if (this.items[index].discount_type === 'AMOUNT') {
                 const lineGross = this.items[index].quantity * val;
                 if (this.items[index].discount_value > lineGross) {
@@ -800,9 +801,6 @@ class POSCart {
         }
     }
 
-    /**
-     * Updates in-row discount details and warning badges live on input without losing focus
-     */
     updateLiveRowCalculations(index) {
         const item = this.items[index];
         if (!item) return;
@@ -831,11 +829,9 @@ class POSCart {
         const effectiveLimit = Math.min(allowedThreshold, supervisorLimit);
         const exceedsLimit = effectivePct > effectiveLimit;
 
-        // Update live row total text
         const totalEl = document.getElementById(`cartLineTotal_${index}`);
         if (totalEl) totalEl.innerText = `Rs. ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-        // Update detail message element
         const detailEl = document.getElementById(`cartDiscDetail_${index}`);
         if (detailEl) {
             if (lineDisc > 0) {
@@ -873,9 +869,6 @@ class POSCart {
         this.render();
     }
 
-    /**
-     * Exact Total Calculation with Support for Dual-Mode Concessions
-     */
     calculateTotals() {
         let subtotal = 0;
         let itemDiscountTotal = 0;
@@ -1004,8 +997,6 @@ class POSCart {
 
     render() {
         if (!this.cartTableBody) return;
-        const totals = this.calculateTotals();
-
         const isSimpleDivContainer = this.cartTableBody.tagName === 'DIV';
 
         if (this.items.length === 0) {
@@ -1093,7 +1084,6 @@ class POSCart {
                                 </div>
                             </div>
                             
-                            <!-- Discrete 3-Way Line-Level Discount Controls [None | % | Rs.] -->
                             <div class="d-flex align-items-center justify-content-between pt-1 mt-1 border-top border-light flex-wrap gap-1">
                                 <span class="text-muted fs-2xs fw-semibold">Discount:</span>
                                 <div class="d-flex align-items-center gap-1">
@@ -1102,14 +1092,12 @@ class POSCart {
                                             <i class="fas fa-ban me-1"></i>No Disc
                                         </span>
                                     ` : `
-                                        <!-- Segmented 3-Way Mode Control -->
                                         <div class="btn-group btn-group-sm" role="group" style="height: 22px;">
                                             <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'NONE' ? 'btn-dark active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="NONE" title="No Discount">None</button>
                                             <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'PERCENTAGE' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="PERCENTAGE" title="Percentage (%)">%</button>
                                             <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'AMOUNT' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="AMOUNT" title="Fixed Amount (Rs.)">Rs.</button>
                                         </div>
 
-                                        <!-- Numeric Input Container (Active only when mode != NONE) -->
                                         ${type !== 'NONE' ? `
                                             <div class="input-group input-group-sm" style="width: 95px; height: 22px;">
                                                 <span class="input-group-text p-0 px-1 fs-2xs font-mono bg-light text-muted">${type === 'AMOUNT' ? 'Rs.' : '%'}</span>
@@ -1125,7 +1113,6 @@ class POSCart {
                                 </div>
                             </div>
 
-                            <!-- Live Concession Details Display -->
                             <div class="d-flex justify-content-end align-items-center mt-1" id="cartDiscDetail_${idx}">
                                 ${lineDisc > 0 ? `
                                     <span class="text-danger font-mono fs-2xs">
@@ -1182,7 +1169,6 @@ class POSCart {
                                     ${secondaryImei ? `<span class="badge bg-info bg-opacity-10 text-info font-monospace fs-2xs"><i class="fas fa-barcode me-1"></i>SIM 2: ${escapeHtml(secondaryImei)}</span>` : ''}
                                 </div>
                                 
-                                <!-- Discrete 3-Way Line-Level Discount Controls [None | % | Rs.] -->
                                 <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
                                     <span class="text-muted fs-2xs fw-semibold">Disc:</span>
                                     ${isDiscountDisabled ? `
@@ -1210,7 +1196,6 @@ class POSCart {
                                     `}
                                 </div>
 
-                                <!-- Live Effective Percentage & Concession Feedback -->
                                 <div class="mt-1" id="cartDiscDetail_${idx}">
                                     ${lineDisc > 0 ? `
                                         <span class="text-danger font-mono fs-2xs">
@@ -1374,7 +1359,6 @@ class POSHoldCartManager {
         const customerPhone = this.engine.cart.customerPhone || '';
         const notes = prompt('Enter a short note for this held cart (optional):') || 'Held at counter';
 
-        // Full preservation of line items and discrete discount modes
         const serializedItems = this.engine.cart.items.map(item => ({
             ...item,
             unit_price: (item.unit_price !== undefined) ? item.unit_price : (item.price || 0),
@@ -1507,7 +1491,6 @@ class POSHoldCartManager {
             if (items.length > 0) {
                 this.engine.cart.clear();
 
-                // Restore items preserving discount modes and values
                 items.forEach(item => {
                     let dType = 'NONE';
                     if (item.discount_type === 'AMOUNT' || item.discount_type === 'FIXED') {
@@ -1524,7 +1507,6 @@ class POSHoldCartManager {
                     });
                 });
 
-                // Restore bill-level discount configuration
                 let billDiscType = (data.cart_payload && data.cart_payload.bill_discount_type) ? data.cart_payload.bill_discount_type : 'PERCENTAGE';
                 if (billDiscType === 'FIXED') billDiscType = 'AMOUNT';
 
@@ -1742,7 +1724,6 @@ class POSCheckout {
         const totals = this.engine.cart.calculateTotals();
         const cash = parseFloat(document.getElementById('splitCashAmt')?.value) || 0;
 
-        // Extract Amounts and Explicit Transaction References
         const fonepay = parseFloat(document.getElementById('splitFonepayAmt')?.value) || 0;
         const fonepayRef = (document.getElementById('splitFonepayRef')?.value || '').trim();
 
@@ -1762,27 +1743,13 @@ class POSCheckout {
         const creditRef = (document.getElementById('splitCreditRef')?.value || '').trim();
 
         const payments = [];
-        if (cash > 0) {
-            payments.push({ mode: 'CASH', amount: cash, transaction_ref: '' });
-        }
-        if (fonepay > 0) {
-            payments.push({ mode: 'FONEPAY', amount: fonepay, transaction_ref: fonepayRef });
-        }
-        if (esewa > 0) {
-            payments.push({ mode: 'ESEWA', amount: esewa, transaction_ref: esewaRef });
-        }
-        if (khalti > 0) {
-            payments.push({ mode: 'KHALTI', amount: khalti, transaction_ref: khaltiRef });
-        }
-        if (card > 0) {
-            payments.push({ mode: 'CARD', amount: card, transaction_ref: cardRef });
-        }
-        if (bank > 0) {
-            payments.push({ mode: 'BANK', amount: bank, transaction_ref: bankRef });
-        }
-        if (credit > 0) {
-            payments.push({ mode: 'CREDIT', amount: credit, transaction_ref: creditRef });
-        }
+        if (cash > 0) payments.push({ mode: 'CASH', amount: cash, transaction_ref: '' });
+        if (fonepay > 0) payments.push({ mode: 'FONEPAY', amount: fonepay, transaction_ref: fonepayRef });
+        if (esewa > 0) payments.push({ mode: 'ESEWA', amount: esewa, transaction_ref: esewaRef });
+        if (khalti > 0) payments.push({ mode: 'KHALTI', amount: khalti, transaction_ref: khaltiRef });
+        if (card > 0) payments.push({ mode: 'CARD', amount: card, transaction_ref: cardRef });
+        if (bank > 0) payments.push({ mode: 'BANK', amount: bank, transaction_ref: bankRef });
+        if (credit > 0) payments.push({ mode: 'CREDIT', amount: credit, transaction_ref: creditRef });
 
         const totalEntered = cash + fonepay + esewa + khalti + card + bank + credit;
         if (Math.abs(totalEntered - totals.grandTotal) > 0.5) {
@@ -1800,7 +1767,6 @@ class POSCheckout {
         }
 
         const payload = this.buildPayload(payments);
-
         this.setButtonsDisabled(true);
 
         const modalEl = document.getElementById('splitPaymentModal');
@@ -1831,7 +1797,6 @@ class POSCheckout {
                         document.getElementById('posCustomerPanInput')?.value.trim() || 
                         (this.engine.customerManager.selectedCustomer ? this.engine.customerManager.selectedCustomer.pan : '') || '';
 
-        // Line-Item Packaging: Strictly sending discount_type: "AMOUNT", "PERCENTAGE", or "NONE"
         const packagedCartItems = this.engine.cart.items.map(item => {
             const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
             const discType = item.discount_type || 'NONE';
@@ -1853,7 +1818,7 @@ class POSCheckout {
                 official_unit_price: item.official_unit_price || item.catalog_price || price,
                 catalog_price: item.catalog_price || item.official_unit_price || price,
                 quantity: item.quantity,
-                discount_type: discType, // "NONE", "PERCENTAGE", or "AMOUNT"
+                discount_type: discType,
                 discount_value: discVal,
                 discount_input_value: discVal,
                 discount_percent: effectivePct,
@@ -1888,7 +1853,6 @@ class POSCheckout {
                                this.engine.cart.billDiscountReason ||
                                '';
 
-        // Securely standardize payment objects with explicit transaction_ref
         const standardizedPayments = (payments || []).map(p => ({
             mode: p.mode,
             amount: parseFloat(p.amount) || 0,
@@ -1903,11 +1867,11 @@ class POSCheckout {
             customer_name: custName,
             customer_phone: this.engine.cart.customerPhone || '',
             customer_pan: custPan,
-            bill_discount_type: billDiscType, // "AMOUNT", "PERCENTAGE", or "NONE"
+            bill_discount_type: billDiscType,
             bill_discount_value: billDiscVal,
             bill_discount_input_value: billDiscVal,
             bill_discount_percent: effectiveBillPct,
-            discount_percent: effectiveBillPct, // Backwards-compatibility alias
+            discount_percent: effectiveBillPct,
             discount_reason: discountReason,
             trade_in_voucher_id: this.engine.tradeInManager.voucherId,
             manager_pin: this.managerPin || '',
@@ -1938,7 +1902,6 @@ class POSCheckout {
 
             const data = await response.json();
 
-            // Intercept Manager PIN Required (HTTP 403)
             if (response.status === 403 && (data.message || '').toLowerCase().includes('manager pin')) {
                 this.setButtonsDisabled(false);
                 const pin = await this.promptForManagerPin(data.message);
@@ -1958,9 +1921,7 @@ class POSCheckout {
                 this.managerPin = null;
                 const totals = this.engine.cart.calculateTotals();
 
-                // Show Thermal Receipt
                 this.engine.showThermalReceipt(data.estimate_number, payload.customer_name, payModeDisplay, totals);
-
                 this.engine.showNotification(`Bill ${data.estimate_number} finalized successfully!`, 'success');
                 POSAudioSynthesizer.play('success');
 
@@ -2035,9 +1996,11 @@ class SmartPOSEngine {
 
         this.currentCategory = 'ALL';
         this.currentCategoryId = null;
+        this.initialProducts = [];
         this.allLoadedProducts = [];
         this.pendingPhoneProduct = null;
         this.repairTicketId = null;
+        this.searchDebounceTimer = null;
 
         this.initDomElements();
 
@@ -2103,29 +2066,34 @@ class SmartPOSEngine {
             this.searchInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
+                    clearTimeout(this.searchDebounceTimer);
                     this.handleDirectImeiOrBarcodeScan(this.searchInput.value.trim());
                 }
             });
 
             this.searchInput.addEventListener('input', (e) => {
-                const val = e.target.value.trim();
-                if (val.length >= 14 && /^\d+$/.test(val)) {
-                    this.handleDirectImeiOrBarcodeScan(val);
+                const val = e.target.value;
+                const cleanVal = val.trim();
+                if (cleanVal.length >= 14 && /^\d+$/.test(cleanVal)) {
+                    clearTimeout(this.searchDebounceTimer);
+                    this.handleDirectImeiOrBarcodeScan(cleanVal);
                 } else {
-                    this.filterCatalogBySearch(val.toLowerCase());
+                    this.handleSearchInput(val);
                 }
             });
         }
 
         if (this.clearSearchBtn) {
             this.clearSearchBtn.addEventListener('click', () => {
-                this.searchInput.value = '';
+                clearTimeout(this.searchDebounceTimer);
+                if (this.searchInput) this.searchInput.value = '';
+                this.allLoadedProducts = [...(this.initialProducts || [])];
                 this.filterCatalogBySearch('');
-                this.searchInput.focus();
+                if (this.searchInput) this.searchInput.focus();
             });
         }
 
-        // Category Filter Buttons (Supports both Smart Keys and Database Category IDs)
+        // Category Filter Buttons (Supports Smart Keys and Category IDs)
         this.categoryPills.forEach(pill => {
             pill.addEventListener('click', () => {
                 this.categoryPills.forEach(p => p.classList.remove('active'));
@@ -2139,7 +2107,12 @@ class SmartPOSEngine {
                     this.currentCategory = pill.dataset.categoryKey || 'ALL';
                 }
 
-                this.filterCatalogBySearch((this.searchInput ? this.searchInput.value.trim().toLowerCase() : ''));
+                const currentQuery = this.searchInput ? this.searchInput.value.trim() : '';
+                if (currentQuery) {
+                    this.handleSearchInput(currentQuery);
+                } else {
+                    this.filterCatalogByCategory();
+                }
             });
         });
 
@@ -2256,13 +2229,19 @@ class SmartPOSEngine {
         }
     }
 
+    /**
+     * Optimized Initial Catalog Boot:
+     * Restricts initial payload to the top 24 frequently sold products.
+     * Prevents browser freezing and excessive memory allocation on POS terminal load.
+     */
     async loadInitialCatalog() {
         try {
             const customerType = this.cart.customerType || 'RETAIL';
-            const resp = await fetch(`/products/api/search/?q=a&customer_type=${customerType}`);
+            const resp = await fetch(`/products/api/search/?top_selling=true&limit=24&customer_type=${customerType}`);
             if (!resp.ok) throw new Error('Could not load catalog');
             const data = await resp.json();
-            this.allLoadedProducts = data.results || [];
+            this.initialProducts = data.results || [];
+            this.allLoadedProducts = [...this.initialProducts];
             this.renderCatalog(this.allLoadedProducts);
         } catch (err) {
             console.warn('[POS] Falling back to direct query', err);
@@ -2274,6 +2253,83 @@ class SmartPOSEngine {
                     </div>
                 `;
             }
+        }
+    }
+
+    handleSearchInput(val) {
+        clearTimeout(this.searchDebounceTimer);
+        const cleanVal = (val || '').trim();
+
+        if (!cleanVal) {
+            this.allLoadedProducts = [...(this.initialProducts || [])];
+            this.filterCatalogBySearch('');
+            return;
+        }
+
+        // Instant snappy filter on in-memory items
+        this.filterCatalogBySearch(cleanVal.toLowerCase());
+
+        // Debounced on-demand server search for full database inventory reach
+        this.searchDebounceTimer = setTimeout(() => {
+            this.performOnlineCatalogSearch(cleanVal);
+        }, 220);
+    }
+
+    async performOnlineCatalogSearch(query) {
+        if (!query || query.length < 2) return;
+        try {
+            const customerType = this.cart.customerType || 'RETAIL';
+            let url = `/products/api/search/?q=${encodeURIComponent(query)}&customer_type=${customerType}`;
+            if (this.currentCategoryId) {
+                url += `&category_id=${this.currentCategoryId}`;
+            }
+
+            const resp = await fetch(url);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const results = data.results || [];
+
+            if (this.searchInput && this.searchInput.value.trim().toLowerCase() === query.toLowerCase()) {
+                this.allLoadedProducts = results;
+                this.filterCatalogBySearch(query.toLowerCase());
+            }
+        } catch (err) {
+            console.error('[POS] Online catalog search error:', err);
+        }
+    }
+
+    async filterCatalogByCategory() {
+        if (this.currentCategory === 'ALL' && !this.currentCategoryId) {
+            this.allLoadedProducts = [...(this.initialProducts || [])];
+            this.renderCatalog(this.allLoadedProducts);
+            return;
+        }
+
+        const localMatches = this.getMatchingCatalogProducts('', this.initialProducts || []);
+        if (localMatches.length > 0) {
+            this.allLoadedProducts = [...(this.initialProducts || [])];
+            this.renderCatalog(localMatches);
+            return;
+        }
+
+        try {
+            const customerType = this.cart.customerType || 'RETAIL';
+            let url = `/products/api/search/?limit=24&customer_type=${customerType}`;
+            if (this.currentCategoryId) {
+                url += `&category_id=${this.currentCategoryId}`;
+            } else if (this.currentCategory) {
+                url += `&category=${encodeURIComponent(this.currentCategory)}`;
+            }
+
+            const resp = await fetch(url);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const results = data.results || [];
+            this.allLoadedProducts = results;
+            this.renderCatalog(results);
+        } catch (err) {
+            console.error('[POS] Category on-demand fetch error:', err);
+            this.renderCatalog([]);
         }
     }
 
@@ -2300,7 +2356,8 @@ class SmartPOSEngine {
         const cleanCode = scannedCode.trim();
 
         // 1. Check in-memory catalog
-        for (const prod of this.allLoadedProducts) {
+        const memoryPool = [...this.allLoadedProducts, ...(this.initialProducts || [])];
+        for (const prod of memoryPool) {
             if (prod.in_stock_units && prod.in_stock_units.length > 0) {
                 const matchedUnit = prod.in_stock_units.find(
                     u => (u.imei_1 && u.imei_1 === cleanCode) || 
@@ -2364,10 +2421,11 @@ class SmartPOSEngine {
         }
     }
 
-    filterCatalogBySearch(query = '') {
+    getMatchingCatalogProducts(query = '', sourceList = null) {
         const cleanQuery = query.toLowerCase().trim();
+        const listToFilter = sourceList || this.allLoadedProducts;
 
-        const filtered = this.allLoadedProducts.filter(p => {
+        return listToFilter.filter(p => {
             let matchesCat = false;
 
             if (this.currentCategoryId) {
@@ -2404,7 +2462,10 @@ class SmartPOSEngine {
 
             return matchesCat && matchesQuery;
         });
+    }
 
+    filterCatalogBySearch(query = '') {
+        const filtered = this.getMatchingCatalogProducts(query);
         this.renderCatalog(filtered);
     }
 
@@ -2596,7 +2657,6 @@ class SmartPOSEngine {
             const splitCredit = document.getElementById('splitCreditAmt');
             if (splitCredit) splitCredit.value = '';
 
-            // Explicitly clear all transaction reference inputs
             const refIds = [
                 'splitFonepayRef',
                 'splitEsewaRef',

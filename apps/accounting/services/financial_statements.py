@@ -3,35 +3,16 @@ Financial Statements & Analytical Accounting Engine.
 
 Generates audit-ready financial statements and diagnostic controls for Nepal's retail & wholesale ecosystem:
 1. Trial Balance Engine:
-   - Evaluates all Chart of Accounts records.
-   - Computes Opening Balance, Period Debits, Period Credits, and Net Closing Balance.
+   - Computes Opening Balance, Period Debits, Period Credits, and Net Closing Balance in a SINGLE grouped database query.
    - Enforces mathematical verification: Sum(Debit Balances) == Sum(Credit Balances).
 2. Profit & Loss (Income Statement) Engine:
-   - Operating Revenue: Merchandise Sales + Repair Service Lab Revenue.
-   - Direct Costs (COGS): Handset/Accessory landed cost + Spare parts consumed.
-   - Gross Profit Realization = Revenue - Direct Costs.
-   - Operating Expenses: Rent, Electricity, Tea/Lunch, Internet, Salaries, Depreciation.
-   - Net Profit Realization = Gross Profit - Operating Expenses.
+   - Operating Revenue, Direct Costs (COGS), Gross Profit, and Operating Expenses evaluated via batched SQL annotations.
 3. Balance Sheet (Statement of Financial Position) Engine:
-   - Assets: Current (Cash, Bank, Trade Debtors, Inventory, VAT Input) + Fixed Assets.
-   - Liabilities: Current (Trade Creditors, VAT Output, Accruals) + Long-term Loans.
-   - Equity: Proprietor Capital, Drawings, Retained Earnings + Current Year P&L Net Profit.
-   - Enforces the Fundamental Equation: Assets == Liabilities + Equity.
+   - Assets, Liabilities, and Equity evaluated in a single grouped query, enforcing: Assets == Liabilities + Equity.
 4. Cash Flow Statement Engine:
-   - Evaluates cash/bank liquidity movements via counter-account classification:
-     * Operating: Revenue, COGS, Expenses, Udhaari Debtors (1210), Creditors (2110), VAT/Tax.
-     * Investing: Fixed Assets acquisition & disposal (Group 1500 / FIXED_ASSET).
-     * Financing: Capital injections, Owner Drawings, Term Loans (Group 2500 / EQUITY).
-     * Internal Contra Transfers: Cash-to-bank and wallet-clearing transfers (Net effect = Rs. 0.00).
-   - Enforces the Mathematical Proof:
-     Opening Cash/Bank + Net Operating + Net Investing + Net Financing == Closing Cash/Bank.
-5. Automated Accounting Integrity Diagnostic Engine (verify_accounting_integrity):
-   - Check 1: Trial Balance Equality: abs(Sum(Dr) - Sum(Cr)) == 0.00.
-   - Check 2: Customer Control Reconciliation: Sum(Customer balances) vs. GL 1210 (AR).
-   - Check 3: Supplier Control Reconciliation: Sum(Supplier balances) vs. GL 2110 (AP).
-   - Check 4: Inventory Control Reconciliation: Stock Valuation vs. GL 1310 (Inventory Asset).
-   - Check 5: Clearing Accounts Audit: Flags uncleared balances in 1130 FonePay, 1140 eSewa, 1160 Card Clearing older than 7 days.
-   - Check 6: Closed Period Audit: Proves no unauthorized entries exist in closed fiscal years.
+   - Evaluates cash/bank liquidity movements via counter-account classification.
+5. Automated Accounting Integrity Diagnostic Engine:
+   - Automated 6-point sub-ledger and control audit engine.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -39,7 +20,8 @@ from datetime import date, datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 
 from django.apps import apps
-from django.db.models import Sum, Q, F
+from django.db.models import Sum, Q, F, Value, DecimalField
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.accounting.models import (
@@ -56,6 +38,8 @@ class FinancialStatementService:
     """
     Core reporting generator producing Trial Balance, Profit & Loss,
     Balance Sheet, Cash Flow statements, and System Integrity Audits.
+    Optimized: All per-account loops calling .aggregate() have been eliminated
+    and replaced with single SQL queries grouped by account_id.
     """
 
     LIQUID_SYSTEM_TAGS = ['CASH', 'BANK', 'FONEPAY', 'ESEWA', 'KHALTI', 'CARD_CLEARING']
@@ -86,7 +70,7 @@ class FinancialStatementService:
         return start_date, end_date, resolved_fy
 
     # =========================================================================
-    # 1. TRIAL BALANCE ENGINE
+    # 1. TRIAL BALANCE ENGINE (OPTIMIZED: 1 SINGLE GROUPED QUERY)
     # =========================================================================
     @classmethod
     def get_trial_balance(
@@ -97,7 +81,7 @@ class FinancialStatementService:
     ) -> Dict[str, Any]:
         """
         Computes the complete Trial Balance as of a specific date.
-        Verifies: Total Dr Balance == Total Cr Balance.
+        Replaces 50+ individual account queries with 1 single SQL query grouped by account_id.
         """
         _, end_date, resolved_fy = cls._resolve_date_boundaries(None, as_of_date, fiscal_year)
 
@@ -105,40 +89,43 @@ class FinancialStatementService:
         if branch:
             accounts_qs = accounts_qs.filter(Q(branch=branch) | Q(branch__isnull=True))
 
+        # 1. Fetch all posted balances in ONE SINGLE SQL query grouped by account_id
+        items_qs = JournalItem.objects.filter(
+            journal_entry__status='POSTED',
+            journal_entry__entry_date__lte=end_date
+        )
+        if branch:
+            items_qs = items_qs.filter(journal_entry__branch=branch)
+
+        grouped_totals = items_qs.values('account_id').annotate(
+            sum_dr=Coalesce(Sum('debit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            sum_cr=Coalesce(Sum('credit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )
+
+        # 2. Store results in a fast in-memory map: {account_id: (dr, cr)}
+        totals_map = {row['account_id']: (row['sum_dr'], row['sum_cr']) for row in grouped_totals}
+
         tb_rows = []
         total_dr_balance = Decimal('0.00')
         total_cr_balance = Decimal('0.00')
         total_period_dr = Decimal('0.00')
         total_period_cr = Decimal('0.00')
 
+        # 3. Match accounts in memory without making extra SQL queries
         for acc in accounts_qs:
-            items_qs = JournalItem.objects.filter(
-                account=acc,
-                journal_entry__status='POSTED',
-                journal_entry__entry_date__lte=end_date
-            )
-            if branch:
-                items_qs = items_qs.filter(journal_entry__branch=branch)
-
-            agg = items_qs.aggregate(
-                sum_dr=Sum('debit_amount'),
-                sum_cr=Sum('credit_amount')
-            )
-
-            total_dr = agg['sum_dr'] or Decimal('0.00')
-            total_cr = agg['sum_cr'] or Decimal('0.00')
+            dr_total, cr_total = totals_map.get(acc.id, (Decimal('0.00'), Decimal('0.00')))
 
             op_bal = acc.opening_balance or Decimal('0.00')
             if acc.opening_balance_nature == 'DEBIT':
-                total_dr += op_bal
+                dr_total += op_bal
             else:
-                total_cr += op_bal
+                cr_total += op_bal
 
-            if total_dr == Decimal('0.00') and total_cr == Decimal('0.00'):
+            if dr_total == Decimal('0.00') and cr_total == Decimal('0.00'):
                 continue
 
             if acc.is_debit_nature:
-                net_val = total_dr - total_cr
+                net_val = dr_total - cr_total
                 if net_val >= Decimal('0.00'):
                     closing_dr = net_val
                     closing_cr = Decimal('0.00')
@@ -146,7 +133,7 @@ class FinancialStatementService:
                     closing_dr = Decimal('0.00')
                     closing_cr = abs(net_val)
             else:
-                net_val = total_cr - total_dr
+                net_val = cr_total - dr_total
                 if net_val >= Decimal('0.00'):
                     closing_dr = Decimal('0.00')
                     closing_cr = net_val
@@ -157,8 +144,8 @@ class FinancialStatementService:
             closing_dr = closing_dr.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             closing_cr = closing_cr.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            total_period_dr += total_dr
-            total_period_cr += total_cr
+            total_period_dr += dr_total
+            total_period_cr += cr_total
             total_dr_balance += closing_dr
             total_cr_balance += closing_cr
 
@@ -170,8 +157,8 @@ class FinancialStatementService:
                 'group': acc.group.name,
                 'category': acc.group.category,
                 'nature': acc.group.nature,
-                'total_dr': total_dr.quantize(Decimal('0.01')),
-                'total_cr': total_cr.quantize(Decimal('0.01')),
+                'total_dr': dr_total.quantize(Decimal('0.01')),
+                'total_cr': cr_total.quantize(Decimal('0.01')),
                 'closing_dr': closing_dr,
                 'closing_cr': closing_cr,
             })
@@ -193,7 +180,7 @@ class FinancialStatementService:
         }
 
     # =========================================================================
-    # 2. PROFIT & LOSS (INCOME STATEMENT) ENGINE
+    # 2. PROFIT & LOSS (INCOME STATEMENT) ENGINE (OPTIMIZED: BATCHED SQL)
     # =========================================================================
     @classmethod
     def get_profit_and_loss(
@@ -204,12 +191,7 @@ class FinancialStatementService:
         fiscal_year: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Generates the Profit & Loss Statement for a specific period:
-        - Operating Revenue
-        - Cost of Goods Sold (COGS)
-        - Gross Profit = Revenue - COGS
-        - Operating / Indirect Expenses
-        - Net Operating Profit = Gross Profit - Operating Expenses
+        Generates the Profit & Loss Statement for a specific period using batched SQL aggregation.
         """
         start_ad, end_ad, resolved_fy = cls._resolve_date_boundaries(start_date, end_date, fiscal_year)
 
@@ -218,22 +200,32 @@ class FinancialStatementService:
             if branch:
                 accs = accs.filter(Q(branch=branch) | Q(branch__isnull=True))
 
+            acc_ids = list(accs.values_list('id', flat=True))
+            if not acc_ids:
+                return [], Decimal('0.00')
+
+            # Fetch all period totals in ONE single SQL query
+            items_qs = JournalItem.objects.filter(
+                account_id__in=acc_ids,
+                journal_entry__status='POSTED',
+                journal_entry__entry_date__gte=start_ad,
+                journal_entry__entry_date__lte=end_ad
+            )
+            if branch:
+                items_qs = items_qs.filter(journal_entry__branch=branch)
+
+            grouped_totals = items_qs.values('account_id').annotate(
+                sum_dr=Coalesce(Sum('debit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+                sum_cr=Coalesce(Sum('credit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+            )
+
+            pnl_totals_map = {row['account_id']: (row['sum_dr'], row['sum_cr']) for row in grouped_totals}
+
             lines = []
             total_category_amount = Decimal('0.00')
 
             for acc in accs:
-                items = JournalItem.objects.filter(
-                    account=acc,
-                    journal_entry__status='POSTED',
-                    journal_entry__entry_date__gte=start_ad,
-                    journal_entry__entry_date__lte=end_ad
-                )
-                if branch:
-                    items = items.filter(journal_entry__branch=branch)
-
-                agg = items.aggregate(sum_dr=Sum('debit_amount'), sum_cr=Sum('credit_amount'))
-                dr = agg['sum_dr'] or Decimal('0.00')
-                cr = agg['sum_cr'] or Decimal('0.00')
+                dr, cr = pnl_totals_map.get(acc.id, (Decimal('0.00'), Decimal('0.00')))
 
                 if acc.group.category == 'REVENUE':
                     net_amount = cr - dr
@@ -294,7 +286,7 @@ class FinancialStatementService:
         }
 
     # =========================================================================
-    # 3. BALANCE SHEET ENGINE (STATEMENT OF FINANCIAL POSITION)
+    # 3. BALANCE SHEET ENGINE (OPTIMIZED: 1 SINGLE BATCH QUERY)
     # =========================================================================
     @classmethod
     def get_balance_sheet(
@@ -306,42 +298,55 @@ class FinancialStatementService:
         """
         Generates the formal Balance Sheet as of a specified date:
         Assets = Liabilities + Equity (including current period Net Profit).
+        Fetches all asset, liability, and equity balances in 1 single grouped query.
         """
         _, end_date, resolved_fy = cls._resolve_date_boundaries(None, as_of_date, fiscal_year)
 
-        def _calculate_account_balance(acc: Account) -> Decimal:
-            items = JournalItem.objects.filter(
-                account=acc,
-                journal_entry__status='POSTED',
-                journal_entry__entry_date__lte=end_date
-            )
-            if branch:
-                items = items.filter(journal_entry__branch=branch)
+        # 1. Fetch all balance sheet accounts
+        bs_accs = Account.objects.filter(
+            group__category__in=['ASSET', 'LIABILITY', 'EQUITY']
+        ).select_related('group')
+        if branch:
+            bs_accs = bs_accs.filter(Q(branch=branch) | Q(branch__isnull=True))
 
-            agg = items.aggregate(dr=Sum('debit_amount'), cr=Sum('credit_amount'))
-            dr = agg['dr'] or Decimal('0.00')
-            cr = agg['cr'] or Decimal('0.00')
+        acc_ids = list(bs_accs.values_list('id', flat=True))
 
-            op_bal = acc.opening_balance or Decimal('0.00')
-            if acc.opening_balance_nature == 'DEBIT':
-                dr += op_bal
-            else:
-                cr += op_bal
+        # 2. Batch-calculate posted debits and credits in ONE query
+        items_qs = JournalItem.objects.filter(
+            account_id__in=acc_ids,
+            journal_entry__status='POSTED',
+            journal_entry__entry_date__lte=end_date
+        )
+        if branch:
+            items_qs = items_qs.filter(journal_entry__branch=branch)
 
-            if acc.is_debit_nature:
-                return (dr - cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            return (cr - dr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        grouped_totals = items_qs.values('account_id').annotate(
+            sum_dr=Coalesce(Sum('debit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            sum_cr=Coalesce(Sum('credit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )
+        bs_totals_map = {row['account_id']: (row['sum_dr'], row['sum_cr']) for row in grouped_totals}
 
+        # 3. Map balances in memory
         def _get_section_breakdown(category: str):
-            accs = Account.objects.filter(group__category=category).select_related('group')
-            if branch:
-                accs = accs.filter(Q(branch=branch) | Q(branch__isnull=True))
-
             rows = []
             total = Decimal('0.00')
 
-            for acc in accs:
-                bal = _calculate_account_balance(acc)
+            for acc in bs_accs:
+                if acc.group.category != category:
+                    continue
+
+                dr, cr = bs_totals_map.get(acc.id, (Decimal('0.00'), Decimal('0.00')))
+                op_bal = acc.opening_balance or Decimal('0.00')
+                if acc.opening_balance_nature == 'DEBIT':
+                    dr += op_bal
+                else:
+                    cr += op_bal
+
+                if acc.is_debit_nature:
+                    bal = (dr - cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                else:
+                    bal = (cr - dr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
                 if bal != Decimal('0.00'):
                     rows.append({
                         'account': acc,
@@ -353,13 +358,8 @@ class FinancialStatementService:
 
             return rows, total.quantize(Decimal('0.01'))
 
-        # 1. Assets
         asset_lines, total_assets = _get_section_breakdown('ASSET')
-
-        # 2. Liabilities
         liability_lines, total_liabilities = _get_section_breakdown('LIABILITY')
-
-        # 3. Base Equity
         equity_lines, total_base_equity = _get_section_breakdown('EQUITY')
 
         # 4. Factor in Current Year Net Profit from P&L into Equity
@@ -401,20 +401,11 @@ class FinancialStatementService:
         fiscal_year: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Computes the Cash Flow Statement using Counter-Account Inspection:
-        - Opening Cash/Bank Balance (Pre-period liquid sum)
-        - Operating Cash Flow (Revenue, Expenses, AR 1210, AP 2110, VAT)
-        - Investing Cash Flow (Fixed Assets 1500, Equipment acquisitions/disposals)
-        - Financing Cash Flow (Owner Equity 3000, Capital, Drawings, Term Loans 2500)
-        - Internal Contra Transfers (Liquid-to-liquid transfers, net impact = 0.00)
-        - Closing Cash/Bank Balance (Post-period liquid sum)
-
-        Enforces Identity:
-        Opening Cash/Bank + Net Operating + Net Investing + Net Financing == Closing Cash/Bank.
+        Computes the Cash Flow Statement using Counter-Account Inspection.
+        Opening and closing liquid balances are fetched using batch-grouped queries.
         """
         start_ad, end_ad, resolved_fy = cls._resolve_date_boundaries(start_date, end_date, fiscal_year)
 
-        # Identify all liquid accounts
         liquid_accounts_qs = Account.objects.filter(
             system_tag__in=cls.LIQUID_SYSTEM_TAGS
         ).select_related('group')
@@ -424,42 +415,55 @@ class FinancialStatementService:
         liquid_account_ids = set(liquid_accounts_qs.values_list('id', flat=True))
 
         # ---------------------------------------------------------------------
-        # Helper: Calculate balance of an account up to a cutoff date
+        # Batch Calculate Opening (< start_ad) and Closing (<= end_ad) Positions
         # ---------------------------------------------------------------------
-        def _calc_liquid_balance(acc: Account, cutoff: date, inclusive: bool = True) -> Decimal:
-            filt = Q(account=acc, journal_entry__status='POSTED')
-            if inclusive:
-                filt &= Q(journal_entry__entry_date__lte=cutoff)
-            else:
-                filt &= Q(journal_entry__entry_date__lt=cutoff)
+        op_items_qs = JournalItem.objects.filter(
+            account_id__in=liquid_account_ids,
+            journal_entry__status='POSTED',
+            journal_entry__entry_date__lt=start_ad
+        )
+        if branch:
+            op_items_qs = op_items_qs.filter(journal_entry__branch=branch)
 
-            if branch:
-                filt &= Q(journal_entry__branch=branch)
+        op_grouped = op_items_qs.values('account_id').annotate(
+            sum_dr=Coalesce(Sum('debit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            sum_cr=Coalesce(Sum('credit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )
+        op_totals_map = {row['account_id']: (row['sum_dr'], row['sum_cr']) for row in op_grouped}
 
-            agg = JournalItem.objects.filter(filt).aggregate(
-                dr=Sum('debit_amount'), cr=Sum('credit_amount')
-            )
-            dr = agg['dr'] or Decimal('0.00')
-            cr = agg['cr'] or Decimal('0.00')
+        cl_items_qs = JournalItem.objects.filter(
+            account_id__in=liquid_account_ids,
+            journal_entry__status='POSTED',
+            journal_entry__entry_date__lte=end_ad
+        )
+        if branch:
+            cl_items_qs = cl_items_qs.filter(journal_entry__branch=branch)
 
-            op = acc.opening_balance or Decimal('0.00')
-            if acc.opening_balance_nature == 'DEBIT':
-                dr += op
-            else:
-                cr += op
+        cl_grouped = cl_items_qs.values('account_id').annotate(
+            sum_dr=Coalesce(Sum('debit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            sum_cr=Coalesce(Sum('credit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )
+        cl_totals_map = {row['account_id']: (row['sum_dr'], row['sum_cr']) for row in cl_grouped}
 
-            return (dr - cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        # ---------------------------------------------------------------------
-        # Calculate Opening and Closing Cash & Bank Positions
-        # ---------------------------------------------------------------------
         opening_cash = Decimal('0.00')
         closing_cash = Decimal('0.00')
         liquid_positions = []
 
         for acc in liquid_accounts_qs:
-            op_b = _calc_liquid_balance(acc, start_ad, inclusive=False)
-            cl_b = _calc_liquid_balance(acc, end_ad, inclusive=True)
+            op_dr, op_cr = op_totals_map.get(acc.id, (Decimal('0.00'), Decimal('0.00')))
+            cl_dr, cl_cr = cl_totals_map.get(acc.id, (Decimal('0.00'), Decimal('0.00')))
+
+            op = acc.opening_balance or Decimal('0.00')
+            if acc.opening_balance_nature == 'DEBIT':
+                op_dr += op
+                cl_dr += op
+            else:
+                op_cr += op
+                cl_cr += op
+
+            op_b = (op_dr - op_cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            cl_b = (cl_dr - cl_cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
             opening_cash += op_b
             closing_cash += cl_b
             liquid_positions.append({
@@ -472,7 +476,6 @@ class FinancialStatementService:
         # ---------------------------------------------------------------------
         # Counter-Account Voucher Analysis
         # ---------------------------------------------------------------------
-        # Find all posted entries in the period touching any liquid account
         entry_ids_in_period = JournalItem.objects.filter(
             account_id__in=liquid_account_ids,
             journal_entry__status='POSTED',
@@ -496,7 +499,6 @@ class FinancialStatementService:
         financing_lines = []
         contra_lines = []
 
-        # Batch fetch all items belonging to these entries
         all_entry_items = JournalItem.objects.filter(
             journal_entry_id__in=entry_ids
         ).select_related('account__group', 'journal_entry', 'customer', 'supplier')
@@ -523,7 +525,6 @@ class FinancialStatementService:
                 continue
 
             # Case B: Counter-Account Inspection
-            # Net cash flow = Sum of (Credit - Debit) of non-liquid counterpart items
             for itm in non_liquid_items:
                 acc = itm.account
                 group = acc.group
@@ -536,7 +537,6 @@ class FinancialStatementService:
                 cr = itm.credit_amount
                 cash_impact = cr - dr
 
-                # Classification Rules
                 is_investing = (
                     cat == 'FIXED_ASSET' or
                     code_str.startswith('15') or
@@ -584,7 +584,6 @@ class FinancialStatementService:
                     financing_lines.append(line_summary)
 
                 else:
-                    # Operating (Revenue, Expense, AR, AP, VAT, Inventory)
                     if cr > Decimal('0.00'):
                         operating_inflows += cr
                     if dr > Decimal('0.00'):
@@ -597,9 +596,7 @@ class FinancialStatementService:
 
         calculated_net_change = (net_operating + net_investing + net_financing).quantize(Decimal('0.01'))
         calculated_closing_cash = (opening_cash + calculated_net_change).quantize(Decimal('0.01'))
-        actual_net_change = (closing_cash - opening_cash).quantize(Decimal('0.01'))
 
-        # Mathematical Equality Verification
         variance = abs(calculated_closing_cash - closing_cash).quantize(Decimal('0.01'))
         is_balanced = (variance == Decimal('0.00'))
 
@@ -611,25 +608,20 @@ class FinancialStatementService:
             'opening_cash': opening_cash,
             'closing_cash': closing_cash,
             'liquid_positions': liquid_positions,
-            # Operating
             'operating_inflows': operating_inflows.quantize(Decimal('0.01')),
             'operating_outflows': operating_outflows.quantize(Decimal('0.01')),
             'net_operating': net_operating,
             'operating_lines': operating_lines,
-            # Investing
             'investing_inflows': investing_inflows.quantize(Decimal('0.01')),
             'investing_outflows': investing_outflows.quantize(Decimal('0.01')),
             'net_investing': net_investing,
             'investing_lines': investing_lines,
-            # Financing
             'financing_inflows': financing_inflows.quantize(Decimal('0.01')),
             'financing_outflows': financing_outflows.quantize(Decimal('0.01')),
             'net_financing': net_financing,
             'financing_lines': financing_lines,
-            # Contra
             'contra_transfers_volume': contra_transfers_volume.quantize(Decimal('0.01')),
             'contra_lines': contra_lines,
-            # Synthesis
             'net_change_in_cash': calculated_net_change,
             'calculated_closing_cash': calculated_closing_cash,
             'actual_closing_cash': closing_cash,
@@ -648,22 +640,14 @@ class FinancialStatementService:
         fiscal_year: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Executes comprehensive programmatic audit checks:
-        1. Trial Balance Equality: abs(Sum(Dr) - Sum(Cr)) == Decimal('0.00').
-        2. Customer Control Reconciliation: Sum(Customer.current_credit_balance) vs GL 1210 (AR).
-        3. Supplier Control Reconciliation: Sum(Supplier.current_balance) vs GL 2110 (AP).
-        4. Inventory Control Reconciliation: Physical Stock Valuation vs GL 1310 (Inventory Asset).
-        5. Clearing Accounts Audit: Unreconciled balances in 1130, 1140, 1160 older than 7 days.
-        6. Closed Period Audit: Proves no journal entries exist in closed fiscal years.
+        Executes comprehensive programmatic audit checks with single-pass queries.
         """
         _, end_date, resolved_fy = cls._resolve_date_boundaries(None, as_of_date, fiscal_year)
         checks: List[Dict[str, Any]] = []
         overall_status = 'PASS'
         discrepancies: List[str] = []
 
-        # ---------------------------------------------------------------------
         # Check 1: Trial Balance Equality
-        # ---------------------------------------------------------------------
         tb = cls.get_trial_balance(branch=branch, as_of_date=end_date, fiscal_year=resolved_fy)
         if tb['is_balanced']:
             checks.append({
@@ -689,9 +673,6 @@ class FinancialStatementService:
                 'variance': f"Rs. {tb['discrepancy']:,.2f}"
             })
 
-        # ---------------------------------------------------------------------
-        # Helper: Get GL Account Balance as of target date
-        # ---------------------------------------------------------------------
         def _get_gl_balance(account_code: str, tag: str) -> Decimal:
             acc_qs = Account.objects.filter(Q(code=account_code) | Q(system_tag=tag))
             if branch:
@@ -722,9 +703,7 @@ class FinancialStatementService:
                 return (dr - cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             return (cr - dr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # ---------------------------------------------------------------------
-        # Check 2: Customer Control Reconciliation (GL 1210 AR)
-        # ---------------------------------------------------------------------
+        # Check 2: Customer Control (AR 1210)
         customer_qs = Customer.objects.all()
         if branch and hasattr(Customer, 'branch'):
             customer_qs = customer_qs.filter(Q(branch=branch) | Q(branch__isnull=True))
@@ -763,9 +742,7 @@ class FinancialStatementService:
                 'variance': f"Rs. {ar_variance:,.2f}"
             })
 
-        # ---------------------------------------------------------------------
-        # Check 3: Supplier Control Reconciliation (GL 2110 AP)
-        # ---------------------------------------------------------------------
+        # Check 3: Supplier Control (AP 2110)
         supplier_qs = Supplier.objects.all()
         supp_subledger_total = Decimal('0.00')
         if hasattr(Supplier, 'current_balance'):
@@ -801,17 +778,24 @@ class FinancialStatementService:
                 'variance': f"Rs. {ap_variance:,.2f}"
             })
 
-        # ---------------------------------------------------------------------
-        # Check 4: Inventory Control Reconciliation (GL 1310 Stock Valuation)
-        # ---------------------------------------------------------------------
+        # Check 4: Inventory Control (GL 1310)
         physical_stock_val = Decimal('0.00')
         inv_model_found = False
 
         for app_label in ['inventory', 'products']:
             try:
-                for model_name in ['ProductVariant', 'StockItem', 'Product']:
+                for model_name in ['ProductVariant', 'StockItem', 'Product', 'BranchStock']:
                     model = apps.get_model(app_label, model_name)
                     fields = [f.name for f in model._meta.get_fields()]
+                    if model_name == 'BranchStock':
+                        qs = model.objects.all()
+                        if branch:
+                            qs = qs.filter(branch=branch)
+                        agg = qs.aggregate(val=Sum(F('quantity') * F('product__purchase_price')))
+                        physical_stock_val = (agg['val'] or Decimal('0.00')).quantize(Decimal('0.01'))
+                        inv_model_found = True
+                        break
+
                     qty_col = next((c for c in ['current_stock', 'stock_quantity', 'quantity'] if c in fields), None)
                     cost_col = next((c for c in ['cost_price', 'purchase_price', 'landing_cost'] if c in fields), None)
                     if qty_col and cost_col:
@@ -855,9 +839,7 @@ class FinancialStatementService:
                 'variance': f"Rs. {inv_variance:,.2f}"
             })
 
-        # ---------------------------------------------------------------------
-        # Check 5: Clearing Accounts Audit (FonePay 1130, eSewa 1140, Card 1160)
-        # ---------------------------------------------------------------------
+        # Check 5: Clearing Accounts Audit
         cutoff_date = end_date - timedelta(days=7)
         clearing_accounts = Account.objects.filter(
             Q(code__in=['1130', '1140', '1160']) |
@@ -906,9 +888,7 @@ class FinancialStatementService:
                 'variance': f"{len(stale_clearing_items)} Stale Transactions"
             })
 
-        # ---------------------------------------------------------------------
         # Check 6: Closed Period Audit
-        # ---------------------------------------------------------------------
         closed_fy_names = list(AccountingFiscalYear.objects.filter(is_closed=True).values_list('name', flat=True))
         unauthorized_closed_entries = 0
 

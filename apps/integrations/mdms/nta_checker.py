@@ -1,27 +1,29 @@
 """
 Nepal Telecommunications Authority (NTA) MDMS Gateway Client.
-Module: apps.integrations.mdms.nta_checker
 
 Features:
-- 15-digit IMEI Luhn algorithm checksum validation and sanitization.
-- Fast local memory caching (24-hour TTL / 86,400 seconds) preventing POS lag during peak hours.
-- 2.5-second strict HTTP connection & read timeout safeguard preventing cash register lockups.
-- Graceful fallback to 'PENDING_VERIFICATION' when government gateways are unreachable or rate-limited.
-- Standardized HTML badge generators and semantic metadata for POS, Product catalog, and Trade-In wizards.
+- Local database check first (queries ItemInstance to instantly resolve known handsets).
+- Memory-cached lookups (24-hour TTL) preventing repeated external network hits.
+- Non-blocking asynchronous background resolution worker preventing Gunicorn WSGI thread freezes.
+- Strict 1.5-second connection & read timeout fallback.
+- Standardized HTML badge generators and semantic metadata.
 """
 
 import re
+import threading
 import requests
 from typing import Dict, Any, Optional
 from django.conf import settings
 from django.core.cache import cache
 from django.utils.html import mark_safe
-
+from django.db.models import Q
 
 class NTAMDMSClient:
     """
     Client for querying and validating handset IMEI registration with the
     Nepal Telecommunications Authority (NTA) Mobile Device Management System (MDMS).
+    Designed to prevent worker thread lockups by checking local inventory first
+    and running external HTTP lookups asynchronously.
     """
 
     LOOKUP_URL = getattr(
@@ -31,14 +33,13 @@ class NTAMDMSClient:
     )
     # 24 Hours Cache TTL (86,400 seconds)
     CACHE_TIMEOUT = getattr(settings, 'NTA_MDMS_CACHE_TIMEOUT', 86400)
-    # 2.5 Seconds Strict Timeout Safeguard
-    HTTP_TIMEOUT = getattr(settings, 'NTA_MDMS_HTTP_TIMEOUT', 2.5)
+    # 1.5 Seconds Strict Timeout Safeguard
+    HTTP_TIMEOUT = getattr(settings, 'NTA_MDMS_HTTP_TIMEOUT', 1.5)
 
     @classmethod
     def luhn_checksum_valid(cls, imei_str: str) -> bool:
         """
         Validates 15-digit IMEI using the standard Luhn algorithm (Mod 10).
-        Returns True if the check digit matches, False otherwise.
         """
         digits = [int(d) for d in str(imei_str) if d.isdigit()]
         if len(digits) != 15:
@@ -46,7 +47,7 @@ class NTAMDMSClient:
 
         total = 0
         for i, digit in enumerate(digits[:-1]):
-            if i % 2 == 1:  # Double every second digit from the left (0-indexed odd positions)
+            if i % 2 == 1:
                 doubled = digit * 2
                 total += (doubled // 10) + (doubled % 10)
             else:
@@ -57,46 +58,18 @@ class NTAMDMSClient:
 
     @classmethod
     def validate_imei_format(cls, imei_str: str) -> bool:
-        """
-        Verifies whether an input string is a valid numeric IMEI (14, 15, or 16 digits).
-        """
+        """Verifies whether an input string is a valid numeric IMEI (14, 15, or 16 digits)."""
         if not imei_str:
             return False
         clean = re.sub(r'\D', '', str(imei_str).strip())
         return len(clean) in [14, 15, 16]
 
     @classmethod
-    def verify_imei(cls, imei_number: str) -> Dict[str, Any]:
+    def _execute_remote_lookup(cls, clean_imei: str, cache_key: str):
         """
-        Verifies IMEI status against official NTA MDMS registry with high-speed 24h caching.
-
-        Workflow:
-        1. Validates and sanitizes raw input characters.
-        2. Checks local cache (`nta_mdms_verified_<imei>`) for instant sub-millisecond response.
-        3. Queries NTA MDMS endpoint with a strict 2.5-second timeout safeguard.
-        4. Caches successful verifications for 24 hours (86,400s).
-        5. If government gateway is offline, slow (>2.5s), or throws an exception,
-           gracefully falls back to 'PENDING_VERIFICATION' without freezing POS checkout.
+        Worker executed synchronously or in a background thread to query the government portal
+        and update the local cache upon completion.
         """
-        raw_clean = str(imei_number or '').strip()
-        clean_imei = re.sub(r'\D', '', raw_clean)
-
-        if not cls.validate_imei_format(clean_imei):
-            return {
-                'status': 'INVALID_IMEI',
-                'is_registered': False,
-                'message': 'Invalid IMEI format. Expected 15 numeric digits.',
-                'raw_status': 'INVALID',
-                'imei': clean_imei
-            }
-
-        # Step 1: Check fast in-memory cache
-        cache_key = f"nta_mdms_verified_{clean_imei}"
-        cached_result = cache.get(cache_key)
-        if cached_result and isinstance(cached_result, dict):
-            return cached_result
-
-        # Step 2: Query live NTA Gateway with 2.5s timeout safeguard
         try:
             headers = {
                 'User-Agent': 'NepalMobileShopERP/2.5.0 (Enterprise POS Terminal)',
@@ -114,7 +87,6 @@ class NTAMDMSClient:
 
             if response.status_code == 200:
                 data = response.json()
-                # Parse registration flags across various NTA response schemas
                 is_reg = bool(
                     data.get('registered') is True or
                     str(data.get('status', '')).upper() in ['REGISTERED', 'WHITELISTED', 'ACTIVE', 'PAID'] or
@@ -138,8 +110,6 @@ class NTAMDMSClient:
                     'imei': clean_imei,
                     'from_cache': False
                 }
-
-                # Step 3: Cache verified record for 24 hours (86,400s)
                 cache.set(cache_key, result, timeout=cls.CACHE_TIMEOUT)
                 return result
 
@@ -155,22 +125,89 @@ class NTAMDMSClient:
                 cache.set(cache_key, result, timeout=cls.CACHE_TIMEOUT)
                 return result
 
-        except requests.exceptions.Timeout:
-            # Step 4A: Gateway connection timed out (> 2.5 seconds)
-            pass
-        except requests.exceptions.RequestException:
-            # Step 4B: Network unreachable, DNS resolution error, or gateway maintenance
-            pass
         except Exception:
-            # Step 4C: Defensive catch to guarantee POS register never crashes
             pass
 
-        # Step 5: Graceful offline fallback
+        return None
+
+    @classmethod
+    def verify_imei(cls, imei_number: str, allow_sync_network: bool = False) -> Dict[str, Any]:
+        """
+        Verifies IMEI status against:
+        1. Fast in-memory cache (sub-millisecond).
+        2. Local Inventory database (`ItemInstance`) to verify pre-cataloged handsets instantly.
+        3. External NTA Gateway (executed in background thread to protect live POS checkout).
+        """
+        raw_clean = str(imei_number or '').strip()
+        clean_imei = re.sub(r'\D', '', raw_clean)
+
+        if not cls.validate_imei_format(clean_imei):
+            return {
+                'status': 'INVALID_IMEI',
+                'is_registered': False,
+                'message': 'Invalid IMEI format. Expected 15 numeric digits.',
+                'raw_status': 'INVALID',
+                'imei': clean_imei
+            }
+
+        # ---------------------------------------------------------------------
+        # STEP 1: Fast Cache Check
+        # ---------------------------------------------------------------------
+        cache_key = f"nta_mdms_verified_{clean_imei}"
+        cached_result = cache.get(cache_key)
+        if cached_result and isinstance(cached_result, dict):
+            return cached_result
+
+        # ---------------------------------------------------------------------
+        # STEP 2: Check Local Inventory Database First (Zero Network Lag)
+        # ---------------------------------------------------------------------
+        try:
+            from apps.inventory.models import ItemInstance
+            local_instance = ItemInstance.objects.filter(
+                Q(imei_1=clean_imei) | Q(imei_2=clean_imei)
+            ).select_related('product', 'product__brand').first()
+
+            if local_instance and local_instance.mdms_status in ['REGISTERED_OFFICIAL', 'GRAY_UNREGISTERED', 'INDIVIDUAL_CUSTOMS_PAID']:
+                is_reg = (local_instance.mdms_status in ['REGISTERED_OFFICIAL', 'INDIVIDUAL_CUSTOMS_PAID'])
+                result = {
+                    'status': local_instance.mdms_status,
+                    'is_registered': is_reg,
+                    'message': f"Locally Verified in Inventory ({local_instance.get_mdms_status_display()})",
+                    'model': getattr(local_instance.product, 'model_name', '') or local_instance.product.name,
+                    'brand': local_instance.product.brand.name if getattr(local_instance.product, 'brand', None) else '',
+                    'raw_status': local_instance.mdms_status,
+                    'imei': clean_imei,
+                    'from_cache': True,
+                    'from_local_db': True
+                }
+                cache.set(cache_key, result, timeout=cls.CACHE_TIMEOUT)
+                return result
+        except Exception:
+            pass
+
+        # ---------------------------------------------------------------------
+        # STEP 3: Handle External Network Verification
+        # ---------------------------------------------------------------------
+        if allow_sync_network:
+            # Explicit synchronous request (e.g. user manually clicked "Verify MDMS" button in Trade-In)
+            res = cls._execute_remote_lookup(clean_imei, cache_key)
+            if res:
+                return res
+        else:
+            # Non-blocking POS checkout: launch worker thread in background
+            bg_worker = threading.Thread(
+                target=cls._execute_remote_lookup,
+                args=(clean_imei, cache_key),
+                daemon=True
+            )
+            bg_worker.start()
+
+        # Fallback returned instantly to protect Gunicorn threads from stalling
         return {
             'status': 'PENDING_VERIFICATION',
             'is_registered': False,
-            'message': 'NTA MDMS Status Pending (Gateway unreachable — verify before sale)',
-            'raw_status': 'PENDING_OFFLINE',
+            'message': 'NTA MDMS Status Pending (Verification queued in background)',
+            'raw_status': 'PENDING_BACKGROUND',
             'imei': clean_imei,
             'from_cache': False
         }
@@ -178,8 +215,7 @@ class NTAMDMSClient:
     @classmethod
     def get_badge_meta(cls, status_code: str) -> Dict[str, str]:
         """
-        Returns semantic UI dictionary metadata (CSS class, FontAwesome icon, and clean text label)
-        for standard MDMS status codes.
+        Returns semantic UI dictionary metadata for standard MDMS status codes.
         """
         mapping = {
             'REGISTERED_OFFICIAL': {
@@ -216,9 +252,7 @@ class NTAMDMSClient:
 
     @classmethod
     def format_mdms_badge(cls, status_code: str) -> str:
-        """
-        Formats and returns a safe HTML badge snippet for templates and API JSON payloads.
-        """
+        """Formats and returns a safe HTML badge snippet."""
         meta = cls.get_badge_meta(status_code)
         html_str = f'<span class="{meta["css_class"]}"><i class="{meta["icon"]}"></i> {meta["label"]}</span>'
         return mark_safe(html_str)

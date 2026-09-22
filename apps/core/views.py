@@ -1,13 +1,14 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.shortcuts import render
 from django.views.generic import TemplateView, View, ListView
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import JsonResponse
-from django.db.models import Sum, F, Q, Count, DecimalField, Value, Case, When
+from django.db.models import Sum, F, Q, Count, DecimalField, Value, Case, When, ExpressionWrapper
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.core.cache import cache
 
 from apps.sales.models import SalesEstimate, SalesEstimateItem, SalesPaymentTransaction
 from apps.customers.models import Customer
@@ -19,13 +20,12 @@ from apps.core.models import SystemConfiguration, AuditLog
 from apps.core.utils.nepali_date_converter import ad_to_bs_string, bs_to_ad_date
 from apps.core.utils.barcode_generator import BarcodeGenerator
 
-
 class DashboardHomeView(LoginRequiredMixin, TemplateView):
     """
     Central Executive Dashboard Controller.
-    Computes all 8 client-requested business metrics, tender collection breakdowns,
-    and side-by-side short summaries of today's sales and purchases scoped
-    to the active store outlet.
+    Optimized to eliminate Python in-memory loops by delegating all stock valuations,
+    landed cost aggregations, and overdue metrics to PostgreSQL/database expressions.
+    Includes a 60-second caching layer for near-instantaneous page reloads.
     """
     template_name = 'core/dashboard.html'
 
@@ -33,15 +33,27 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         active_branch = getattr(self.request, 'active_branch', None) or Branch.get_default_main_branch()
         today = timezone.now().date()
+        branch_id = active_branch.id if active_branch else 0
+        is_super = self.request.user.is_superuser
 
         # ---------------------------------------------------------------------
-        # 1. TODAY'S SALES & BILLS COUNT (आजको कुल बिक्री)
+        # CACHE LAYER: 60-second cache per branch & user scope to prevent DB thrashing
+        # ---------------------------------------------------------------------
+        cache_key = f"dashboard_kpis_branch_{branch_id}_{today.isoformat()}_{is_super}"
+        cached_data = cache.get(cache_key)
+
+        if cached_data is not None:
+            context.update(cached_data)
+            return context
+
+        # ---------------------------------------------------------------------
+        # 1. TODAY'S SALES & BILLS COUNT (Database Aggregation)
         # ---------------------------------------------------------------------
         sales_qs = SalesEstimate.objects.filter(
             bill_date_ad=today,
             status__in=['COMPLETED', 'PARTIALLY_RETURNED']
         )
-        if active_branch and not self.request.user.is_superuser:
+        if active_branch and not is_super:
             sales_qs = sales_qs.filter(branch=active_branch)
 
         sales_agg = sales_qs.aggregate(
@@ -55,15 +67,23 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         daily_sales_total = sales_agg['total_sales']
         today_sales_count = sales_agg['bills_count']
         today_cogs_total = sales_agg['total_cogs']
+        today_profit = sales_agg['total_profit']
+
+        if daily_sales_total > Decimal('0.00'):
+            today_profit_margin_pct = (
+                (today_profit / daily_sales_total) * Decimal('100.00')
+            ).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+        else:
+            today_profit_margin_pct = Decimal('0.0')
 
         # ---------------------------------------------------------------------
-        # 2. TODAY'S PURCHASES AMOUNT (आजको खरिद - GRN INWARD)
+        # 2. TODAY'S PURCHASES AMOUNT (GRN INWARD - Database Aggregation)
         # ---------------------------------------------------------------------
         grn_qs = GoodsReceivedNote.objects.filter(
             bill_date=today,
             status='RECEIVED'
         )
-        if active_branch and not self.request.user.is_superuser:
+        if active_branch and not is_super:
             grn_qs = grn_qs.filter(branch=active_branch)
 
         grn_agg = grn_qs.aggregate(
@@ -78,84 +98,82 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         today_purchase_paid = grn_agg['paid_sum']
 
         # ---------------------------------------------------------------------
-        # 3. CURRENT STOCK VALUATION (Landed Cost & Retail MRP)
+        # 3. CURRENT STOCK VALUATION (DATABASE AGGREGATION - REPLACED PYTHON FOR-LOOP)
         # ---------------------------------------------------------------------
-        stock_qs = BranchStock.objects.select_related('product', 'product__base_unit')
-        if active_branch and not self.request.user.is_superuser:
+        stock_qs = BranchStock.objects.filter(product__is_active=True)
+        if active_branch and not is_super:
             stock_qs = stock_qs.filter(branch=active_branch)
 
-        current_stock_valuation = Decimal('0.00')
-        current_stock_retail = Decimal('0.00')
-        total_stock_quantity = Decimal('0.000')
+        cost_val_expr = ExpressionWrapper(
+            F('quantity') * F('product__purchase_price'),
+            output_field=DecimalField(max_digits=18, decimal_places=2)
+        )
+        retail_val_expr = ExpressionWrapper(
+            F('quantity') * F('product__selling_price'),
+            output_field=DecimalField(max_digits=18, decimal_places=2)
+        )
 
-        for bs in stock_qs:
-            qty = bs.quantity or Decimal('0.000')
-            total_stock_quantity += qty
-            cost_rate = bs.product.purchase_price or Decimal('0.00')
-            retail_rate = bs.product.selling_price or Decimal('0.00')
-            current_stock_valuation += (qty * cost_rate)
-            current_stock_retail += (qty * retail_rate)
+        stock_agg = stock_qs.aggregate(
+            total_qty=Coalesce(Sum('quantity'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=18, decimal_places=3))),
+            total_cost_val=Coalesce(Sum(cost_val_expr), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_retail_val=Coalesce(Sum(retail_val_expr), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )
 
+        total_stock_quantity = stock_agg['total_qty']
+        current_stock_valuation = stock_agg['total_cost_val']
+        current_stock_retail = stock_agg['total_retail_val']
         current_stock_margin = max(Decimal('0.00'), current_stock_retail - current_stock_valuation)
 
         # ---------------------------------------------------------------------
-        # 4. TODAY'S REALIZED PROFIT & MARGIN % (आजको नाफा)
-        # ---------------------------------------------------------------------
-        today_profit = sales_agg['total_profit']
-        if daily_sales_total > Decimal('0.00'):
-            today_profit_margin_pct = (
-                (today_profit / daily_sales_total) * Decimal('100.00')
-            ).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
-        else:
-            today_profit_margin_pct = Decimal('0.0')
-
-        # ---------------------------------------------------------------------
-        # 5. CUSTOMER CREDIT / DUE (ग्राहक बाँकी / कुल उधारो)
+        # 4. CUSTOMER CREDIT / DUE (UDHAARI)
         # ---------------------------------------------------------------------
         debtor_qs = Customer.objects.filter(current_credit_balance__gt=Decimal('0.00'), is_active=True)
-        total_udhaari = debtor_qs.aggregate(
-            total=Coalesce(Sum('current_credit_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
-        )['total']
-        debtor_customers_count = debtor_qs.count()
+        debtor_agg = debtor_qs.aggregate(
+            total=Coalesce(Sum('current_credit_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            count=Count('id')
+        )
+        total_udhaari = debtor_agg['total']
+        debtor_customers_count = debtor_agg['count']
 
         # ---------------------------------------------------------------------
-        # 6. SUPPLIER PAYABLE (सप्लायरलाई तिर्न बाँकी)
+        # 5. SUPPLIER PAYABLE & OVERDUE (LIGHTWEIGHT DATABASE TUPLES)
         # ---------------------------------------------------------------------
         supplier_due_qs = Supplier.objects.filter(current_balance__gt=Decimal('0.00'), is_active=True)
-        supplier_payable_total = supplier_due_qs.aggregate(
-            total=Coalesce(Sum('current_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
-        )['total']
-        active_suppliers_count = supplier_due_qs.count()
+        supplier_agg = supplier_due_qs.aggregate(
+            total=Coalesce(Sum('current_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            count=Count('id')
+        )
+        supplier_payable_total = supplier_agg['total']
+        active_suppliers_count = supplier_agg['count']
 
-        # Count overdue suppliers based on credit period
-        overdue_suppliers_count = 0
-        for sup in supplier_due_qs:
-            credit_days = sup.credit_period_days or 30
-            if sup.last_purchase_date:
-                if (today - sup.last_purchase_date).days > credit_days:
-                    overdue_suppliers_count += 1
+        # Evaluate overdue suppliers using raw tuples (values_list) without instantiating model objects
+        supplier_dates = supplier_due_qs.filter(last_purchase_date__isnull=False).values_list('last_purchase_date', 'credit_period_days')
+        overdue_suppliers_count = sum(
+            1 for lp_date, credit_days in supplier_dates
+            if (today - lp_date).days > (credit_days or 30)
+        )
 
         # ---------------------------------------------------------------------
-        # 7. TOTAL SMARTPHONES (IMEI UNITS) IN STOCK
+        # 6. TOTAL SMARTPHONES (IMEI UNITS) IN STOCK
         # ---------------------------------------------------------------------
         phones_qs = ItemInstance.objects.filter(status='IN_STOCK')
-        if active_branch and not self.request.user.is_superuser:
+        if active_branch and not is_super:
             phones_qs = phones_qs.filter(branch=active_branch)
         total_phones_in_stock = phones_qs.count()
 
         # ---------------------------------------------------------------------
-        # 8. LOW STOCK ALERT ITEMS COUNT & RADAR
+        # 7. LOW STOCK ALERT ITEMS COUNT & RADAR
         # ---------------------------------------------------------------------
         low_stock_qs = stock_qs.filter(
             quantity__lte=F('low_stock_threshold'),
             quantity__gt=Decimal('0.000')
-        ).order_by('quantity')
+        ).select_related('product', 'product__category', 'product__base_unit').order_by('quantity')
 
         low_stock_count = low_stock_qs.count()
         low_stock_items = list(low_stock_qs[:5])
 
         # ---------------------------------------------------------------------
-        # 9. TODAY'S SALES TENDER SPLITS (Cash, FonePay, eSewa, Credit)
+        # 8. TODAY'S SALES TENDER SPLITS
         # ---------------------------------------------------------------------
         tender_agg = SalesPaymentTransaction.objects.filter(
             estimate__in=sales_qs
@@ -172,7 +190,7 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         today_credit_sales = tender_agg['credit_sum']
 
         # ---------------------------------------------------------------------
-        # 10. RECENT SUMMARIES (TOP 5 RECENT SALES & PURCHASES)
+        # 9. RECENT SUMMARIES (TOP 5 RECENT SALES & PURCHASES)
         # ---------------------------------------------------------------------
         recent_sales = list(
             sales_qs.select_related('customer', 'cashier', 'salesperson')
@@ -185,17 +203,15 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
             .order_by('-created_at')[:5]
         )
 
-        # Workshop repair queue metric
         repair_qs = RepairTicket.objects.exclude(service_status__in=['DELIVERED', 'CANCELLED'])
-        if active_branch and not self.request.user.is_superuser:
+        if active_branch and not is_super:
             repair_qs = repair_qs.filter(branch=active_branch)
         active_repairs_count = repair_qs.count()
 
         # ---------------------------------------------------------------------
-        # PACKAGE ALL REQUIRED VARIABLES INTO CONTEXT
+        # PACKAGE & CACHE DATA DICTIONARY
         # ---------------------------------------------------------------------
-        context.update({
-            # 8 Core Client KPIs
+        kpi_payload = {
             'daily_sales_total': daily_sales_total,
             'today_sales_count': today_sales_count,
             'today_purchase_total': today_purchase_total,
@@ -215,8 +231,6 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
             'total_stock_quantity': total_stock_quantity,
             'total_phones_in_stock': total_phones_in_stock,
             'low_stock_count': low_stock_count,
-
-            # Short Summaries & Feeds
             'today_cash_sales': today_cash_sales,
             'today_fonepay_sales': today_fonepay_sales,
             'today_esewa_sales': today_esewa_sales,
@@ -225,9 +239,12 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
             'recent_purchases': recent_purchases,
             'low_stock_items': low_stock_items,
             'active_repair_count': active_repairs_count,
-        })
-        return context
+        }
 
+        # Cache metrics for 60 seconds
+        cache.set(cache_key, kpi_payload, timeout=60)
+        context.update(kpi_payload)
+        return context
 
 class AuditLogListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
     """
@@ -288,7 +305,6 @@ class AuditLogListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
         })
         return context
 
-
 class ConvertDateAPIView(LoginRequiredMixin, View):
     """AJAX helper to instantly convert between AD and BS dates."""
 
@@ -311,7 +327,6 @@ class ConvertDateAPIView(LoginRequiredMixin, View):
             return JsonResponse({'status': 'error', 'message': 'Unknown action'}, status=400)
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
-
 
 class BarcodePreviewAPIView(LoginRequiredMixin, View):
     """Returns SVG and Base64 representations for instant POS sticker or modal preview."""

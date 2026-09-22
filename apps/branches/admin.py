@@ -3,16 +3,18 @@ from django.contrib import messages
 from django.utils.html import format_html
 from apps.branches.models import Branch, StockTransferRequest, StockTransferItem, BranchDocumentSequence
 
-
 class StockTransferItemInline(admin.TabularInline):
     model = StockTransferItem
     extra = 1
     fields = ['product', 'quantity', 'scanned_imei_or_serial', 'item_instance', 'notes']
-    autocomplete_fields = ['product']
-
+    autocomplete_fields = ['product', 'item_instance']
 
 @admin.register(Branch)
 class BranchAdmin(admin.ModelAdmin):
+    """
+    Branch administration interface aligned with the cached model architecture.
+    Automatically clears memory caches on save or delete to ensure immediate consistency.
+    """
     list_display = [
         'logo_thumbnail', 'code', 'display_company_name_column', 
         'name', 'city', 'district', 'phone_number', 'is_main_branch', 
@@ -52,10 +54,12 @@ class BranchAdmin(admin.ModelAdmin):
     readonly_fields = ['logo_preview_display']
 
     def logo_thumbnail(self, obj):
-        if obj.logo_url:
+        # Uses cached obj.logo_url without executing SQL queries per row
+        url = obj.logo_url
+        if url:
             return format_html(
                 '<img src="{}" style="height: 32px; width: 32px; object-fit: contain; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff;" />',
-                obj.logo_url
+                url
             )
         return format_html('<span style="color: #94a3b8; font-size: 11px;">(No Logo)</span>')
     logo_thumbnail.short_description = "Logo"
@@ -65,18 +69,25 @@ class BranchAdmin(admin.ModelAdmin):
     display_company_name_column.short_description = "Company Name"
 
     def logo_preview_display(self, obj):
-        if obj.logo_url:
+        url = obj.logo_url
+        if url:
             return format_html(
                 '<img src="{}" style="max-height: 80px; max-width: 240px; object-fit: contain; border-radius: 8px; border: 1px solid #cbd5e1; padding: 4px; background: #fff;" /><br><small style="color: #64748b;">Current Active Logo</small>',
-                obj.logo_url
+                url
             )
         return format_html('<span style="color: #94a3b8;">No logo uploaded (System uses clean text company name).</span>')
     logo_preview_display.short_description = "Current Logo Preview"
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        obj.invalidate_branch_caches()
+
+    def delete_model(self, request, obj):
+        obj.invalidate_branch_caches()
+        super().delete_model(request, obj)
+
     def has_delete_permission(self, request, obj=None):
-        """
-        Prevent accidental deletion of the central main branch or the sole remaining branch.
-        """
+        """Prevent accidental deletion of the central main branch or the sole remaining branch."""
         if obj is not None:
             if obj.is_main_branch or Branch.objects.count() <= 1:
                 return False
@@ -89,8 +100,9 @@ class BranchAdmin(admin.ModelAdmin):
             queryset = queryset.exclude(is_main_branch=True)
             if not queryset.exists():
                 return
+        for b in queryset:
+            b.invalidate_branch_caches()
         super().delete_queryset(request, queryset)
-
 
 @admin.register(BranchDocumentSequence)
 class BranchDocumentSequenceAdmin(admin.ModelAdmin):
@@ -98,7 +110,6 @@ class BranchDocumentSequenceAdmin(admin.ModelAdmin):
     list_filter = ['document_type', 'branch']
     search_fields = ['branch__code', 'branch__name', 'prefix']
     readonly_fields = ['created_at', 'updated_at']
-
 
 @admin.register(StockTransferRequest)
 class StockTransferRequestAdmin(admin.ModelAdmin):
@@ -110,7 +121,6 @@ class StockTransferRequestAdmin(admin.ModelAdmin):
     search_fields = ['transfer_no', 'notes']
     readonly_fields = ['transfer_no', 'created_at', 'updated_at', 'dispatched_date', 'received_date']
     inlines = [StockTransferItemInline]
-
 
 @admin.register(StockTransferItem)
 class StockTransferItemAdmin(admin.ModelAdmin):

@@ -14,7 +14,11 @@ from django.contrib import messages
 from django.urls import reverse_lazy, reverse
 from django.http import JsonResponse
 from django.db import transaction
-from django.db.models import Q, F, Sum, Count
+from django.db.models import (
+    Q, F, Sum, Count, DecimalField, Value, ExpressionWrapper, Prefetch
+)
+from django.db.models.functions import Coalesce
+from django.core.cache import cache
 from django.conf import settings
 
 from apps.branches.models import Branch
@@ -34,11 +38,9 @@ from apps.inventory.forms import (
 from apps.inventory.services import InventoryService, ExcelProductImporter
 from apps.core.models import AuditLog
 
-
 # ==============================================================================
 # BRAND FORM HELPER
 # ==============================================================================
-
 class BrandForm(forms.ModelForm):
     class Meta:
         model = Brand
@@ -55,21 +57,31 @@ class BrandForm(forms.ModelForm):
             }),
         }
 
-
 # ==============================================================================
 # INVENTORY CATALOG SERVICE HELPER
 # ==============================================================================
-
 class InventoryCatalogService:
     """
     Dedicated query filter and KPI aggregation helper for inventory views.
+    Optimized to compute total inventory stock quantities and valuation directly
+    inside the database engine instead of loading and summing rows in Python memory.
     """
 
     @staticmethod
     def get_filtered_products(request_params: dict, active_branch: Branch):
-        qs = Product.objects.select_related('category', 'brand', 'base_unit').prefetch_related(
-            'branch_stocks', 'component_warranty_rules'
-        )
+        # Prefetch branch stock scoped specifically to the active branch to avoid loading all branches into memory
+        if active_branch:
+            branch_stock_prefetch = Prefetch(
+                'branch_stocks',
+                queryset=BranchStock.objects.filter(branch=active_branch)
+            )
+            qs = Product.objects.select_related('category', 'brand', 'base_unit').prefetch_related(
+                branch_stock_prefetch, 'component_warranty_rules'
+            )
+        else:
+            qs = Product.objects.select_related('category', 'brand', 'base_unit').prefetch_related(
+                'branch_stocks', 'component_warranty_rules'
+            )
 
         query = request_params.get('q', '').strip()
         cat_id = request_params.get('category', '').strip()
@@ -142,22 +154,44 @@ class InventoryCatalogService:
                 'recent_activities': []
             }
 
-        branch_stocks = BranchStock.objects.filter(branch=active_branch).select_related('product')
-        total_units = branch_stocks.aggregate(sum_qty=Sum('quantity'))['sum_qty'] or Decimal('0')
+        # Cache catalog KPIs for 30 seconds per branch
+        cache_key = f"inv_catalog_kpi_branch_{active_branch.id}"
+        cached_kpis = cache.get(cache_key)
+        if cached_kpis is not None:
+            return cached_kpis
 
-        low_stocks_qs = branch_stocks.filter(quantity__lte=F('low_stock_threshold')).order_by('quantity')
+        branch_stocks = BranchStock.objects.filter(branch=active_branch, product__is_active=True)
+
+        # Database expression: quantity * purchase_price evaluated in SQL
+        cost_val_expr = ExpressionWrapper(
+            F('quantity') * F('product__purchase_price'),
+            output_field=DecimalField(max_digits=18, decimal_places=2)
+        )
+
+        # Single combined database aggregation query
+        stock_agg = branch_stocks.aggregate(
+            sum_qty=Coalesce(Sum('quantity'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=18, decimal_places=3))),
+            total_val=Coalesce(Sum(cost_val_expr), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )
+
+        total_units = stock_agg['sum_qty']
+        total_val = stock_agg['total_val']
+
+        low_stocks_qs = branch_stocks.filter(
+            quantity__lte=F('low_stock_threshold'),
+            quantity__gt=Decimal('0.000')
+        ).select_related('product', 'product__base_unit').order_by('quantity')
+        
         low_stock_count = low_stocks_qs.count()
         replenishment_items = list(low_stocks_qs[:5])
 
-        total_val = sum((bs.quantity * bs.product.purchase_price for bs in branch_stocks), Decimal('0.00'))
-
         recent_activities = list(
             StockMovementLog.objects.filter(branch=active_branch)
-            .select_related('product', 'user')
+            .select_related('product', 'product__base_unit', 'user')
             .order_by('-created_at')[:6]
         )
 
-        return {
+        result = {
             'kpi_active_skus': total_skus,
             'kpi_total_units': int(total_units),
             'kpi_low_stock_count': low_stock_count,
@@ -166,11 +200,12 @@ class InventoryCatalogService:
             'recent_activities': recent_activities
         }
 
+        cache.set(cache_key, result, timeout=30)
+        return result
 
 # ==============================================================================
 # CENTRAL IMEI & SERIAL REGISTRY VIEW (SECTION 7)
 # ==============================================================================
-
 class ItemInstanceListView(LoginRequiredMixin, ListView):
     """
     Central searchable registry across all serialized smartphones, IMEI 1, IMEI 2,
@@ -248,11 +283,9 @@ class ItemInstanceListView(LoginRequiredMixin, ListView):
         })
         return context
 
-
 # ==============================================================================
 # UNITS OF MEASUREMENT (UOM) MANAGEMENT VIEWS
 # ==============================================================================
-
 class UnitListView(LoginRequiredMixin, ListView):
     model = UnitOfMeasurement
     template_name = 'inventory/unit_list.html'
@@ -274,7 +307,6 @@ class UnitListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         context['unit_form'] = UnitOfMeasurementForm()
         return context
-
 
 class UnitCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = UnitOfMeasurement
@@ -305,7 +337,6 @@ class UnitCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
         messages.success(self.request, f"Unit '{self.object.name}' ({self.object.code}) created successfully.")
         return response
 
-
 class UnitUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = UnitOfMeasurement
     form_class = UnitOfMeasurementForm
@@ -329,7 +360,6 @@ class UnitUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             )
         messages.success(self.request, f"Unit '{self.object.name}' ({self.object.code}) updated successfully.")
         return response
-
 
 class UnitQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
     def test_func(self):
@@ -387,11 +417,9 @@ class UnitQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
-
 # ==============================================================================
 # PRODUCT CATEGORY MANAGEMENT VIEWS
 # ==============================================================================
-
 class CategoryListView(LoginRequiredMixin, ListView):
     model = ProductCategory
     template_name = 'inventory/category_list.html'
@@ -414,7 +442,6 @@ class CategoryListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         context['category_form'] = ProductCategoryForm(initial={'is_active': True})
         return context
-
 
 class CategoryCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = ProductCategory
@@ -447,7 +474,6 @@ class CategoryCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
         messages.success(self.request, f"Category '{self.object.name}' created successfully.")
         return response
 
-
 class CategoryUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = ProductCategory
     form_class = ProductCategoryForm
@@ -471,7 +497,6 @@ class CategoryUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             )
         messages.success(self.request, f"Category '{self.object.name}' updated successfully.")
         return response
-
 
 class CategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
     def test_func(self):
@@ -538,11 +563,9 @@ class CategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
-
 # ==============================================================================
 # PRODUCT SUBCATEGORY QUICK CREATE API VIEW
 # ==============================================================================
-
 class SubCategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
     """
     Lightweight JSON endpoint to register product subcategories dynamically
@@ -628,11 +651,9 @@ class SubCategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, Vie
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
-
 # ==============================================================================
 # BRAND MANAGEMENT & QUICK CREATE API VIEWS
 # ==============================================================================
-
 class BrandListView(LoginRequiredMixin, ListView):
     model = Brand
     template_name = 'inventory/brand_list.html'
@@ -653,7 +674,6 @@ class BrandListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         context['brand_form'] = BrandForm()
         return context
-
 
 class BrandCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = Brand
@@ -682,7 +702,6 @@ class BrandCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
         messages.success(self.request, f"Brand '{self.object.name}' created successfully.")
         return response
 
-
 class BrandUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Brand
     form_class = BrandForm
@@ -706,7 +725,6 @@ class BrandUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             )
         messages.success(self.request, f"Brand '{self.object.name}' updated successfully.")
         return response
-
 
 class BrandQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
     """
@@ -775,11 +793,9 @@ class BrandQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
-
 # ==============================================================================
 # PRODUCT INVENTORY & CATALOG VIEWS
 # ==============================================================================
-
 class ProductListView(LoginRequiredMixin, ListView):
     model = Product
     template_name = 'inventory/product_list.html'
@@ -805,7 +821,6 @@ class ProductListView(LoginRequiredMixin, ListView):
         context.update(kpi_data)
 
         return context
-
 
 class ProductDetailView(LoginRequiredMixin, DetailView):
     model = Product
@@ -847,7 +862,6 @@ class ProductDetailView(LoginRequiredMixin, DetailView):
 
         context['service_tickets'] = adapted_service_tickets
         return context
-
 
 class ProductCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = Product
@@ -911,7 +925,6 @@ class ProductCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
         messages.success(self.request, f"Product '{self.object.name}' registered successfully.")
         return redirect(self.success_url)
 
-
 class ProductUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Product
     form_class = ProductForm
@@ -950,7 +963,6 @@ class ProductUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
 
         messages.success(self.request, f"Product '{self.object.name}' updated successfully.")
         return redirect(reverse('inventory:product_detail', kwargs={'pk': self.object.pk}))
-
 
 class ProductStockAdjustmentView(LoginRequiredMixin, UserPassesTestMixin, View):
     def test_func(self):
@@ -1005,11 +1017,9 @@ class ProductStockAdjustmentView(LoginRequiredMixin, UserPassesTestMixin, View):
 
         return redirect('inventory:product_detail', pk=product.pk)
 
-
 # ==============================================================================
 # VENDOR RMA & DISTRIBUTOR WARRANTY CLAIM VIEWS
 # ==============================================================================
-
 class VendorRMAListView(LoginRequiredMixin, ListView):
     model = VendorRMAClaim
     template_name = 'inventory/vendor_rma_list.html'
@@ -1034,7 +1044,6 @@ class VendorRMAListView(LoginRequiredMixin, ListView):
 
         context['pending_defective_parts'] = quarantine_parts
         return context
-
 
 class VendorRMACreateView(LoginRequiredMixin, UserPassesTestMixin, FormView):
     template_name = 'inventory/vendor_rma_form.html'
@@ -1173,7 +1182,6 @@ class VendorRMACreateView(LoginRequiredMixin, UserPassesTestMixin, FormView):
         messages.success(self.request, f"Vendor RMA Claim {rma_claim.rma_number} dispatched to {supplier.company_name} with {claimed_count} part(s).")
         return redirect(self.success_url)
 
-
 class VendorRMADetailView(LoginRequiredMixin, UserPassesTestMixin, DetailView):
     model = VendorRMAClaim
     template_name = 'inventory/vendor_rma_detail.html'
@@ -1224,7 +1232,9 @@ class VendorRMADetailView(LoginRequiredMixin, UserPassesTestMixin, DetailView):
                 rma_claim.status = 'COMPLETED'
                 rma_claim.resolution_date = date.today()
                 rma_claim.resolved_by = request.user
-                rma_claim.total_credit_amount = sum((it.credit_amount for it in all_items), Decimal('0.00'))
+                rma_claim.total_credit_amount = all_items.aggregate(
+                    total=Coalesce(Sum('credit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+                )['total']
                 rma_claim.save()
             else:
                 rma_claim.status = 'PARTIALLY_SETTLED'
@@ -1248,11 +1258,9 @@ class VendorRMADetailView(LoginRequiredMixin, UserPassesTestMixin, DetailView):
         messages.success(request, f"RMA Item {rma_item.product.name} settled as: {rma_item.get_resolution_display()}")
         return redirect('inventory:vendor_rma_detail', pk=rma_claim.pk)
 
-
 # ==============================================================================
 # EXCEL IMPORT PIPELINE
 # ==============================================================================
-
 class ProductExcelUploadView(LoginRequiredMixin, UserPassesTestMixin, FormView):
     template_name = 'inventory/excel_import.html'
     form_class = ProductExcelUploadForm
@@ -1296,7 +1304,6 @@ class ProductExcelUploadView(LoginRequiredMixin, UserPassesTestMixin, FormView):
             messages.error(self.request, f"Error parsing spreadsheet: {str(e)}")
             return self.form_invalid(form)
 
-
 class ProductExcelMappingView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
     template_name = 'inventory/excel_mapping.html'
 
@@ -1316,7 +1323,6 @@ class ProductExcelMappingView(LoginRequiredMixin, UserPassesTestMixin, TemplateV
         context['mapping_form'] = ProductExcelMappingForm()
         context['branches'] = Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name')
         return context
-
 
 class ProductExcelProcessAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
     def test_func(self):

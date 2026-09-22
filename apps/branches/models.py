@@ -2,6 +2,7 @@ import uuid
 from decimal import Decimal
 from django.db import models
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 from apps.core.models import TimeStampedModel
@@ -10,8 +11,7 @@ from apps.core.models import TimeStampedModel
 class Branch(TimeStampedModel):
     """
     Branch entity supporting multi-location shops (e.g., New Road, Pokhara, Lalitpur).
-    Supports White-Label customization with custom Company / Business Name
-    and optional Company Logo upload per store outlet.
+    Optimized with memory-cached branding lookups to eliminate recursive SQL queries on property access.
     """
     code = models.CharField(max_length=20, unique=True, verbose_name=_("Branch Code"), db_index=True)
     name = models.CharField(max_length=150, verbose_name=_("Branch / Outlet Name (e.g. New Road Branch)"))
@@ -90,38 +90,67 @@ class Branch(TimeStampedModel):
         verbose_name_plural = _('Branches & Outlets')
 
     def __str__(self):
-        brand_title = self.display_company_name
-        return f"{brand_title} - {self.name} ({self.code})"
+        return f"{self.display_company_name} - {self.name} ({self.code})"
+
+    def invalidate_branch_caches(self):
+        """Flushes all cached references to this branch and the main branch across workers."""
+        cache.delete('central_main_branch_record')
+        cache.delete('default_main_branch_record')
+        cache.delete('global_active_branches_list')
+        cache.delete('system_configuration_singleton')
+        cache.delete(f"branch_obj_{self.pk}")
+        cache.delete(f"resolved_branding_branch_{self.pk}")
 
     def save(self, *args, **kwargs):
         if self.is_main_branch:
             # Enforce single primary main branch flag
             Branch.objects.filter(is_main_branch=True).exclude(pk=self.pk).update(is_main_branch=False)
         super().save(*args, **kwargs)
+        self.invalidate_branch_caches()
+
+    def delete(self, *args, **kwargs):
+        self.invalidate_branch_caches()
+        super().delete(*args, **kwargs)
 
     # =========================================================================
-    # WHITE-LABEL DYNAMIC BRANDING RESOLUTION PROPERTIES
+    # CACHED STATIC HELPER METHODS
+    # =========================================================================
+
+    @classmethod
+    def get_cached_main_branch(cls):
+        """
+        Retrieves the main central branch from cache to prevent recursive SQL queries.
+        Cached for 1 hour.
+        """
+        return cache.get_or_set(
+            'central_main_branch_record',
+            lambda: cls.objects.filter(is_main_branch=True, is_active=True).first(),
+            timeout=3600
+        )
+
+    # =========================================================================
+    # OPTIMIZED BRANDING PROPERTIES (ZERO EXTRA SQL QUERIES)
     # =========================================================================
 
     @property
     def display_company_name(self) -> str:
         """
-        Returns the resolved Company Name in English:
-        1. Branch custom company_name if set.
-        2. Central Main Branch company_name if set.
-        3. Core SystemConfiguration company_name_en.
-        4. Fallback to self.name.
+        Returns resolved Company Name in English without repeating database queries:
+        1. Local branch company_name if present.
+        2. Cached Central Main Branch company_name.
+        3. Cached SystemConfiguration company_name_en.
+        4. Fallback to branch name.
         """
         if self.company_name and self.company_name.strip():
             return self.company_name.strip()
 
         if not self.is_main_branch:
-            main_branch = Branch.objects.filter(is_main_branch=True, is_active=True).exclude(pk=self.pk).first()
-            if main_branch and main_branch.company_name and main_branch.company_name.strip():
+            main_branch = self.get_cached_main_branch()
+            if main_branch and main_branch.pk != self.pk and main_branch.company_name and main_branch.company_name.strip():
                 return main_branch.company_name.strip()
 
         from apps.core.models import SystemConfiguration
-        config = SystemConfiguration.get_solo()
+        config = cache.get_or_set('system_configuration_singleton', SystemConfiguration.get_solo, timeout=3600)
         if config and config.company_name_en and config.company_name_en.strip():
             return config.company_name_en.strip()
 
@@ -130,22 +159,18 @@ class Branch(TimeStampedModel):
     @property
     def display_company_name_np(self) -> str:
         """
-        Returns the resolved Company Name in Nepali (Devanagari):
-        1. Branch custom company_name_np if set.
-        2. Central Main Branch company_name_np if set.
-        3. Core SystemConfiguration company_name_np.
-        4. Fallback to self.name_np or self.display_company_name.
+        Returns resolved Devanagari Company Name using memory cache.
         """
         if self.company_name_np and self.company_name_np.strip():
             return self.company_name_np.strip()
 
         if not self.is_main_branch:
-            main_branch = Branch.objects.filter(is_main_branch=True, is_active=True).exclude(pk=self.pk).first()
-            if main_branch and main_branch.company_name_np and main_branch.company_name_np.strip():
+            main_branch = self.get_cached_main_branch()
+            if main_branch and main_branch.pk != self.pk and main_branch.company_name_np and main_branch.company_name_np.strip():
                 return main_branch.company_name_np.strip()
 
         from apps.core.models import SystemConfiguration
-        config = SystemConfiguration.get_solo()
+        config = cache.get_or_set('system_configuration_singleton', SystemConfiguration.get_solo, timeout=3600)
         if config and config.company_name_np and config.company_name_np.strip():
             return config.company_name_np.strip()
 
@@ -154,8 +179,8 @@ class Branch(TimeStampedModel):
     @property
     def logo_url(self) -> str:
         """
-        Returns the valid URL of the uploaded logo image, or None if no logo exists.
-        Inherits from Central Main Branch if current branch has no custom logo uploaded.
+        Returns the URL of the uploaded logo image without triggering database queries.
+        Inherits from cached Central Main Branch if current branch has no custom logo.
         """
         if self.logo and hasattr(self.logo, 'url'):
             try:
@@ -164,8 +189,8 @@ class Branch(TimeStampedModel):
                 pass
 
         if not self.is_main_branch:
-            main_branch = Branch.objects.filter(is_main_branch=True, is_active=True).exclude(pk=self.pk).first()
-            if main_branch and main_branch.logo and hasattr(main_branch.logo, 'url'):
+            main_branch = self.get_cached_main_branch()
+            if main_branch and main_branch.pk != self.pk and main_branch.logo and hasattr(main_branch.logo, 'url'):
                 try:
                     return main_branch.logo.url
                 except Exception:
@@ -182,9 +207,13 @@ class Branch(TimeStampedModel):
     def get_default_main_branch(cls):
         """
         Self-healing class method.
-        Returns the primary main branch, active branch, or automatically creates
+        Returns the primary main branch from cache, active branch, or automatically creates
         a default Central Branch if the database is newly initialized.
         """
+        branch = cache.get('default_main_branch_record')
+        if branch:
+            return branch
+
         branch = cls.objects.filter(is_main_branch=True, is_active=True).first() or \
                  cls.objects.filter(is_active=True).first() or \
                  cls.objects.first()
@@ -208,6 +237,8 @@ class Branch(TimeStampedModel):
                 header_contact_info="New Road, Kathmandu | Tel: 01-4220000",
                 footer_estimate_note="* Estimation slip only. Exchange possible within 7 days with this estimate slip. *"
             )
+
+        cache.set('default_main_branch_record', branch, timeout=3600)
         return branch
 
 
@@ -270,7 +301,6 @@ class BranchDocumentSequence(TimeStampedModel):
         """
         Atomically increments and retrieves the next strictly unique sequential document number
         using database row-level locking (select_for_update).
-        Guarantees thread-safe isolation across concurrent checkouts and POS counters.
         """
         seq_obj, created = cls.objects.select_for_update().get_or_create(
             branch=branch,

@@ -526,10 +526,8 @@
             </div>
 
             <div class="modal-body grn-camera-modal-body">
-                <!-- Video Stream Feed -->
                 <video id="grnCameraFeedVideo" class="grn-camera-video" playsinline autoplay muted></video>
                 
-                <!-- Dynamic Sequential Step Banner Overlay -->
                 <div class="grn-camera-step-banner shadow-sm">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <span class="badge bg-primary fs-2xs px-2 py-1" id="grnModalCurrentStepBadge">STEP 1: SCAN IMEI 1</span>
@@ -541,7 +539,6 @@
                     </div>
                 </div>
 
-                <!-- Aiming Reticle with Animated Laser -->
                 <div class="grn-scanner-viewfinder">
                     <div class="grn-aiming-reticle">
                         <div class="grn-corner-tr"></div>
@@ -550,7 +547,6 @@
                     </div>
                 </div>
 
-                <!-- Floating Toolbar Controls with Picture Picker -->
                 <div class="position-absolute bottom-0 start-0 end-0 p-3 d-flex justify-content-center flex-wrap gap-2 z-3">
                     <label class="btn btn-primary btn-sm rounded-pill px-3 py-1 bg-opacity-90 fs-xs fw-bold shadow-sm" style="cursor: pointer;">
                         <i class="fas fa-image me-1"></i> Pick Box Picture
@@ -742,44 +738,22 @@
     </div>
 </div>
 
-<!-- Embedded Product Tracking Metadata Map -->
-<script id="productTrackingMeta" type="application/json">
-{
-    {% for prod in formset.empty_form.fields.product.queryset %}
-    "{{ prod.id }}": {
-        "requires_imei": {{ prod.requires_imei_tracking|yesno:"true,false" }},
-        "requires_serial": {{ prod.requires_serial_tracking|yesno:"true,false" }},
-        "sim_config": "{{ prod.sim_configuration|default:'DUAL_SIM' }}"
-    }{% if not forloop.last %},{% endif %}
-    {% endfor %}
-}
-</script>
-
 <script src="{% static 'js/camera_barcode_scanner.js' %}"></script>
 <script>
 /**
  * Interactive Dual-IMEI Inward Scanner & Proportional Overhead Controller
+ * OPTIMIZED: Uses on-demand async metadata fetching with client-side caching.
  */
 class GRNDualIMEIController {
     constructor() {
         this.deviceStore = {};
+        this.productMetaCache = {};
         
         // Camera Session State
         this.activeCameraRow = null;
         this.activeCameraSlot = 'dual_sequential';
         this.tempImei1 = '';
 
-        // Load Embedded Product Tracking Metadata
-        this.productMeta = {};
-        try {
-            const metaScript = document.getElementById('productTrackingMeta');
-            if (metaScript) {
-                this.productMeta = JSON.parse(metaScript.textContent || '{}');
-            }
-        } catch (e) {
-            console.warn('[GRN] Could not parse product tracking metadata', e);
-        }
-        
         this.cameraScanner = new CameraBarcodeScanner({
             facingMode: 'environment',
             cooldown: 1100
@@ -823,28 +797,59 @@ class GRNDualIMEIController {
         this.updateRowTrackingMode(idx);
     }
 
-    isProductTracked(productId) {
-        if (!productId) return false;
-        const meta = this.productMeta[String(productId)];
-        if (meta) {
-            return Boolean(meta.requires_imei || meta.requires_serial);
+    /**
+     * Asynchronously resolves product tracking metadata without bloating HTML payload.
+     */
+    async fetchProductMeta(productId) {
+        if (!productId) return null;
+        if (this.productMetaCache[productId]) {
+            return this.productMetaCache[productId];
         }
-        
-        const opt = document.querySelector(`select.grn-product-select option[value="${productId}"]`);
-        if (opt) {
-            const text = opt.text.toLowerCase();
-            if (text.includes('phone') || text.includes('mobile') || text.includes('smartphone') || text.includes('iphone') || text.includes('galaxy')) {
-                return true;
+
+        try {
+            const resp = await fetch(`/products/api/search/?id=${encodeURIComponent(productId)}`);
+            if (resp.ok) {
+                const data = await resp.json();
+                const prod = Array.isArray(data) ? data[0] : (data.results ? data.results[0] : data);
+                if (prod) {
+                    const resolved = {
+                        requires_imei: Boolean(prod.requires_imei || prod.requires_imei_tracking || prod.track_imei),
+                        requires_serial: Boolean(prod.requires_serial || prod.requires_serial_tracking),
+                        sim_config: prod.sim_configuration || prod.sim_config || 'DUAL_SIM',
+                        purchase_price: prod.purchase_price || 0
+                    };
+                    this.productMetaCache[productId] = resolved;
+                    return resolved;
+                }
             }
+        } catch (e) {
+            console.warn('[GRN] On-demand product lookup failed, using heuristic fallback:', e);
         }
-        return false;
+
+        // Heuristic fallback based on select option label
+        const opt = document.querySelector(`select[name$="-product"] option[value="${productId}"]`);
+        const text = opt ? opt.text.toLowerCase() : '';
+        const fallback = {
+            requires_imei: text.includes('phone') || text.includes('mobile') || text.includes('smartphone') || text.includes('iphone') || text.includes('galaxy') || text.includes('redmi'),
+            requires_serial: false,
+            sim_config: 'DUAL_SIM',
+            purchase_price: 0
+        };
+        this.productMetaCache[productId] = fallback;
+        return fallback;
     }
 
-    updateRowTrackingMode(idx) {
+    async isProductTracked(productId) {
+        if (!productId) return false;
+        const meta = await this.fetchProductMeta(productId);
+        return Boolean(meta && (meta.requires_imei || meta.requires_serial));
+    }
+
+    async updateRowTrackingMode(idx) {
         const row = document.querySelector(`.grn-line-item-row[data-row-index="${idx}"]`);
         if (!row) return;
 
-        const prodSelect = row.querySelector('.grn-product-select');
+        const prodSelect = row.querySelector('select[name$="-product"]');
         const prodId = prodSelect ? prodSelect.value : '';
         const imeiWorkspace = document.getElementById(`imeiWorkspaceRow_${idx}`);
         const nonImeiNotice = document.getElementById(`nonImeiNoticeRow_${idx}`);
@@ -855,7 +860,7 @@ class GRNDualIMEIController {
             return;
         }
 
-        const isTracked = this.isProductTracked(prodId);
+        const isTracked = await this.isProductTracked(prodId);
 
         if (isTracked) {
             if (imeiWorkspace) imeiWorkspace.classList.remove('d-none');
@@ -993,7 +998,6 @@ class GRNDualIMEIController {
     // =========================================================================
     // VALUE-BASED OVERHEAD DISTRIBUTION & REAL-TIME FINANCIALS
     // =========================================================================
-
     recalculateAllFinancials() {
         const freight = parseFloat(document.querySelector('[name="extra_freight_charge"]')?.value || 0) || 0;
         const customs = parseFloat(document.querySelector('[name="customs_import_charge"]')?.value || 0) || 0;
@@ -1024,10 +1028,8 @@ class GRNDualIMEIController {
             totalMerchandiseValue += lineNetValue;
         });
 
-        // Value-based overhead rate
         const overheadRate = totalMerchandiseValue > 0 ? (totalOverheads / totalMerchandiseValue) : 0;
 
-        // Apply proportional overhead to each line preview
         document.querySelectorAll('.grn-line-item-row').forEach(row => {
             const idx = row.dataset.rowIndex;
             if (idx === '__prefix__') return;
@@ -1051,7 +1053,6 @@ class GRNDualIMEIController {
         const totalLanded = totalMerchandiseValue + totalOverheads;
         const due = Math.max(0, totalLanded - paid);
 
-        // Update Summary Card Texts
         const grossSummaryEl = document.getElementById('grnSummaryGrossText');
         const overheadSummaryEl = document.getElementById('grnSummaryOverheadText');
         const landedSummaryEl = document.getElementById('grnSummaryLandedText');
@@ -1064,9 +1065,8 @@ class GRNDualIMEIController {
     }
 
     // =========================================================================
-    // CAMERA & IMAGE SEQUENTIAL SCANNING WORKFLOW
+    // CAMERA & IMAGE SCANNING WORKFLOW
     // =========================================================================
-    
     openCameraForDualSequential(rowIdx) {
         this.activeCameraRow = rowIdx;
         this.activeCameraSlot = 'dual_sequential';
@@ -1099,7 +1099,7 @@ class GRNDualIMEIController {
         const prodTitle = document.getElementById('grnModalProductTitle');
         const progCount = document.getElementById('grnModalProgressCount');
 
-        const prodSelect = document.querySelector(`[name="items-${this.activeCameraRow}-product"]`);
+        const prodSelect = document.querySelector(`select[name="items-${this.activeCameraRow}-product"]`);
         const prodName = prodSelect && prodSelect.selectedIndex >= 0 ? prodSelect.options[prodSelect.selectedIndex].text : 'Phone Model';
         
         const qtyInput = document.querySelector(`[name="items-${this.activeCameraRow}-purchased_quantity"]`);
@@ -1269,7 +1269,7 @@ class GRNDualIMEIController {
         const masterForm = document.getElementById('grnMasterForm');
 
         container.addEventListener('change', (e) => {
-            if (e.target.classList.contains('grn-product-select')) {
+            if (e.target.name && e.target.name.endsWith('-product')) {
                 const row = e.target.closest('.grn-line-item-row');
                 if (row) {
                     this.updateRowTrackingMode(row.dataset.rowIndex);
@@ -1387,29 +1387,28 @@ class GRNDualIMEIController {
                 totalFormsInput.value = currentCount + 1;
                 this.initRowState(currentCount);
 
-                const newSelect = newRow.querySelector('.grn-product-select');
+                const newSelect = newRow.querySelector('select[name$="-product"]');
                 if (newSelect) newSelect.focus();
                 this.recalculateAllFinancials();
             });
         }
 
-        // Form Submit Validation: Enforce Exact IMEI Scanning
         if (masterForm) {
-            masterForm.addEventListener('submit', (e) => {
+            masterForm.addEventListener('submit', async (e) => {
                 let hasValidationErr = false;
 
-                document.querySelectorAll('.grn-line-item-row').forEach(row => {
+                for (const row of document.querySelectorAll('.grn-line-item-row')) {
                     const idx = row.dataset.rowIndex;
-                    if (idx === '__prefix__') return;
+                    if (idx === '__prefix__') continue;
 
                     const deleteCheck = row.querySelector(`[name="items-${idx}-DELETE"]`);
-                    if (deleteCheck && deleteCheck.checked) return;
+                    if (deleteCheck && deleteCheck.checked) continue;
 
-                    const prodSelect = row.querySelector('.grn-product-select');
+                    const prodSelect = row.querySelector('select[name$="-product"]');
                     const prodId = prodSelect ? prodSelect.value : '';
-                    if (!prodId) return;
+                    if (!prodId) continue;
 
-                    const isTracked = this.isProductTracked(prodId);
+                    const isTracked = await this.isProductTracked(prodId);
                     if (isTracked) {
                         const qtyInput = row.querySelector(`[name="items-${idx}-purchased_quantity"]`);
                         const targetQty = parseInt(qtyInput?.value || 0, 10);
@@ -1419,9 +1418,10 @@ class GRNDualIMEIController {
                             hasValidationErr = true;
                             alert(`IMEI Count Incomplete on Line ${parseInt(idx, 10) + 1}: Required quantity is ${targetQty} unit(s), but exactly ${scannedCount} IMEI pair(s) were scanned.`);
                             row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            break;
                         }
                     }
-                });
+                }
 
                 if (hasValidationErr) {
                     e.preventDefault();

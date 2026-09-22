@@ -204,7 +204,8 @@
                                 <tr class="coa-account-row" data-account-code="{{ acc.code|lower }}" data-account-name="{{ acc.name|lower }} {{ acc.name_np|default:''|lower }}" data-category="{{ group.category }}">
                                     <td class="ps-3 font-mono fw-bold text-primary fs-xs">
                                         <span>{{ acc.code }}</span>
-                                        {% if acc.is_system_reserved or acc.journal_lines.exists %}
+                                        {# OPTIMIZED: Uses pre-annotated has_tx to eliminate template N+1 SQL queries #}
+                                        {% if acc.is_system_reserved or acc.has_tx %}
                                             <i class="fas fa-lock text-muted ms-1 fs-2xs" data-bs-toggle="tooltip" data-bs-placement="top" title="Transacted Account - Accounting Nature Locked"></i>
                                         {% endif %}
                                     </td>
@@ -334,7 +335,8 @@
                                         <tr class="coa-account-row" data-account-code="{{ acc.code|lower }}" data-account-name="{{ acc.name|lower }} {{ acc.name_np|default:''|lower }}" data-category="{{ group.category }}">
                                             <td class="ps-3 font-mono fw-bold text-primary fs-xs">
                                                 <span>{{ acc.code }}</span>
-                                                {% if acc.is_system_reserved or acc.journal_lines.exists %}
+                                                {# OPTIMIZED: Uses pre-annotated has_tx to eliminate template N+1 SQL queries #}
+                                                {% if acc.is_system_reserved or acc.has_tx %}
                                                     <i class="fas fa-lock text-muted ms-1 fs-2xs" data-bs-toggle="tooltip" data-bs-placement="top" title="Transacted Account - Accounting Nature Locked"></i>
                                                 {% endif %}
                                             </td>

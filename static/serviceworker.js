@@ -1,23 +1,28 @@
 /**
  * PWA Service Worker for Mobile Shop & Optical Store ERP (Nepal)
- * Cache Version: v3.1.0 (Camera Barcode Scanner & Offline Hardware Architecture)
+ * Cache Version: v3.2.0 (Zero Dynamic Route Pre-Caching & Production Stability)
  * 
  * Features:
- * - Pre-caches core styles, camera barcode scanner engine, audio chime feedback, and offline pages.
+ * - Pre-caches only purely static CSS, JS, icon fonts, and the dedicated /offline/ fallback view.
+ * - Dynamic route '/' (live dashboard) is excluded to eliminate stale KPI metrics and reloading loops.
  * - Stale-While-Revalidate caching strategy for static scripts and CSS assets.
  * - Network-First strategy with resilient cache fallback for catalog search APIs and date converters.
- * - Offline navigation fallback to /offline/ when network connection is unavailable.
+ * - Network-First navigation with fallback to /offline/ when network connection is unavailable.
  */
 
-const CACHE_NAME = 'mobile-shop-erp-v3.1.0';
+const CACHE_NAME = 'mobile-shop-erp-v3.2.0';
 
 const STATIC_ASSETS = [
-    '/',
+    '/offline/',
+    '/static/css/bootstrap.min.css',
     '/static/css/custom.css',
     '/static/css/pos.css',
     '/static/css/print_thermal.css',
     '/static/css/print_a4.css',
     '/static/css/repair.css',
+    '/static/vendor/nepali-datepicker/nepali.datepicker.v4.0.7.min.css',
+    '/static/vendor/nepali-datepicker/nepali.datepicker.v4.0.7.min.js',
+    '/static/js/bootstrap.bundle.min.js',
     '/static/js/pos_engine.js',
     '/static/js/camera_barcode_scanner.js',
     '/static/js/barcode_scanner_listener.js',
@@ -29,23 +34,28 @@ const STATIC_ASSETS = [
     '/static/js/repair_camera_capture.js',
     '/static/js/repair_pattern_lock.js',
     '/static/js/pwa_register.js',
-    '/static/manifest.json',
-    '/offline/'
+    '/static/manifest.json'
 ];
 
 // =============================================================================
-// INSTALL EVENT: Pre-cache shell assets and camera scanning engine
+// INSTALL EVENT: Pre-cache static shell assets (Resilient against individual 404s)
 // =============================================================================
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
-            return cache.addAll(STATIC_ASSETS);
+            return Promise.all(
+                STATIC_ASSETS.map((assetUrl) => {
+                    return cache.add(assetUrl).catch((err) => {
+                        console.warn(`[ServiceWorker] Skipped non-critical asset during precache: ${assetUrl}`, err);
+                    });
+                })
+            );
         }).then(() => self.skipWaiting())
     );
 });
 
 // =============================================================================
-// ACTIVATE EVENT: Clean up deprecated cache versions
+// ACTIVATE EVENT: Purge legacy cache buckets (including v3.1.0 with cached '/')
 // =============================================================================
 self.addEventListener('activate', (event) => {
     event.waitUntil(
@@ -69,10 +79,10 @@ self.addEventListener('fetch', (event) => {
     const request = event.request;
     const url = new URL(request.url);
 
-    // Skip non-GET requests (e.g. POST checkout or API commits)
+    // Skip non-GET requests (e.g., POST checkout, API mutations, form submissions)
     if (request.method !== 'GET' || !url.protocol.startsWith('http')) return;
 
-    // 1. Static JavaScript & CSS Assets: Stale-While-Revalidate
+    // 1. Static Assets (JS, CSS, Images, Fonts): Stale-While-Revalidate
     if (url.pathname.startsWith('/static/')) {
         event.respondWith(
             caches.match(request).then((cachedResponse) => {
@@ -89,7 +99,7 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 2. Read-Only Search & Date Converter APIs: Network-First with Stale Cache Fallback
+    // 2. Read-Only Lookup APIs: Network-First with Stale Cache Fallback
     if (url.pathname.includes('/api/search/') || url.pathname.includes('/api/convert-date/')) {
         event.respondWith(
             fetch(request).then((networkResponse) => {
@@ -103,12 +113,19 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 3. HTML Navigation: Network-First with Fallback to /offline/
-    event.respondWith(
-        fetch(request).catch(() => {
-            return caches.match(request).then((response) => {
-                return response || caches.match('/offline/');
-            });
-        })
-    );
+    // 3. HTML Navigation Routes (Dashboard, POS, Invoices, Reports): Network-First
+    // Live pages are always retrieved from Django to ensure real-time data & CSRF validity.
+    if (request.mode === 'navigate' || (request.headers.get('accept') && request.headers.get('accept').includes('text/html'))) {
+        event.respondWith(
+            fetch(request).catch(() => {
+                return caches.match('/offline/').then((fallback) => {
+                    return fallback || new Response(
+                        '<h2 style="font-family:sans-serif;text-align:center;margin-top:20vh;">Offline Mode</h2><p style="text-align:center;">Network connection lost. Please verify your connection.</p>',
+                        { headers: { 'Content-Type': 'text/html' } }
+                    );
+                });
+            })
+        );
+        return;
+    }
 });

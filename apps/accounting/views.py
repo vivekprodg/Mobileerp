@@ -2,9 +2,9 @@
 Accounting Views & Financial Report Controllers.
 
 Capabilities:
-1. Chart of Accounts (COA) Tree View: Visual hierarchical listing with real-time balances and system protection.
-2. Journal Entry Management: Browse, search, filter, and create manual double-entry vouchers with subledger checks.
-3. Operating Expense Vouchers: Cashier/Accountant daily operational expense recorder with multi-wallet support.
+1. Chart of Accounts (COA) Tree View: Visual hierarchical listing with real-time balances, database-level conditional aggregation, and system protection.
+2. Journal Entry Management: Browse, search, filter, and create manual double-entry vouchers with subledger checks and prefetched items.
+3. Operating Expense Vouchers: Cashier/Accountant daily operational expense recorder with multi-wallet support and select_related optimizations.
 4. General Ledger Statement: Account ledger with Opening Balance, running balance math, and reference links.
 5. Trial Balance: Multi-column statement verifying Sum(Debits) == Sum(Credits).
 6. Profit & Loss (Income Statement): Operating Revenue, COGS, Gross Profit, and Net Operating Profit.
@@ -23,7 +23,10 @@ from django.views.generic import ListView
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib import messages
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import (
+    Q, Sum, F, Case, When, Value, DecimalField, Exists, OuterRef, Prefetch
+)
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -41,7 +44,6 @@ from apps.accounting.services.financial_statements import FinancialStatementServ
 from apps.branches.models import Branch
 from apps.core.nepali_calendar import NepaliCalendar
 
-
 # =============================================================================
 # 1. CHART OF ACCOUNTS (COA) VIEW
 # =============================================================================
@@ -49,41 +51,58 @@ class ChartOfAccountsView(LoginRequiredMixin, View):
     """
     Hierarchical view of all Account Groups and individual General Ledger accounts
     with current debit/credit balances, deletion protection, and system locks.
+    Optimized: Replaces Python in-memory row iteration with PostgreSQL conditional
+    aggregations and prefetches accounts with existence annotations to prevent N+1 queries.
     """
     template_name = 'accounting/coa.html'
 
     def get(self, request):
-        groups = AccountGroup.objects.prefetch_related('accounts', 'sub_groups').filter(parent__isnull=True)
+        # 1. Annotate accounts with has_tx to eliminate template-level N+1 query loops
+        has_tx_subquery = JournalItem.objects.filter(account=OuterRef('pk'))
+        accounts_prefetched = Account.objects.select_related('group', 'branch').annotate(
+            has_tx=Exists(has_tx_subquery)
+        )
 
-        total_assets = Decimal('0.00')
-        total_liabilities = Decimal('0.00')
-        total_equity = Decimal('0.00')
-        total_revenue = Decimal('0.00')
-        total_expenses = Decimal('0.00')
+        # 2. Prefetch root groups and sub-groups using the pre-annotated account queryset
+        groups = AccountGroup.objects.filter(parent__isnull=True).prefetch_related(
+            Prefetch('accounts', queryset=accounts_prefetched),
+            Prefetch('sub_groups__accounts', queryset=accounts_prefetched),
+            'sub_groups'
+        )
 
-        for acc in Account.objects.all():
-            cat = acc.group.category
-            bal = acc.current_balance
-            if cat == 'ASSET':
-                total_assets += bal
-            elif cat == 'LIABILITY':
-                total_liabilities += bal
-            elif cat == 'EQUITY':
-                total_equity += bal
-            elif cat == 'REVENUE':
-                total_revenue += bal
-            elif cat in ['DIRECT_EXPENSE', 'INDIRECT_EXPENSE']:
-                total_expenses += bal
+        # 3. Compute Category Totals in ONE single SQL query instead of looping over accounts in Python
+        totals_agg = Account.objects.aggregate(
+            total_assets=Coalesce(
+                Sum(Case(When(group__category='ASSET', then=F('current_balance')))),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            total_liabilities=Coalesce(
+                Sum(Case(When(group__category='LIABILITY', then=F('current_balance')))),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            total_equity=Coalesce(
+                Sum(Case(When(group__category='EQUITY', then=F('current_balance')))),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            total_revenue=Coalesce(
+                Sum(Case(When(group__category='REVENUE', then=F('current_balance')))),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            total_expenses=Coalesce(
+                Sum(Case(When(group__category__in=['DIRECT_EXPENSE', 'INDIRECT_EXPENSE'], then=F('current_balance')))),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+        )
 
         form = AccountForm()
         context = {
             'groups': groups,
             'form': form,
-            'total_assets': total_assets.quantize(Decimal('0.01')),
-            'total_liabilities': total_liabilities.quantize(Decimal('0.01')),
-            'total_equity': total_equity.quantize(Decimal('0.01')),
-            'total_revenue': total_revenue.quantize(Decimal('0.01')),
-            'total_expenses': total_expenses.quantize(Decimal('0.01')),
+            'total_assets': totals_agg['total_assets'].quantize(Decimal('0.01')),
+            'total_liabilities': totals_agg['total_liabilities'].quantize(Decimal('0.01')),
+            'total_equity': totals_agg['total_equity'].quantize(Decimal('0.01')),
+            'total_revenue': totals_agg['total_revenue'].quantize(Decimal('0.01')),
+            'total_expenses': totals_agg['total_expenses'].quantize(Decimal('0.01')),
             'active_tab': 'coa'
         }
         return render(request, self.template_name, context)
@@ -103,13 +122,7 @@ class ChartOfAccountsView(LoginRequiredMixin, View):
                 messages.error(request, _(f"Account '{account.name}' is a system-reserved control account and cannot be deleted."))
                 return redirect('accounting:coa')
 
-            has_transactions = False
-            if hasattr(account, 'journal_lines'):
-                has_transactions = account.journal_lines.exists()
-            elif hasattr(account, 'journal_items'):
-                has_transactions = account.journal_items.exists()
-            elif hasattr(account, 'journalitem_set'):
-                has_transactions = account.journalitem_set.exists()
+            has_transactions = JournalItem.objects.filter(account=account).exists()
 
             if has_transactions:
                 messages.error(request, _(f"Cannot delete account '{account.name}' ({account.code}) because posted journal transactions exist."))
@@ -157,7 +170,6 @@ class ChartOfAccountsView(LoginRequiredMixin, View):
                 groups = AccountGroup.objects.prefetch_related('accounts').filter(parent__isnull=True)
                 return render(request, self.template_name, {'groups': groups, 'form': form, 'active_tab': 'coa'})
 
-
 # =============================================================================
 # 2. JOURNAL ENTRY MANAGEMENT
 # =============================================================================
@@ -170,7 +182,12 @@ class JournalEntryListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         branch = getattr(self.request, 'active_branch', None)
-        qs = JournalEntry.objects.select_related('branch', 'created_by', 'posted_by').order_by('-entry_date', '-created_at')
+        # Prefetch journal lines with related models to eliminate modal N+1 queries
+        qs = JournalEntry.objects.select_related(
+            'branch', 'created_by', 'posted_by'
+        ).prefetch_related(
+            'items__account', 'items__customer', 'items__supplier'
+        ).order_by('-entry_date', '-created_at')
 
         if branch and not self.request.user.is_superuser and getattr(self.request.user, 'role', '') != 'OWNER':
             qs = qs.filter(branch=branch)
@@ -201,7 +218,6 @@ class JournalEntryListView(LoginRequiredMixin, ListView):
         ctx['fiscal_years'] = AccountingFiscalYear.objects.order_by('-name')
         ctx['active_tab'] = 'journals'
         return ctx
-
 
 class JournalEntryCreateView(LoginRequiredMixin, View):
     """Intake form for manual double-entry adjustments and Contra transfers."""
@@ -277,7 +293,6 @@ class JournalEntryCreateView(LoginRequiredMixin, View):
             'active_tab': 'journals'
         })
 
-
 # =============================================================================
 # 3. OPERATING EXPENSE VOUCHER MANAGEMENT
 # =============================================================================
@@ -290,8 +305,9 @@ class ExpenseVoucherListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         branch = getattr(self.request, 'active_branch', None)
+        # Select related journal_entry to prevent per-row N+1 queries in template
         qs = ExpenseVoucher.objects.select_related(
-            'branch', 'expense_account', 'payment_account', 'recorded_by'
+            'branch', 'expense_account', 'payment_account', 'recorded_by', 'journal_entry'
         ).order_by('-expense_date', '-created_at')
 
         if branch and not self.request.user.is_superuser and getattr(self.request.user, 'role', '') != 'OWNER':
@@ -319,7 +335,6 @@ class ExpenseVoucherListView(LoginRequiredMixin, ListView):
         ctx['total_spent'] = self.get_queryset().aggregate(tot=Sum('amount'))['tot'] or Decimal('0.00')
         ctx['active_tab'] = 'expenses'
         return ctx
-
 
 class ExpenseVoucherCreateView(LoginRequiredMixin, View):
     """Quick counter expense logger with automatic balanced double-entry posting."""
@@ -379,7 +394,6 @@ class ExpenseVoucherCreateView(LoginRequiredMixin, View):
 
         return render(request, self.template_name, {'form': form, 'active_tab': 'expenses'})
 
-
 # =============================================================================
 # 4. GENERAL LEDGER (ACCOUNT STATEMENT)
 # =============================================================================
@@ -397,7 +411,7 @@ class GeneralLedgerView(LoginRequiredMixin, View):
             messages.info(request, _("No chart of accounts found."))
             return redirect('accounting:coa')
 
-        account = get_object_or_404(Account.objects.select_related('group'), pk=account_id)
+        account = get_object_or_404(Account.objects.select_related('group', 'branch'), pk=account_id)
 
         start_date_str = request.GET.get('start_date')
         end_date_str = request.GET.get('end_date')
@@ -489,7 +503,7 @@ class GeneralLedgerView(LoginRequiredMixin, View):
             })
 
         closing_balance = running_bal.quantize(Decimal('0.01'))
-        all_accounts = Account.objects.select_related('group').order_by('code')
+        all_accounts = Account.objects.select_related('group', 'branch').order_by('code')
 
         context = {
             'account': account,
@@ -504,7 +518,6 @@ class GeneralLedgerView(LoginRequiredMixin, View):
             'active_tab': 'general_ledger'
         }
         return render(request, self.template_name, context)
-
 
 # =============================================================================
 # 5. TRIAL BALANCE REPORT
@@ -543,7 +556,6 @@ class TrialBalanceView(LoginRequiredMixin, View):
             'active_tab': 'trial_balance'
         }
         return render(request, self.template_name, context)
-
 
 # =============================================================================
 # 6. PROFIT & LOSS (INCOME STATEMENT)
@@ -592,7 +604,6 @@ class ProfitLossView(LoginRequiredMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # =============================================================================
 # 7. BALANCE SHEET (STATEMENT OF FINANCIAL POSITION)
 # =============================================================================
@@ -630,7 +641,6 @@ class BalanceSheetView(LoginRequiredMixin, View):
             'active_tab': 'balance_sheet'
         }
         return render(request, self.template_name, context)
-
 
 # =============================================================================
 # 8. CASH FLOW STATEMENT VIEW
@@ -678,7 +688,6 @@ class CashFlowView(LoginRequiredMixin, View):
             'active_tab': 'cash_flow'
         }
         return render(request, self.template_name, context)
-
 
 # =============================================================================
 # 9. UPGRADED BANK RECONCILIATION VIEW
@@ -733,9 +742,10 @@ class BankReconciliationView(LoginRequiredMixin, View):
             'statement_ending_balance': gl_balance
         })
 
+        # Prefetch statement lines to prevent N+1 queries in modal inspection
         recent_reconciliations = BankReconciliation.objects.select_related(
             'bank_account', 'branch', 'reconciled_by'
-        ).order_by('-statement_date')[:15]
+        ).prefetch_related('statement_lines').order_by('-statement_date')[:15]
 
         context = {
             'form': form,
@@ -797,7 +807,6 @@ class BankReconciliationView(LoginRequiredMixin, View):
 
         messages.error(request, _("Please provide valid reconciliation inputs."))
         return redirect('accounting:reconciliation')
-
 
 # =============================================================================
 # 10. AUTOMATED ACCOUNTING INTEGRITY DIAGNOSTIC DASHBOARD

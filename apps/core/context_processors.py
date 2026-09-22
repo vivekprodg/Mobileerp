@@ -5,18 +5,22 @@ from apps.core.models import SystemConfiguration
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
 from apps.branches.models import Branch
 
-
 def global_system_context(request):
     """
-    Exposes white-label branding (Dynamic Company Name, Optional Logo URL),
-    master shop tax mode, dynamic tax rate, cached active branches,
-    cached Bikram Sambat date context, user role-based UI hints, MDMS tracking flags,
-    and trade-in parameters globally across all templates.
+    Exposes white-label branding, master shop tax mode, cached active branches,
+    cached Bikram Sambat date strings, and user role hints globally to all templates.
+    Optimized with complete memory caching to prevent per-request database hits on navigation headers.
     """
-    # 1. System Configuration Singleton
-    config = getattr(request, 'system_config', None) or SystemConfiguration.get_solo()
+    # 1. System Configuration Singleton (Cached in Middleware or fetched here)
+    config = getattr(request, 'system_config', None)
+    if not config:
+        config = cache.get_or_set(
+            'system_configuration_singleton',
+            SystemConfiguration.get_solo,
+            timeout=3600
+        )
 
-    # 2. Date Context (Cached per current AD Date)
+    # 2. Bikram Sambat Date Context (Cached per calendar day)
     today_ad = timezone.now().date()
     cache_key_bs_date = f"bs_date_strings_{today_ad.isoformat()}"
     date_context = cache.get(cache_key_bs_date)
@@ -28,7 +32,6 @@ def global_system_context(request):
             'CURRENT_BS_DATE_EN': bs_date_en,
             'CURRENT_BS_DATE_NP': bs_date_np,
         }
-        # Cache for 24 hours (until next date boundary)
         cache.set(cache_key_bs_date, date_context, timeout=86400)
 
     # 3. Active Branches (Cached for 300 seconds)
@@ -38,15 +41,25 @@ def global_system_context(request):
         timeout=300
     )
 
-    # 4. White-Label Branding Resolution based on Active Store Outlet
+    # 4. Active Store Outlet & Cached Branding Dictionary
     active_branch = getattr(request, 'active_branch', None)
     if not active_branch:
         active_branch = Branch.get_default_main_branch()
 
-    resolved_company_name = active_branch.display_company_name if active_branch else config.company_name_en
-    resolved_company_name_np = active_branch.display_company_name_np if active_branch else config.company_name_np
-    resolved_logo_url = active_branch.logo_url if active_branch else ""
-    has_custom_logo = bool(resolved_logo_url)
+    branch_id = active_branch.id if active_branch else 0
+    cache_key_branding = f"resolved_branding_branch_{branch_id}"
+    branding = cache.get(cache_key_branding)
+
+    if not branding:
+        branding = {
+            'COMPANY_NAME': active_branch.display_company_name if active_branch else config.company_name_en,
+            'COMPANY_NAME_NP': active_branch.display_company_name_np if active_branch else config.company_name_np,
+            'COMPANY_LOGO_URL': active_branch.logo_url if active_branch else "",
+            'HAS_COMPANY_LOGO': bool(active_branch.logo_url) if active_branch else False,
+            'STORE_OUTLET_NAME': active_branch.name if active_branch else "Main Branch",
+            'STORE_OUTLET_CODE': active_branch.code if active_branch else "MAIN",
+        }
+        cache.set(cache_key_branding, branding, timeout=3600)
 
     # 5. User Role Scoped Context for UI Authorization Badges
     user = getattr(request, 'user', None)
@@ -54,13 +67,13 @@ def global_system_context(request):
     user_role = getattr(user, 'role', '') if is_authenticated else ''
 
     return {
-        # White-Label Dynamic Branding Context
-        'COMPANY_NAME': resolved_company_name,
-        'COMPANY_NAME_NP': resolved_company_name_np,
-        'COMPANY_LOGO_URL': resolved_logo_url,
-        'HAS_COMPANY_LOGO': has_custom_logo,
-        'STORE_OUTLET_NAME': active_branch.name if active_branch else "Main Branch",
-        'STORE_OUTLET_CODE': active_branch.code if active_branch else "MAIN",
+        # White-Label Dynamic Branding (From Memory Cache)
+        'COMPANY_NAME': branding['COMPANY_NAME'],
+        'COMPANY_NAME_NP': branding['COMPANY_NAME_NP'],
+        'COMPANY_LOGO_URL': branding['COMPANY_LOGO_URL'],
+        'HAS_COMPANY_LOGO': branding['HAS_COMPANY_LOGO'],
+        'STORE_OUTLET_NAME': branding['STORE_OUTLET_NAME'],
+        'STORE_OUTLET_CODE': branding['STORE_OUTLET_CODE'],
 
         # Core Configuration & Tax Modes
         'SYS_CONFIG': config,

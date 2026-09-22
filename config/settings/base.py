@@ -107,7 +107,6 @@ LOGOUT_REDIRECT_URL = 'users:login'
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
-# Lowered session lifetime to 12 Hours (43,200s) to protect shared counter terminals and enforce daily shift logins
 SESSION_COOKIE_AGE = config('SESSION_COOKIE_AGE', default=43200, cast=int)
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 SESSION_SAVE_EVERY_REQUEST = False
@@ -128,6 +127,30 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# ==============================================================================
+# CACHE CONFIGURATION
+# ==============================================================================
+# Centralized shared caching. Uses Redis if REDIS_URL is configured,
+# otherwise falls back to LocMemCache for lightweight development.
+REDIS_URL = config('REDIS_URL', default='')
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            'KEY_PREFIX': 'mobileshop_erp',
+            'TIMEOUT': 300,
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'mobileshop_erp_locmem',
+            'TIMEOUT': 300,
+        }
+    }
+
 # Dedicated File Storage Directories for Branding, Diagnostics, Optical Rx & Customer Ownership KYC
 BRANCH_LOGO_UPLOAD_DIR = 'branches/logos/%Y/%m/'
 REPAIR_EVIDENCE_UPLOAD_DIR = 'repairs/evidence/%Y/%m/'
@@ -141,6 +164,7 @@ KYC_MAX_UPLOAD_SIZE = 12 * 1024 * 1024  # 12 MB limit
 # NTA MDMS (Mobile Device Management System - Nepal Telecommunications Authority) Gateways
 NTA_MDMS_LOOKUP_URL = config('NTA_MDMS_LOOKUP_URL', default='https://mdms.nta.gov.np/api/v1/device/verify')
 NTA_MDMS_FALLBACK_PORTAL = 'https://mdms.nta.gov.np/'
+NTA_MDMS_TIMEOUT = 1.5
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

@@ -189,18 +189,6 @@
     </form>
 </div>
 
-<!-- Embedded Product Default Purchase Price Map -->
-<script id="productCostMeta" type="application/json">
-{
-    {% for prod in products %}
-    "{{ prod.id }}": {
-        "cost_price": "{{ prod.purchase_price|default:'0.00' }}",
-        "unit_id": "{{ prod.base_unit_id|default:'' }}"
-    }{% if not forloop.last %},{% endif %}
-    {% endfor %}
-}
-</script>
-
 <!-- Empty Form Template for Dynamic Line Additions -->
 <div id="emptyPoFormTemplate" style="display: none;">
     <div class="po-item-row" data-row-index="__prefix__">
@@ -235,19 +223,41 @@
 </div>
 
 <script>
+/**
+ * PO Dynamic Line Management & Real-time Subtotal Calculator
+ * OPTIMIZED: Uses on-demand async price resolution to eliminate HTML database dumps.
+ */
 document.addEventListener('DOMContentLoaded', () => {
-    let productCostMap = {};
-    try {
-        const costScript = document.getElementById('productCostMeta');
-        if (costScript) {
-            productCostMap = JSON.parse(costScript.textContent || '{}');
-        }
-    } catch(e) {}
-
+    const productCostCache = {};
     const container = document.getElementById('poFormsetContainer');
     const addBtn = document.getElementById('addNewPoItemBtn');
     const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
     const grandTotalEl = document.getElementById('poGrandTotalText');
+
+    async function fetchProductDefaultCost(productId) {
+        if (!productId) return 0;
+        if (productCostCache[productId] !== undefined) {
+            return productCostCache[productId];
+        }
+
+        try {
+            const resp = await fetch(`/products/api/search/?id=${encodeURIComponent(productId)}`);
+            if (resp.ok) {
+                const data = await resp.json();
+                const prod = Array.isArray(data) ? data[0] : (data.results ? data.results[0] : data);
+                if (prod && prod.purchase_price !== undefined) {
+                    const price = parseFloat(prod.purchase_price) || 0;
+                    productCostCache[productId] = price;
+                    return price;
+                }
+            }
+        } catch (e) {
+            console.warn('[PO] Could not fetch unit cost dynamically:', e);
+        }
+
+        productCostCache[productId] = 0;
+        return 0;
+    }
 
     function recalculatePoTotals() {
         let runningTotal = 0;
@@ -257,8 +267,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const qtyInput = row.querySelector('.po-qty');
-            const priceInput = row.querySelector('.po-price');
+            const qtyInput = row.querySelector('input[name$="-ordered_quantity"]');
+            const priceInput = row.querySelector('input[name$="-unit_cost_price"]');
             const lineTotalText = row.querySelector('.po-line-total-text');
 
             const qty = parseFloat(qtyInput ? qtyInput.value : 0) || 0;
@@ -279,19 +289,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (container) {
         container.addEventListener('input', (e) => {
-            if (e.target.classList.contains('po-qty') || e.target.classList.contains('po-price')) {
+            if (e.target.name && (e.target.name.endsWith('-ordered_quantity') || e.target.name.endsWith('-unit_cost_price'))) {
                 recalculatePoTotals();
             }
         });
 
-        container.addEventListener('change', (e) => {
-            if (e.target.classList.contains('select-po-product')) {
+        container.addEventListener('change', async (e) => {
+            if (e.target.name && e.target.name.endsWith('-product')) {
                 const prodId = e.target.value;
                 const row = e.target.closest('.po-item-row');
-                if (row && prodId && productCostMap[prodId]) {
-                    const priceInput = row.querySelector('.po-price');
+                if (row && prodId) {
+                    const priceInput = row.querySelector('input[name$="-unit_cost_price"]');
                     if (priceInput && (!priceInput.value || parseFloat(priceInput.value) === 0)) {
-                        priceInput.value = parseFloat(productCostMap[prodId].cost_price || 0).toFixed(2);
+                        const defaultCost = await fetchProductDefaultCost(prodId);
+                        if (defaultCost > 0) {
+                            priceInput.value = defaultCost.toFixed(2);
+                        }
                     }
                 }
                 recalculatePoTotals();
@@ -315,6 +328,9 @@ document.addEventListener('DOMContentLoaded', () => {
             container.appendChild(newRow);
 
             totalFormsInput.value = currentCount + 1;
+
+            const newSelect = newRow.querySelector('select[name$="-product"]');
+            if (newSelect) newSelect.focus();
             recalculatePoTotals();
         });
     }

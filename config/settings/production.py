@@ -1,7 +1,8 @@
 """
 Production Settings for Mobile Shop & Optical Store ERP (Nepal Context).
 Enforces strict secret key validation, domain whitelisting, HTTPS/SSL encryption,
-secure cookie policies, and persistent audit logging directories.
+centralized shared cache (Redis or DatabaseCache) across all Gunicorn workers,
+and persistent audit logging directories.
 """
 
 import os
@@ -17,8 +18,6 @@ DEBUG = False
 # ==============================================================================
 # 1. ALLOWED HOSTS & DOMAIN WHITELISTING
 # ==============================================================================
-# Specify production domain names, Cloudflare hostnames, or local LAN server IPs
-# e.g., ALLOWED_HOSTS=mobileshop.np,pos.mobileshop.np,192.168.1.100,127.0.0.1
 ALLOWED_HOSTS = config(
     'ALLOWED_HOSTS',
     default='localhost,127.0.0.1',
@@ -60,7 +59,42 @@ DATABASES = {
 }
 
 # ==============================================================================
-# 4. HTTPS / SSL ENCRYPTION & COOKIE SECURITY
+# 4. CENTRALIZED PRODUCTION CACHE (Shared across Gunicorn workers)
+# ==============================================================================
+# Prevents multi-worker cache thrashing where each worker maintains an isolated
+# cache and re-queries PostgreSQL repeatedly.
+REDIS_URL = config('REDIS_URL', default='')
+CACHE_TYPE = config('CACHE_TYPE', default='redis' if REDIS_URL else 'db')
+
+if CACHE_TYPE == 'redis' and REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            'KEY_PREFIX': 'mobileshop_prod',
+            'TIMEOUT': 300,
+        }
+    }
+elif CACHE_TYPE == 'db':
+    # Shared database cache across all workers (run: python manage.py createcachetable)
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'erp_production_cache_table',
+            'TIMEOUT': 300,
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'mobileshop_prod_locmem',
+            'TIMEOUT': 300,
+        }
+    }
+
+# ==============================================================================
+# 5. HTTPS / SSL ENCRYPTION & COOKIE SECURITY
 # ==============================================================================
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=True, cast=bool)
@@ -68,17 +102,16 @@ SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=True, cast=bool)
 SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=True, cast=bool)
 CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=True, cast=bool)
 SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_HTTPONLY = False  # Allows AJAX front-end to read CSRF token
+CSRF_COOKIE_HTTPONLY = False
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 
-# 12-Hour Session Lifetime on POS Terminals
 SESSION_COOKIE_AGE = config('SESSION_COOKIE_AGE', default=43200, cast=int)
 
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
-SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=31536000, cast=int)  # 1 Year
+SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=31536000, cast=int)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 
@@ -89,7 +122,7 @@ CSRF_TRUSTED_ORIGINS = config(
 )
 
 # ==============================================================================
-# 5. LOG FILE DIRECTORIES & PRODUCTION LOGGING
+# 6. LOG FILE DIRECTORIES & PRODUCTION LOGGING
 # ==============================================================================
 LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -117,7 +150,7 @@ LOGGING = {
             'level': 'ERROR',
             'class': 'logging.handlers.RotatingFileHandler',
             'filename': LOG_DIR / 'error.log',
-            'maxBytes': 1024 * 1024 * 15,  # 15 MB
+            'maxBytes': 1024 * 1024 * 15,
             'backupCount': 10,
             'formatter': 'verbose',
         },
@@ -125,7 +158,7 @@ LOGGING = {
             'level': 'INFO',
             'class': 'logging.handlers.RotatingFileHandler',
             'filename': LOG_DIR / 'application.log',
-            'maxBytes': 1024 * 1024 * 15,  # 15 MB
+            'maxBytes': 1024 * 1024 * 15,
             'backupCount': 10,
             'formatter': 'verbose',
         },

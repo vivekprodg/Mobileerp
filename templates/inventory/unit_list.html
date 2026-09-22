@@ -343,8 +343,9 @@
                         </td>
 
                         <td>
+                            {# OPTIMIZED: Replaced unit.base_products.count fallback with static 0 to prevent N+1 queries #}
                             <a href="{% url 'inventory:product_list' %}" class="badge bg-primary bg-opacity-10 text-primary text-decoration-none fw-bold px-3 py-2 fs-xs">
-                                <i class="fas fa-boxes-stacked me-1"></i> {{ unit.product_count|default:unit.base_products.count }} Products
+                                <i class="fas fa-boxes-stacked me-1"></i> {{ unit.product_count|default:0 }} Products
                             </a>
                         </td>
 
