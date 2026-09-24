@@ -18,16 +18,37 @@
         </a>
     </div>
 
-    <form method="post" id="rmaDispatchForm">
+    <form method="post" id="rmaDispatchForm" autocomplete="off">
         {% csrf_token %}
         <div class="row g-4">
+            <!-- Left Column: Distributor & Dispatch Info -->
             <div class="col-12 col-lg-5">
                 <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
                     <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">Distributor Information</h6>
+                    
+                    <!-- Standardized Universal Contextual Supplier Search -->
                     <div class="mb-3">
                         <label class="form-label fw-bold text-dark fs-xs">Distributor / Supplier <span class="text-danger">*</span></label>
-                        {{ form.supplier }}
+                        <div class="contextual-search-wrapper"
+                             data-search-url="/purchases/suppliers/api/search/"
+                             data-search-type="supplier"
+                             data-placeholder="Search distributor or company name..."
+                             data-initial-id="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}"
+                             data-initial-title="{{ form.instance.supplier.company_name|default:form.instance.supplier.name|default:'' }}"
+                             data-initial-subtitle="{% if form.instance.supplier.code %}Code: {{ form.instance.supplier.code }}{% endif %}">
+                            <input type="hidden" name="supplier" id="id_supplier" value="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}" required>
+                            <input type="text" class="form-control contextual-search-input async-search-input" 
+                                   id="supplier_search_display"
+                                   placeholder="Search distributor or company name..." 
+                                   value="{% if form.instance.supplier %}{{ form.instance.supplier.company_name|default:form.instance.supplier.name }}{% endif %}" 
+                                   autocomplete="off">
+                        </div>
+                        {% if form.supplier.errors %}
+                        <div class="text-danger fs-2xs mt-1">{{ form.supplier.errors|striptags }}</div>
+                        {% endif %}
+                        <small class="text-muted fs-2xs mt-1 d-block">Instant zero-query search over distributor directory.</small>
                     </div>
+
                     <div class="mb-3">
                         <label class="form-label fw-bold text-dark fs-xs">Distributor Service Center Lab</label>
                         {{ form.distributor_service_center }}
@@ -43,6 +64,7 @@
                 </div>
             </div>
 
+            <!-- Right Column: Quarantined Defective Parts Selection -->
             <div class="col-12 col-lg-7">
                 <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
                     <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">Select Defective Quarantine Items</h6>
@@ -101,10 +123,13 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // Select all / deselect all defective parts checkboxes
     const selectAll = document.getElementById('selectAllRmaItems');
     if (selectAll) {
         selectAll.addEventListener('change', (e) => {
-            document.querySelectorAll('.rma-item-check').forEach(cb => cb.checked = e.target.checked);
+            document.querySelectorAll('.rma-item-check').forEach(cb => {
+                cb.checked = e.target.checked;
+            });
         });
     }
 });

@@ -142,11 +142,10 @@
                 {% endif %}
             </div>
             <p class="text-muted fs-xs mb-0 mt-1">
-                Chronological inward GRN book recording trade discounts, input VAT, shipping overheads, true landed costs, and supplier ledger debts
+                Chronological inward GRN book recording pre-VAT merchandise, trade discounts, taxable base, 13% input VAT, shipping overheads, true landed costs, and supplier ledger debts.
             </p>
         </div>
         <div class="d-flex flex-wrap gap-2 align-items-center">
-            <!-- 1-Click CSV and Styled Excel Export Buttons -->
             <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
                class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs" 
                title="Export Purchase Register to CSV">
@@ -169,7 +168,6 @@
     <!-- Enhanced Filter Bar with Nepali Fiscal Year & B.S. Month Selectors -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
         <form method="get" class="row g-2 align-items-end" id="purchaseRegisterFilterForm">
-            
             <!-- 1. Nepali Fiscal Year Selector Dropdown -->
             <div class="col-12 col-md-3">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">
@@ -266,11 +264,11 @@
     <div class="row g-3 mb-4">
         <div class="col-12 col-sm-6 col-xl-3">
             <div class="register-kpi-card border-start border-primary border-4 h-100">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Gross Merchandise Inward</span>
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Gross Pre-VAT Merchandise</span>
                 <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
                     Rs. {{ totals.total_gross|default:0|floatformat:2|intcomma }}
                 </h3>
-                <small class="text-muted fs-2xs">Before discounts &amp; overheads</small>
+                <small class="text-muted fs-2xs">Total Discounts: -Rs. {{ totals.total_discount|default:0|floatformat:2|intcomma }}</small>
             </div>
         </div>
 
@@ -290,7 +288,7 @@
                 <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
                     Rs. {{ totals.total_landed|default:0|floatformat:2|intcomma }}
                 </h3>
-                <small class="text-success fs-2xs fw-bold">Real inventory asset valuation</small>
+                <small class="text-success fs-2xs fw-bold">Taxable Base + Overheads</small>
             </div>
         </div>
 
@@ -305,7 +303,7 @@
         </div>
     </div>
 
-    <!-- Complete Commercial Purchase Register Table (Displaying Official Nepali Date Prominently) -->
+    <!-- Complete Commercial Purchase Register Table (Annex 7 Format with Full Discount & Pre-VAT Alignment) -->
     <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
         <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
             <h6 class="fw-bold text-dark mb-0">
@@ -323,8 +321,9 @@
                         <th>Supplier / Distributor</th>
                         <th>Supplier Bill / Invoice Ref</th>
                         <th>Tax Type</th>
-                        <th class="text-end">Gross Subtotal</th>
+                        <th class="text-end">Gross (Pre-VAT)</th>
                         <th class="text-end">Trade Discount</th>
+                        <th class="text-end">Taxable Base</th>
                         <th class="text-end">Input VAT</th>
                         <th class="text-end">Freight / Duty</th>
                         <th class="text-end">Total Landed Cost</th>
@@ -370,19 +369,45 @@
                             {% endif %}
                         </td>
 
+                        <!-- Pre-VAT Gross Subtotal -->
                         <td class="col-num">Rs. {{ row.gross_amount|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-muted">{% if row.discount_amount > 0 %}-Rs. {{ row.discount_amount|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
-                        <td class="col-num text-success">{% if row.vat_amount > 0 %}Rs. {{ row.vat_amount|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
+                        
+                        <!-- Combined Line + Whole-Bill Discounts -->
+                        <td class="col-num text-muted">
+                            {% if row.discount_amount > 0 %}
+                                -Rs. {{ row.discount_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <!-- Pre-VAT Taxable Base (Gross - Total Discount) -->
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ row.taxable_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 13% Input VAT -->
+                        <td class="col-num text-success">
+                            {% if row.vat_amount > 0 %}
+                                Rs. {{ row.vat_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
                         
                         <!-- Distributed Overheads: Freight + Customs + Handling -->
                         <td class="col-num text-warning-emphasis">
                             +Rs. {{ row.overhead_total|floatformat:2|intcomma }}
                         </td>
 
+                        <!-- Total Landed Cost (COGS) -->
                         <td class="col-num fw-bold text-dark">Rs. {{ row.total_landed_cost|floatformat:2|intcomma }}</td>
+                        
+                        <!-- Net Invoice Total -->
                         <td class="col-num fw-bold text-primary">Rs. {{ row.net_total_amount|floatformat:2|intcomma }}</td>
                         <td class="col-num text-success">Rs. {{ row.paid_amount|floatformat:2|intcomma }}</td>
 
+                        <!-- Due Added to Supplier Debt -->
                         <td class="col-num pe-3">
                             {% if row.due_amount > 0 %}
                                 <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace fs-xs">
@@ -395,7 +420,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="13" class="text-center py-5 text-muted">
+                        <td colspan="14" class="text-center py-5 text-muted">
                             <i class="fas fa-truck-ramp-box fs-1 text-secondary opacity-25 d-block mb-3"></i>
                             <h6 class="fw-bold text-dark mb-1">No Inward Purchase Records in this Period</h6>
                             <p class="text-muted fs-xs mb-0">No verified GRN shipments were recorded for {{ period_label }}.</p>
@@ -408,21 +433,21 @@
                 <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
                     <tr>
                         <td colspan="5" class="ps-3 text-end text-uppercase text-white-50">Register Grand Totals:</td>
-                        <td class="col-num text-white-50">Rs. {{ totals.total_gross|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white-50">-Rs. {{ totals.total_discount|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-success">Rs. {{ totals.total_vat|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-warning">+Rs. {{ totals.total_overheads|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white fs-6">Rs. {{ totals.total_landed|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-warning fs-6">Rs. {{ totals.total_net|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-success fs-6">Rs. {{ totals.total_paid|floatformat:2|intcomma }}</td>
-                        <td class="col-num pe-3 text-danger fs-6">Rs. {{ totals.total_due|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_gross|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">-Rs. {{ totals.total_discount|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-info">Rs. {{ totals.total_taxable|default:totals.total_gross|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success">Rs. {{ totals.total_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning">+Rs. {{ totals.total_overheads|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white fs-6">Rs. {{ totals.total_landed|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning fs-6">Rs. {{ totals.total_net|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success fs-6">Rs. {{ totals.total_paid|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num pe-3 text-danger fs-6">Rs. {{ totals.total_due|default:0|floatformat:2|intcomma }}</td>
                     </tr>
                 </tfoot>
                 {% endif %}
             </table>
         </div>
     </div>
-
 </div>
 
 <!-- Client-Side Synchronization Script for Fiscal Year & Month Selectors -->
@@ -437,7 +462,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fySelect) {
         fySelect.addEventListener('change', () => {
             if (fySelect.value) {
-                // If a fiscal year is chosen, reset the month and custom date fields so full fiscal year queries apply cleanly
                 if (monthSelect) monthSelect.value = '';
                 if (startDateBs) startDateBs.value = '';
                 if (endDateBs) endDateBs.value = '';
@@ -448,7 +472,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (monthSelect) {
         monthSelect.addEventListener('change', () => {
             if (monthSelect.value) {
-                // If a month is chosen, reset the fiscal year and custom date fields
                 if (fySelect) fySelect.value = '';
                 if (startDateBs) startDateBs.value = '';
                 if (endDateBs) endDateBs.value = '';

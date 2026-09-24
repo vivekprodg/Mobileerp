@@ -16,7 +16,6 @@ from apps.sales.models import (
 # =============================================================================
 # 1. SALES ESTIMATE LINE ITEMS & PAYMENT INLINES
 # =============================================================================
-
 class SalesEstimateItemInline(admin.TabularInline):
     model = SalesEstimateItem
     extra = 0
@@ -62,7 +61,6 @@ class SalesEstimateItemInline(admin.TabularInline):
         return format_html('<span style="color: #94a3b8; font-style: italic; font-size: 10px;">(Non-Serialized / Historical)</span>')
     imei_display.short_description = _("IMEI / Serial")
 
-
 class SalesPaymentTransactionInline(admin.TabularInline):
     model = SalesPaymentTransaction
     extra = 0
@@ -77,16 +75,15 @@ class SalesPaymentTransactionInline(admin.TabularInline):
         )
     payment_mode_badge.short_description = _("Payment Mode")
 
-
 # =============================================================================
 # 2. SALES ESTIMATE / INVOICE ADMIN (HISTORICAL AUDIT PROTECTED)
 # =============================================================================
-
 @admin.register(SalesEstimate)
 class SalesEstimateAdmin(admin.ModelAdmin):
     list_display = [
         'estimate_number', 'branch', 'recipient_display_name',
-        'customer_pan_display', 'bill_date_ad', 'bill_date_bs', 'fiscal_year',
+        'customer_phone_display', 'customer_pan_display',
+        'bill_date_ad', 'bill_date_bs', 'fiscal_year',
         'taxable_amount_display', 'vat_amount_display', 'grand_total',
         'merchandise_discount_display', 'trade_in_credit_display',
         'paid_amount', 'due_amount', 'status_badge', 'payment_status_badge'
@@ -151,6 +148,13 @@ class SalesEstimateAdmin(admin.ModelAdmin):
             )
         }),
     )
+
+    def customer_phone_display(self, obj):
+        phone = obj.customer_phone_manual or (obj.customer.phone_number if obj.customer else None)
+        if phone:
+            return format_html('<span class="font-monospace">{}</span>', phone)
+        return format_html('<span style="color: #94a3b8;">-</span>')
+    customer_phone_display.short_description = _("Customer Phone")
 
     def customer_pan_display(self, obj):
         if obj.customer_pan:
@@ -222,16 +226,13 @@ class SalesEstimateAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
-
 # =============================================================================
 # 3. TRADE-IN & BUY-BACK ADMIN
 # =============================================================================
-
 class TradeInInspectionChecklistInline(admin.StackedInline):
     model = TradeInInspectionChecklist
     extra = 0
     can_delete = False
-
 
 class TradeInLegalUndertakingInline(admin.StackedInline):
     model = TradeInLegalUndertaking
@@ -273,7 +274,6 @@ class TradeInLegalUndertakingInline(admin.StackedInline):
             )
         return "(No ID back)"
     preview_id_back.short_description = _("ID Back Photo")
-
 
 @admin.register(PhoneExchangeTradeIn)
 class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
@@ -362,11 +362,9 @@ class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
         )
     status_badge.short_description = _("Voucher Status")
 
-
 # =============================================================================
 # 4. SALES RETURN & DEFECTIVE ITEMS ADMIN
 # =============================================================================
-
 class SalesReturnItemInline(admin.TabularInline):
     model = SalesReturnItem
     extra = 0
@@ -383,7 +381,6 @@ class SalesReturnItemInline(admin.TabularInline):
         'is_defective', 'defect_reason'
     ]
     can_delete = False
-
 
 @admin.register(SalesReturn)
 class SalesReturnAdmin(admin.ModelAdmin):

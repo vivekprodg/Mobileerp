@@ -1,7 +1,7 @@
 {% extends "core/base.html" %}
 {% load static humanize %}
 
-{% block title %}Record Purchase Return (Debit Note) | {{ COMPANY_NAME }}{% endblock %}
+{% block title %}Record Purchase Return (Debit Note) | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -40,7 +40,7 @@
                 <i class="fas fa-arrow-rotate-left text-danger me-2"></i> Record Purchase Return / Debit Note to Supplier
             </h4>
             <p class="text-muted fs-xs mb-0">
-                Return defective devices or over-shipped stock to distributors, automatically deduct warehouse inventory, lock IMEIs, and reduce supplier debt
+                Return defective devices or over-shipped stock to distributors, automatically deduct warehouse inventory, lock IMEIs, and reduce supplier debt.
             </p>
         </div>
         <div class="d-flex gap-2">
@@ -77,11 +77,29 @@
             </h6>
 
             <div class="row g-3">
+                <!-- 1. Universal Contextual Supplier Search -->
                 <div class="col-12 col-md-4">
                     <label class="form-label fw-bold text-dark fs-xs">
                         Distributor / Supplier <span class="text-danger">*</span>
                     </label>
-                    {{ form.supplier }}
+                    <div class="contextual-search-wrapper" 
+                         id="supplierSearchWrapper" 
+                         data-search-url="/purchases/suppliers/api/search/" 
+                         data-search-type="supplier"
+                         data-placeholder="Search supplier by name, company, phone, PAN..."
+                         data-initial-id="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}"
+                         data-initial-title="{{ form.instance.supplier.company_name|default:form.instance.supplier.name|default:'' }}"
+                         data-initial-subtitle="{% if form.instance.supplier.code %}Code: {{ form.instance.supplier.code }}{% endif %}">
+                        <input type="hidden" name="supplier" id="id_supplier" value="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}" required>
+                        <input type="text" class="form-control contextual-search-input async-search-input" 
+                               id="supplier_search_display"
+                               placeholder="Search supplier by name, company, phone, PAN..." 
+                               value="{% if form.instance.supplier %}{{ form.instance.supplier.company_name|default:form.instance.supplier.name }}{% endif %}" 
+                               autocomplete="off">
+                    </div>
+                    {% if form.supplier.errors %}
+                        <div class="text-danger fs-2xs mt-1">{{ form.supplier.errors|striptags }}</div>
+                    {% endif %}
                     <small class="text-muted fs-2xs mt-1 d-block">Select the supplier receiving the returned goods.</small>
                 </div>
 
@@ -111,9 +129,26 @@
                     {{ form.return_date_bs }}
                 </div>
 
+                <!-- 2. Universal Contextual Original Inward GRN Selector (Dynamically Chained to Supplier) -->
                 <div class="col-12 col-md-3">
                     <label class="form-label fw-bold text-dark fs-xs">Original Inward GRN (Optional)</label>
-                    {{ form.original_grn }}
+                    <div class="contextual-search-wrapper" 
+                         id="grnSearchWrapper" 
+                         data-search-url="/purchases/grn/api/search/{% if form.supplier.value %}?supplier_id={{ form.supplier.value }}{% endif %}" 
+                         data-search-type="grn"
+                         data-placeholder="Search GRN # or Challan ref..."
+                         data-initial-id="{{ form.instance.original_grn.id|default:form.original_grn.value|default:'' }}"
+                         data-initial-title="{% if form.instance.original_grn %}{{ form.instance.original_grn.grn_number }}{% endif %}">
+                        <input type="hidden" name="original_grn" id="id_original_grn" value="{{ form.instance.original_grn.id|default:form.original_grn.value|default:'' }}">
+                        <input type="text" class="form-control contextual-search-input async-search-input" 
+                               id="grn_search_display"
+                               placeholder="Search GRN # or Challan ref..." 
+                               value="{% if form.instance.original_grn %}{{ form.instance.original_grn.grn_number }}{% endif %}" 
+                               autocomplete="off">
+                    </div>
+                    <small class="text-muted fs-2xs mt-1 d-block" id="grnSearchNotice">
+                        {% if form.supplier.value %}Filtered by selected supplier.{% else %}Choose supplier to scope GRN invoices.{% endif %}
+                    </small>
                 </div>
 
                 <div class="col-12 col-md-3">
@@ -128,14 +163,14 @@
             </div>
         </div>
 
-        <!-- Section 2: Returned Line Items Formset -->
+        <!-- Section 2: Returned Line Items Formset with Universal Contextual Product Search -->
         <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
             <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 border-bottom pb-3 mb-3">
                 <div>
                     <h6 class="fw-bold text-dark mb-0">
                         <i class="fas fa-boxes-stacked text-danger me-2"></i> 2. Returned Products, Quantities &amp; Serialized IMEIs
                     </h6>
-                    <small class="text-muted fs-2xs">Specify products, return quantities, agreed return purchase rates, and enter 15-digit IMEIs for smartphones.</small>
+                    <small class="text-muted fs-2xs">Rates are Pre-VAT Net values. VAT is calculated on top. Exactly match return quantities with 15-digit IMEIs.</small>
                 </div>
                 <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold" id="addNewReturnItemBtn">
                     <i class="fas fa-plus me-1"></i> Add Another Item
@@ -149,16 +184,35 @@
                 <div class="return-item-row" data-row-index="{{ forloop.counter0 }}">
                     {{ item_form.id }}
                     <div class="row g-3 align-items-end">
+                        <!-- Universal Contextual Product Search for Rendered Row -->
                         <div class="col-12 col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
-                            {{ item_form.product }}
+                            <div class="contextual-search-wrapper" 
+                                 data-search-url="/products/api/search/?mode=simple" 
+                                 data-search-type="product"
+                                 data-placeholder="Scan barcode or type model/brand..."
+                                 data-initial-id="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}"
+                                 data-initial-title="{{ item_form.instance.product.name|default:'' }}"
+                                 data-initial-subtitle="{% if item_form.instance.product.sku %}SKU: {{ item_form.instance.product.sku }}{% endif %}">
+                                <input type="hidden" name="items-{{ forloop.counter0 }}-product" id="id_items-{{ forloop.counter0 }}-product" value="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}" class="return-product-id-input" required>
+                                <input type="text" class="form-control contextual-search-input async-search-input return-product-search-input" 
+                                       placeholder="Scan barcode or type model/brand..." 
+                                       value="{% if item_form.instance.product %}{{ item_form.instance.product.name }}{% endif %}" 
+                                       autocomplete="off">
+                            </div>
+                            {% if item_form.product.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ item_form.product.errors|striptags }}</div>
+                            {% endif %}
                         </div>
+
                         <div class="col-6 col-md-2">
                             <label class="form-label fw-bold text-dark fs-xs">Return Qty <span class="text-danger">*</span></label>
                             {{ item_form.returned_quantity }}
                         </div>
                         <div class="col-6 col-md-2">
-                            <label class="form-label fw-bold text-dark fs-xs">Purchase Rate (NPR) <span class="text-danger">*</span></label>
+                            <label class="form-label fw-bold text-dark fs-xs" title="Pre-VAT Net Purchase Cost">
+                                Pre-VAT Rate (NPR) <span class="text-danger">*</span>
+                            </label>
                             {{ item_form.purchase_rate }}
                         </div>
                         <div class="col-6 col-md-1">
@@ -175,7 +229,7 @@
                             {% if formset.can_delete %}
                                 <div class="form-check form-check-inline mt-4">
                                     {{ item_form.DELETE }}
-                                    <label class="form-check-label text-danger fs-2xs fw-bold">Remove</label>
+                                    <label class="form-check-label text-danger fs-2xs fw-bold" title="Remove line">Remove</label>
                                 </div>
                             {% endif %}
                         </div>
@@ -195,14 +249,22 @@
                 {% endfor %}
             </div>
 
-            <!-- Real-Time Return Totals Summary Panel -->
+            <!-- Real-Time Return Totals 3-Part Summary Panel -->
             <div class="p-3 bg-light rounded-3 border mt-3 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
                 <div class="fs-xs text-muted">
-                    <i class="fas fa-calculator text-danger me-1"></i> Live Debit Note Valuation updates automatically based on quantity, rates, and tax.
+                    <i class="fas fa-calculator text-danger me-1"></i> Live Debit Note Valuation updates automatically: Pre-VAT Base + Reversible 13% Input VAT = Total Debit Note.
                 </div>
-                <div class="d-flex align-items-center gap-4">
+                <div class="d-flex align-items-center gap-4 flex-wrap">
                     <div class="text-end">
-                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Total Debit Note Value</span>
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Pre-VAT Merchandise</span>
+                        <h6 class="fw-bold text-dark font-monospace mb-0" id="returnGrossText">Rs. 0.00</h6>
+                    </div>
+                    <div class="text-end">
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Reversible Input VAT</span>
+                        <h6 class="fw-bold text-success font-monospace mb-0" id="returnVatText">+Rs. 0.00</h6>
+                    </div>
+                    <div class="text-end ps-3 border-start">
+                        <span class="text-danger fs-2xs text-uppercase fw-bold d-block">Total Debit Note Value</span>
                         <h4 class="fw-extrabold text-danger font-monospace mb-0" id="returnGrandTotalText">Rs. 0.00</h4>
                     </div>
                 </div>
@@ -227,33 +289,33 @@
     </form>
 </div>
 
-<!-- Embedded Product Default Purchase Cost Map -->
-<script id="productCostMeta" type="application/json">
-{
-    {% for prod in products %}
-    "{{ prod.id }}": {
-        "cost_price": "{{ prod.purchase_price|default:'0.00' }}",
-        "requires_imei": {{ prod.requires_imei_tracking|yesno:"true,false" }}
-    }{% if not forloop.last %},{% endif %}
-    {% endfor %}
-}
-</script>
-
 <!-- Empty Form Template for Dynamic Line Additions -->
 <div id="emptyReturnFormTemplate" style="display: none;">
     <div class="return-item-row" data-row-index="__prefix__">
         {{ formset.empty_form.id }}
         <div class="row g-3 align-items-end">
+            <!-- Universal Contextual Product Search Template -->
             <div class="col-12 col-md-4">
                 <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
-                {{ formset.empty_form.product }}
+                <div class="contextual-search-wrapper" 
+                     data-search-url="/products/api/search/?mode=simple" 
+                     data-search-type="product"
+                     data-placeholder="Scan barcode or type model/brand...">
+                    <input type="hidden" name="items-__prefix__-product" id="id_items-__prefix__-product" value="" class="return-product-id-input" required>
+                    <input type="text" class="form-control contextual-search-input async-search-input return-product-search-input" 
+                           placeholder="Scan barcode or type model/brand..." 
+                           autocomplete="off">
+                </div>
             </div>
+
             <div class="col-6 col-md-2">
                 <label class="form-label fw-bold text-dark fs-xs">Return Qty <span class="text-danger">*</span></label>
                 {{ formset.empty_form.returned_quantity }}
             </div>
             <div class="col-6 col-md-2">
-                <label class="form-label fw-bold text-dark fs-xs">Purchase Rate (NPR) <span class="text-danger">*</span></label>
+                <label class="form-label fw-bold text-dark fs-xs" title="Pre-VAT Net Purchase Cost">
+                    Pre-VAT Rate (NPR) <span class="text-danger">*</span>
+                </label>
                 {{ formset.empty_form.purchase_rate }}
             </div>
             <div class="col-6 col-md-1">
@@ -287,29 +349,99 @@
 </div>
 
 <script>
+/**
+ * Purchase Return Dynamic Calculation & Supplier-GRN Chaining Controller
+ * Fully integrated with universal contextual_search.js loaded from base.html.
+ */
 document.addEventListener('DOMContentLoaded', () => {
-    let productCostMap = {};
-    try {
-        const costScript = document.getElementById('productCostMeta');
-        if (costScript) {
-            productCostMap = JSON.parse(costScript.textContent || '{}');
-        }
-    } catch(e) {}
-
     const container = document.getElementById('returnFormsetContainer');
     const addBtn = document.getElementById('addNewReturnItemBtn');
     const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
     const grandTotalEl = document.getElementById('returnGrandTotalText');
+    const grossTotalEl = document.getElementById('returnGrossText');
+    const vatTotalEl = document.getElementById('returnVatText');
+    const supplierWrapper = document.getElementById('supplierSearchWrapper');
+    const grnWrapper = document.getElementById('grnSearchWrapper');
+    const grnNotice = document.getElementById('grnSearchNotice');
+    const origBillRefInput = document.querySelector('[name="original_bill_reference"]');
 
+    // =========================================================================
+    // 1. Dynamic Dropdown Chaining: Supplier -> Original GRN
+    // =========================================================================
+    function rechainGrnDropdown(supplierId, supplierTitle = '') {
+        if (!grnWrapper) return;
+
+        const newUrl = supplierId ? `/purchases/grn/api/search/?supplier_id=${encodeURIComponent(supplierId)}` : '/purchases/grn/api/search/';
+        grnWrapper.dataset.searchUrl = newUrl;
+        grnWrapper.dataset.autocompleteUrl = newUrl;
+
+        if (grnNotice) {
+            grnNotice.innerText = supplierId ? `Filtered for ${supplierTitle || 'selected supplier'}.` : 'Choose supplier to scope GRN invoices.';
+        }
+
+        delete grnWrapper.dataset.asyncSearchInitialized;
+        const existingInput = grnWrapper.querySelector('input[type="text"]:not([type="hidden"])');
+        if (existingInput) delete existingInput.dataset.asyncSearchInitialized;
+
+        const controls = grnWrapper.querySelector('.async-controls-wrap');
+        if (controls) controls.remove();
+        const dropdown = grnWrapper.querySelector('.async-search-dropdown');
+        if (dropdown) dropdown.remove();
+        const chip = grnWrapper.querySelector('.async-selected-chip');
+        if (chip) chip.remove();
+
+        const hidden = grnWrapper.querySelector('input[type="hidden"]');
+        if (hidden) hidden.value = '';
+        if (existingInput) {
+            existingInput.value = '';
+            existingInput.classList.remove('d-none');
+        }
+
+        if (typeof window.initContextualSearch === 'function') {
+            window.initContextualSearch(grnWrapper);
+        }
+    }
+
+    if (supplierWrapper) {
+        supplierWrapper.addEventListener('item-selected', (e) => {
+            const item = e.detail;
+            const supplierId = item ? (item.id !== undefined ? item.id : item.pk) : null;
+            const supplierTitle = item ? (item.title || item.name || item.company_name || '') : '';
+            rechainGrnDropdown(supplierId, supplierTitle);
+        });
+
+        supplierWrapper.addEventListener('item-cleared', () => {
+            rechainGrnDropdown(null);
+        });
+    }
+
+    if (grnWrapper) {
+        grnWrapper.addEventListener('item-selected', (e) => {
+            const grn = e.detail;
+            if (grn && origBillRefInput && (!origBillRefInput.value || origBillRefInput.value.trim() === '')) {
+                const billRef = grn.bill_no || grn.supplier_bill_no || grn.reference || '';
+                if (billRef) {
+                    origBillRefInput.value = billRef;
+                }
+            }
+        });
+    }
+
+    // =========================================================================
+    // 2. Real-Time Totals & Line Calculations
+    // =========================================================================
     function recalculateReturnTotals() {
+        let runningGross = 0;
+        let runningVat = 0;
         let runningTotal = 0;
+
         document.querySelectorAll('.return-item-row').forEach(row => {
             const deleteCb = row.querySelector('input[name$="-DELETE"]');
             if (deleteCb && deleteCb.checked) return;
 
-            const qtyInput = row.querySelector('.return-qty-input');
-            const rateInput = row.querySelector('.return-rate-input');
-            const taxInput = row.querySelector('.return-tax-input');
+            const qtyInput = row.querySelector('input[name$="-returned_quantity"]');
+            const rateInput = row.querySelector('input[name$="-purchase_rate"]');
+            const taxInput = row.querySelector('input[name$="-tax_rate"]');
             const lineTotalText = row.querySelector('.return-line-total-text');
 
             const qty = parseFloat(qtyInput ? qtyInput.value : 0) || 0;
@@ -324,42 +456,60 @@ document.addEventListener('DOMContentLoaded', () => {
                 lineTotalText.innerText = `Rs. ${lineTot.toFixed(2)}`;
             }
 
+            runningGross += gross;
+            runningVat += tax;
             runningTotal += lineTot;
         });
 
-        if (grandTotalEl) {
-            grandTotalEl.innerText = `Rs. ${runningTotal.toFixed(2)}`;
-        }
+        if (grossTotalEl) grossTotalEl.innerText = `Rs. ${runningGross.toFixed(2)}`;
+        if (vatTotalEl) vatTotalEl.innerText = `+Rs. ${runningVat.toFixed(2)}`;
+        if (grandTotalEl) grandTotalEl.innerText = `Rs. ${runningTotal.toFixed(2)}`;
     }
 
     if (container) {
+        container.addEventListener('item-selected', (e) => {
+            const row = e.target.closest('.return-item-row');
+            if (!row) return;
+
+            const item = e.detail;
+            if (!item) return;
+
+            const extra = item.extra_data || {};
+            const costPrice = extra.cost_price !== undefined 
+                ? extra.cost_price 
+                : (item.cost_price !== undefined ? item.cost_price : (item.purchase_price !== undefined ? item.purchase_price : null));
+
+            const rateInput = row.querySelector('input[name$="-purchase_rate"]');
+            if (rateInput && costPrice !== null && costPrice !== undefined && (!rateInput.value || parseFloat(rateInput.value) === 0)) {
+                rateInput.value = parseFloat(costPrice).toFixed(2);
+            }
+
+            const qtyInput = row.querySelector('input[name$="-returned_quantity"]');
+            if (qtyInput && (!qtyInput.value || parseFloat(qtyInput.value) <= 0)) {
+                qtyInput.value = '1';
+            }
+
+            recalculateReturnTotals();
+        });
+
+        container.addEventListener('item-cleared', () => {
+            recalculateReturnTotals();
+        });
+
         container.addEventListener('input', (e) => {
-            if (e.target.classList.contains('return-qty-input') || 
-                e.target.classList.contains('return-rate-input') || 
-                e.target.classList.contains('return-tax-input')) {
+            if (e.target.name && (e.target.name.endsWith('-returned_quantity') || e.target.name.endsWith('-purchase_rate') || e.target.name.endsWith('-tax_rate'))) {
                 recalculateReturnTotals();
             }
         });
 
         container.addEventListener('change', (e) => {
-            if (e.target.classList.contains('select-return-product')) {
-                const prodId = e.target.value;
-                const row = e.target.closest('.return-item-row');
-                if (row && prodId && productCostMap[prodId]) {
-                    const rateInput = row.querySelector('.return-rate-input');
-                    if (rateInput && (!rateInput.value || parseFloat(rateInput.value) === 0)) {
-                        rateInput.value = parseFloat(productCostMap[prodId].cost_price || 0).toFixed(2);
-                    }
-                }
-                recalculateReturnTotals();
-            }
-
             if (e.target.name && e.target.name.endsWith('-DELETE')) {
                 recalculateReturnTotals();
             }
         });
     }
 
+    // Dynamic Formset Addition via "+ Add Another Item"
     if (addBtn && totalFormsInput && container) {
         addBtn.addEventListener('click', () => {
             const currentCount = parseInt(totalFormsInput.value, 10);
@@ -372,6 +522,14 @@ document.addEventListener('DOMContentLoaded', () => {
             container.appendChild(newRow);
 
             totalFormsInput.value = currentCount + 1;
+
+            if (typeof window.initContextualSearch === 'function') {
+                window.initContextualSearch(newRow);
+            }
+
+            const searchInput = newRow.querySelector('.return-product-search-input');
+            if (searchInput) searchInput.focus();
+
             recalculateReturnTotals();
         });
     }

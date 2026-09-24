@@ -324,44 +324,215 @@
     </div>
 </div>
 
-<!-- Modal: Record Supplier Payout -->
-<div class="modal fade" id="supplierPayoutModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+<!-- ==========================================================================
+     STANDARDIZED MODAL: RECORD SUPPLIER PAYOUT & INVOICE SETTLEMENT
+     ========================================================================== -->
+<div class="modal fade" id="supplierPayoutModal" tabindex="-1" aria-labelledby="supplierPayoutModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-            <form action="{% url 'purchases:supplier_payment' supplier.pk %}" method="post">
+            <form action="{% url 'purchases:supplier_payment' supplier.pk %}" method="post" id="supplierPayoutForm">
                 {% csrf_token %}
                 <div class="modal-header bg-success text-white border-0 py-3">
-                    <h5 class="modal-title fs-6 fw-bold"><i class="fas fa-hand-holding-dollar me-2"></i> Record Supplier Payout</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-white text-success p-2 rounded-circle fs-6"><i class="fas fa-hand-holding-dollar"></i></span>
+                        <div>
+                            <h5 class="modal-title fs-6 fw-bold mb-0" id="supplierPayoutModalLabel">Record Supplier Payout / Debt Settlement</h5>
+                            <small class="text-white-50 fs-2xs">Disburse payments to {{ supplier.company_name }} with linked GRN tracking</small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
+
                 <div class="modal-body p-4">
-                    <div class="mb-3">
-                        <label class="form-label fw-bold text-dark fs-xs">Payout Amount (NPR) <span class="text-danger">*</span></label>
-                        {{ payment_form.amount }}
+                    <!-- Current Supplier Balance Warning Banner -->
+                    <div class="p-3 bg-light rounded-3 border d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Current Unsettled Debt Balance</span>
+                            <h4 class="fw-extrabold text-danger font-monospace mb-0">Rs. {{ supplier.current_balance|floatformat:2|intcomma }}</h4>
+                        </div>
+                        <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 fs-xs fw-bold" id="fillFullDueBtn">
+                            Pay Total Outstanding
+                        </button>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-bold text-dark fs-xs">Payment Mode <span class="text-danger">*</span></label>
-                        {{ payment_form.payment_mode }}
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-bold text-dark fs-xs">Reference No. (Cheque / Bank Auth)</label>
-                        {{ payment_form.reference_number }}
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-bold text-dark fs-xs">Cheque Date (If Applicable)</label>
-                        {{ payment_form.cheque_date }}
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-bold text-dark fs-xs">Remarks / Payout Notes</label>
-                        {{ payment_form.remarks }}
+
+                    <div class="row g-3">
+                        <!-- Direct Link to Outstanding Inward GRN Invoice (Standard Contextual Search) -->
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Link to Outstanding Bill / Inward GRN (Optional)</label>
+                            <div class="contextual-search-wrapper" 
+                                 id="payoutGrnWrapper" 
+                                 data-search-url="/purchases/grn/api/search/?supplier_id={{ supplier.pk }}" 
+                                 data-search-type="grn"
+                                 data-placeholder="Search unpaid GRN invoice by GRN number, Bill Ref...">
+                                <input type="hidden" name="grn_id" id="payout_grn_id" value="">
+                                <input type="text" class="form-control contextual-search-input async-search-input" 
+                                       id="payout_grn_display"
+                                       placeholder="Search unpaid GRN invoice by GRN number, Bill Ref..." 
+                                       autocomplete="off">
+                            </div>
+                            <small class="text-muted fs-2xs mt-1 d-block">Selecting an outstanding invoice will automatically autofill the remaining bill balance.</small>
+
+                            <!-- Selected Invoice Preview Card -->
+                            <div class="p-2 bg-success bg-opacity-10 border border-success border-opacity-25 rounded-3 mt-2 d-none" id="selectedGrnCard">
+                                <div class="d-flex justify-content-between align-items-center fs-xs">
+                                    <div>
+                                        <strong class="text-success" id="selectedGrnTitle">GRN-0000</strong>
+                                        <span class="text-muted fs-2xs ms-2" id="selectedGrnDate"></span>
+                                    </div>
+                                    <div>
+                                        <span class="text-muted fs-2xs">Invoice Balance:</span>
+                                        <strong class="text-dark font-monospace" id="selectedGrnBalance">Rs. 0.00</strong>
+                                        <button type="button" class="btn btn-sm btn-link text-primary p-0 ms-2 fw-bold text-decoration-none" id="fillGrnBalanceBtn">
+                                            Use Amount
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Payout Amount -->
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Payout Amount (NPR) <span class="text-danger">*</span></label>
+                            {{ payment_form.amount }}
+                        </div>
+
+                        <!-- Payment Mode -->
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Payment Mode <span class="text-danger">*</span></label>
+                            {{ payment_form.payment_mode }}
+                        </div>
+
+                        <!-- Standard Accounting Payment Clearing Account Lookup -->
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Payment Clearing Account (Bank / Cash)</label>
+                            <div class="contextual-search-wrapper" 
+                                 id="payoutClearingAccountWrapper"
+                                 data-search-url="/accounting/api/accounts/search/?category=PAYMENT" 
+                                 data-search-type="account"
+                                 data-placeholder="Select company cash register or bank account...">
+                                <input type="hidden" name="clearing_account_id" id="payout_clearing_account_id" value="">
+                                <input type="text" class="form-control contextual-search-input async-search-input" 
+                                       id="payout_clearing_account_display"
+                                       placeholder="Select company cash register or bank account..." 
+                                       autocomplete="off">
+                            </div>
+                            <small class="text-muted fs-2xs mt-1 d-block">Source ledger account where disbursement is debited.</small>
+                        </div>
+
+                        <!-- Reference No. (Cheque / Bank Auth / Voucher) -->
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Reference No. (Cheque / FonePay Trace / Voucher)</label>
+                            {{ payment_form.reference_number }}
+                        </div>
+
+                        <!-- Cheque Date -->
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Cheque Clearance Date (If Cheque)</label>
+                            {{ payment_form.cheque_date }}
+                        </div>
+
+                        <!-- Remarks / Notes -->
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Remarks / Settlement Notes</label>
+                            {{ payment_form.remarks }}
+                        </div>
                     </div>
                 </div>
-                <div class="modal-footer bg-light border-0">
-                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-success btn-sm px-4 rounded-pill fw-bold">Post Payout</button>
+
+                <div class="modal-footer bg-light border-0 py-3">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success btn-sm px-5 rounded-pill fw-bold shadow-sm">
+                        <i class="fas fa-check-circle me-1"></i> Post Payout &amp; Deduct Debt
+                    </button>
                 </div>
             </form>
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const payoutGrnWrapper = document.getElementById('payoutGrnWrapper');
+    const amountInput = document.querySelector('#supplierPayoutForm input[name="amount"]');
+    const selectedGrnCard = document.getElementById('selectedGrnCard');
+    const selectedGrnTitle = document.getElementById('selectedGrnTitle');
+    const selectedGrnDate = document.getElementById('selectedGrnDate');
+    const selectedGrnBalance = document.getElementById('selectedGrnBalance');
+    const fillGrnBalanceBtn = document.getElementById('fillGrnBalanceBtn');
+    const fillFullDueBtn = document.getElementById('fillFullDueBtn');
+    const clearingAccountWrapper = document.getElementById('payoutClearingAccountWrapper');
+    const paymentModeSelect = document.querySelector('#supplierPayoutForm select[name="payment_mode"]');
+
+    let currentSelectedGrnDue = 0;
+    const totalSupplierDue = parseFloat('{{ supplier.current_balance|default:"0" }}') || 0;
+
+    // Quick fill full outstanding balance
+    if (fillFullDueBtn && amountInput) {
+        fillFullDueBtn.addEventListener('click', () => {
+            if (totalSupplierDue > 0) {
+                amountInput.value = totalSupplierDue.toFixed(2);
+                amountInput.focus();
+            }
+        });
+    }
+
+    // Direct link to GRN selection hook via universal event contract
+    if (payoutGrnWrapper) {
+        payoutGrnWrapper.addEventListener('item-selected', (e) => {
+            const grn = e.detail;
+            if (!grn) return;
+
+            const extra = grn.extra_data || grn;
+            currentSelectedGrnDue = parseFloat(extra.due_amount ?? extra.balance ?? extra.total_amount ?? grn.due_amount ?? 0) || 0;
+
+            if (selectedGrnCard) {
+                selectedGrnCard.classList.remove('d-none');
+                if (selectedGrnTitle) selectedGrnTitle.innerText = extra.grn_number || grn.title || 'GRN';
+                if (selectedGrnDate) selectedGrnDate.innerText = extra.bill_date ? `(${extra.bill_date})` : '';
+                if (selectedGrnBalance) selectedGrnBalance.innerText = `Rs. ${currentSelectedGrnDue.toFixed(2)}`;
+            }
+
+            if (amountInput && (!amountInput.value || parseFloat(amountInput.value) === 0)) {
+                if (currentSelectedGrnDue > 0) {
+                    amountInput.value = currentSelectedGrnDue.toFixed(2);
+                }
+            }
+        });
+
+        payoutGrnWrapper.addEventListener('item-cleared', () => {
+            if (selectedGrnCard) selectedGrnCard.classList.add('d-none');
+            currentSelectedGrnDue = 0;
+        });
+    }
+
+    if (fillGrnBalanceBtn && amountInput) {
+        fillGrnBalanceBtn.addEventListener('click', () => {
+            if (currentSelectedGrnDue > 0) {
+                amountInput.value = currentSelectedGrnDue.toFixed(2);
+                amountInput.focus();
+            }
+        });
+    }
+
+    // Sync payment mode dropdown automatically based on selected clearing account
+    if (clearingAccountWrapper && paymentModeSelect) {
+        clearingAccountWrapper.addEventListener('item-selected', (e) => {
+            const account = e.detail;
+            if (!account) return;
+
+            const extra = account.extra_data || account;
+            const tag = (extra.system_tag || account.system_tag || '').toUpperCase();
+            const text = (account.title || account.name || '').toUpperCase();
+
+            if (tag === 'CASH' || text.includes('CASH')) {
+                paymentModeSelect.value = 'CASH';
+            } else if (tag === 'BANK' || text.includes('BANK')) {
+                paymentModeSelect.value = 'BANK_TRANSFER';
+            } else if (tag === 'FONEPAY' || text.includes('FONEPAY') || text.includes('QR')) {
+                paymentModeSelect.value = 'FONEPAY';
+            }
+        });
+    }
+});
+</script>
 {% endblock %}

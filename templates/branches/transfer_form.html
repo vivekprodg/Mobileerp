@@ -28,6 +28,32 @@
     border-radius: 16px 16px 0 0;
     box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
 }
+.branch-dropdown-results, .product-dropdown-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1055;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+    max-height: 260px;
+    overflow-y: auto;
+    margin-top: 4px;
+}
+.async-search-item-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    transition: background 0.15s ease-in-out;
+}
+.async-search-item-btn:hover {
+    background-color: #f1f5f9;
+}
 </style>
 {% endblock %}
 
@@ -65,7 +91,7 @@
     </div>
     {% endif %}
 
-    <form method="post" id="stockTransferMasterForm" novalidate>
+    <form method="post" id="stockTransferMasterForm" autocomplete="off" novalidate>
         {% csrf_token %}
 
         <!-- Section 1: Route & Purpose Header -->
@@ -75,6 +101,7 @@
             </h6>
 
             <div class="row g-3">
+                <!-- Source Origin -->
                 <div class="col-12 col-md-6">
                     <label class="form-label fw-bold text-muted fs-xs text-uppercase">Source Outlet (Origin)</label>
                     <div class="p-3 bg-light rounded-3 border d-flex justify-content-between align-items-center">
@@ -88,12 +115,29 @@
                     </div>
                 </div>
 
+                <!-- Async Destination Branch Selector -->
                 <div class="col-12 col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">
                         Destination Branch (Recipient) <span class="text-danger">*</span>
                     </label>
-                    {{ form.destination_branch }}
-                    <small class="text-muted fs-2xs mt-1 d-block">Select the target store outlet receiving this inventory shipment.</small>
+                    
+                    <div class="position-relative">
+                        <input type="hidden" name="destination_branch" id="id_destination_branch" value="{{ form.destination_branch.value|default:'' }}" required>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light text-muted border-end-0"><i class="fas fa-store"></i></span>
+                            <input type="text" id="destBranchSearchInput" class="form-control border-start-0" 
+                                   placeholder="Search destination branch outlet..." 
+                                   value="{% if form.instance.destination_branch %}{{ form.instance.destination_branch.name }} ({{ form.instance.destination_branch.code }}){% endif %}">
+                        </div>
+
+                        <div id="destBranchResultsDropdown" class="branch-dropdown-results d-none">
+                            <div class="p-2 border-bottom text-muted fs-2xs fw-bold text-uppercase bg-light">
+                                Available Branches (Excluding Origin)
+                            </div>
+                            <div id="destBranchListContainer"></div>
+                        </div>
+                    </div>
+                    <small class="text-muted fs-2xs mt-1 d-block">Search &amp; select the target store outlet receiving this inventory consignment.</small>
                 </div>
 
                 <div class="col-12">
@@ -125,22 +169,45 @@
                 <div class="transfer-item-row" data-row-index="{{ forloop.counter0 }}">
                     {{ item_form.id }}
                     <div class="row g-3 align-items-end">
+                        
+                        <!-- Async Product Search Input -->
                         <div class="col-12 col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
-                            {{ item_form.product }}
+                            <div class="position-relative product-picker-wrapper">
+                                <input type="hidden" name="items-{{ forloop.counter0 }}-product" class="product-id-hidden" 
+                                       value="{{ item_form.product.value|default:'' }}" required>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text bg-light text-muted border-end-0"><i class="fas fa-mobile-screen"></i></span>
+                                    <input type="text" class="form-control border-start-0 product-search-display" 
+                                           placeholder="Search catalog or barcode..." 
+                                           value="{% if item_form.instance.product %}{{ item_form.instance.product.name }}{% endif %}">
+                                </div>
+                                <div class="product-dropdown-results d-none">
+                                    <div class="p-1 border-bottom text-muted fs-2xs fw-bold text-uppercase bg-light">Products</div>
+                                    <div class="product-results-items"></div>
+                                </div>
+                            </div>
                         </div>
+
                         <div class="col-6 col-md-2">
                             <label class="form-label fw-bold text-dark fs-xs">Transfer Quantity <span class="text-danger">*</span></label>
                             {{ item_form.quantity }}
                         </div>
-                        <div class="col-12 col-md-3">
-                            <label class="form-label fw-bold text-dark fs-xs">Scanned IMEI 1 / Serial (Smartphones)</label>
+
+                        <!-- Scanned IMEI with Dynamic Visibility -->
+                        <div class="col-12 col-md-3 imei-column-wrapper">
+                            <label class="form-label fw-bold text-dark fs-xs d-flex justify-content-between">
+                                <span>Scanned IMEI / Serial</span>
+                                <span class="badge bg-warning text-dark fs-2xs imei-badge-required d-none">IMEI Required</span>
+                            </label>
                             {{ item_form.scanned_imei_or_serial }}
                         </div>
+
                         <div class="col-8 col-md-2">
                             <label class="form-label fw-bold text-dark fs-xs">Line Note</label>
                             {{ item_form.notes }}
                         </div>
+
                         <div class="col-4 col-md-1 text-end">
                             {% if formset.can_delete %}
                                 <div class="form-check form-check-inline mt-4">
@@ -175,27 +242,45 @@
 <!-- Dynamic Empty Formset Template for Client-Side Cloning -->
 <div id="emptyTransferFormTemplate" style="display: none;">
     <div class="transfer-item-row" data-row-index="__prefix__">
-        {{ formset.empty_form.id }}
+        <input type="hidden" name="items-__prefix__-id" id="id_items-__prefix__-id">
         <div class="row g-3 align-items-end">
+            
             <div class="col-12 col-md-4">
                 <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
-                {{ formset.empty_form.product }}
+                <div class="position-relative product-picker-wrapper">
+                    <input type="hidden" name="items-__prefix__-product" id="id_items-__prefix__-product" class="product-id-hidden" required>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light text-muted border-end-0"><i class="fas fa-mobile-screen"></i></span>
+                        <input type="text" class="form-control border-start-0 product-search-display" placeholder="Search catalog or barcode...">
+                    </div>
+                    <div class="product-dropdown-results d-none">
+                        <div class="p-1 border-bottom text-muted fs-2xs fw-bold text-uppercase bg-light">Products</div>
+                        <div class="product-results-items"></div>
+                    </div>
+                </div>
             </div>
+
             <div class="col-6 col-md-2">
                 <label class="form-label fw-bold text-dark fs-xs">Transfer Quantity <span class="text-danger">*</span></label>
-                {{ formset.empty_form.quantity }}
+                <input type="number" name="items-__prefix__-quantity" id="id_items-__prefix__-quantity" value="1" min="1" class="form-control form-control-sm" required>
             </div>
-            <div class="col-12 col-md-3">
-                <label class="form-label fw-bold text-dark fs-xs">Scanned IMEI 1 / Serial (Smartphones)</label>
-                {{ formset.empty_form.scanned_imei_or_serial }}
+
+            <div class="col-12 col-md-3 imei-column-wrapper">
+                <label class="form-label fw-bold text-dark fs-xs d-flex justify-content-between">
+                    <span>Scanned IMEI / Serial</span>
+                    <span class="badge bg-warning text-dark fs-2xs imei-badge-required d-none">IMEI Required</span>
+                </label>
+                <input type="text" name="items-__prefix__-scanned_imei_or_serial" id="id_items-__prefix__-scanned_imei_or_serial" class="form-control form-control-sm font-monospace" placeholder="Scan 15-digit IMEI">
             </div>
+
             <div class="col-8 col-md-2">
                 <label class="form-label fw-bold text-dark fs-xs">Line Note</label>
-                {{ formset.empty_form.notes }}
+                <input type="text" name="items-__prefix__-notes" id="id_items-__prefix__-notes" class="form-control form-control-sm" placeholder="Optional note">
             </div>
+
             <div class="col-4 col-md-1 text-end">
                 <div class="form-check form-check-inline mt-4">
-                    {{ formset.empty_form.DELETE }}
+                    <input type="checkbox" name="items-__prefix__-DELETE" id="id_items-__prefix__-DELETE" class="form-check-input">
                     <label class="form-check-label text-danger fs-2xs fw-bold" title="Mark for removal">Remove</label>
                 </div>
             </div>
@@ -205,6 +290,223 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    const sourceBranchId = "{{ source_branch.id }}";
+
+    // -------------------------------------------------------------
+    // 1. Destination Branch Async Autocomplete
+    // -------------------------------------------------------------
+    const destInput = document.getElementById('destBranchSearchInput');
+    const destHidden = document.getElementById('id_destination_branch');
+    const destDropdown = document.getElementById('destBranchResultsDropdown');
+    const destList = document.getElementById('destBranchListContainer');
+
+    let destTimer = null;
+    let cachedBranches = null;
+
+    function renderBranchOptions(branches) {
+        destList.innerHTML = '';
+        // Filter out source origin branch
+        const filtered = branches.filter(b => String(b.id) !== String(sourceBranchId));
+
+        if (filtered.length === 0) {
+            destList.innerHTML = '<div class="p-2 text-center text-muted fs-xs">No available destination branches.</div>';
+            destDropdown.classList.remove('d-none');
+            return;
+        }
+
+        filtered.forEach(b => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'async-search-item-btn';
+            btn.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong class="text-dark fs-xs d-block">${b.name}</strong>
+                        <span class="text-muted fs-2xs">${b.city || b.address || 'Outlet'}</span>
+                    </div>
+                    <span class="badge bg-primary bg-opacity-10 text-primary font-monospace fs-2xs">${b.code || ('ID:' + b.id)}</span>
+                </div>
+            `;
+            btn.addEventListener('click', () => {
+                destHidden.value = b.id;
+                destInput.value = `${b.name} (${b.code || b.id})`;
+                destDropdown.classList.add('d-none');
+            });
+            destList.appendChild(btn);
+        });
+
+        destDropdown.classList.remove('d-none');
+    }
+
+    async function loadBranches(q = '') {
+        try {
+            const url = q.trim() 
+                ? `/branches/api/search/?q=${encodeURIComponent(q.trim())}` 
+                : `/branches/api/search/?limit=25`;
+            const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) throw new Error('Branches API error');
+            const data = await res.json();
+            const results = data.results || (Array.isArray(data) ? data : []);
+            if (!q.trim()) cachedBranches = results;
+            renderBranchOptions(results);
+        } catch (err) {
+            console.error(err);
+            destList.innerHTML = '<div class="p-2 text-center text-muted fs-xs">Unable to load branches.</div>';
+            destDropdown.classList.remove('d-none');
+        }
+    }
+
+    destInput.addEventListener('focus', () => {
+        if (cachedBranches) {
+            renderBranchOptions(cachedBranches);
+        } else {
+            loadBranches('');
+        }
+    });
+
+    destInput.addEventListener('input', () => {
+        const q = destInput.value;
+        destHidden.value = '';
+        clearTimeout(destTimer);
+        destTimer = setTimeout(() => {
+            loadBranches(q);
+        }, 220);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!destInput.contains(e.target) && !destDropdown.contains(e.target)) {
+            destDropdown.classList.add('d-none');
+        }
+    });
+
+    // -------------------------------------------------------------
+    // 2. Product Async Autocomplete & Dynamic IMEI Toggle for Line Items
+    // -------------------------------------------------------------
+    let cachedProducts = null;
+
+    function initProductPicker(rowEl) {
+        const wrapper = rowEl.querySelector('.product-picker-wrapper');
+        if (!wrapper) return;
+
+        const input = wrapper.querySelector('.product-search-display');
+        const hiddenId = wrapper.querySelector('.product-id-hidden');
+        const dropdown = wrapper.querySelector('.product-dropdown-results');
+        const list = wrapper.querySelector('.product-results-items');
+        
+        const imeiCol = rowEl.querySelector('.imei-column-wrapper');
+        const imeiBadge = imeiCol ? imeiCol.querySelector('.imei-badge-required') : null;
+        const imeiInput = imeiCol ? imeiCol.querySelector('input[type="text"]') : null;
+
+        let debounce = null;
+
+        function updateImeiVisibility(requiresImei) {
+            if (!imeiCol || !imeiInput) return;
+            if (requiresImei) {
+                imeiInput.disabled = false;
+                imeiInput.required = true;
+                imeiInput.placeholder = "Scan 15-digit Handset IMEI";
+                if (imeiBadge) imeiBadge.classList.remove('d-none');
+            } else {
+                imeiInput.required = false;
+                imeiInput.placeholder = "N/A for accessories/parts";
+                if (imeiBadge) imeiBadge.classList.add('d-none');
+            }
+        }
+
+        function renderProducts(items) {
+            list.innerHTML = '';
+            if (!items || items.length === 0) {
+                list.innerHTML = '<div class="p-2 text-center text-muted fs-xs">No matching products found.</div>';
+                dropdown.classList.remove('d-none');
+                return;
+            }
+
+            items.forEach(prod => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'async-search-item-btn';
+
+                const requiresImei = Boolean(
+                    (prod.extra_data && (prod.extra_data.requires_imei || prod.extra_data.is_serialized)) ||
+                    prod.requires_imei || 
+                    prod.is_serialized
+                );
+
+                const barcode = (prod.extra_data && prod.extra_data.barcode) || prod.barcode || prod.sku || '';
+
+                btn.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong class="text-dark fs-xs d-block">${prod.name}</strong>
+                            <span class="text-muted fs-2xs">${barcode}</span>
+                        </div>
+                        <div>
+                            ${requiresImei ? '<span class="badge bg-warning text-dark fs-2xs">IMEI</span>' : '<span class="badge bg-light text-muted border fs-2xs">Stock</span>'}
+                        </div>
+                    </div>
+                `;
+
+                btn.addEventListener('click', () => {
+                    hiddenId.value = prod.id;
+                    input.value = prod.name;
+                    dropdown.classList.add('d-none');
+                    updateImeiVisibility(requiresImei);
+                });
+
+                list.appendChild(btn);
+            });
+
+            dropdown.classList.remove('d-none');
+        }
+
+        async function loadProducts(q = '') {
+            try {
+                const url = q.trim() 
+                    ? `/products/api/search/?q=${encodeURIComponent(q.trim())}` 
+                    : `/products/api/search/?limit=20`;
+                const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                if (!res.ok) throw new Error('Product API error');
+                const data = await res.json();
+                const items = data.results || (Array.isArray(data) ? data : []);
+                if (!q.trim()) cachedProducts = items;
+                renderProducts(items);
+            } catch (err) {
+                console.error(err);
+                list.innerHTML = '<div class="p-2 text-center text-muted fs-xs">Error loading catalog.</div>';
+                dropdown.classList.remove('d-none');
+            }
+        }
+
+        input.addEventListener('focus', () => {
+            if (cachedProducts) {
+                renderProducts(cachedProducts);
+            } else {
+                loadProducts('');
+            }
+        });
+
+        input.addEventListener('input', () => {
+            const q = input.value;
+            hiddenId.value = '';
+            clearTimeout(debounce);
+            debounce = setTimeout(() => {
+                loadProducts(q);
+            }, 220);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!wrapper.contains(e.target)) {
+                dropdown.classList.add('d-none');
+            }
+        });
+    }
+
+    // Initialize existing rows on page load
+    document.querySelectorAll('.transfer-item-row').forEach(row => initProductPicker(row));
+
+    // -------------------------------------------------------------
+    // 3. Dynamic Formset Add Item Handling
+    // -------------------------------------------------------------
     const addBtn = document.getElementById('addNewTransferItemBtn');
     const container = document.getElementById('transferFormsetContainer');
     const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
@@ -220,6 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const newRow = tempDiv.firstElementChild;
             container.appendChild(newRow);
 
+            initProductPicker(newRow);
             totalFormsInput.value = currentCount + 1;
         });
     }

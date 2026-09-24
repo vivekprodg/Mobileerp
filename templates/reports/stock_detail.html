@@ -44,10 +44,6 @@
     border-top: 1.5px solid #0f172a;
     border-bottom: 1.5px solid #0f172a;
 }
-
-#productSearchResultsDropdown .dropdown-item:hover {
-    background-color: #eff6ff;
-}
 </style>
 {% endblock %}
 
@@ -80,37 +76,29 @@
         {% endif %}
     </div>
 
-    <!-- Filter Bar (Product Search, Branch & Dates) -->
+    <!-- Filter Bar (Universal Contextual Product Search, Branch & Dates) -->
     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
         <form method="get" class="row g-2 align-items-end" id="stockDetailFilterForm">
-            <!-- 1. Optimized Autocomplete Product Search -->
+            <!-- Universal Product Contextual Search Component with Auto-Submit -->
             <div class="col-12 col-md-4">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">Select Product / Phone <span class="text-danger">*</span></label>
-                <div class="position-relative">
-                    <div class="input-group input-group-sm">
-                        <span class="input-group-text bg-light border-0 text-muted">
-                            <i class="fas fa-search"></i>
-                        </span>
-                        <input type="text" 
-                               id="productSearchAutocomplete" 
-                               class="form-control bg-light border-0 fw-bold" 
-                               placeholder="Search phone name, SKU, or barcode..."
-                               value="{% if product %}{{ product.name }} (SKU: {{ product.sku }}){% endif %}"
-                               autocomplete="off">
-                        {% if product %}
-                        <button type="button" class="btn btn-light border-0 text-muted" id="clearProductSearchBtn" title="Clear selection">
-                            <i class="fas fa-times"></i>
-                        </button>
-                        {% endif %}
-                    </div>
-                    <input type="hidden" name="product_id" id="selectedProductId" value="{{ product.id|default:'' }}">
-                    
-                    <!-- Search Results Overlay Dropdown -->
-                    <div id="productSearchResultsDropdown" class="dropdown-menu shadow-lg w-100 p-0 rounded-3 mt-1 border" style="display:none; max-height: 280px; overflow-y: auto; z-index: 1050;"></div>
+                <div class="contextual-search-wrapper"
+                     id="productSearchWrapper"
+                     data-search-url="/products/api/search/?mode=simple"
+                     data-search-type="product"
+                     data-placeholder="Search phone name, SKU, or barcode..."
+                     data-initial-id="{{ product.id|default:'' }}"
+                     data-initial-title="{% if product %}{{ product.name }} (SKU: {{ product.sku }}){% endif %}">
+                    <input type="hidden" name="product_id" id="selectedProductId" value="{{ product.id|default:'' }}" required>
+                    <input type="text"
+                           class="form-control form-control-sm contextual-search-input async-search-input fw-bold"
+                           placeholder="Search phone name, SKU, or barcode..."
+                           value="{% if product %}{{ product.name }} (SKU: {{ product.sku }}){% endif %}"
+                           autocomplete="off">
                 </div>
             </div>
 
-            <!-- 2. Branch Selector -->
+            <!-- Branch Selector -->
             <div class="col-6 col-md-2">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">Outlet / Branch</label>
                 <select name="branch" class="form-select form-select-sm bg-light border-0">
@@ -121,19 +109,19 @@
                 </select>
             </div>
 
-            <!-- 3. Start Date -->
+            <!-- Start Date -->
             <div class="col-6 col-md-2">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">Start Date (AD)</label>
                 <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm bg-light border-0 font-monospace">
             </div>
 
-            <!-- 4. End Date -->
+            <!-- End Date -->
             <div class="col-6 col-md-2">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">End Date (AD)</label>
                 <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm bg-light border-0 font-monospace">
             </div>
 
-            <!-- 5. Submit / Reset -->
+            <!-- Submit / Reset -->
             <div class="col-6 col-md-2 d-flex gap-1">
                 <button type="submit" class="btn btn-primary btn-sm w-100 rounded-3 fw-bold shadow-xs">
                     <i class="fas fa-filter me-1"></i> Generate Ledger
@@ -179,7 +167,7 @@
         </div>
     </div>
 
-    <!-- The 10-Column Running Ledger Table Matching Client Excel -->
+    <!-- 10-Column Running Ledger Table Matching Standard Bin Card -->
     <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
         <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
             <div>
@@ -303,75 +291,20 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const searchInput = document.getElementById('productSearchAutocomplete');
-    const hiddenInput = document.getElementById('selectedProductId');
-    const dropdown = document.getElementById('productSearchResultsDropdown');
+    const productWrapper = document.getElementById('productSearchWrapper');
     const filterForm = document.getElementById('stockDetailFilterForm');
-    const clearBtn = document.getElementById('clearProductSearchBtn');
-    let debounceTimer = null;
 
-    if (!searchInput || !dropdown) return;
+    if (productWrapper && filterForm) {
+        // Auto-submit filter form immediately upon selecting a product via universal search
+        productWrapper.addEventListener('item-selected', (e) => {
+            const item = e.detail;
+            if (item && (item.id || item.pk)) {
+                filterForm.submit();
+            }
+        });
 
-    searchInput.addEventListener('input', function() {
-        const query = this.value.trim();
-        clearTimeout(debounceTimer);
-
-        if (query.length < 2) {
-            dropdown.style.display = 'none';
-            dropdown.innerHTML = '';
-            return;
-        }
-
-        debounceTimer = setTimeout(() => {
-            dropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-2"></i>Searching catalog...</div>';
-            dropdown.style.display = 'block';
-
-            fetch(`/products/api/search/?q=${encodeURIComponent(query)}`)
-                .then(res => res.json())
-                .then(data => {
-                    const items = Array.isArray(data) ? data : (data.results || []);
-                    if (!items.length) {
-                        dropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No matching products found</div>';
-                        return;
-                    }
-
-                    dropdown.innerHTML = items.map(p => `
-                        <button type="button" class="dropdown-item py-2 px-3 border-bottom d-flex justify-content-between align-items-center text-start" data-id="${p.id}" data-label="${p.name} (SKU: ${p.sku || p.barcode || 'N/A'})">
-                            <div>
-                                <div class="fw-bold fs-xs text-dark">${p.name}</div>
-                                <small class="text-muted font-monospace fs-2xs">SKU: ${p.sku || 'N/A'} &bull; ${p.category_name || 'General'}</small>
-                            </div>
-                            <span class="badge bg-light text-primary border font-monospace fs-2xs">Rs. ${parseFloat(p.selling_price || 0).toFixed(2)}</span>
-                        </button>
-                    `).join('');
-                })
-                .catch(err => {
-                    console.error('[StockDetail] Autocomplete search error:', err);
-                    dropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Error fetching results</div>';
-                });
-        }, 220);
-    });
-
-    dropdown.addEventListener('click', (e) => {
-        const itemBtn = e.target.closest('button[data-id]');
-        if (!itemBtn) return;
-
-        hiddenInput.value = itemBtn.dataset.id;
-        searchInput.value = itemBtn.dataset.label;
-        dropdown.style.display = 'none';
-        filterForm.submit();
-    });
-
-    document.addEventListener('click', (e) => {
-        if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
-            dropdown.style.display = 'none';
-        }
-    });
-
-    if (clearBtn) {
-        clearBtn.addEventListener('click', () => {
-            searchInput.value = '';
-            hiddenInput.value = '';
+        // Reset page cleanly if the selection is cleared
+        productWrapper.addEventListener('item-cleared', () => {
             window.location.href = "{% url 'reports:stock_detail' %}";
         });
     }

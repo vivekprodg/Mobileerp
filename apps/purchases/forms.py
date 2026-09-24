@@ -1,14 +1,26 @@
 """
 Procurement, Supplier Udhaari & Purchase Return Forms.
-File Path: apps/purchases/forms.py
+
+Upgraded Capabilities:
+1. GoodsReceivedNoteForm:
+   - Exposes whole-bill discount controls: `bill_discount_type` and `bill_discount_input_value`.
+   - Exposes Nepal 13% VAT toggle (`is_vat_bill`) and custom `vat_rate`.
+   - Validates that bill discount is non-negative and percentages do not exceed 100%.
+2. GRNItemForm:
+   - Exposes dual-mode line discounts: `discount_type` (Amount vs %) and `discount_input_value`.
+   - Fully removes legacy percentage-only restrictions.
+   - Strictly validates that a flat cash discount cannot exceed the line gross merchandise value.
+3. Strict Serialized & Dual-IMEI Validation:
+   - Form-level validation ensures scanned IMEI tokens match purchased whole integer handset units.
 """
 
 import re
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from django import forms
 from django.forms import inlineformset_factory
 from django.utils.translation import gettext_lazy as _
+
 from apps.purchases.models import (
     Supplier, PurchaseOrder, PurchaseOrderItem,
     GoodsReceivedNote, GRNItem, SupplierUdhaariLedger,
@@ -18,11 +30,9 @@ from apps.inventory.models import Product, UnitOfMeasurement, UnitConversion
 from apps.branches.models import Branch
 from apps.core.nepali_calendar import NepaliCalendar
 
-
 # ==============================================================================
 # 1. SUPPLIER FORM
 # ==============================================================================
-
 class SupplierForm(forms.ModelForm):
     """
     Comprehensive Validator & Input Controller for Supplier Registration.
@@ -194,11 +204,9 @@ class SupplierForm(forms.ModelForm):
                 raise forms.ValidationError(_("Uploaded document exceeds maximum 15MB size limit."))
         return file_obj
 
-
 # ==============================================================================
 # 2. PURCHASE ORDER (PO) HEADER & LINE ITEM FORMSET
 # ==============================================================================
-
 class PurchaseOrderForm(forms.ModelForm):
     class Meta:
         model = PurchaseOrder
@@ -220,7 +228,6 @@ class PurchaseOrderForm(forms.ModelForm):
         self.fields['supplier'].queryset = Supplier.objects.filter(is_active=True).order_by('company_name')
         if not self.instance.pk:
             self.fields['order_date'].initial = date.today()
-
 
 class PurchaseOrderItemForm(forms.ModelForm):
     class Meta:
@@ -245,7 +252,6 @@ class PurchaseOrderItemForm(forms.ModelForm):
             raise forms.ValidationError(_("Cost price cannot be negative."))
         return price
 
-
 PurchaseOrderItemFormSet = inlineformset_factory(
     PurchaseOrder,
     PurchaseOrderItem,
@@ -254,17 +260,27 @@ PurchaseOrderItemFormSet = inlineformset_factory(
     can_delete=True
 )
 
-
 # ==============================================================================
 # 3. GOODS RECEIVED NOTE (GRN) HEADER FORM
 # ==============================================================================
-
 class GoodsReceivedNoteForm(forms.ModelForm):
+    """
+    Inward Procurement Header Form.
+    Features:
+    - Dedicated whole-bill discount controls (`bill_discount_type`, `bill_discount_input_value`).
+    - Dedicated Nepal 13% VAT toggle (`is_vat_bill`) and rate.
+    - Landed overhead expenses (Freight, Customs, Handling).
+    """
+
     class Meta:
         model = GoodsReceivedNote
         fields = [
             'supplier', 'purchase_order', 'supplier_bill_no', 'supplier_product_code',
-            'bill_date', 'bill_date_bs', 'is_vat_bill',
+            'bill_date', 'bill_date_bs',
+            # Bill-Level Discount & VAT Controls
+            'bill_discount_type', 'bill_discount_input_value',
+            'is_vat_bill', 'vat_rate',
+            # Compliance & Overheads
             'distributor_mdms_certified', 'mdms_tax_invoice_ref',
             'extra_freight_charge', 'customs_import_charge', 'other_handling_charge',
             'paid_amount', 'warranty_provider', 'warranty_months',
@@ -277,15 +293,20 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             'supplier_product_code': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. BATCH-SAM-2024-Q3'}),
             'bill_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'bill_date_bs': forms.TextInput(attrs={'class': 'form-control', 'placeholder': '2081-XX-XX'}),
+            'bill_discount_type': forms.Select(attrs={'class': 'form-select'}),
+            'bill_discount_input_value': forms.NumberInput(attrs={
+                'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00', 'placeholder': '0.00'
+            }),
             'is_vat_bill': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'vat_rate': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'distributor_mdms_certified': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'mdms_tax_invoice_ref': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. NTA-PP-2081-82/9012 or Customs PP No.'}),
-            'extra_freight_charge': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'customs_import_charge': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'other_handling_charge': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
-            'paid_amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'extra_freight_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
+            'customs_import_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
+            'other_handling_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
+            'paid_amount': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'warranty_provider': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Samsung Nepal Official / IMS'}),
-            'warranty_months': forms.NumberInput(attrs={'class': 'form-control', 'step': '1'}),
+            'warranty_months': forms.NumberInput(attrs={'class': 'form-control', 'step': '1', 'min': '0'}),
             'authorized_service_center': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. CTC Mall 5th Floor Service Center'}),
             'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Stock receiving remarks...'}),
         }
@@ -297,7 +318,8 @@ class GoodsReceivedNoteForm(forms.ModelForm):
         self.fields['bill_date'].required = True
 
         optional_fields = [
-            'purchase_order', 'supplier_product_code', 'bill_date_bs', 'is_vat_bill',
+            'purchase_order', 'supplier_product_code', 'bill_date_bs',
+            'bill_discount_type', 'bill_discount_input_value', 'is_vat_bill', 'vat_rate',
             'distributor_mdms_certified', 'mdms_tax_invoice_ref',
             'extra_freight_charge', 'customs_import_charge', 'other_handling_charge',
             'paid_amount', 'warranty_provider', 'warranty_months',
@@ -308,6 +330,9 @@ class GoodsReceivedNoteForm(forms.ModelForm):
                 self.fields[f].required = False
 
         if not self.instance.pk:
+            self.fields['bill_discount_type'].initial = 'NONE'
+            self.fields['bill_discount_input_value'].initial = Decimal('0.00')
+            self.fields['vat_rate'].initial = Decimal('13.00')
             self.fields['warranty_months'].initial = 12
             self.fields['extra_freight_charge'].initial = Decimal('0.00')
             self.fields['customs_import_charge'].initial = Decimal('0.00')
@@ -315,32 +340,67 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             self.fields['paid_amount'].initial = Decimal('0.00')
             self.fields['distributor_mdms_certified'].initial = True
 
+    def clean_bill_discount_input_value(self):
+        val = self.cleaned_data.get('bill_discount_input_value')
+        if val is None or val < Decimal('0.00'):
+            return Decimal('0.00')
+        return val
+
+    def clean(self):
+        cleaned_data = super().clean()
+        b_type = cleaned_data.get('bill_discount_type')
+        b_input = cleaned_data.get('bill_discount_input_value') or Decimal('0.00')
+
+        if b_type == 'PERCENTAGE' and b_input > Decimal('100.00'):
+            self.add_error('bill_discount_input_value', _("Whole-bill percentage discount cannot exceed 100%."))
+
+        return cleaned_data
 
 # ==============================================================================
 # 4. GRN LINE ITEM FORM & INLINE FORMSET
 # ==============================================================================
-
 class GRNItemForm(forms.ModelForm):
+    """
+    Line Item Input Validator for Goods Received Notes (GRN).
+    Features:
+    - Unit Purchase Rate is strictly treated as Pre-VAT.
+    - Two-Way Line Discount: Flat Amount (रू) or Percentage (%).
+    - Automatic validation preventing discount amount > line gross value.
+    - Scanned dual-IMEI pair count matching integer unit quantity.
+    """
+
     class Meta:
         model = GRNItem
         fields = [
             'product', 'supplier_item_code', 'unit_conversion',
             'purchased_quantity', 'conversion_factor', 'purchase_rate',
-            'discount_percent', 'is_vat_applicable', 'vat_rate',
+            # Upgraded Discount Controls
+            'discount_type', 'discount_input_value',
+            # Pricing & Tax
+            'new_selling_price', 'is_vat_applicable', 'vat_rate',
+            # MDMS & Serialized Handset Info
             'default_mdms_status', 'warranty_months', 'warranty_provider', 'scanned_imei_list'
         ]
         widgets = {
-            'product': forms.Select(attrs={'class': 'form-select grn-product-select'}),
+            'product': forms.Select(attrs={'class': 'form-select grn-product-select select2-enable'}),
             'supplier_item_code': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Supplier SKU'}),
             'unit_conversion': forms.Select(attrs={'class': 'form-select grn-conversion-select'}),
-            'purchased_quantity': forms.NumberInput(attrs={'class': 'form-control grn-qty', 'step': '0.001'}),
-            'conversion_factor': forms.NumberInput(attrs={'class': 'form-control grn-factor', 'step': '0.001'}),
-            'purchase_rate': forms.NumberInput(attrs={'class': 'form-control grn-rate', 'step': '0.01'}),
-            'discount_percent': forms.NumberInput(attrs={'class': 'form-control grn-discount', 'step': '0.1'}),
+            'purchased_quantity': forms.NumberInput(attrs={'class': 'form-control font-monospace grn-qty', 'step': '0.001', 'min': '0.001'}),
+            'conversion_factor': forms.NumberInput(attrs={'class': 'form-control font-monospace grn-factor', 'step': '0.001', 'min': '0.001'}),
+            'purchase_rate': forms.NumberInput(attrs={
+                'class': 'form-control font-monospace text-end grn-rate', 'step': '0.01', 'min': '0.00', 'placeholder': '0.00'
+            }),
+            'discount_type': forms.Select(attrs={'class': 'form-select form-select-sm grn-discount-type'}),
+            'discount_input_value': forms.NumberInput(attrs={
+                'class': 'form-control font-monospace form-select-sm text-end grn-discount-input', 'step': '0.01', 'min': '0.00', 'placeholder': '0.00'
+            }),
+            'new_selling_price': forms.NumberInput(attrs={
+                'class': 'form-control font-monospace text-end', 'step': '0.01', 'min': '0.00', 'placeholder': 'MRP / Sell Price'
+            }),
             'is_vat_applicable': forms.CheckboxInput(attrs={'class': 'form-check-input grn-vat-check'}),
-            'vat_rate': forms.NumberInput(attrs={'class': 'form-control grn-vat-rate', 'step': '0.01'}),
+            'vat_rate': forms.NumberInput(attrs={'class': 'form-control font-monospace text-end grn-vat-rate', 'step': '0.01', 'min': '0.00'}),
             'default_mdms_status': forms.Select(attrs={'class': 'form-select form-select-sm grn-mdms-select'}),
-            'warranty_months': forms.NumberInput(attrs={'class': 'form-control', 'step': '1'}),
+            'warranty_months': forms.NumberInput(attrs={'class': 'form-control', 'step': '1', 'min': '0'}),
             'warranty_provider': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Distributor'}),
             'scanned_imei_list': forms.Textarea(attrs={
                 'class': 'form-control font-monospace fs-xs',
@@ -357,8 +417,9 @@ class GRNItemForm(forms.ModelForm):
 
         optional_fields = [
             'supplier_item_code', 'unit_conversion', 'conversion_factor',
-            'discount_percent', 'is_vat_applicable', 'vat_rate',
-            'default_mdms_status', 'warranty_months', 'warranty_provider', 'scanned_imei_list'
+            'discount_type', 'discount_input_value', 'new_selling_price',
+            'is_vat_applicable', 'vat_rate', 'default_mdms_status',
+            'warranty_months', 'warranty_provider', 'scanned_imei_list'
         ]
         for f in optional_fields:
             if f in self.fields:
@@ -366,42 +427,65 @@ class GRNItemForm(forms.ModelForm):
 
         if not self.instance.pk:
             self.fields['conversion_factor'].initial = Decimal('1.000')
-            self.fields['discount_percent'].initial = Decimal('0.00')
-            self.fields['vat_rate'].initial = Decimal('0.00')
+            self.fields['discount_type'].initial = 'NONE'
+            self.fields['discount_input_value'].initial = Decimal('0.00')
+            self.fields['is_vat_applicable'].initial = True
+            self.fields['vat_rate'].initial = Decimal('13.00')
             self.fields['default_mdms_status'].initial = 'REGISTERED_OFFICIAL'
             self.fields['warranty_months'].initial = 12
 
     def clean_conversion_factor(self):
         val = self.cleaned_data.get('conversion_factor')
-        return val if val and val > Decimal('0.000') else Decimal('1.000')
+        return val if (val and val > Decimal('0.000')) else Decimal('1.000')
 
-    def clean_discount_percent(self):
-        val = self.cleaned_data.get('discount_percent')
-        return val if val is not None else Decimal('0.00')
+    def clean_purchase_rate(self):
+        val = self.cleaned_data.get('purchase_rate')
+        if val is None or val < Decimal('0.00'):
+            raise forms.ValidationError(_("Unit purchase rate cannot be negative."))
+        return val
 
-    def clean_vat_rate(self):
-        val = self.cleaned_data.get('vat_rate')
-        return val if val is not None else Decimal('0.00')
-
-    def clean_default_mdms_status(self):
-        val = self.cleaned_data.get('default_mdms_status')
-        return val if val else 'REGISTERED_OFFICIAL'
-
-    def clean_warranty_months(self):
-        val = self.cleaned_data.get('warranty_months')
-        return val if val is not None else 12
+    def clean_discount_input_value(self):
+        val = self.cleaned_data.get('discount_input_value')
+        if val is None or val < Decimal('0.00'):
+            return Decimal('0.00')
+        return val
 
     def clean(self):
         cleaned_data = super().clean()
         product = cleaned_data.get('product')
         quantity = cleaned_data.get('purchased_quantity') or Decimal('0.000')
+        rate = cleaned_data.get('purchase_rate') or Decimal('0.00')
+        disc_type = cleaned_data.get('discount_type') or 'NONE'
+        disc_input = cleaned_data.get('discount_input_value') or Decimal('0.00')
         scanned_raw = cleaned_data.get('scanned_imei_list') or ''
 
+        # 1. Validate Discount Logic Against Pre-VAT Gross Value
+        line_gross = (quantity * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if disc_type == 'PERCENTAGE':
+            if disc_input > Decimal('100.00'):
+                self.add_error('discount_input_value', _("Percentage discount cannot exceed 100%."))
+        elif disc_type == 'AMOUNT':
+            if disc_input > line_gross:
+                self.add_error(
+                    'discount_input_value',
+                    _(f"Discount amount (Rs. {disc_input:,.2f}) cannot exceed total line value (Rs. {line_gross:,.2f}).")
+                )
+
+        # 2. Strict Serialized IMEI Tracking Validation
         if product and (product.requires_imei_tracking or product.requires_serial_tracking):
-            expected_units = int(quantity)
+            factor = cleaned_data.get('conversion_factor') or Decimal('1.000')
+            base_units = (quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+
+            if base_units % 1 != 0:
+                self.add_error(
+                    'purchased_quantity',
+                    _(f"Handset item '{product.name}' must be received in whole integer units.")
+                )
+
+            expected_units = int(base_units)
             tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
 
-            if quantity > 0 and len(tokens) != expected_units:
+            if expected_units > 0 and len(tokens) != expected_units:
                 raise forms.ValidationError(
                     _(f"IMEI Count Mismatch on '{product.name}': Purchased quantity is {expected_units} unit(s), "
                       f"but {len(tokens)} device IMEI pair(s) were scanned.")
@@ -421,7 +505,6 @@ class GRNItemForm(forms.ModelForm):
 
         return cleaned_data
 
-
 GRNItemFormSet = inlineformset_factory(
     GoodsReceivedNote,
     GRNItem,
@@ -430,11 +513,9 @@ GRNItemFormSet = inlineformset_factory(
     can_delete=True
 )
 
-
 # ==============================================================================
 # 5. COMMERCIAL PURCHASE RETURN (DEBIT NOTE) FORMS & FORMSET
 # ==============================================================================
-
 class PurchaseReturnForm(forms.ModelForm):
     """
     Header form for commercial purchase returns / debit notes to suppliers.
@@ -496,7 +577,6 @@ class PurchaseReturnForm(forms.ModelForm):
             y, m, d = NepaliCalendar.ad_to_bs(ret_date)
             cleaned_data['return_date_bs'] = NepaliCalendar.format_bs(y, m, d, lang='en')
         return cleaned_data
-
 
 class PurchaseReturnItemForm(forms.ModelForm):
     """
@@ -589,7 +669,6 @@ class PurchaseReturnItemForm(forms.ModelForm):
                     raise forms.ValidationError(_(f"Invalid IMEI '{clean_token}'. IMEIs must be numeric digits."))
         return cleaned_data
 
-
 PurchaseReturnItemFormSet = inlineformset_factory(
     PurchaseReturn,
     PurchaseReturnItem,
@@ -598,11 +677,9 @@ PurchaseReturnItemFormSet = inlineformset_factory(
     can_delete=True
 )
 
-
 # ==============================================================================
 # 6. SUPPLIER PAYMENT / PAYOUT FORM
 # ==============================================================================
-
 class SupplierPaymentForm(forms.ModelForm):
     class Meta:
         model = SupplierUdhaariLedger

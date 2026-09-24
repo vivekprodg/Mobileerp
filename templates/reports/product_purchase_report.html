@@ -59,6 +59,14 @@
     border-color: var(--erp-primary) !important;
     box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
 }
+/* Compact filter styling for async dropdown groups */
+.filter-async-group .async-search-input {
+    font-size: 0.8125rem;
+    padding: 0.25rem 0.5rem;
+    background-color: #f8fafc;
+    border: none;
+    border-radius: 0.375rem;
+}
 </style>
 {% endblock %}
 
@@ -177,9 +185,10 @@
         </div>
     </div>
 
-    <!-- Multi-Parameter Filter Toolbar -->
+    <!-- Multi-Parameter Filter Toolbar with Standardized Category & Brand Inputs -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-center">
+        <form method="get" id="productPurchaseFilterForm" class="row g-2 align-items-center">
+            <!-- Product Text Search -->
             <div class="col-12 col-md-3">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
@@ -189,28 +198,41 @@
                 </div>
             </div>
 
+            <!-- Asynchronous Category Contextual Search with Visible Input -->
             <div class="col-6 col-md-2">
-                <select name="category" class="form-select form-select-sm bg-light border-0">
-                    <option value="all">All Categories</option>
-                    {% for cat in categories %}
-                        <option value="{{ cat.id }}" {% if filters.category_id == cat.id|stringformat:"s" %}selected{% endif %}>
-                            {{ cat.name }}
-                        </option>
-                    {% endfor %}
-                </select>
+                <div class="contextual-search-wrapper filter-async-group"
+                     id="filterCategoryWrapper"
+                     data-search-url="/inventory/api/categories/search/"
+                     data-search-type="category"
+                     data-placeholder="All Categories"
+                     data-initial-id="{% if filters.category_id and filters.category_id != 'all' %}{{ filters.category_id }}{% endif %}"
+                     data-initial-title="{% for cat in categories %}{% if filters.category_id == cat.id|stringformat:'s' %}{{ cat.name }}{% endif %}{% endfor %}">
+                    <input type="hidden" name="category" id="filter_category_id" value="{% if filters.category_id and filters.category_id != 'all' %}{{ filters.category_id }}{% endif %}">
+                    <input type="text" class="form-control form-control-sm contextual-search-input async-search-input"
+                           placeholder="All Categories"
+                           value="{% for cat in categories %}{% if filters.category_id == cat.id|stringformat:'s' %}{{ cat.name }}{% endif %}{% endfor %}"
+                           autocomplete="off">
+                </div>
             </div>
 
+            <!-- Asynchronous Brand Contextual Search with Visible Input -->
             <div class="col-6 col-md-2">
-                <select name="brand" class="form-select form-select-sm bg-light border-0">
-                    <option value="all">All Brands</option>
-                    {% for b in brands %}
-                        <option value="{{ b.id }}" {% if filters.brand_id == b.id|stringformat:"s" %}selected{% endif %}>
-                            {{ b.name }}
-                        </option>
-                    {% endfor %}
-                </select>
+                <div class="contextual-search-wrapper filter-async-group"
+                     id="filterBrandWrapper"
+                     data-search-url="/inventory/api/brands/search/"
+                     data-search-type="brand"
+                     data-placeholder="All Brands"
+                     data-initial-id="{% if filters.brand_id and filters.brand_id != 'all' %}{{ filters.brand_id }}{% endif %}"
+                     data-initial-title="{% for b in brands %}{% if filters.brand_id == b.id|stringformat:'s' %}{{ b.name }}{% endif %}{% endfor %}">
+                    <input type="hidden" name="brand" id="filter_brand_id" value="{% if filters.brand_id and filters.brand_id != 'all' %}{{ filters.brand_id }}{% endif %}">
+                    <input type="text" class="form-control form-control-sm contextual-search-input async-search-input"
+                           placeholder="All Brands"
+                           value="{% for b in brands %}{% if filters.brand_id == b.id|stringformat:'s' %}{{ b.name }}{% endif %}{% endfor %}"
+                           autocomplete="off">
+                </div>
             </div>
 
+            <!-- Tracking Type Filter -->
             <div class="col-6 col-md-2">
                 <select name="tracking_type" class="form-select form-select-sm bg-light border-0">
                     <option value="">All Item Types</option>
@@ -219,6 +241,7 @@
                 </select>
             </div>
 
+            <!-- Date Range Pickers -->
             <div class="col-6 col-md-2">
                 <div class="input-group input-group-sm">
                     <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date">
@@ -227,6 +250,7 @@
                 </div>
             </div>
 
+            <!-- Actions -->
             <div class="col-6 col-md-1 d-flex gap-1">
                 <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
                 {% if filters.q or filters.category_id or filters.brand_id or filters.tracking_type or start_date or end_date %}
@@ -374,4 +398,20 @@
     </div>
 
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Automatically submit form on selection/clearing in either universal category or brand filters
+    const filterForm = document.getElementById('productPurchaseFilterForm');
+    const catWrapper = document.getElementById('filterCategoryWrapper');
+    const brandWrapper = document.getElementById('filterBrandWrapper');
+
+    [catWrapper, brandWrapper].forEach(wrapper => {
+        if (wrapper && filterForm) {
+            wrapper.addEventListener('item-selected', () => filterForm.submit());
+            wrapper.addEventListener('item-cleared', () => filterForm.submit());
+        }
+    });
+});
+</script>
 {% endblock %}

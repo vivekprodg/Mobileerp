@@ -77,11 +77,28 @@
             </h6>
 
             <div class="row g-3">
+                <!-- Universal Contextual Supplier Search -->
                 <div class="col-12 col-md-5">
                     <label class="form-label fw-bold text-dark fs-xs">
                         Distributor / Supplier <span class="text-danger">*</span>
                     </label>
-                    {{ form.supplier }}
+                    <div class="contextual-search-wrapper" 
+                         data-search-url="/purchases/suppliers/api/search/" 
+                         data-search-type="supplier"
+                         data-placeholder="Search supplier by name, company, phone, PAN..."
+                         data-initial-id="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}"
+                         data-initial-title="{{ form.instance.supplier.company_name|default:'' }}"
+                         data-initial-subtitle="{% if form.instance.supplier.code %}Code: {{ form.instance.supplier.code }}{% endif %}">
+                        <input type="hidden" name="supplier" id="id_supplier" value="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}" required>
+                        <input type="text" class="form-control contextual-search-input async-search-input" 
+                               id="supplier_search_display"
+                               placeholder="Search supplier by name, company, phone, PAN..." 
+                               value="{% if form.instance.supplier %}{{ form.instance.supplier.company_name }}{% endif %}" 
+                               autocomplete="off">
+                    </div>
+                    {% if form.supplier.errors %}
+                        <div class="text-danger fs-2xs mt-1">{{ form.supplier.errors|striptags }}</div>
+                    {% endif %}
                     <small class="text-muted fs-2xs mt-1 d-block">Choose the verified supplier or brand distributor receiving this order.</small>
                 </div>
 
@@ -126,10 +143,27 @@
                 <div class="po-item-row" data-row-index="{{ forloop.counter0 }}">
                     {{ item_form.id }}
                     <div class="row g-3 align-items-end">
+                        <!-- Universal Contextual Product Search for Rendered Row -->
                         <div class="col-12 col-md-5">
                             <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
-                            {{ item_form.product }}
+                            <div class="contextual-search-wrapper" 
+                                 data-search-url="/products/api/search/?mode=simple" 
+                                 data-search-type="product"
+                                 data-placeholder="Type product name, brand, or scan barcode..."
+                                 data-initial-id="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}"
+                                 data-initial-title="{{ item_form.instance.product.name|default:'' }}"
+                                 data-initial-subtitle="{% if item_form.instance.product.sku %}SKU: {{ item_form.instance.product.sku }}{% endif %}">
+                                <input type="hidden" name="items-{{ forloop.counter0 }}-product" id="id_items-{{ forloop.counter0 }}-product" value="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}" class="po-product-id-input" required>
+                                <input type="text" class="form-control form-control-sm contextual-search-input async-search-input po-product-search-input" 
+                                       placeholder="Type product name, brand, or scan barcode..." 
+                                       value="{% if item_form.instance.product %}{{ item_form.instance.product.name }}{% endif %}" 
+                                       autocomplete="off">
+                            </div>
+                            {% if item_form.product.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ item_form.product.errors|striptags }}</div>
+                            {% endif %}
                         </div>
+
                         <div class="col-6 col-md-2">
                             <label class="form-label fw-bold text-dark fs-xs">Order Quantity <span class="text-danger">*</span></label>
                             {{ item_form.ordered_quantity }}
@@ -194,9 +228,18 @@
     <div class="po-item-row" data-row-index="__prefix__">
         {{ formset.empty_form.id }}
         <div class="row g-3 align-items-end">
+            <!-- Universal Contextual Product Search Template -->
             <div class="col-12 col-md-5">
                 <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
-                {{ formset.empty_form.product }}
+                <div class="contextual-search-wrapper" 
+                     data-search-url="/products/api/search/?mode=simple" 
+                     data-search-type="product"
+                     data-placeholder="Type product name, brand, or scan barcode...">
+                    <input type="hidden" name="items-__prefix__-product" id="id_items-__prefix__-product" value="" class="po-product-id-input" required>
+                    <input type="text" class="form-control form-control-sm contextual-search-input async-search-input po-product-search-input" 
+                           placeholder="Type product name, brand, or scan barcode..." 
+                           autocomplete="off">
+                </div>
             </div>
             <div class="col-6 col-md-2">
                 <label class="form-label fw-bold text-dark fs-xs">Order Quantity <span class="text-danger">*</span></label>
@@ -225,39 +268,13 @@
 <script>
 /**
  * PO Dynamic Line Management & Real-time Subtotal Calculator
- * OPTIMIZED: Uses on-demand async price resolution to eliminate HTML database dumps.
+ * Relies strictly on the master contextual_search.js engine loaded from base.html.
  */
 document.addEventListener('DOMContentLoaded', () => {
-    const productCostCache = {};
     const container = document.getElementById('poFormsetContainer');
     const addBtn = document.getElementById('addNewPoItemBtn');
     const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
     const grandTotalEl = document.getElementById('poGrandTotalText');
-
-    async function fetchProductDefaultCost(productId) {
-        if (!productId) return 0;
-        if (productCostCache[productId] !== undefined) {
-            return productCostCache[productId];
-        }
-
-        try {
-            const resp = await fetch(`/products/api/search/?id=${encodeURIComponent(productId)}`);
-            if (resp.ok) {
-                const data = await resp.json();
-                const prod = Array.isArray(data) ? data[0] : (data.results ? data.results[0] : data);
-                if (prod && prod.purchase_price !== undefined) {
-                    const price = parseFloat(prod.purchase_price) || 0;
-                    productCostCache[productId] = price;
-                    return price;
-                }
-            }
-        } catch (e) {
-            console.warn('[PO] Could not fetch unit cost dynamically:', e);
-        }
-
-        productCostCache[productId] = 0;
-        return 0;
-    }
 
     function recalculatePoTotals() {
         let runningTotal = 0;
@@ -288,34 +305,50 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (container) {
+        // Universal Selection Event Hook for Product Line Items
+        container.addEventListener('item-selected', (e) => {
+            const row = e.target.closest('.po-item-row');
+            if (!row) return;
+
+            const item = e.detail;
+            if (!item) return;
+
+            const extra = item.extra_data || {};
+            const costPrice = extra.cost_price !== undefined 
+                ? extra.cost_price 
+                : (item.cost_price !== undefined ? item.cost_price : (item.purchase_price !== undefined ? item.purchase_price : null));
+
+            const priceInput = row.querySelector('input[name$="-unit_cost_price"]');
+            if (priceInput && costPrice !== null && costPrice !== undefined && (!priceInput.value || parseFloat(priceInput.value) === 0)) {
+                priceInput.value = parseFloat(costPrice).toFixed(2);
+            }
+
+            const qtyInput = row.querySelector('input[name$="-ordered_quantity"]');
+            if (qtyInput && (!qtyInput.value || parseFloat(qtyInput.value) <= 0)) {
+                qtyInput.value = '1';
+            }
+
+            recalculatePoTotals();
+        });
+
+        container.addEventListener('item-cleared', () => {
+            recalculatePoTotals();
+        });
+
         container.addEventListener('input', (e) => {
             if (e.target.name && (e.target.name.endsWith('-ordered_quantity') || e.target.name.endsWith('-unit_cost_price'))) {
                 recalculatePoTotals();
             }
         });
 
-        container.addEventListener('change', async (e) => {
-            if (e.target.name && e.target.name.endsWith('-product')) {
-                const prodId = e.target.value;
-                const row = e.target.closest('.po-item-row');
-                if (row && prodId) {
-                    const priceInput = row.querySelector('input[name$="-unit_cost_price"]');
-                    if (priceInput && (!priceInput.value || parseFloat(priceInput.value) === 0)) {
-                        const defaultCost = await fetchProductDefaultCost(prodId);
-                        if (defaultCost > 0) {
-                            priceInput.value = defaultCost.toFixed(2);
-                        }
-                    }
-                }
-                recalculatePoTotals();
-            }
-
+        container.addEventListener('change', (e) => {
             if (e.target.name && e.target.name.endsWith('-DELETE')) {
                 recalculatePoTotals();
             }
         });
     }
 
+    // Dynamic Row Insertion via "+ Add Another Product"
     if (addBtn && totalFormsInput && container) {
         addBtn.addEventListener('click', () => {
             const currentCount = parseInt(totalFormsInput.value, 10);
@@ -329,8 +362,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             totalFormsInput.value = currentCount + 1;
 
-            const newSelect = newRow.querySelector('select[name$="-product"]');
-            if (newSelect) newSelect.focus();
+            // Automatically initialize universal contextual search on the newly inserted row
+            if (typeof window.initContextualSearch === 'function') {
+                window.initContextualSearch(newRow);
+            }
+
+            const searchInput = newRow.querySelector('.po-product-search-input');
+            if (searchInput) searchInput.focus();
+
             recalculatePoTotals();
         });
     }

@@ -102,6 +102,56 @@
     background: #e2e8f0;
     display: flex;
 }
+
+/* Asynchronous Autocomplete Dropdown Styling */
+.async-search-container {
+    position: relative;
+}
+
+.async-results-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+    max-height: 250px;
+    overflow-y: auto;
+    margin-top: 4px;
+    display: none;
+}
+
+.async-results-dropdown.show {
+    display: block;
+}
+
+.async-result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.15s ease;
+}
+
+.async-result-item:last-child {
+    border-bottom: none;
+}
+
+.async-result-item:hover {
+    background-color: #f8fafc;
+}
+
+.async-selected-card {
+    background: #ffffff;
+    border: 1px solid #10b981;
+    border-radius: 10px;
+    padding: 10px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
 </style>
 {% endblock %}
 
@@ -245,7 +295,7 @@
                 </form>
             </div>
 
-            <!-- 2. Spare Parts Installation & Live Stock Deduction (PROMINENT CTA) -->
+            <!-- 2. Spare Parts Installation & Live Stock Deduction -->
             <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
                 <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 border-bottom pb-3 mb-3">
                     <div>
@@ -254,7 +304,6 @@
                         </h6>
                         <small class="text-muted fs-2xs">Live inventory deduction &amp; automated sub-warranty stamping</small>
                     </div>
-                    <!-- Prominent Animated CTA -->
                     <button type="button" class="cta-install-part" data-bs-toggle="modal" data-bs-target="#installPartModal">
                         <i class="fas fa-plus-circle me-1"></i> Install Spare Part from Stock
                     </button>
@@ -300,7 +349,7 @@
                 </div>
             </div>
 
-            <!-- 3. Photo Evidence Vault (Interactive Lightbox Trigger) -->
+            <!-- 3. Photo Evidence Vault -->
             <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
                 <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
                     <h6 class="fw-bold text-dark mb-0">
@@ -418,21 +467,43 @@
     </div>
 </div>
 
-<!-- Modal: Install Spare Part -->
+<!-- Modal: Install Spare Part (Asynchronous Search & Charge Autofill) -->
 <div class="modal fade" id="installPartModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-            <form action="{% url 'repairs:install_part' ticket.pk %}" method="post">
+            <form action="{% url 'repairs:install_part' ticket.pk %}" method="post" id="installPartForm">
                 {% csrf_token %}
                 <div class="modal-header bg-success text-white border-0 py-3">
                     <h5 class="modal-title fs-6 fw-bold"><i class="fas fa-wrench me-2"></i> Install Replacement Spare Part</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body p-4">
+                    <!-- Asynchronous Spare Part Selector -->
                     <div class="mb-3">
                         <label class="form-label fw-bold text-dark fs-xs">Select Spare Part from Live Stock <span class="text-danger">*</span></label>
-                        {{ part_form.spare_part_product }}
+                        <input type="hidden" name="spare_part_product" id="id_spare_part_product" required>
+                        
+                        <div class="async-search-container">
+                            <div id="sparePartSelectedCard" class="async-selected-card d-none mb-2">
+                                <div>
+                                    <div class="fw-bold text-success fs-xs" id="sparePartSelectedName">Selected Part</div>
+                                    <small class="text-muted fs-2xs" id="sparePartSelectedDetails">SKU &bull; Stock</small>
+                                </div>
+                                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-2xs" id="clearSelectedPartBtn">
+                                    <i class="fas fa-times me-1"></i> Change
+                                </button>
+                            </div>
+
+                            <div id="sparePartSearchWrapper">
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted fs-xs"></i></span>
+                                    <input type="text" id="sparePartSearchInput" class="form-control border-start-0" placeholder="Type part name, SKU, or barcode..." autocomplete="off">
+                                </div>
+                                <div id="sparePartSearchResults" class="async-results-dropdown shadow-lg"></div>
+                            </div>
+                        </div>
                     </div>
+
                     <div class="row g-2 mb-3">
                         <div class="col-6">
                             <label class="form-label fw-bold text-dark fs-xs">Quantity</label>
@@ -484,5 +555,113 @@ function openLightbox(imageUrl, caption) {
     document.getElementById('lightboxCaption').innerText = caption;
     new bootstrap.Modal(document.getElementById('lightboxModal')).show();
 }
+
+// Asynchronous Spare Part Search & Charge Autofill
+document.addEventListener('DOMContentLoaded', () => {
+    function debounce(func, wait = 250) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    const partHiddenInput = document.getElementById('id_spare_part_product');
+    const partSearchInput = document.getElementById('sparePartSearchInput');
+    const partSearchWrapper = document.getElementById('sparePartSearchWrapper');
+    const partSearchResults = document.getElementById('sparePartSearchResults');
+    const partSelectedCard = document.getElementById('sparePartSelectedCard');
+    const partSelectedName = document.getElementById('sparePartSelectedName');
+    const partSelectedDetails = document.getElementById('sparePartSelectedDetails');
+    const clearPartBtn = document.getElementById('clearSelectedPartBtn');
+    const customerChargeInput = document.querySelector('[name="customer_charge"]');
+
+    function selectPart(part) {
+        partHiddenInput.value = part.id;
+        partSelectedName.innerText = part.name;
+        const price = part.selling_price || part.retail_price || part.price || '0.00';
+        const stock = part.stock_quantity ?? 'In Stock';
+        partSelectedDetails.innerText = `SKU: ${part.sku || 'N/A'} | Stock: ${stock} | Price: Rs. ${price}`;
+
+        partSelectedCard.classList.remove('d-none');
+        partSearchWrapper.classList.add('d-none');
+        partSearchResults.classList.remove('show');
+        partSearchInput.value = '';
+
+        // Auto-populate customer charge from product selling price
+        if (customerChargeInput && price) {
+            customerChargeInput.value = parseFloat(price).toFixed(2);
+        }
+    }
+
+    if (clearPartBtn) {
+        clearPartBtn.addEventListener('click', () => {
+            partHiddenInput.value = '';
+            partSelectedCard.classList.add('d-none');
+            partSearchWrapper.classList.remove('d-none');
+            partSearchInput.value = '';
+            partSearchInput.focus();
+        });
+    }
+
+    if (partSearchInput) {
+        const handleSearch = debounce(async (query) => {
+            try {
+                partSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching replacement parts...</div>';
+                partSearchResults.classList.add('show');
+
+                const resp = await fetch(`/products/api/search/?is_spare_part=true&q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Search failed');
+                const data = await resp.json();
+                const parts = data.results || data || [];
+
+                if (!parts.length) {
+                    partSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No spare parts found.</div>';
+                    return;
+                }
+
+                let html = '';
+                parts.forEach(p => {
+                    const price = p.selling_price || p.retail_price || p.price || '0.00';
+                    const stock = p.stock_quantity ?? 'In Stock';
+                    html += `
+                        <div class="async-result-item part-item" data-part='${JSON.stringify(p).replace(/'/g, "&apos;")}'>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-bold text-dark fs-xs">${escapeHtml(p.name)}</span>
+                                <span class="badge bg-light text-success border font-monospace fs-2xs">Rs. ${price}</span>
+                            </div>
+                            <div class="text-muted fs-2xs">SKU: ${escapeHtml(p.sku || 'N/A')} &bull; Stock: ${stock}</div>
+                        </div>
+                    `;
+                });
+                partSearchResults.innerHTML = html;
+
+                partSearchResults.querySelectorAll('.part-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const partObj = JSON.parse(el.dataset.part);
+                        selectPart(partObj);
+                    });
+                });
+            } catch (err) {
+                partSearchResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying spare parts inventory.</div>';
+            }
+        }, 250);
+
+        partSearchInput.addEventListener('input', (e) => handleSearch(e.target.value.trim()));
+        partSearchInput.addEventListener('focus', (e) => handleSearch(e.target.value.trim()));
+    }
+
+    document.addEventListener('click', (e) => {
+        if (partSearchResults && !partSearchResults.contains(e.target) && e.target !== partSearchInput) {
+            partSearchResults.classList.remove('show');
+        }
+    });
+});
 </script>
 {% endblock %}

@@ -57,10 +57,10 @@
 </div>
 
 <!-- =========================================================================
-     2. MAIN HEADER (BRAND LOGO, TOGGLES, POS BILLING & USER PROFILE: 58px)
+     2. MAIN HEADER (BRAND LOGO, TOGGLES, GLOBAL SEARCH & USER PROFILE: 58px)
      ========================================================================= -->
 <header class="erp-main-header">
-    <div class="container-fluid px-0 d-flex align-items-center justify-content-between">
+    <div class="container-fluid px-0 d-flex align-items-center justify-content-between gap-2">
         
         <!-- Left: Sidebar Toggles & Company Branding -->
         <div class="d-flex align-items-center gap-2">
@@ -93,16 +93,34 @@
                     </div>
                 {% endif %}
                 
-                <div class="header-brand-text">
+                <div class="header-brand-text d-none d-sm-flex">
                     <span class="brand-title">{{ COMPANY_NAME|default:"Smart Mobile & Optics Hub" }}</span>
                     <span class="brand-subtitle">{{ STORE_OUTLET_NAME|default:"New Road Branch"|upper }} ({{ STORE_OUTLET_CODE|default:"HQ" }})</span>
                 </div>
             </a>
         </div>
 
-        <!-- Right: POS Billing Hero CTA & Single-Line User Profile (Strict Zero-Zigzag Alignment) -->
+        <!-- Center: Global Command Palette Search Trigger (Desktop & Tablet) -->
+        <div class="header-search-container mx-2 mx-xl-3 flex-grow-1 d-none d-md-block">
+            <button type="button" class="header-search-trigger" onclick="openGlobalSearchModal()" title="Quick Command Palette [Ctrl + K]">
+                <div class="d-flex align-items-center gap-2 overflow-hidden">
+                    <i class="fas fa-magnifying-glass search-icon"></i>
+                    <span class="search-placeholder text-truncate">Search phones, IMEIs, customers, bills, repairs...</span>
+                </div>
+                <div class="search-hotkey-badge flex-shrink-0 d-none d-lg-inline-flex">
+                    <kbd>Ctrl</kbd><span class="mx-1">+</span><kbd>K</kbd>
+                </div>
+            </button>
+        </div>
+
+        <!-- Right: Mobile Search Trigger, POS Hero CTA & User Profile -->
         <div class="d-flex align-items-center gap-2 gap-md-3">
             
+            <!-- Mobile Search Icon Trigger (< 768px) -->
+            <button type="button" class="header-search-trigger-mobile d-inline-flex d-md-none" onclick="openGlobalSearchModal()" title="Search [Ctrl + K]">
+                <i class="fas fa-magnifying-glass"></i>
+            </button>
+
             <!-- Hero POS Billing Fast CTA Button -->
             <a href="{% url 'sales:pos_terminal' %}" class="btn-pos-hero" title="Open POS Billing Terminal [F2]">
                 <i class="fas fa-bolt"></i>

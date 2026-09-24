@@ -3,6 +3,37 @@
 
 {% block title %}Match Columns &amp; Conflict Resolution | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
+{% block extra_head %}
+<style>
+.branch-dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1050;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+    max-height: 250px;
+    overflow-y: auto;
+    margin-top: 4px;
+}
+.branch-item-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    transition: background 0.15s ease-in-out;
+}
+.branch-item-btn:hover {
+    background-color: #f1f5f9;
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid px-4 py-4" style="max-width: 1200px;">
     <!-- Page Header -->
@@ -82,21 +113,35 @@
 
         <!-- RIGHT: Target Branch & Duplicate Strategy (4 Cols) -->
         <div class="col-12 col-lg-4">
-            <!-- Target Store Branch Destination Card -->
+            <!-- Target Store Branch Destination Card with Async Selector -->
             <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-3">
                 <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
                     <i class="fas fa-store text-primary me-2"></i> Destination Outlet / Store
                 </h6>
                 <label class="form-label fw-semibold text-muted fs-xs">Target Store for Stock Receipt:</label>
-                <select id="targetBranchSelect" class="form-select form-select-sm fw-bold">
-                    {% for br in branches %}
-                        <option value="{{ br.id }}" {% if ACTIVE_BRANCH.id == br.id %}selected{% endif %}>
-                            {{ br.name }} ({{ br.code }})
-                        </option>
-                    {% empty %}
-                        <option value="{{ ACTIVE_BRANCH.id }}" selected>{{ ACTIVE_BRANCH.name|default:"Main Central Branch" }}</option>
-                    {% endfor %}
-                </select>
+
+                <!-- Async Branch Search Component -->
+                <div class="position-relative">
+                    <input type="hidden" id="targetBranchId" value="{{ ACTIVE_BRANCH.id|default:'' }}">
+                    
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light text-muted border-end-0">
+                            <i class="fas fa-shop"></i>
+                        </span>
+                        <input type="text" id="targetBranchInput" class="form-control border-start-0" 
+                               placeholder="Search store branch..." 
+                               value="{{ ACTIVE_BRANCH.name|default:'Main Central Branch' }}{% if ACTIVE_BRANCH.code %} ({{ ACTIVE_BRANCH.code }}){% endif %}">
+                    </div>
+
+                    <!-- Dropdown Results Container -->
+                    <div id="branchSearchResults" class="branch-dropdown-menu d-none">
+                        <div class="p-2 border-bottom text-muted fs-2xs fw-bold text-uppercase bg-light">
+                            Available Branches
+                        </div>
+                        <div id="branchListContainer"></div>
+                    </div>
+                </div>
+
                 <small class="text-muted fs-2xs mt-2 d-block">All imported opening quantities will be allocated to this store counter.</small>
             </div>
 
@@ -210,8 +255,92 @@ document.addEventListener('DOMContentLoaded', () => {
     const summaryModal = new bootstrap.Modal(summaryModalEl);
     const modalBody = document.getElementById('modalProgressBody');
     const modalFooter = document.getElementById('modalFooterActions');
-    const branchSelector = document.getElementById('targetBranchSelect');
 
+    // Async Branch Selector Handles
+    const branchInput = document.getElementById('targetBranchInput');
+    const branchHiddenId = document.getElementById('targetBranchId');
+    const branchDropdown = document.getElementById('branchSearchResults');
+    const branchList = document.getElementById('branchListContainer');
+
+    let branchDebounce = null;
+    let cachedBranches = null;
+
+    // Render branch list
+    function renderBranches(branches) {
+        branchList.innerHTML = '';
+        if (!branches || branches.length === 0) {
+            branchList.innerHTML = '<div class="p-2 text-center text-muted fs-xs">No active branches found.</div>';
+            branchDropdown.classList.remove('d-none');
+            return;
+        }
+
+        branches.forEach(b => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'branch-item-btn';
+            btn.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong class="text-dark fs-xs d-block">${b.name}</strong>
+                        <span class="text-muted fs-2xs">${b.city || b.address || 'Standard Location'}</span>
+                    </div>
+                    <span class="badge bg-secondary font-monospace fs-2xs">${b.code || ('ID:' + b.id)}</span>
+                </div>
+            `;
+            btn.addEventListener('click', () => {
+                branchHiddenId.value = b.id;
+                branchInput.value = `${b.name} (${b.code || b.id})`;
+                branchDropdown.classList.add('d-none');
+            });
+            branchList.appendChild(btn);
+        });
+
+        branchDropdown.classList.remove('d-none');
+    }
+
+    // Fetch branches from API
+    async function fetchBranches(q = '') {
+        try {
+            const url = q.trim() 
+                ? `/branches/api/search/?q=${encodeURIComponent(q.trim())}` 
+                : `/branches/api/search/?limit=20`;
+            const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) throw new Error('Branch API offline');
+            const data = await res.json();
+            const list = data.results || (Array.isArray(data) ? data : []);
+            if (!q.trim()) cachedBranches = list;
+            renderBranches(list);
+        } catch (e) {
+            console.error(e);
+            branchList.innerHTML = '<div class="p-2 text-center text-muted fs-xs">Standard Default Branch Selected</div>';
+            branchDropdown.classList.remove('d-none');
+        }
+    }
+
+    branchInput.addEventListener('focus', () => {
+        if (cachedBranches) {
+            renderBranches(cachedBranches);
+        } else {
+            fetchBranches('');
+        }
+    });
+
+    branchInput.addEventListener('input', () => {
+        const query = branchInput.value;
+        branchHiddenId.value = '';
+        clearTimeout(branchDebounce);
+        branchDebounce = setTimeout(() => {
+            fetchBranches(query);
+        }, 200);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!branchInput.contains(e.target) && !branchDropdown.contains(e.target)) {
+            branchDropdown.classList.add('d-none');
+        }
+    });
+
+    // Execute Import Action
     executeBtn.addEventListener('click', async () => {
         const mapping = {};
         document.querySelectorAll('.header-mapping-select').forEach(sel => {
@@ -229,7 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const strategyRadio = document.querySelector('input[name="conflict_strategy"]:checked');
         const conflictStrategy = strategyRadio ? strategyRadio.value : 'MERGE';
-        const targetBranchId = branchSelector ? branchSelector.value : '';
+        const targetBranchId = branchHiddenId.value;
 
         summaryModal.show();
 

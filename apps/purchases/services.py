@@ -1,28 +1,31 @@
 """
 Purchase GRN & Commercial Purchase Return (Debit Note) Services.
-File Path: apps/purchases/services.py
 
 Core Capabilities:
-1. Value-Based Overhead Distribution:
-   - Shipping, freight, customs duty, and handling fees are allocated proportionally
-     based on each item's monetary value rather than raw unit box counts.
-2. Strict Serialized & Dual-IMEI Enforcement:
-   - Mandates that if N units of a smartphone are received, exactly N valid IMEI pairs
-     (IMEI 1 & optional IMEI 2) must be scanned and verified against active stock before
-     inventory is approved.
-3. Thread-Safe Supplier Ledger Reconciliation:
-   - Atomically updates supplier outstanding balances with row-level locking (select_for_update)
-     and logs double-entry ledger transactions.
-4. Product Master & Multi-Branch FIFO Updates:
-   - Adjusts landed cost, updates counter MRPs, records historical price fluctuations,
-     and initializes serialized ItemInstances with NTA MDMS certification.
-5. Strict Atomic General Ledger Double-Entry Accounting Integration:
-   - Inward GRN verification automatically debits Merchandise Inventory Asset & Input VAT
-     and credits Accounts Payable / Cash via post_grn_journal / post_grn_receipt.
-   - Purchase Return (Debit Note) verification automatically debits Accounts Payable / Cash
-     and credits Merchandise Inventory Asset & Input VAT via post_purchase_return_journal.
-   - All GL postings are strictly bound to the database transaction. If GL voucher creation
-     fails, the entire procurement/return transaction rolls back cleanly.
+1. Strict Pre-VAT Line Valuation:
+   - Unit Purchase Rate is strictly treated as Pre-VAT (before tax).
+   - Line Gross = Purchased Quantity * Unit Purchase Rate.
+2. Two-Way Line Discount Logic:
+   - Supports flat cash discount (AMOUNT) and percentage discount (PERCENTAGE).
+   - Computes exact rupee deductions and syncs equivalent percentage for analytics.
+3. Proportional Whole-Bill Discount Allocation:
+   - Invoice-level discounts (Amount or %) are distributed across items based on
+     their net merchandise values.
+4. Pre-VAT Subtotal (Taxable Base) & Dedicated 13% VAT Calculation:
+   - Computes true Pre-VAT Taxable Base: Gross Lines - Total Discounts.
+   - When 13% VAT toggle is ON, 13% VAT is calculated strictly on top of the Pre-VAT Taxable Base.
+   - When OFF, VAT is strictly Rs. 0.00.
+5. Value-Based Overhead Allocation (Landed Cost / COGS):
+   - Freight, customs duty, and insurance/handling fees are distributed proportionally
+     based on each item's net pre-tax value to derive exact unit landed costs.
+6. Final Supplier Payable & Udhaari Debt:
+   - Net Invoice Total = Pre-VAT Base + 13% VAT + Overheads.
+   - Due Balance = Net Invoice Total - Paid Amount.
+7. Strict Serialized & Dual-IMEI Enforcement:
+   - Requires exact 1-to-1 match between handset quantities and scanned IMEIs.
+   - Validates uniqueness, verifies against active IN_STOCK units, and initializes ItemInstances.
+8. Thread-Safe Supplier Ledger Reconciliation & Fail-Closed General Ledger Posting:
+   - Row-level locking (select_for_update) on supplier ledger and automatic double-entry GL postings.
 """
 
 import re
@@ -49,19 +52,15 @@ from apps.core.models import AuditLog
 
 logger = logging.getLogger(__name__)
 
-
 # =============================================================================
 # GENERAL LEDGER DISPATCHER BRIDGES (STRICT TRANSACTIONAL INTEGRITY)
 # =============================================================================
-
 def _post_purchase_return_direct(purchase_return: PurchaseReturn, user=None):
     """
     Direct General Ledger poster for commercial purchase returns (Debit Notes).
     - Debit: Accounts Payable (Supplier Ledger) OR Cash in Hand (if cash refund)
-    - Credit: Merchandise Inventory Asset (at total return value)
+    - Credit: Merchandise Inventory Asset (at purchase return value)
     - Credit: Input VAT 13% (reversing input tax if tax invoice)
-
-    Errors bubble up to enforce atomic rollback across stock and ledger.
     """
     from apps.accounting.models import JournalEntry
     from apps.accounting.services.auto_posting import JournalEngine, AutoPostingService
@@ -110,7 +109,7 @@ def _post_purchase_return_direct(purchase_return: PurchaseReturn, user=None):
             'narration': f"Accounts Payable reduced on Debit Note {purchase_return.return_number}"
         })
 
-    # 2. Credit: Merchandise Inventory Asset (at purchase value)
+    # 2. Credit: Merchandise Inventory Asset (at purchase return value)
     lines.append({
         'account': inv_asset_acc,
         'debit': Decimal('0.00'),
@@ -142,7 +141,7 @@ def _post_purchase_return_direct(purchase_return: PurchaseReturn, user=None):
     )
 
 
-# Ensure post_grn_journal and post_purchase_return_journal exist on auto_posting module
+# Ensure dynamic hooks exist on auto_posting module
 try:
     import apps.accounting.services.auto_posting as _ap_mod
     if not hasattr(_ap_mod, 'post_grn_journal'):
@@ -153,22 +152,13 @@ try:
 except Exception:
     pass
 
-
+# =============================================================================
+# PURCHASE & GRN SERVICE ENGINE
+# =============================================================================
 class PurchaseService:
     """
-    Core procurement engine managing Goods Received Notes (GRN):
-    1. Enforces Value-Based Overhead Distribution: Shipping, freight, customs duties,
-       and handling fees are allocated proportionally based on each item's monetary value
-       rather than raw box count.
-    2. Strict Serialized & Dual-IMEI Enforcement: Mandates that if N units of a smartphone
-       are received, exactly N valid IMEI pairs (IMEI 1 & optional IMEI 2) must be scanned
-       and verified against existing stock before inventory is updated.
-    3. Thread-Safe Supplier Ledger Reconciliation: Atomically updates the supplier's
-       outstanding balance with row-level locking (select_for_update) and logs ledger transactions.
-    4. Product Master & Multi-Branch FIFO Updates: Adjusts landed cost, updates counter MRPs,
-       records historical price fluctuations, and initializes serialized ItemInstances.
-    5. Fail-Closed General Ledger Auto-Posting: Dispatches balanced vouchers upon GRN verification.
-       If voucher creation fails, the transaction is rolled back completely.
+    Core Procurement & Goods Received Notes (GRN) Processing Engine.
+    Executes mathematically strict, Nepal tax-compliant procurement workflows.
     """
 
     @classmethod
@@ -179,7 +169,9 @@ class PurchaseService:
         user=None
     ) -> GoodsReceivedNote:
         """
-        Main transactional entry point coordinating complete GRN verification and stock inward.
+        Main transactional entry point coordinating complete GRN verification,
+        two-way discount calculation, proportional overhead distribution, stock inward,
+        supplier debt ledger updates, and fail-closed General Ledger posting.
         """
         if grn.status == 'RECEIVED':
             raise ValidationError("This GRN voucher has already been verified and received.")
@@ -191,45 +183,18 @@ class PurchaseService:
         # Step 1: Strict Pre-Validation of Serialized / Dual-IMEI Quantities & Collisions
         cls._validate_grn_lines(grn, items)
 
-        # Step 2: Proportional Value-Based Overhead Allocation
-        landed_overhead_rate, extra_charges = cls._allocate_landed_overhead(grn, items)
-
-        # Step 3: Calculate Line Figures, Update Branch Stock, FIFO Batches & Master Rates
-        gross_total, total_discount, total_tax = cls._calculate_and_apply_line_items(
+        # Step 2: Full Mathematical Valuation & Proportional Overhead Allocation
+        cls._calculate_and_apply_financials_and_stock(
             grn=grn,
             items=items,
-            landed_overhead_rate=landed_overhead_rate,
             user=user
         )
 
-        # Step 4: Finalize GRN Header Summaries & Due Debt
-        net_total = cls._finalize_grn_header(
-            grn=grn,
-            gross_total=gross_total,
-            total_discount=total_discount,
-            total_tax=total_tax,
-            extra_charges=extra_charges,
-            user=user
-        )
+        # Step 3: Post to Supplier Ledger with Row-Level Locking & Audit Trail
+        cls._post_supplier_ledger(grn=grn, user=user)
 
-        # Step 5: Post to Supplier Ledger with Row-Level Locking & Audit Trail
-        cls._post_supplier_ledger(grn=grn, net_total=net_total, user=user)
-
-        # Step 6: Post General Ledger Double-Entry Journal (Debit Inventory Asset, Credit Accounts Payable)
-        # Execution is strict; errors bubble up to enforce atomic rollback across stock and ledger.
-        import apps.accounting.services.auto_posting as auto_posting_module
-        if hasattr(auto_posting_module, 'post_grn_journal'):
-            auto_posting_module.post_grn_journal(grn, user=user)
-        elif hasattr(auto_posting_module, 'AutoPostingService'):
-            service = auto_posting_module.AutoPostingService
-            if hasattr(service, 'post_grn_journal'):
-                service.post_grn_journal(grn, user=user)
-            elif hasattr(service, 'post_grn_receipt'):
-                service.post_grn_receipt(grn=grn, user=user)
-            else:
-                raise ValidationError("AutoPostingService has no post_grn_journal or post_grn_receipt implementation.")
-        else:
-            raise ValidationError("Accounting auto_posting module is unavailable for GRN journal posting.")
+        # Step 4: Post General Ledger Double-Entry Journal
+        cls._post_gl_journal(grn=grn, user=user)
 
         return grn
 
@@ -240,8 +205,8 @@ class PurchaseService:
     @classmethod
     def _validate_grn_lines(cls, grn: GoodsReceivedNote, items: List[GRNItem]) -> None:
         """
-        Strictly validates that every line item with IMEI/Serial tracking has an exact
-        1-to-1 match between the required base unit quantity and the count of scanned IMEIs.
+        Strictly validates that every serialized product has an exact 1-to-1 match
+        between the required base unit quantity and the count of scanned IMEIs.
         Validates both IMEI 1 and IMEI 2:
         - Rejects internal duplicate IMEIs within the consignment.
         - Rejects devices where IMEI 1 equals IMEI 2.
@@ -251,8 +216,9 @@ class PurchaseService:
 
         for item in items:
             product = item.product
-            factor = item.conversion_factor if item.conversion_factor > Decimal('0.000') else Decimal('1.000')
-            base_qty = (item.purchased_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
+            qty = item.purchased_quantity if (item.purchased_quantity and item.purchased_quantity > Decimal('0.000')) else Decimal('1.000')
+            base_qty = (qty * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
 
             if base_qty <= Decimal('0.000'):
                 raise ValidationError(f"Quantity for line item '{product.name}' must be greater than zero.")
@@ -339,89 +305,147 @@ class PurchaseService:
                             )
 
     # =========================================================================
-    # STEP 2: PROPORTIONAL VALUE-BASED OVERHEAD ALLOCATION
+    # STEP 2: MATHEMATICAL CALCULATION & OVERHEAD ALLOCATION ENGINE
     # =========================================================================
+    @classmethod
+    def _calculate_and_apply_financials_and_stock(
+        cls,
+        grn: GoodsReceivedNote,
+        items: List[GRNItem],
+        user=None
+    ) -> None:
+        """
+        Executes complete mathematical valuation:
+        1. Pre-VAT Line Gross = Quantity * Purchase Rate (Pre-VAT).
+        2. Two-way Line Discounts (AMOUNT or PERCENTAGE).
+        3. Whole-bill Discount computed and distributed proportionally.
+        4. Pre-VAT Taxable Base = Total Line Gross - Consolidated Discounts.
+        5. Dedicated 13% VAT calculated strictly on Taxable Base when VAT toggle is ON.
+        6. Proportional value-based overhead distribution for exact unit landed cost.
+        7. Net Invoice Total = Pre-VAT Base + 13% VAT + Overheads.
+        8. Live branch stock counters, FIFO batches, and IMEI instances created.
+        """
+        total_line_gross = Decimal('0.00')
+        total_line_discount = Decimal('0.00')
 
-    @staticmethod
-    def _allocate_landed_overhead(grn: GoodsReceivedNote, items: List[GRNItem]) -> Tuple[Decimal, Decimal]:
-        """
-        Calculates proportional value-weighted overhead distribution rate for freight,
-        customs, and handling charges based on total merchandise value rather than raw unit counts.
-        Formula:
-            Item Line Value = Purchased Qty * Purchase Rate * (1 - Discount%)
-            Total Merchandise Value = Sum(Item Line Values)
-            Overhead Rate = Extra Charges / Total Merchandise Value
-        """
-        extra_charges = (
+        # Phase 1: Line Item Gross & Line Discount Computations
+        for item in items:
+            qty = item.purchased_quantity if (item.purchased_quantity and item.purchased_quantity > Decimal('0.000')) else Decimal('1.000')
+            rate = item.purchase_rate or Decimal('0.00')
+            line_gross = (qty * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            item.gross_amount = line_gross
+
+            disc_type = item.discount_type or 'NONE'
+            disc_input = item.discount_input_value or Decimal('0.00')
+
+            if disc_type == 'PERCENTAGE':
+                pct = min(Decimal('100.00'), max(Decimal('0.00'), disc_input))
+                rupee_disc = (line_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.item_discount_amount = min(rupee_disc, line_gross)
+                item.discount_percent = pct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            elif disc_type == 'AMOUNT':
+                amt = max(Decimal('0.00'), disc_input)
+                item.item_discount_amount = min(amt, line_gross)
+                if line_gross > Decimal('0.00'):
+                    item.discount_percent = ((item.item_discount_amount / line_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                else:
+                    item.discount_percent = Decimal('0.00')
+            else:
+                item.discount_type = 'NONE'
+                item.discount_input_value = Decimal('0.00')
+                item.item_discount_amount = Decimal('0.00')
+                item.discount_percent = Decimal('0.00')
+
+            item.line_total = line_gross - item.item_discount_amount
+            total_line_gross += line_gross
+            total_line_discount += item.item_discount_amount
+
+        # Merchandise subtotal after line discounts
+        net_lines_subtotal = max(Decimal('0.00'), total_line_gross - total_line_discount)
+
+        # Phase 2: Whole-Bill Discount Calculation
+        bill_disc_type = grn.bill_discount_type or 'NONE'
+        bill_disc_input = grn.bill_discount_input_value or Decimal('0.00')
+
+        if bill_disc_type == 'PERCENTAGE':
+            pct = min(Decimal('100.00'), max(Decimal('0.00'), bill_disc_input))
+            b_disc = (net_lines_subtotal * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            grn.bill_discount_amount = min(b_disc, net_lines_subtotal)
+        elif bill_disc_type == 'AMOUNT':
+            amt = max(Decimal('0.00'), bill_disc_input)
+            grn.bill_discount_amount = min(amt, net_lines_subtotal)
+        else:
+            grn.bill_discount_type = 'NONE'
+            grn.bill_discount_input_value = Decimal('0.00')
+            grn.bill_discount_amount = Decimal('0.00')
+
+        # Phase 3: Taxable Pre-VAT Base
+        consolidated_discounts = total_line_discount + grn.bill_discount_amount
+        taxable_base = max(Decimal('0.00'), total_line_gross - consolidated_discounts)
+
+        # Phase 4: Dedicated 13% VAT Calculation (Strictly on Pre-VAT Base)
+        if grn.is_vat_bill:
+            rate = grn.vat_rate if (grn.vat_rate and grn.vat_rate > Decimal('0.00')) else Decimal('13.00')
+            grn.vat_rate = rate
+            vat_amount = (taxable_base * (rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            vat_amount = Decimal('0.00')
+
+        # Phase 5: Overheads (Freight, Customs, Handling)
+        overheads = (
             (grn.extra_freight_charge or Decimal('0.00')) +
             (grn.customs_import_charge or Decimal('0.00')) +
             (grn.other_handling_charge or Decimal('0.00'))
         ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        total_merchandise_value = Decimal('0.00')
-        for item in items:
-            qty = item.purchased_quantity if item.purchased_quantity > Decimal('0.000') else Decimal('1.000')
-            rate = item.purchase_rate or Decimal('0.00')
-            disc_pct = item.discount_percent or Decimal('0.00')
+        # Phase 6: Landed Cost Valuation & Final Bill Total
+        total_landed_valuation = (taxable_base + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        net_invoice_total = (taxable_base + vat_amount + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            line_gross = (qty * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            discount = (line_gross * (disc_pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            taxable_line = line_gross - discount
-            total_merchandise_value += taxable_line
+        paid = grn.paid_amount or Decimal('0.00')
+        net_due = max(Decimal('0.00'), net_invoice_total - paid)
 
-        landed_overhead_rate = (
-            (extra_charges / total_merchandise_value) if total_merchandise_value > Decimal('0.00') else Decimal('0.00')
-        )
-        return landed_overhead_rate, extra_charges
+        # Update GRN Header
+        grn.gross_amount = total_line_gross
+        grn.total_line_discount = total_line_discount
+        grn.discount_amount = consolidated_discounts
+        grn.taxable_amount = taxable_base
+        grn.vat_amount = vat_amount
+        grn.total_landed_cost = total_landed_valuation
+        grn.net_total_amount = net_invoice_total
+        grn.due_amount = net_due
+        grn.status = 'RECEIVED'
+        grn.received_by = user
+        grn.save()
 
-    # =========================================================================
-    # STEP 3: CALCULATE LINE ITEMS, LANDED COSTS & UPDATE STOCK
-    # =========================================================================
-
-    @classmethod
-    def _calculate_and_apply_line_items(
-        cls,
-        grn: GoodsReceivedNote,
-        items: List[GRNItem],
-        landed_overhead_rate: Decimal,
-        user=None
-    ) -> Tuple[Decimal, Decimal, Decimal]:
-        """
-        Computes line financials with value-weighted overhead allocation, updates live
-        branch inventory counters, writes FIFO batches, and creates serialized ItemInstances.
-        """
-        gross_total = Decimal('0.00')
-        total_discount = Decimal('0.00')
-        total_tax = Decimal('0.00')
-
+        # Phase 7: Value-Based Overhead & Bill-Discount Allocation to Line Items
+        item_count = len(items)
         for item in items:
             product = item.product
-            factor = item.conversion_factor if item.conversion_factor > Decimal('0.000') else Decimal('1.000')
+            factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
             base_qty = (item.purchased_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
             item.base_unit_quantity = base_qty
 
-            line_gross = (item.purchased_quantity * item.purchase_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            discount = (line_gross * ((item.discount_percent or Decimal('0.00')) / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            taxable_line = line_gross - discount
+            # Proportional value weighting based on net pre-tax line value
+            if net_lines_subtotal > Decimal('0.00'):
+                weight = item.line_total / net_lines_subtotal
+            else:
+                weight = Decimal('1.00') / Decimal(item_count) if item_count > 0 else Decimal('0.00')
 
-            # Inward Tax Calculation
-            line_tax = Decimal('0.00')
-            if grn.is_vat_bill and item.is_vat_applicable and (item.vat_rate or Decimal('0.00')) > Decimal('0.00'):
-                line_tax = (taxable_line * (item.vat_rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            line_bill_disc = (grn.bill_discount_amount * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            line_overhead = (overheads * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            item.line_total = taxable_line + line_tax
+            # Net landed cost for this line (Net Line - Bill Disc Share + Overhead Share)
+            line_landed_total = item.line_total - line_bill_disc + line_overhead
 
-            # Proportional Value-Weighted Landed Overhead Calculation
-            line_landed_overhead = (taxable_line * landed_overhead_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            total_line_landed_cost = taxable_line + line_landed_overhead
-            item.unit_landed_cost = (total_line_landed_cost / base_qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if base_qty > Decimal('0.000') else Decimal('0.00')
+            if base_qty > Decimal('0.000'):
+                item.unit_landed_cost = (line_landed_total / base_qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            else:
+                item.unit_landed_cost = Decimal('0.00')
+
             item.save()
 
-            gross_total += line_gross
-            total_discount += discount
-            total_tax += line_tax
-
-            # A. Update Physical Branch Stock Level
+            # A. Update Physical Branch Inventory Counters
             InventoryService.adjust_stock(
                 product=product,
                 branch=grn.branch,
@@ -433,7 +457,7 @@ class PurchaseService:
                 allow_negative=True
             )
 
-            # B. Price Fluctuation Audit & Update Master Counter Selling Price
+            # B. Price Fluctuation Audit & Update Master Selling Price
             batch_id = cls._update_product_master_and_batches(
                 grn=grn,
                 item=item,
@@ -449,8 +473,6 @@ class PurchaseService:
                 product=product,
                 batch_id=batch_id
             )
-
-        return gross_total, total_discount, total_tax
 
     @staticmethod
     def _update_product_master_and_batches(
@@ -468,7 +490,7 @@ class PurchaseService:
         old_sell = product.selling_price
         new_sell = item.new_selling_price or product.selling_price
 
-        if item.unit_landed_cost != old_cost or new_sell != old_sell:
+        if item.unit_landed_cost != old_cost or (item.new_selling_price and new_sell != old_sell):
             ProductCostHistory.objects.create(
                 product=product,
                 date_effective=grn.bill_date,
@@ -571,44 +593,11 @@ class PurchaseService:
                 )
 
     # =========================================================================
-    # STEP 4: FINALIZE GRN HEADER TOTALS
+    # STEP 3: AUTOMATIC SUPPLIER LEDGER & BALANCE UPDATE
     # =========================================================================
-
-    @staticmethod
-    def _finalize_grn_header(
-        grn: GoodsReceivedNote,
-        gross_total: Decimal,
-        total_discount: Decimal,
-        total_tax: Decimal,
-        extra_charges: Decimal,
-        user=None
-    ) -> Decimal:
-        """Computes and locks the final voucher totals."""
-        net_total = (gross_total - total_discount + total_tax + extra_charges).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        total_landed = (gross_total - total_discount + extra_charges).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        grn.gross_amount = gross_total
-        grn.discount_amount = total_discount
-        grn.vat_amount = total_tax
-        grn.total_landed_cost = total_landed
-        grn.net_total_amount = net_total
-
-        paid = grn.paid_amount or Decimal('0.00')
-        grn.due_amount = max(Decimal('0.00'), net_total - paid)
-        grn.status = 'RECEIVED'
-        grn.received_by = user
-        grn.save()
-
-        return net_total
-
-    # =========================================================================
-    # STEP 5: AUTOMATIC SUPPLIER LEDGER & BALANCE UPDATE
-    # =========================================================================
-
     @staticmethod
     def _post_supplier_ledger(
         grn: GoodsReceivedNote,
-        net_total: Decimal,
         user=None
     ) -> None:
         """
@@ -628,7 +617,7 @@ class PurchaseService:
             supplier=supplier,
             branch=grn.branch,
             transaction_type='PURCHASE_BILL',
-            amount=net_total,
+            amount=grn.net_total_amount,
             previous_balance=prev_bal,
             resulting_balance=new_bal,
             payment_mode='CASH' if (grn.paid_amount or Decimal('0.00')) > Decimal('0.00') else 'OTHER',
@@ -636,7 +625,9 @@ class PurchaseService:
             recorded_by=user,
             remarks=(
                 f"GRN Received. Bill No: {grn.supplier_bill_no} "
-                f"(Total: Rs. {net_total:.2f}, Paid: Rs. {grn.paid_amount:.2f}, Due: Rs. {grn.due_amount:.2f})"
+                f"(Gross: Rs. {grn.gross_amount:.2f}, Taxable: Rs. {grn.taxable_amount:.2f}, "
+                f"VAT: Rs. {grn.vat_amount:.2f}, Total: Rs. {grn.net_total_amount:.2f}, "
+                f"Paid: Rs. {grn.paid_amount:.2f}, Due: Rs. {grn.due_amount:.2f})"
             )
         )
 
@@ -648,9 +639,12 @@ class PurchaseService:
             object_repr=grn.grn_number,
             details={
                 'supplier': supplier.company_name,
-                'net_amount': str(net_total),
+                'gross_amount': str(grn.gross_amount),
+                'taxable_amount': str(grn.taxable_amount),
+                'vat_amount': str(grn.vat_amount),
+                'net_amount': str(grn.net_total_amount),
                 'landed_cost': str(grn.total_landed_cost),
-                'freight_and_customs': str(grn.extra_freight_charge + grn.customs_import_charge + grn.other_handling_charge),
+                'overheads': str(grn.overhead_total),
                 'mdms_certified': grn.distributor_mdms_certified,
                 'items_count': grn.items.count(),
                 'prev_supplier_balance': str(prev_bal),
@@ -658,29 +652,45 @@ class PurchaseService:
             }
         )
 
+    # =========================================================================
+    # STEP 4: GENERAL LEDGER POSTING BRIDGE
+    # =========================================================================
+    @staticmethod
+    def _post_gl_journal(grn: GoodsReceivedNote, user=None) -> None:
+        """
+        Dispatches double-entry voucher to General Ledger fail-closed.
+        """
+        import apps.accounting.services.auto_posting as auto_posting_module
+        if hasattr(auto_posting_module, 'post_grn_journal'):
+            auto_posting_module.post_grn_journal(grn, user=user)
+        elif hasattr(auto_posting_module, 'AutoPostingService'):
+            service = auto_posting_module.AutoPostingService
+            if hasattr(service, 'post_grn_journal'):
+                service.post_grn_journal(grn, user=user)
+            elif hasattr(service, 'post_grn_receipt'):
+                service.post_grn_receipt(grn=grn, user=user)
+            else:
+                raise ValidationError("AutoPostingService has no post_grn_journal or post_grn_receipt implementation.")
+        else:
+            raise ValidationError("Accounting auto_posting module is unavailable for GRN journal posting.")
 
+# =============================================================================
+# COMMERCIAL PURCHASE RETURN / DEBIT NOTE SERVICE
+# =============================================================================
 class PurchaseReturnService:
     """
     Commercial Purchase Return / Debit Note Processing Engine.
     Executes atomic merchandise return to suppliers:
-    1. Pre-validates that stock and serialized IMEIs are currently available in IN_STOCK status at the branch.
-    2. Deducts physical inventory from BranchStock via InventoryService.adjust_stock.
-    3. For serialized smartphones (IMEI), marks ItemInstance status as 'RETURNED_TO_SUPPLIER'
-       so it is permanently removed from active sellable inventory.
-    4. Deducts quantity from active non-serialized inventory FIFO batches.
-    5. If refund_mode is 'DEDUCT_FROM_BALANCE', atomically reduces the supplier's
-       outstanding debt balance in Supplier and records a 'PURCHASE_RETURN' transaction in SupplierUdhaariLedger.
-    6. If refund_mode is 'CASH_REFUND', logs the cash inflow in the supplier ledger.
-    7. Records detailed movement logs in StockMovementLog and forensics in AuditLog.
-    8. Automatically posts double-entry General Ledger reversal vouchers fail-closed.
+    1. Pre-validates stock and serialized IMEIs in IN_STOCK status.
+    2. Deducts physical inventory via InventoryService.adjust_stock.
+    3. Locks serialized ItemInstances as 'RETURNED_TO_SUPPLIER'.
+    4. Deducts from FIFO batches.
+    5. Reconciles supplier debt balance and records ledger entry.
+    6. Automatically posts double-entry General Ledger reversal vouchers fail-closed.
     """
 
     @staticmethod
     def generate_return_number(branch: Branch) -> str:
-        """
-        Atomically allocates a strictly unique sequential debit note number
-        using database row-level locking.
-        """
         try:
             return BranchDocumentSequence.get_next_sequence_number(
                 branch=branch,
@@ -698,11 +708,6 @@ class PurchaseReturnService:
         purchase_return: PurchaseReturn,
         user=None
     ) -> PurchaseReturn:
-        """
-        Main transactional entry point coordinating purchase return approval,
-        inventory deduction, IMEI locking, supplier udhaari ledger reconciliation,
-        and double-entry General Ledger voucher posting.
-        """
         items = list(purchase_return.items.select_related('product', 'product__base_unit', 'unit_conversion').all())
         if not items:
             raise ValidationError("Cannot process a purchase return without line items. Please add at least one product.")
@@ -728,8 +733,7 @@ class PurchaseReturnService:
         # Step 3: Settle Supplier Debt Ledger & Post Financial Adjustment
         cls._reconcile_supplier_ledger(purchase_return, net_refund_val, user)
 
-        # Step 4: Post Double-Entry Journal to General Ledger (Debit AP/Cash, Credit Inventory Asset & Input VAT)
-        # Execution is strict; errors bubble up to enforce atomic rollback across stock and ledger.
+        # Step 4: Post Double-Entry Journal to General Ledger
         import apps.accounting.services.auto_posting as auto_posting_module
         if hasattr(auto_posting_module, 'post_purchase_return_journal'):
             auto_posting_module.post_purchase_return_journal(purchase_return, user=user)
@@ -764,21 +768,15 @@ class PurchaseReturnService:
 
     @classmethod
     def _validate_return_items(cls, purchase_return: PurchaseReturn, items: List[PurchaseReturnItem]) -> None:
-        """
-        Strictly verifies that:
-        - Quantities are strictly positive.
-        - Branch has sufficient sellable stock to cover the return without going negative.
-        - For serialized items, the specified IMEIs currently exist in available IN_STOCK status at this branch.
-        """
         for item in items:
             product = item.product
-            factor = item.conversion_factor if item.conversion_factor > Decimal('0.000') else Decimal('1.000')
-            base_qty = (item.returned_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
+            qty = item.returned_quantity if (item.returned_quantity and item.returned_quantity > Decimal('0.000')) else Decimal('1.000')
+            base_qty = (qty * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
 
             if base_qty <= Decimal('0.000'):
                 raise ValidationError(f"Return quantity for item '{product.name}' must be greater than zero.")
 
-            # Check branch stock level
             branch_stock = BranchStock.objects.filter(
                 branch=purchase_return.branch,
                 product=product
@@ -791,7 +789,6 @@ class PurchaseReturnService:
                     f"Available in warehouse: {available_stock} {product.base_unit.code}, Requested return: {base_qty}."
                 )
 
-            # Validate serialized IMEIs
             if product.requires_imei_tracking or product.requires_serial_tracking:
                 expected_units = int(base_qty)
                 raw_imei = item.returned_imei_list or ''
@@ -824,20 +821,17 @@ class PurchaseReturnService:
         items: List[PurchaseReturnItem],
         user=None
     ) -> Tuple[Decimal, Decimal]:
-        """
-        Deducts physical branch stock, deducts non-serialized FIFO batches,
-        locks serialized phone instances as 'RETURNED_TO_SUPPLIER', and computes financial totals.
-        """
         total_return_val = Decimal('0.00')
         total_tax_val = Decimal('0.00')
 
         for item in items:
             product = item.product
-            factor = item.conversion_factor if item.conversion_factor > Decimal('0.000') else Decimal('1.000')
-            base_qty = (item.returned_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
+            qty = item.returned_quantity if (item.returned_quantity and item.returned_quantity > Decimal('0.000')) else Decimal('1.000')
+            base_qty = (qty * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
             item.base_unit_quantity = base_qty
 
-            gross = (item.returned_quantity * (item.purchase_rate or Decimal('0.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            gross = (qty * (item.purchase_rate or Decimal('0.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             tax_rate = item.tax_rate or Decimal('0.00')
             tax = (gross * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if tax_rate > Decimal('0.00') else Decimal('0.00')
             line_tot = gross + tax
@@ -849,7 +843,7 @@ class PurchaseReturnService:
             total_return_val += gross
             total_tax_val += tax
 
-            # 1. Deduct sellable stock from BranchStock via InventoryService
+            # 1. Deduct sellable stock from BranchStock
             InventoryService.adjust_stock(
                 product=product,
                 branch=purchase_return.branch,
@@ -915,12 +909,6 @@ class PurchaseReturnService:
         net_refund_amount: Decimal,
         user=None
     ) -> None:
-        """
-        Adjusts supplier debt ledger according to selected refund mode:
-        - DEDUCT_FROM_BALANCE: Reduces supplier current balance (owing less to supplier).
-        - CASH_REFUND: Logs cash inflow from supplier without altering debt balance.
-        - REPLACEMENT: Logs return awaiting replacement consignment.
-        """
         supplier = Supplier.objects.select_for_update().get(pk=purchase_return.supplier_id)
         prev_bal = supplier.current_balance or Decimal('0.00')
 

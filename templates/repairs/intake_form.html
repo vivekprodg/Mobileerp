@@ -71,6 +71,56 @@
     border-color: #2563eb !important;
 }
 
+/* Asynchronous Dropdown & Selector Cards */
+.async-autocomplete-container {
+    position: relative;
+}
+
+.async-results-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+    max-height: 280px;
+    overflow-y: auto;
+    margin-top: 4px;
+    display: none;
+}
+
+.async-results-dropdown.show {
+    display: block;
+}
+
+.async-result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.15s ease;
+}
+
+.async-result-item:last-child {
+    border-bottom: none;
+}
+
+.async-result-item:hover, .async-result-item.active {
+    background-color: #f8fafc;
+}
+
+.async-selected-card {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
 /* ==========================================================================
    REPAIR IMEI CAMERA SCANNER VIEWFINDER OVERLAY STYLES
    ========================================================================== */
@@ -253,10 +303,38 @@
                     </div>
 
                     <div class="row g-3">
+                        <!-- ASYNC DEVICE MODEL SEARCH DROPDOWN -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Device Model <span class="text-danger">*</span></label>
-                            {{ intake_form.product }}
+                            <input type="hidden" name="product" id="id_product" value="{{ intake_form.product.value|default:'' }}" required>
+                            
+                            <div class="async-autocomplete-container">
+                                <div id="productSelectedCard" class="async-selected-card mb-2 {% if not intake_form.product.value %}d-none{% endif %}">
+                                    <div>
+                                        <div class="fw-bold text-dark fs-xs" id="productSelectedName">
+                                            {% if intake_form.instance.product %}{{ intake_form.instance.product.name }}{% else %}Selected Product{% endif %}
+                                        </div>
+                                        <small class="text-muted fs-2xs" id="productSelectedSku">Linked to Catalog</small>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-2xs" id="clearSelectedProductBtn">
+                                        <i class="fas fa-times me-1"></i> Change
+                                    </button>
+                                </div>
+
+                                <div id="productSearchInputWrapper" class="{% if intake_form.product.value %}d-none{% endif %}">
+                                    <div class="input-group">
+                                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted fs-xs"></i></span>
+                                        <input type="text" id="productSearchInput" class="form-control border-start-0" placeholder="Type model, brand, or SKU (e.g. iPhone 13, Galaxy S22)..." autocomplete="off">
+                                    </div>
+                                    <div id="productSearchResults" class="async-results-dropdown shadow-lg"></div>
+                                </div>
+                            </div>
+                            {% if intake_form.product.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ intake_form.product.errors|first }}</div>
+                            {% endif %}
                         </div>
+
+                        <!-- 15-Digit IMEI / Serial Number with Camera & Barcode Trigger -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">15-Digit IMEI or Serial Number <span class="text-danger">*</span></label>
                             <div class="input-group">
@@ -264,20 +342,39 @@
                                 <button type="button" class="btn btn-outline-primary btn-sm fw-bold px-2" id="scanRepairImeiBtn" title="Scan Barcode / Focus IMEI Gun">
                                     <i class="fas fa-barcode"></i>
                                 </button>
-                                <!-- CAMERA SCANNER TRIGGER BUTTON -->
                                 <button type="button" class="btn btn-warning btn-sm fw-bold px-3 text-dark" id="cameraScanRepairImeiBtn" title="Scan IMEI using Device Camera">
                                     <i class="fas fa-camera me-1"></i> Camera Scan
                                 </button>
                             </div>
+                            {% if intake_form.imei_or_serial.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ intake_form.imei_or_serial.errors|first }}</div>
+                            {% endif %}
                         </div>
+
+                        <!-- ASYNC CUSTOMER AUTOCOMPLETE: NAME -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Customer Name <span class="text-danger">*</span></label>
-                            {{ intake_form.customer_name_manual }}
+                            <div class="async-autocomplete-container">
+                                {{ intake_form.customer_name_manual }}
+                                <div id="customerNameSearchResults" class="async-results-dropdown shadow-lg"></div>
+                            </div>
+                            {% if intake_form.customer_name_manual.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ intake_form.customer_name_manual.errors|first }}</div>
+                            {% endif %}
                         </div>
+
+                        <!-- ASYNC CUSTOMER AUTOCOMPLETE: PHONE -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Customer Mobile Phone <span class="text-danger">*</span></label>
-                            {{ intake_form.customer_phone_manual }}
+                            <div class="async-autocomplete-container">
+                                {{ intake_form.customer_phone_manual }}
+                                <div id="customerPhoneSearchResults" class="async-results-dropdown shadow-lg"></div>
+                            </div>
+                            {% if intake_form.customer_phone_manual.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ intake_form.customer_phone_manual.errors|first }}</div>
+                            {% endif %}
                         </div>
+
                         <div class="col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Claimed Defective Component</label>
                             {{ intake_form.claimed_component }}
@@ -286,10 +383,38 @@
                             <label class="form-label fw-bold text-dark fs-xs">Device Color / Finish</label>
                             {{ intake_form.device_color }}
                         </div>
+
+                        <!-- ASYNC TECHNICIAN ASSIGNMENT SELECTOR -->
                         <div class="col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Assigned Technician</label>
-                            {{ intake_form.technician }}
+                            <input type="hidden" name="technician" id="id_technician" value="{{ intake_form.technician.value|default:'' }}">
+                            
+                            <div class="async-autocomplete-container">
+                                <div id="technicianSelectedCard" class="async-selected-card mb-2 {% if not intake_form.technician.value %}d-none{% endif %}">
+                                    <div>
+                                        <div class="fw-bold text-dark fs-xs" id="technicianSelectedName">
+                                            {% if intake_form.instance.technician %}{{ intake_form.instance.technician.get_full_name|default:intake_form.instance.technician.username }}{% else %}Assigned Staff{% endif %}
+                                        </div>
+                                        <small class="text-muted fs-2xs" id="technicianSelectedRole">Technician Workbench</small>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-2xs" id="clearSelectedTechBtn">
+                                        <i class="fas fa-times me-1"></i> Change
+                                    </button>
+                                </div>
+
+                                <div id="technicianSearchInputWrapper" class="{% if intake_form.technician.value %}d-none{% endif %}">
+                                    <div class="input-group">
+                                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-user-gear text-muted fs-xs"></i></span>
+                                        <input type="text" id="technicianSearchInput" class="form-control border-start-0" placeholder="Search technician by name..." autocomplete="off">
+                                    </div>
+                                    <div id="technicianSearchResults" class="async-results-dropdown shadow-lg"></div>
+                                </div>
+                            </div>
+                            {% if intake_form.technician.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ intake_form.technician.errors|first }}</div>
+                            {% endif %}
                         </div>
+
                         <div class="col-12">
                             <label class="form-label fw-bold text-dark fs-xs">Accessories Received with Device</label>
                             {{ intake_form.intake_accessories_received }}
@@ -372,7 +497,7 @@
                     </div>
                 </div>
 
-                <!-- 3. Photo Evidence Vault & Live Camera Capture with Clear Fallback -->
+                <!-- 3. Photo Evidence Vault & Live Camera Capture -->
                 <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
                     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
                         <div>
@@ -400,7 +525,7 @@
                         <canvas id="snapshotCanvas"></canvas>
                     </div>
 
-                    <!-- Standard File Upload Fallback (Always Accessible) -->
+                    <!-- Standard File Upload Fallback -->
                     <div class="mb-3">
                         <label class="form-label fw-semibold fs-xs text-dark">
                             <i class="fas fa-folder-open text-secondary me-1"></i> Upload Evidence Images (from PC / Phone Storage)
@@ -416,7 +541,7 @@
 
             </div>
 
-            <!-- Right Column (4 Cols): Pattern Lock at TOP -> Scheduled Delivery -> Agreements -->
+            <!-- Right Column (4 Cols): Security Pattern Lock & Terms -->
             <div class="col-12 col-lg-4">
                 
                 <!-- 1. Security Pattern Lock & PIN Card -->
@@ -498,9 +623,7 @@
     </form>
 </div>
 
-<!-- ==========================================================================
-     REPAIR INTAKE CAMERA IMEI / SERIAL SCANNER MODAL
-     ========================================================================== -->
+<!-- CAMERA SCANNER MODAL -->
 <div class="modal fade" id="repairImeiCameraModal" tabindex="-1" aria-labelledby="repairImeiCameraModalLabel" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark text-white">
@@ -516,10 +639,8 @@
             </div>
             
             <div class="modal-body repair-scanner-modal-body">
-                <!-- Live Video Feed -->
                 <video id="repairImeiCameraFeedVideo" class="repair-scanner-video-feed" playsinline autoplay muted></video>
                 
-                <!-- Dynamic Banner Overlay -->
                 <div class="repair-camera-banner shadow-sm">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <span class="badge bg-warning text-dark fs-2xs px-2 py-1">INTAKE IMEI SCAN</span>
@@ -530,7 +651,6 @@
                     </div>
                 </div>
 
-                <!-- Aiming Reticle with Animated Laser -->
                 <div class="repair-scanner-viewfinder">
                     <div class="repair-aiming-reticle">
                         <div class="repair-corner-tr"></div>
@@ -539,7 +659,6 @@
                     </div>
                 </div>
 
-                <!-- Floating Toolbar Controls -->
                 <div class="position-absolute bottom-0 start-0 end-0 p-3 d-flex justify-content-center gap-2 z-3">
                     <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="repairTorchToggleBtn" style="display: none;">
                         <i class="fas fa-bolt me-1 text-warning"></i> Flashlight
@@ -569,19 +688,281 @@
 <script src="{% static 'js/repair_camera_capture.js' %}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // Utility: Debounce for API lookups
+    function debounce(func, wait = 250) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    // Utility: Escape HTML
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // =========================================================================
+    // 1. ASYNC DEVICE MODEL SEARCH DROPDOWN (/products/api/search/?mode=simple)
+    // =========================================================================
+    const productIdInput = document.getElementById('id_product');
+    const productSearchInput = document.getElementById('productSearchInput');
+    const productSearchWrapper = document.getElementById('productSearchInputWrapper');
+    const productSearchResults = document.getElementById('productSearchResults');
+    const productSelectedCard = document.getElementById('productSelectedCard');
+    const productSelectedName = document.getElementById('productSelectedName');
+    const productSelectedSku = document.getElementById('productSelectedSku');
+    const clearSelectedProductBtn = document.getElementById('clearSelectedProductBtn');
+
+    function selectProduct(id, name, sku) {
+        productIdInput.value = id;
+        productSelectedName.innerText = name;
+        productSelectedSku.innerText = sku ? `SKU: ${sku}` : 'Catalog Device';
+        productSelectedCard.classList.remove('d-none');
+        productSearchWrapper.classList.add('d-none');
+        productSearchResults.classList.remove('show');
+        productSearchInput.value = '';
+    }
+
+    if (clearSelectedProductBtn) {
+        clearSelectedProductBtn.addEventListener('click', () => {
+            productIdInput.value = '';
+            productSelectedCard.classList.add('d-none');
+            productSearchWrapper.classList.remove('d-none');
+            productSearchInput.value = '';
+            productSearchInput.focus();
+        });
+    }
+
+    if (productSearchInput) {
+        const handleProductSearch = debounce(async (query) => {
+            if (!query || query.length < 2) {
+                productSearchResults.classList.remove('show');
+                return;
+            }
+
+            try {
+                productSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching catalog...</div>';
+                productSearchResults.classList.add('show');
+
+                const resp = await fetch(`/products/api/search/?mode=simple&q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Search failed');
+                const data = await resp.json();
+                const items = data.results || data || [];
+
+                if (!items.length) {
+                    productSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No matching device models found.</div>';
+                    return;
+                }
+
+                let html = '';
+                items.forEach(item => {
+                    const id = item.id || item.product_id;
+                    const name = item.name || item.text;
+                    const sku = item.sku || item.code || '';
+                    const brand = item.brand || item.category || '';
+                    html += `
+                        <div class="async-result-item" data-id="${id}" data-name="${escapeHtml(name)}" data-sku="${escapeHtml(sku)}">
+                            <div class="fw-bold text-dark fs-xs">${escapeHtml(name)}</div>
+                            <div class="text-muted fs-2xs">
+                                ${sku ? `<span class="badge bg-light text-secondary border me-1">${escapeHtml(sku)}</span>` : ''}
+                                ${brand ? `<span class="text-secondary">${escapeHtml(brand)}</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                productSearchResults.innerHTML = html;
+
+                productSearchResults.querySelectorAll('.async-result-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        selectProduct(el.dataset.id, el.dataset.name, el.dataset.sku);
+                    });
+                });
+            } catch (err) {
+                productSearchResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying products.</div>';
+            }
+        }, 250);
+
+        productSearchInput.addEventListener('input', (e) => handleProductSearch(e.target.value.trim()));
+    }
+
+    // =========================================================================
+    // 2. ASYNC CUSTOMER AUTOCOMPLETE (/customers/api/search/)
+    // =========================================================================
+    const customerNameInput = document.querySelector('[name="customer_name_manual"]');
+    const customerPhoneInput = document.querySelector('[name="customer_phone_manual"]');
+    const customerNameResults = document.getElementById('customerNameSearchResults');
+    const customerPhoneResults = document.getElementById('customerPhoneSearchResults');
+
+    function fillCustomerProfile(cust) {
+        if (customerNameInput) customerNameInput.value = cust.name || cust.full_name || '';
+        if (customerPhoneInput) customerPhoneInput.value = cust.phone || cust.mobile || '';
+        if (customerNameResults) customerNameResults.classList.remove('show');
+        if (customerPhoneResults) customerPhoneResults.classList.remove('show');
+    }
+
+    function setupCustomerAutocomplete(inputEl, resultsEl) {
+        if (!inputEl || !resultsEl) return;
+
+        const performSearch = debounce(async (query) => {
+            if (!query || query.length < 2) {
+                resultsEl.classList.remove('show');
+                return;
+            }
+
+            try {
+                resultsEl.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Looking up customers...</div>';
+                resultsEl.classList.add('show');
+
+                const resp = await fetch(`/customers/api/search/?q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Customer lookup failed');
+                const data = await resp.json();
+                const customers = data.results || data || [];
+
+                if (!customers.length) {
+                    resultsEl.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No registered customer found (New Profile).</div>';
+                    return;
+                }
+
+                let html = '';
+                customers.forEach(c => {
+                    const name = c.name || c.full_name || '';
+                    const phone = c.phone || c.mobile || '';
+                    const city = c.city || c.address || '';
+                    html += `
+                        <div class="async-result-item customer-item" data-customer='${JSON.stringify(c).replace(/'/g, "&apos;")}'>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-bold text-dark fs-xs">${escapeHtml(name)}</span>
+                                <span class="badge bg-light text-primary border font-monospace fs-2xs">${escapeHtml(phone)}</span>
+                            </div>
+                            ${city ? `<div class="text-muted fs-2xs"><i class="fas fa-location-dot me-1"></i>${escapeHtml(city)}</div>` : ''}
+                        </div>
+                    `;
+                });
+                resultsEl.innerHTML = html;
+
+                resultsEl.querySelectorAll('.customer-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const custData = JSON.parse(item.dataset.customer);
+                        fillCustomerProfile(custData);
+                    });
+                });
+            } catch (err) {
+                resultsEl.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying customers.</div>';
+            }
+        }, 250);
+
+        inputEl.addEventListener('input', (e) => performSearch(e.target.value.trim()));
+    }
+
+    setupCustomerAutocomplete(customerNameInput, customerNameResults);
+    setupCustomerAutocomplete(customerPhoneInput, customerPhoneResults);
+
+    // =========================================================================
+    // 3. ASYNC TECHNICIAN ASSIGNMENT (/users/api/search/?role=TECHNICIAN)
+    // =========================================================================
+    const technicianIdInput = document.getElementById('id_technician');
+    const technicianSearchInput = document.getElementById('technicianSearchInput');
+    const technicianSearchWrapper = document.getElementById('technicianSearchInputWrapper');
+    const technicianSearchResults = document.getElementById('technicianSearchResults');
+    const technicianSelectedCard = document.getElementById('technicianSelectedCard');
+    const technicianSelectedName = document.getElementById('technicianSelectedName');
+    const technicianSelectedRole = document.getElementById('technicianSelectedRole');
+    const clearSelectedTechBtn = document.getElementById('clearSelectedTechBtn');
+
+    function selectTechnician(id, name, role) {
+        technicianIdInput.value = id;
+        technicianSelectedName.innerText = name;
+        technicianSelectedRole.innerText = role || 'Technician';
+        technicianSelectedCard.classList.remove('d-none');
+        technicianSearchWrapper.classList.add('d-none');
+        technicianSearchResults.classList.remove('show');
+        technicianSearchInput.value = '';
+    }
+
+    if (clearSelectedTechBtn) {
+        clearSelectedTechBtn.addEventListener('click', () => {
+            technicianIdInput.value = '';
+            technicianSelectedCard.classList.add('d-none');
+            technicianSearchWrapper.classList.remove('d-none');
+            technicianSearchInput.value = '';
+            technicianSearchInput.focus();
+        });
+    }
+
+    if (technicianSearchInput) {
+        const handleTechSearch = debounce(async (query) => {
+            try {
+                technicianSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching technicians...</div>';
+                technicianSearchResults.classList.add('show');
+
+                const resp = await fetch(`/users/api/search/?role=TECHNICIAN&q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Failed to query technicians');
+                const data = await resp.json();
+                const techList = data.results || data || [];
+
+                if (!techList.length) {
+                    technicianSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No active technician found.</div>';
+                    return;
+                }
+
+                let html = '';
+                techList.forEach(t => {
+                    const id = t.id;
+                    const name = t.full_name || t.name || t.username;
+                    const role = t.role_display || t.role || 'Technician';
+                    html += `
+                        <div class="async-result-item" data-id="${id}" data-name="${escapeHtml(name)}" data-role="${escapeHtml(role)}">
+                            <div class="fw-bold text-dark fs-xs">${escapeHtml(name)}</div>
+                            <div class="text-muted fs-2xs"><i class="fas fa-wrench me-1 text-primary"></i>${escapeHtml(role)}</div>
+                        </div>
+                    `;
+                });
+                technicianSearchResults.innerHTML = html;
+
+                technicianSearchResults.querySelectorAll('.async-result-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        selectTechnician(el.dataset.id, el.dataset.name, el.dataset.role);
+                    });
+                });
+            } catch (err) {
+                technicianSearchResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying technicians.</div>';
+            }
+        }, 200);
+
+        technicianSearchInput.addEventListener('input', (e) => handleTechSearch(e.target.value.trim()));
+        technicianSearchInput.addEventListener('focus', (e) => handleTechSearch(e.target.value.trim()));
+    }
+
+    // Dismiss open dropdowns on outside click
+    document.addEventListener('click', (e) => {
+        if (productSearchResults && !productSearchResults.contains(e.target) && e.target !== productSearchInput) {
+            productSearchResults.classList.remove('show');
+        }
+        if (customerNameResults && !customerNameResults.contains(e.target) && e.target !== customerNameInput) {
+            customerNameResults.classList.remove('show');
+        }
+        if (customerPhoneResults && !customerPhoneResults.contains(e.target) && e.target !== customerPhoneInput) {
+            customerPhoneResults.classList.remove('show');
+        }
+        if (technicianSearchResults && !technicianSearchResults.contains(e.target) && e.target !== technicianSearchInput) {
+            technicianSearchResults.classList.remove('show');
+        }
+    });
+
+    // =========================================================================
+    // 4. IMEI / SERIAL SCANNER & AUTO-LOOKUP INTEGRATION
+    // =========================================================================
     const scanRepairImeiBtn = document.getElementById('scanRepairImeiBtn');
     const cameraScanRepairImeiBtn = document.getElementById('cameraScanRepairImeiBtn');
     const repairImeiInput = document.querySelector('[name="imei_or_serial"]');
-    const productSelect = document.getElementById('id_repair_product_select') || document.querySelector('[name="product"]');
-    const customerNameInput = document.querySelector('[name="customer_name_manual"]');
-    const customerPhoneInput = document.querySelector('[name="customer_phone_manual"]');
-
     const feedbackBanner = document.getElementById('repairImeiScanFeedbackBanner');
     const feedbackTitle = document.getElementById('feedbackBannerTitle');
     const feedbackDetails = document.getElementById('feedbackBannerDetails');
     const feedbackWarrantyTag = document.getElementById('feedbackBannerWarrantyTag');
 
-    // Focus Barcode Scanner on Click
     if (scanRepairImeiBtn && repairImeiInput) {
         scanRepairImeiBtn.addEventListener('click', () => {
             repairImeiInput.focus();
@@ -591,51 +972,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Camera Scanner Initialization
-    const cameraModalEl = document.getElementById('repairImeiCameraModal');
-    const videoEl = document.getElementById('repairImeiCameraFeedVideo');
-    const torchBtn = document.getElementById('repairTorchToggleBtn');
-    const switchLensBtn = document.getElementById('repairSwitchLensBtn');
-    const statusText = document.getElementById('repairCameraStatusText');
-
-    let cameraScannerInstance = null;
-    let cameraModalInstance = null;
-
-    if (cameraModalEl) {
-        cameraModalInstance = new bootstrap.Modal(cameraModalEl);
-    }
-
-    // Auto-Lookup Function for Scanned IMEI
     async function performImeiLookup(scannedImei) {
         if (!scannedImei || scannedImei.length < 3) return;
 
         try {
             const resp = await fetch(`/products/api/search/?q=${encodeURIComponent(scannedImei)}`);
             if (!resp.ok) return;
-
             const data = await resp.json();
             const results = data.results || [];
 
             if (results.length > 0) {
                 const match = results[0];
+                const pid = match.product_id || match.id;
+                const pname = match.name;
+                const psku = match.sku || match.imei_1 || '';
 
-                // Auto-select product model in select dropdown
-                if (productSelect && match.product_id) {
-                    let optionExists = false;
-                    for (let opt of productSelect.options) {
-                        if (opt.value == match.product_id) {
-                            productSelect.value = match.product_id;
-                            optionExists = true;
-                            break;
-                        }
-                    }
-                    if (!optionExists) {
-                        const newOption = new Option(match.name, match.product_id, true, true);
-                        productSelect.add(newOption);
-                    }
+                if (pid && pname) {
+                    selectProduct(pid, pname, psku);
                 }
 
-                // Autofill customer name and phone if historical sale record exists
                 if (customerNameInput && match.customer_name && !customerNameInput.value) {
                     customerNameInput.value = match.customer_name;
                 }
@@ -643,13 +998,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     customerPhoneInput.value = match.customer_phone;
                 }
 
-                // Show Live Feedback Banner
                 if (feedbackBanner) {
                     feedbackBanner.classList.remove('d-none');
                     feedbackTitle.innerText = `Recognized: ${match.name}`;
-                    feedbackDetails.innerText = `IMEI: ${match.imei_1 || scannedImei} &bull; Condition: ${match.condition || 'Registered'} &bull; Customer: ${match.customer_name || 'Counter Sale'}`;
-                    
-                    const isWarrantyValid = (match.component_warranties && match.component_warranties.some(w => w.is_valid));
+                    feedbackDetails.innerHTML = `IMEI: <strong>${match.imei_1 || scannedImei}</strong> &bull; Condition: ${match.condition || 'Registered'} &bull; Customer: ${match.customer_name || 'Counter Sale'}`;
+
+                    const isWarrantyValid = match.component_warranties && match.component_warranties.some(w => w.is_valid);
                     if (isWarrantyValid) {
                         feedbackWarrantyTag.className = 'badge bg-success px-3 py-2 rounded-pill fs-xs';
                         feedbackWarrantyTag.innerHTML = '<i class="fas fa-shield-check me-1"></i> Active Official Warranty';
@@ -664,18 +1018,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Camera Barcode Scanner Initialization
+    const cameraModalEl = document.getElementById('repairImeiCameraModal');
+    const videoEl = document.getElementById('repairImeiCameraFeedVideo');
+    const torchBtn = document.getElementById('repairTorchToggleBtn');
+    const switchLensBtn = document.getElementById('repairSwitchLensBtn');
+    const statusText = document.getElementById('repairCameraStatusText');
+
+    let cameraScannerInstance = null;
+    let cameraModalInstance = null;
+
+    if (cameraModalEl) {
+        cameraModalInstance = new bootstrap.Modal(cameraModalEl);
+    }
+
     if (cameraScanRepairImeiBtn && cameraModalEl && videoEl) {
         cameraScannerInstance = new CameraBarcodeScanner({
             facingMode: 'environment',
             cooldown: 1200
         });
 
-        // Open Camera Modal
         cameraScanRepairImeiBtn.addEventListener('click', () => {
             cameraModalInstance.show();
         });
 
-        // Modal Shown -> Start Video Stream
         cameraModalEl.addEventListener('shown.bs.modal', async () => {
             if (statusText) {
                 statusText.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1 text-warning"></i> Starting camera feed...';
@@ -693,8 +1059,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         repairImeiInput.value = cleanCode;
                         repairImeiInput.classList.add('scan-focus-active');
                         setTimeout(() => repairImeiInput.classList.remove('scan-focus-active'), 1500);
-
-                        // Trigger instant warranty & catalog lookup
                         performImeiLookup(cleanCode);
                     }
 
@@ -709,7 +1073,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             );
 
-            // Display flashlight if supported
             if (cameraScannerInstance.hasTorch && torchBtn) {
                 torchBtn.style.display = 'inline-flex';
             } else if (torchBtn) {
@@ -721,7 +1084,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Modal Hidden -> Stop Camera Hardware
         cameraModalEl.addEventListener('hidden.bs.modal', () => {
             if (cameraScannerInstance) {
                 cameraScannerInstance.stop();
@@ -731,7 +1093,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Toggle Flashlight
         if (torchBtn) {
             torchBtn.addEventListener('click', async () => {
                 const state = await cameraScannerInstance.toggleTorch();
@@ -740,7 +1101,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Switch Camera Lens
         if (switchLensBtn) {
             switchLensBtn.addEventListener('click', async () => {
                 await cameraScannerInstance.switchCamera();
@@ -748,7 +1108,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Input change event listener for hardware USB scanner
     if (repairImeiInput) {
         repairImeiInput.addEventListener('change', (e) => {
             performImeiLookup(e.target.value.trim());

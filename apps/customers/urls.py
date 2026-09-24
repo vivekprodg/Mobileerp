@@ -1,7 +1,11 @@
 from django.urls import path
 from apps.customers.views import (
-    CustomerListView, CustomerDetailView, CustomerCreateView,
-    CustomerUpdateView, CustomerUdhaariPaymentView, CustomerSearchAPIView
+    CustomerListView,
+    CustomerDetailView,
+    CustomerCreateView,
+    CustomerUpdateView,
+    CustomerUdhaariPaymentView,
+    CustomerSearchAPIView,
 )
 
 app_name = 'customers'

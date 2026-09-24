@@ -3,6 +3,49 @@
 
 {% block title %}General Ledger Statement: {{ account.name }} | {{ COMPANY_NAME }}{% endblock %}
 
+{% block extra_head %}
+<style>
+.async-search-container {
+    position: relative;
+}
+
+.async-results-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+    max-height: 280px;
+    overflow-y: auto;
+    margin-top: 4px;
+    display: none;
+}
+
+.async-results-dropdown.show {
+    display: block;
+}
+
+.async-result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.15s ease;
+}
+
+.async-result-item:last-child {
+    border-bottom: none;
+}
+
+.async-result-item:hover {
+    background-color: #f8fafc;
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid px-3 px-md-4 py-3">
 
@@ -36,39 +79,41 @@
         </div>
     </div>
 
-    <!-- Account Selection & Nepali Date Range Filter Toolbar -->
+    <!-- Asynchronous Account Selection & Date Range Filter Toolbar -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
         <form method="get" class="row g-2 align-items-center" id="glFilterForm">
-            <!-- Account Dropdown Selector -->
-            <div class="col-12 col-md-4">
-                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Select General Ledger Account</label>
-                <select class="form-select form-select-sm" onchange="location = this.value;">
-                    {% for acc in all_accounts %}
-                    <option value="{% url 'accounting:general_ledger_account' acc.id %}" {% if acc.id == account.id %}selected{% endif %}>
-                        {{ acc.code }} - {{ acc.name }} {% if acc.branch %}[{{ acc.branch.code }}]{% else %}[HQ]{% endif %}
-                    </option>
-                    {% endfor %}
-                </select>
+            <!-- Asynchronous Account Search Switcher -->
+            <div class="col-12 col-md-5">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Switch Ledger Account (खाता खोजी)</label>
+                <div class="async-search-container">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted fs-xs"></i></span>
+                        <input type="text" id="ledgerAccountSearchInput" class="form-control border-start-0 font-mono" 
+                               value="{{ account.code }} - {{ account.name }}" 
+                               placeholder="Type account code or title..." autocomplete="off">
+                    </div>
+                    <div id="ledgerAccountSearchResults" class="async-results-dropdown shadow-lg"></div>
+                </div>
             </div>
 
             <!-- Start Date (AD & BS) -->
-            <div class="col-12 col-sm-6 col-md-3">
-                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">From Date (AD / BS)</label>
+            <div class="col-12 col-sm-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">From Date (AD)</label>
                 <input type="date" name="start_date" id="glStartDate" value="{{ start_date|date:'Y-m-d' }}" 
                        class="form-control form-control-sm font-mono">
             </div>
 
             <!-- End Date (AD & BS) -->
-            <div class="col-12 col-sm-6 col-md-3">
-                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">To Date (AD / BS)</label>
+            <div class="col-12 col-sm-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">To Date (AD)</label>
                 <input type="date" name="end_date" id="glEndDate" value="{{ end_date|date:'Y-m-d' }}" 
                        class="form-control form-control-sm font-mono">
             </div>
 
             <!-- Actions -->
-            <div class="col-12 col-md-2 d-flex align-items-end gap-2 pt-md-3">
+            <div class="col-12 col-md-3 d-flex align-items-end gap-2 pt-md-3">
                 <button type="submit" class="btn btn-primary btn-sm rounded-pill px-3 w-100 fw-bold">
-                    <i class="fas fa-sync-alt me-1"></i> Fetch
+                    <i class="fas fa-sync-alt me-1"></i> Apply Filter
                 </button>
                 <a href="{% url 'accounting:general_ledger_account' account.id %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
                     Reset
@@ -247,7 +292,7 @@
 
 </div>
 
-<!-- CSV Export Script -->
+<!-- Scripts for CSV Export & Instant Account Navigation -->
 <script>
     function exportLedgerToCSV() {
         const table = document.getElementById('generalLedgerTable');
@@ -255,7 +300,6 @@
         for (let row of table.rows) {
             let cols = [];
             for (let cell of row.cells) {
-                // Strip extra whitespace and commas inside monetary figures
                 let text = cell.innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
                 text = `"${text.replace(/"/g, '""')}"`;
                 cols.push(text);
@@ -271,5 +315,85 @@
         downloadLink.click();
         document.body.removeChild(downloadLink);
     }
+
+    // Asynchronous Account Search and Instant Redirection
+    document.addEventListener('DOMContentLoaded', () => {
+        function debounce(func, wait = 200) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return String(text).replace(/[&<>"']/g, m => map[m]);
+        }
+
+        const accountSearchInput = document.getElementById('ledgerAccountSearchInput');
+        const accountResults = document.getElementById('ledgerAccountSearchResults');
+        const startDate = document.getElementById('glStartDate').value;
+        const endDate = document.getElementById('glEndDate').value;
+
+        if (accountSearchInput) {
+            const handleSearch = debounce(async (query) => {
+                try {
+                    accountResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching accounts...</div>';
+                    accountResults.classList.add('show');
+
+                    const resp = await fetch(`/accounting/api/accounts/search/?q=${encodeURIComponent(query)}`);
+                    if (!resp.ok) throw new Error('Search failed');
+                    const data = await resp.json();
+                    const accounts = data.results || data || [];
+
+                    if (!accounts.length) {
+                        accountResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No matching ledger account found.</div>';
+                        return;
+                    }
+
+                    let html = '';
+                    accounts.forEach(a => {
+                        const code = a.code || '';
+                        const name = a.name || a.text || '';
+                        const branch = a.branch_code ? `[${a.branch_code}]` : '[HQ]';
+                        html += `
+                            <div class="async-result-item" data-id="${a.id}">
+                                <div class="fw-bold text-dark font-mono fs-xs">${escapeHtml(code)} &bull; ${escapeHtml(name)} <span class="badge bg-light text-secondary border font-mono fs-2xs ms-1">${escapeHtml(branch)}</span></div>
+                                <div class="text-muted fs-2xs">${escapeHtml(a.group_name || a.category || '')}</div>
+                            </div>
+                        `;
+                    });
+                    accountResults.innerHTML = html;
+
+                    accountResults.querySelectorAll('.async-result-item').forEach(item => {
+                        item.addEventListener('click', () => {
+                            const accId = item.dataset.id;
+                            let targetUrl = `/accounting/general-ledger/${accId}/`;
+                            if (startDate || endDate) {
+                                targetUrl += `?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+                            }
+                            window.location.href = targetUrl;
+                        });
+                    });
+                } catch (err) {
+                    accountResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying accounts.</div>';
+                }
+            }, 200);
+
+            accountSearchInput.addEventListener('input', (e) => handleSearch(e.target.value.trim()));
+            accountSearchInput.addEventListener('focus', () => {
+                accountSearchInput.select();
+                handleSearch(accountSearchInput.value.trim());
+            });
+        }
+
+        document.addEventListener('click', (e) => {
+            if (accountResults && !accountResults.contains(e.target) && e.target !== accountSearchInput) {
+                accountResults.classList.remove('show');
+            }
+        });
+    });
 </script>
 {% endblock %}

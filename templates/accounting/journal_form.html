@@ -21,7 +21,7 @@
                 <span>Create Double-Entry Journal Voucher</span>
                 <span class="fs-xs fw-normal text-muted font-nepali">(दोहोरो लेखा भौचर प्रविष्टि)</span>
             </h4>
-            <p class="text-muted fs-xs mb-0">General manual adjustments, Contra bank-cash transfers, and depreciation entries ($\sum\text{Dr} = \sum\text{Cr}$)</p>
+            <p class="text-muted fs-xs mb-0">General manual adjustments, Contra bank-cash transfers, and depreciation entries (&sum;Dr = &sum;Cr)</p>
         </div>
         <div>
             <a href="{% url 'accounting:journal_list' %}" class="btn btn-outline-dark btn-sm rounded-pill px-3">
@@ -31,7 +31,7 @@
     </div>
 
     <!-- Main Entry Form -->
-    <form action="" method="post" id="journalEntryForm">
+    <form action="" method="post" id="journalEntryForm" novalidate>
         {% csrf_token %}
 
         <!-- Voucher Header Parameters Card -->
@@ -110,11 +110,11 @@
                     <thead class="bg-light text-muted fs-2xs text-uppercase">
                         <tr>
                             <th style="width: 40px;" class="text-center">#</th>
-                            <th style="min-width: 250px;">General Ledger Account * (खाता)</th>
-                            <th style="min-width: 170px;">Sub-Ledger Entity (Customer / Supplier)</th>
-                            <th style="width: 160px;" class="text-end">Debit (Dr) Amount *</th>
-                            <th style="width: 160px;" class="text-end">Credit (Cr) Amount *</th>
-                            <th style="min-width: 180px;">Line Note (Optional)</th>
+                            <th style="min-width: 280px;">General Ledger Account * (खाता)</th>
+                            <th style="min-width: 260px;">Sub-Ledger Entity (Customer / Supplier)</th>
+                            <th style="width: 150px;" class="text-end">Debit (Dr) Amount *</th>
+                            <th style="width: 150px;" class="text-end">Credit (Cr) Amount *</th>
+                            <th style="min-width: 160px;">Line Note (Optional)</th>
                             <th style="width: 50px;" class="text-center">Del</th>
                         </tr>
                     </thead>
@@ -122,34 +122,82 @@
                         {% for item_form in formset %}
                         <tr class="journal-form-row">
                             <td class="text-center font-mono fs-xs text-muted row-index">{{ forloop.counter }}</td>
+                            
+                            <!-- Standardized General Ledger Account Selector -->
                             <td>
                                 {{ item_form.id }}
-                                {{ item_form.account }}
+                                <div class="contextual-search-wrapper"
+                                     data-search-url="/accounting/api/accounts/search/"
+                                     data-search-type="account"
+                                     data-placeholder="Search account by code or title..."
+                                     data-initial-id="{{ item_form.account.value|default:'' }}"
+                                     data-initial-title="{% if item_form.instance.account %}{{ item_form.instance.account.code }} - {{ item_form.instance.account.name }}{% endif %}">
+                                    <input type="hidden" name="{{ item_form.account.html_name }}" id="{{ item_form.account.auto_id }}" value="{{ item_form.account.value|default:'' }}" class="account-hidden-id" required>
+                                    <input type="text" class="form-control form-control-sm contextual-search-input async-search-input"
+                                           placeholder="Search account by code or title..."
+                                           value="{% if item_form.instance.account %}{{ item_form.instance.account.code }} - {{ item_form.instance.account.name }}{% endif %}"
+                                           autocomplete="off">
+                                </div>
                                 {% if item_form.account.errors %}
-                                    <div class="text-danger fs-2xs">{{ item_form.account.errors }}</div>
+                                    <div class="text-danger fs-2xs mt-1">{{ item_form.account.errors|striptags }}</div>
                                 {% endif %}
                             </td>
+
+                            <!-- Standardized Sub-Ledger Selectors (Customer & Supplier) -->
                             <td>
                                 <div class="d-flex flex-column gap-1">
-                                    {{ item_form.customer }}
-                                    {{ item_form.supplier }}
+                                    <!-- Customer Sub-Ledger -->
+                                    <div class="contextual-search-wrapper"
+                                         data-search-url="/customers/api/search/"
+                                         data-search-type="customer"
+                                         data-placeholder="Customer: search name/phone..."
+                                         data-initial-id="{{ item_form.customer.value|default:'' }}"
+                                         data-initial-title="{% if item_form.instance.customer %}{{ item_form.instance.customer.name }}{% endif %}">
+                                        <input type="hidden" name="{{ item_form.customer.html_name }}" id="{{ item_form.customer.auto_id }}" value="{{ item_form.customer.value|default:'' }}">
+                                        <input type="text" class="form-control form-control-sm contextual-search-input async-search-input"
+                                               placeholder="Customer: search name/phone..."
+                                               value="{% if item_form.instance.customer %}{{ item_form.instance.customer.name }}{% endif %}"
+                                               autocomplete="off">
+                                    </div>
+
+                                    <!-- Supplier Sub-Ledger -->
+                                    <div class="contextual-search-wrapper"
+                                         data-search-url="/purchases/suppliers/api/search/"
+                                         data-search-type="supplier"
+                                         data-placeholder="Supplier: search vendor name..."
+                                         data-initial-id="{{ item_form.supplier.value|default:'' }}"
+                                         data-initial-title="{% if item_form.instance.supplier %}{{ item_form.instance.supplier.company_name|default:item_form.instance.supplier.name }}{% endif %}">
+                                        <input type="hidden" name="{{ item_form.supplier.html_name }}" id="{{ item_form.supplier.auto_id }}" value="{{ item_form.supplier.value|default:'' }}">
+                                        <input type="text" class="form-control form-control-sm contextual-search-input async-search-input"
+                                               placeholder="Supplier: search vendor name..."
+                                               value="{% if item_form.instance.supplier %}{{ item_form.instance.supplier.company_name|default:item_form.instance.supplier.name }}{% endif %}"
+                                               autocomplete="off">
+                                    </div>
                                 </div>
                             </td>
+
+                            <!-- Debit -->
                             <td>
                                 {{ item_form.debit_amount }}
                                 {% if item_form.debit_amount.errors %}
                                     <div class="text-danger fs-2xs">{{ item_form.debit_amount.errors }}</div>
                                 {% endif %}
                             </td>
+
+                            <!-- Credit -->
                             <td>
                                 {{ item_form.credit_amount }}
                                 {% if item_form.credit_amount.errors %}
                                     <div class="text-danger fs-2xs">{{ item_form.credit_amount.errors }}</div>
                                 {% endif %}
                             </td>
+
+                            <!-- Narration -->
                             <td>
                                 {{ item_form.line_narration }}
                             </td>
+
+                            <!-- Delete / Remove Action -->
                             <td class="text-center">
                                 {% if item_form.instance.pk %}
                                     {{ item_form.DELETE }}
@@ -169,11 +217,11 @@
             <div class="p-3 bg-slate-900 text-white">
                 <div class="row g-2 align-items-center">
                     <div class="col-12 col-md-3">
-                        <span class="fs-2xs fw-bold text-uppercase text-slate-400 d-block">Total Debits ($\sum\text{Dr}$):</span>
+                        <span class="fs-2xs fw-bold text-uppercase text-slate-400 d-block">Total Debits (&sum;Dr):</span>
                         <h4 class="fw-extrabold text-info font-mono mb-0" id="totalDebitDisplay">Rs. 0.00</h4>
                     </div>
                     <div class="col-12 col-md-3">
-                        <span class="fs-2xs fw-bold text-uppercase text-slate-400 d-block">Total Credits ($\sum\text{Cr}$):</span>
+                        <span class="fs-2xs fw-bold text-uppercase text-slate-400 d-block">Total Credits (&sum;Cr):</span>
                         <h4 class="fw-extrabold text-warning font-mono mb-0" id="totalCreditDisplay">Rs. 0.00</h4>
                     </div>
                     <div class="col-12 col-md-3">
@@ -202,12 +250,13 @@
 </div>
 
 <script>
+document.addEventListener('DOMContentLoaded', () => {
     function calculateVoucherBalances() {
         let totalDr = 0.0;
         let totalCr = 0.0;
 
-        const debitInputs = document.querySelectorAll('.debit-input');
-        const creditInputs = document.querySelectorAll('.credit-input');
+        const debitInputs = document.querySelectorAll('.debit-input, [name$="-debit_amount"]');
+        const creditInputs = document.querySelectorAll('.credit-input, [name$="-credit_amount"]');
 
         debitInputs.forEach(input => {
             const row = input.closest('tr');
@@ -249,80 +298,106 @@
         }
     }
 
-    // Dynamic Formset Row Cloning
-    document.addEventListener('DOMContentLoaded', () => {
-        const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
-        const formsetBody = document.getElementById('journalFormsetBody');
-        const addRowBtn = document.getElementById('addJournalRowBtn');
+    function attachRowListeners(row) {
+        const dr = row.querySelector('.debit-input, [name$="-debit_amount"]');
+        const cr = row.querySelector('.credit-input, [name$="-credit_amount"]');
 
-        function bindRowListeners(row) {
-            const dr = row.querySelector('.debit-input');
-            const cr = row.querySelector('.credit-input');
-
-            if (dr && cr) {
-                dr.addEventListener('input', () => {
-                    if (parseFloat(dr.value) > 0) {
-                        cr.value = '0.00';
-                    }
-                    calculateVoucherBalances();
-                });
-                cr.addEventListener('input', () => {
-                    if (parseFloat(cr.value) > 0) {
-                        dr.value = '0.00';
-                    }
-                    calculateVoucherBalances();
-                });
-            }
-
-            const removeBtn = row.querySelector('.remove-row-btn');
-            if (removeBtn) {
-                removeBtn.addEventListener('click', () => {
-                    row.remove();
-                    renumberRows();
-                    calculateVoucherBalances();
-                });
-            }
-        }
-
-        function renumberRows() {
-            const rows = document.querySelectorAll('.journal-form-row');
-            rows.forEach((r, idx) => {
-                const idxSpan = r.querySelector('.row-index');
-                if (idxSpan) idxSpan.textContent = idx + 1;
+        if (dr && cr) {
+            dr.addEventListener('input', () => {
+                if (parseFloat(dr.value) > 0) {
+                    cr.value = '0.00';
+                }
+                calculateVoucherBalances();
             });
-        }
-
-        if (addRowBtn && totalFormsInput && formsetBody) {
-            addRowBtn.addEventListener('click', () => {
-                const rows = document.querySelectorAll('.journal-form-row');
-                const formIdx = rows.length;
-                const lastRow = rows[rows.length - 1];
-
-                if (!lastRow) return;
-
-                const newRow = lastRow.cloneNode(true);
-                const regex = new RegExp(`items-(\\d+)-`, 'g');
-                newRow.innerHTML = newRow.innerHTML.replace(regex, `items-${formIdx}-`);
-
-                // Clear input values
-                newRow.querySelectorAll('input').forEach(inp => {
-                    if (inp.type === 'number' || inp.type === 'text') inp.value = '';
-                });
-                newRow.querySelectorAll('select').forEach(sel => {
-                    sel.selectedIndex = 0;
-                });
-
-                formsetBody.appendChild(newRow);
-                totalFormsInput.value = formIdx + 1;
-
-                bindRowListeners(newRow);
-                renumberRows();
+            cr.addEventListener('input', () => {
+                if (parseFloat(cr.value) > 0) {
+                    dr.value = '0.00';
+                }
                 calculateVoucherBalances();
             });
         }
 
-        document.querySelectorAll('.journal-form-row').forEach(bindRowListeners);
-        calculateVoucherBalances();
+        const removeBtn = row.querySelector('.remove-row-btn');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', () => {
+                row.remove();
+                renumberRows();
+                calculateVoucherBalances();
+            });
+        }
+    }
+
+    function renumberRows() {
+        const rows = document.querySelectorAll('.journal-form-row');
+        rows.forEach((r, idx) => {
+            const idxSpan = r.querySelector('.row-index');
+            if (idxSpan) idxSpan.textContent = idx + 1;
+        });
+    }
+
+    const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+    const formsetBody = document.getElementById('journalFormsetBody');
+    const addRowBtn = document.getElementById('addJournalRowBtn');
+
+    if (addRowBtn && totalFormsInput && formsetBody) {
+        addRowBtn.addEventListener('click', () => {
+            const rows = document.querySelectorAll('.journal-form-row');
+            const formIdx = rows.length;
+            const lastRow = rows[rows.length - 1];
+
+            if (!lastRow) return;
+
+            const newRow = lastRow.cloneNode(true);
+            const regex = new RegExp(`items-(\\d+)-`, 'g');
+            newRow.innerHTML = newRow.innerHTML.replace(regex, `items-${formIdx}-`);
+
+            // Clear inputs and reset contextual wrappers
+            newRow.querySelectorAll('input').forEach(inp => {
+                if (inp.type === 'number' || inp.type === 'text' || inp.type === 'hidden') {
+                    if (!inp.name.endsWith('-id')) {
+                        inp.value = '';
+                    }
+                }
+                delete inp.dataset.asyncSearchInitialized;
+            });
+
+            // Clean up injected contextual dropdown elements from the cloned markup
+            newRow.querySelectorAll('.contextual-search-wrapper').forEach(wrapper => {
+                delete wrapper.dataset.asyncSearchInitialized;
+                const controls = wrapper.querySelector('.async-controls-wrap');
+                if (controls) controls.remove();
+                const dropdown = wrapper.querySelector('.async-search-dropdown');
+                if (dropdown) dropdown.remove();
+                const chip = wrapper.querySelector('.async-selected-chip');
+                if (chip) chip.remove();
+
+                const textInput = wrapper.querySelector('.async-search-input');
+                if (textInput) {
+                    textInput.classList.remove('d-none');
+                    textInput.value = '';
+                }
+            });
+
+            formsetBody.appendChild(newRow);
+            totalFormsInput.value = formIdx + 1;
+
+            // Global contextual search initialization on newly inserted row
+            if (typeof window.initContextualSearch === 'function') {
+                window.initContextualSearch(newRow);
+            }
+
+            attachRowListeners(newRow);
+            renumberRows();
+            calculateVoucherBalances();
+        });
+    }
+
+    // Initialize existing rows
+    document.querySelectorAll('.journal-form-row').forEach(row => {
+        attachRowListeners(row);
     });
+
+    calculateVoucherBalances();
+});
 </script>
 {% endblock %}

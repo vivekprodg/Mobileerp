@@ -5,7 +5,6 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils.translation import gettext_lazy as _
 
-
 class TimeStampedModel(models.Model):
     """Abstract base model tracking creation, update, and soft state."""
     id = models.BigAutoField(primary_key=True)
@@ -16,7 +15,6 @@ class TimeStampedModel(models.Model):
 
     class Meta:
         abstract = True
-
 
 class SystemConfiguration(TimeStampedModel):
     """
@@ -285,11 +283,12 @@ class SystemConfiguration(TimeStampedModel):
         cache.set(cls.CACHE_KEY, obj, timeout=300)
         return obj
 
-
 class AuditLog(models.Model):
     """
     Immutable audit logging record for forensic security tracking across prices,
     stock deduction, bill deletion, MDMS status overrides, and trade-in purchases.
+    Includes database indexing on object_repr for instant forensic lookups over
+    invoice numbers, IMEIs, and sensitive credentials.
     """
     ACTION_CHOICES = [
         ('CREATE', 'Creation'),
@@ -314,8 +313,14 @@ class AuditLog(models.Model):
         related_name='audit_logs', db_index=True
     )
     action_type = models.CharField(max_length=30, choices=ACTION_CHOICES, db_index=True)
-    module = models.CharField(max_length=50, db_index=True, help_text="e.g. POS, Inventory, TradeIn, MDMS, Purchases, Users, Accounting")
-    object_repr = models.CharField(max_length=255)
+    module = models.CharField(
+        max_length=50, db_index=True,
+        help_text="e.g. POS, Inventory, TradeIn, MDMS, Purchases, Users, Accounting"
+    )
+    object_repr = models.CharField(
+        max_length=255, db_index=True,
+        help_text="Primary target identifier (Invoice #, IMEI, Product SKU, or Username)."
+    )
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     details = models.JSONField(default=dict, blank=True)
 
@@ -326,6 +331,8 @@ class AuditLog(models.Model):
             models.Index(fields=['timestamp', 'module']),
             models.Index(fields=['action_type', 'timestamp']),
             models.Index(fields=['branch', 'timestamp']),
+            models.Index(fields=['object_repr']),
+            models.Index(fields=['module', 'object_repr']),
         ]
         verbose_name = _('Audit Log')
         verbose_name_plural = _('Audit Logs')

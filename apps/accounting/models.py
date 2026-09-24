@@ -10,6 +10,8 @@ Key Capabilities:
 2. General Ledger Chart of Accounts (COA):
    - Hierarchical AccountGroup and Account models with system control tags.
    - Protects transacted and system-reserved accounts from structural tampering.
+   - Optimized indexing on (code, name, branch) and high-speed query helpers for
+     instant partial matching ("11", "cash", "fonepay", "बैंक").
 3. Strict Double-Entry Journal Engine (JournalEntry & JournalItem):
    - Mathematical balance enforcement: Sum(Debits) == Sum(Credits).
    - Provenance tracking via source_module and source_id.
@@ -31,7 +33,6 @@ from apps.branches.models import Branch
 from apps.customers.models import Customer
 from apps.purchases.models import Supplier
 from apps.core.nepali_calendar import NepaliCalendar
-
 
 class AccountGroup(TimeStampedModel):
     """
@@ -86,6 +87,10 @@ class AccountGroup(TimeStampedModel):
         ordering = ['code']
         verbose_name = _('Account Group')
         verbose_name_plural = _('Account Groups')
+        indexes = [
+            models.Index(fields=['code', 'name'], name='idx_accgrp_code_name'),
+            models.Index(fields=['category', 'nature'], name='idx_accgrp_cat_nat'),
+        ]
 
     def __str__(self):
         return f"{self.code} - {self.name}"
@@ -113,6 +118,34 @@ class AccountGroup(TimeStampedModel):
                           "Transactions have already been posted to accounts belonging to this group.")
                     )
 
+class AccountQuerySet(models.QuerySet):
+    """
+    Custom QuerySet for General Ledger Accounts providing high-performance text search
+    and branch-scoped filtering for vouchers, reconciliations, and counter billing.
+    """
+    def for_branch(self, branch=None):
+        if branch is None:
+            return self
+        return self.filter(models.Q(branch=branch) | models.Q(branch__isnull=True))
+
+    def search(self, query: str, branch=None):
+        """
+        Fast lookup optimized for partial account codes (e.g., '11', '1010')
+        or name keywords (e.g., 'cash', 'bank', 'fonepay', 'vat') across
+        both English and Nepali ledger names.
+        """
+        if not query or not query.strip():
+            return self.for_branch(branch)
+
+        query = query.strip()
+        qs = self.for_branch(branch)
+
+        return qs.filter(
+            models.Q(code__istartswith=query) |
+            models.Q(name__icontains=query) |
+            models.Q(name_np__icontains=query) |
+            models.Q(code__icontains=query)
+        ).order_by('code')
 
 class Account(TimeStampedModel):
     """
@@ -127,7 +160,7 @@ class Account(TimeStampedModel):
         verbose_name=_("Account Ledger Name (English)")
     )
     name_np = models.CharField(
-        max_length=200, blank=True, null=True,
+        max_length=200, blank=True, null=True, db_index=True,
         verbose_name=_("Account Ledger Name (Nepali / देवनागरी)")
     )
     group = models.ForeignKey(
@@ -195,12 +228,22 @@ class Account(TimeStampedModel):
     )
     description = models.TextField(blank=True, null=True)
 
+    objects = AccountQuerySet.as_manager()
+
     class Meta:
         db_table = 'acc_accounts'
         ordering = ['code']
         verbose_name = _('General Ledger Account')
         verbose_name_plural = _('General Ledger Accounts')
         indexes = [
+            # High-performance text search and auto-complete indexes
+            models.Index(fields=['code'], name='idx_acc_code'),
+            models.Index(fields=['name'], name='idx_acc_name'),
+            models.Index(fields=['code', 'name'], name='idx_acc_code_name'),
+            models.Index(fields=['name_np'], name='idx_acc_name_np'),
+            models.Index(fields=['branch', 'code'], name='idx_acc_branch_code'),
+            models.Index(fields=['branch', 'name'], name='idx_acc_branch_name'),
+            # System and hierarchy relationship indexes
             models.Index(fields=['system_tag', 'branch'], name='idx_acc_tag_branch'),
             models.Index(fields=['group', 'branch'], name='idx_acc_group_branch'),
         ]
@@ -212,6 +255,14 @@ class Account(TimeStampedModel):
     @property
     def is_debit_nature(self) -> bool:
         return self.group.nature == 'DEBIT'
+
+    @classmethod
+    def search(cls, query: str, branch=None, limit: int = 50):
+        """
+        Classmethod helper for autocomplete endpoints in manual journals,
+        expense vouchers, and bank reconciliations.
+        """
+        return cls.objects.search(query=query, branch=branch)[:limit]
 
     def clean(self):
         super().clean()
@@ -229,7 +280,6 @@ class Account(TimeStampedModel):
                         errors['branch'] = _("Cannot alter the Branch Scope of an account with posted journal entries.")
                     if errors:
                         raise ValidationError(errors)
-
 
 class AccountingFiscalYear(TimeStampedModel):
     """
@@ -283,7 +333,6 @@ class AccountingFiscalYear(TimeStampedModel):
     # =========================================================================
     # FISCAL YEAR MANAGEMENT CLASSMETHODS & CONTEXT MANAGERS
     # =========================================================================
-
     @classmethod
     def get_or_create_fiscal_year(cls, fy_name: str, is_closed: bool = False) -> 'AccountingFiscalYear':
         """
@@ -396,7 +445,6 @@ class AccountingFiscalYear(TimeStampedModel):
 
         return locked_objs, active_obj
 
-
 class FinancialPeriod(TimeStampedModel):
     """
     Monthly Accounting Period corresponding to the 12 Bikram Sambat calendar months.
@@ -424,7 +472,6 @@ class FinancialPeriod(TimeStampedModel):
 
     def __str__(self):
         return f"{self.period_name_en} ({self.fiscal_year.name})"
-
 
 class JournalEntry(TimeStampedModel):
     """
@@ -583,7 +630,6 @@ class JournalEntry(TimeStampedModel):
 
         super().save(*args, **kwargs)
 
-
 class JournalItem(TimeStampedModel):
     """
     Atomic Double-Entry Line Item.
@@ -651,7 +697,6 @@ class JournalItem(TimeStampedModel):
 
         if dr > Decimal('0.00') and cr > Decimal('0.00'):
             raise ValidationError(_("A single line cannot have both Debit and Credit amounts. Split into two lines."))
-
 
 class ExpenseVoucher(TimeStampedModel):
     """
@@ -744,7 +789,6 @@ class ExpenseVoucher(TimeStampedModel):
                     pass
         super().save(*args, **kwargs)
 
-
 class BankReconciliation(TimeStampedModel):
     """
     Bank Statement Reconciliation Voucher.
@@ -790,7 +834,6 @@ class BankReconciliation(TimeStampedModel):
     def __str__(self):
         return f"{self.bank_account.name} @ {self.statement_date} (Diff: Rs. {self.difference})"
 
-
 class BankStatementLine(TimeStampedModel):
     """
     Itemized bank statement line entry matched against journal items.
@@ -815,3 +858,6 @@ class BankStatementLine(TimeStampedModel):
         ordering = ['transaction_date', 'id']
         verbose_name = _('Bank Statement Line')
         verbose_name_plural = _('Bank Statement Lines')
+
+    def __str__(self):
+        return f"{self.transaction_date} - {self.description} (W: {self.withdrawal_amount}, D: {self.deposit_amount})"

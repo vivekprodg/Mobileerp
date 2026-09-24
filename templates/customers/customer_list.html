@@ -23,13 +23,16 @@
         </div>
     </div>
 
-    <!-- Search & Filter Bar with Keyboard Shortcut Hint -->
+    <!-- Search & Filter Bar with Keyboard Shortcut Cue -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
         <form method="get" class="row g-2 align-items-center">
             <div class="col-12 col-md-5 position-relative">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
-                    <input type="text" name="q" id="customerSearchInput" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search by Customer Name, Mobile 98XXXXXXXX, or PAN...">
+                    <input type="text" name="q" id="customerSearchInput" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search Customer Name, Mobile 98XXXXXXXX, or PAN...">
+                    <span class="input-group-text bg-light border-0 py-0 pe-2" title="Keyboard Shortcut: Press '/' or 'Alt+S' to search">
+                        <kbd class="bg-white text-muted border shadow-xs fs-2xs px-1 py-0.5 rounded">Alt+S</kbd>
+                    </span>
                 </div>
             </div>
             <div class="col-6 col-md-3">
@@ -128,12 +131,30 @@
 </div>
 
 <script>
-document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        const searchInput = document.getElementById('customerSearchInput');
-        if (searchInput) searchInput.focus();
-    }
+document.addEventListener('DOMContentLoaded', () => {
+    // Dedicated page-level shortcut listener that PRESERVES Ctrl+K for Global Command Palette
+    document.addEventListener('keydown', (e) => {
+        const isInputFocused = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
+        
+        // Single '/' key when not actively typing in an input
+        if (e.key === '/' && !isInputFocused) {
+            e.preventDefault();
+            const searchInput = document.getElementById('customerSearchInput');
+            if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
+        } 
+        // Alt + S shortcut accessible from anywhere on the page
+        else if (e.altKey && (e.key.toLowerCase() === 's' || e.code === 'KeyS')) {
+            e.preventDefault();
+            const searchInput = document.getElementById('customerSearchInput');
+            if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+    });
 });
 </script>
 {% endblock %}

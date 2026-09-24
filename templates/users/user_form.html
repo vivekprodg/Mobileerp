@@ -1,12 +1,15 @@
 {% extends "core/base.html" %}
 
-{% block title %}{% if form.instance.pk %}Edit Staff{% else %}Register New Staff{% endif %} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+{% block title %}{% if form.instance.pk %}Edit Staff - {{ form.instance.get_full_name|default:form.instance.username }}{% else %}Register Staff Member{% endif %} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
 {% block content %}
 <div class="container-fluid px-4 py-4">
     <div class="d-flex align-items-center justify-content-between mb-4">
         <div>
-            <h4 class="fw-bold text-dark mb-0">{% if form.instance.pk %}Edit Staff Profile{% else %}Register Staff Member{% endif %}</h4>
+            <h4 class="fw-bold text-dark mb-0">
+                <i class="fas fa-user-gear text-primary me-2"></i>
+                {% if form.instance.pk %}Edit Staff Profile: {{ form.instance.get_full_name|default:form.instance.username }}{% else %}Register Staff Member{% endif %}
+            </h4>
             <p class="text-muted fs-xs mb-0">Set up roles, assigned branch terminal, login password, and quick POS PIN</p>
         </div>
         <a href="{% url 'users:user_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
@@ -32,40 +35,79 @@
     {% endif %}
 
     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white" style="max-width: 900px;">
-        <form method="post" novalidate>
+        <form method="post" novalidate id="userMasterForm">
             {% csrf_token %}
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">Username <span class="text-danger">*</span></label>
                     {{ form.username }}
+                    {% if form.username.errors %}<div class="text-danger fs-2xs mt-1">{{ form.username.errors|striptags }}</div>{% endif %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">Mobile Number (Nepal 98XXXXXXXX) <span class="text-danger">*</span></label>
                     {{ form.phone_number }}
+                    {% if form.phone_number.errors %}<div class="text-danger fs-2xs mt-1">{{ form.phone_number.errors|striptags }}</div>{% endif %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">First Name</label>
                     {{ form.first_name }}
+                    {% if form.first_name.errors %}<div class="text-danger fs-2xs mt-1">{{ form.first_name.errors|striptags }}</div>{% endif %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">Last Name</label>
                     {{ form.last_name }}
+                    {% if form.last_name.errors %}<div class="text-danger fs-2xs mt-1">{{ form.last_name.errors|striptags }}</div>{% endif %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">Email Address</label>
                     {{ form.email }}
+                    {% if form.email.errors %}<div class="text-danger fs-2xs mt-1">{{ form.email.errors|striptags }}</div>{% endif %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">System Role <span class="text-danger">*</span></label>
                     {{ form.role }}
+                    {% if form.role.errors %}<div class="text-danger fs-2xs mt-1">{{ form.role.errors|striptags }}</div>{% endif %}
                 </div>
+
+                <!-- Asynchronous Branch Contextual Search Selector with Standard Visible Input & Pre-fill -->
                 <div class="col-md-6">
-                    <label class="form-label fw-bold text-dark fs-xs">Assigned Branch</label>
-                    {{ form.assigned_branch }}
+                    <label class="form-label fw-bold text-dark fs-xs d-flex justify-content-between align-items-center">
+                        <span>Assigned Branch</span>
+                        <span class="text-muted fw-normal fs-2xs">Physical Store / Warehouse</span>
+                    </label>
+                    <div class="contextual-search-wrapper"
+                         id="assignedBranchWrapper"
+                         data-search-url="/branches/api/search/"
+                         data-search-type="branch"
+                         data-placeholder="Search branch name, code, or city..."
+                         data-initial-id="{{ form.instance.assigned_branch.id|default:form.assigned_branch.value|default:'' }}"
+                         data-initial-title="{{ form.instance.assigned_branch.name|default:'' }}"
+                         data-initial-subtitle="{% if form.instance.assigned_branch.code %}Code: {{ form.instance.assigned_branch.code }}{% endif %}">
+                        <input type="hidden" 
+                               name="assigned_branch" 
+                               id="id_assigned_branch" 
+                               value="{{ form.instance.assigned_branch.id|default:form.assigned_branch.value|default:'' }}">
+                        <input type="text" 
+                               class="form-control contextual-search-input async-search-input"
+                               id="assigned_branch_search_display"
+                               placeholder="Search branch name, code, or city..."
+                               value="{% if form.instance.assigned_branch %}{{ form.instance.assigned_branch.name }}{% if form.instance.assigned_branch.code %} ({{ form.instance.assigned_branch.code }}){% endif %}{% endif %}"
+                               autocomplete="off">
+                    </div>
+                    {% if form.assigned_branch.errors %}
+                    <div class="text-danger fs-2xs mt-1">
+                        {{ form.assigned_branch.errors|striptags }}
+                    </div>
+                    {% endif %}
+                    <small class="text-muted fs-2xs d-block mt-1">
+                        Restricts cashier billing, stock transfers, and counter operations to this physical branch.
+                    </small>
                 </div>
+
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">Quick POS PIN (4-6 Digits)</label>
                     {{ form.pin_code }}
+                    {% if form.pin_code.errors %}<div class="text-danger fs-2xs mt-1">{{ form.pin_code.errors|striptags }}</div>{% endif %}
                 </div>
 
                 {% if not form.instance.pk %}
@@ -73,14 +115,19 @@
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">Login Password <span class="text-danger">*</span></label>
                     {{ form.password1 }}
+                    {% if form.password1.errors %}<div class="text-danger fs-2xs mt-1">{{ form.password1.errors|striptags }}</div>{% endif %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-bold text-dark fs-xs">Confirm Login Password <span class="text-danger">*</span></label>
                     {{ form.password2 }}
+                    {% if form.password2.errors %}<div class="text-danger fs-2xs mt-1">{{ form.password2.errors|striptags }}</div>{% endif %}
                 </div>
                 {% endif %}
 
                 <div class="col-12 mt-4 text-end">
+                    <a href="{% url 'users:user_list' %}" class="btn btn-outline-secondary px-4 me-2 rounded-pill">
+                        Cancel
+                    </a>
                     <button type="submit" class="btn btn-primary px-4 py-2 rounded-pill fw-bold shadow-sm">
                         <i class="fas fa-user-check me-1"></i> Save Staff Member
                     </button>

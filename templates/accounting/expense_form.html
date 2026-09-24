@@ -3,6 +3,59 @@
 
 {% block title %}Record Operating Expense (दैनिक खर्च) | {{ COMPANY_NAME }}{% endblock %}
 
+{% block extra_head %}
+<style>
+.async-search-container {
+    position: relative;
+}
+
+.async-results-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+    max-height: 250px;
+    overflow-y: auto;
+    margin-top: 4px;
+    display: none;
+}
+
+.async-results-dropdown.show {
+    display: block;
+}
+
+.async-result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.15s ease;
+}
+
+.async-result-item:last-child {
+    border-bottom: none;
+}
+
+.async-result-item:hover {
+    background-color: #f8fafc;
+}
+
+.async-selected-card {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid px-3 px-md-4 py-3" style="max-width: 1100px;">
 
@@ -40,23 +93,23 @@
         </div>
         <div class="d-flex flex-wrap gap-2">
             <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
-                    onclick="applyPreset('Tea / Coffee / Staff Refreshment (खाजा तथा चिया)', 'Tea and snacks for staff and walk-in VIP clients', 'Local Tea Stall')">
+                    onclick="applyPreset('Tea / Coffee / Staff Refreshment', 'Tea and snacks for staff and walk-in VIP clients', 'Local Tea Stall')">
                 ☕ Tea &amp; Refreshments
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
-                    onclick="applyPreset('Electricity & Water Charges (बिजुली तथा पानी)', 'Monthly shop electricity bill payment', 'Nepal Electricity Authority (NEA)')">
+                    onclick="applyPreset('Electricity & Water Charges', 'Monthly shop electricity bill payment', 'Nepal Electricity Authority (NEA)')">
                 ⚡ Electricity &amp; Water
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
-                    onclick="applyPreset('Shop Rent (पसल भाडा)', 'Monthly store premises rent disbursement', 'Shop Landlord')">
+                    onclick="applyPreset('Shop Rent', 'Monthly store premises rent disbursement', 'Shop Landlord')">
                 🏢 Store Rent
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
-                    onclick="applyPreset('Internet & Telephone (इन्टरनेट तथा फोन)', 'High-speed fiber internet subscription renewal', 'ISP Provider (WorldLink/Vianet)')">
+                    onclick="applyPreset('Internet & Telephone', 'High-speed fiber internet subscription renewal', 'ISP Provider (WorldLink/Vianet)')">
                 📶 Internet / Wi-Fi
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
-                    onclick="applyPreset('Printing & Stationery (कागज तथा स्टेशनरी)', 'Thermal paper rolls, billing receipts & pens', 'Stationery Shop')">
+                    onclick="applyPreset('Printing & Stationery', 'Thermal paper rolls, billing receipts & pens', 'Stationery Shop')">
                 🧾 Thermal Rolls &amp; Paper
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 rounded-pill fs-xs bg-light" 
@@ -108,11 +161,34 @@
                             <div class="form-text fs-2xs">Enter the exact paid amount in Nepalese Rupees.</div>
                         </div>
 
+                        <!-- Asynchronous Expense Account Selector -->
                         <div class="mb-3">
                             <label class="form-label fs-xs fw-bold text-dark mb-1">
                                 Expense Account Category * (खर्च शीर्षक)
                             </label>
-                            {{ form.expense_account }}
+                            <input type="hidden" name="expense_account" id="id_expense_account" value="{{ form.expense_account.value|default:'' }}" required>
+                            
+                            <div class="async-search-container">
+                                <div id="expenseAccountSelectedCard" class="async-selected-card {% if not form.expense_account.value %}d-none{% endif %}">
+                                    <div>
+                                        <div class="fw-bold text-dark fs-xs" id="expenseAccountSelectedName">
+                                            {% if form.instance.expense_account %}{{ form.instance.expense_account.code }} - {{ form.instance.expense_account.name }}{% else %}Selected Expense Account{% endif %}
+                                        </div>
+                                        <small class="text-muted fs-2xs">Expense GL Category</small>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-2xs" id="clearExpenseAccountBtn">
+                                        <i class="fas fa-times me-1"></i> Change
+                                    </button>
+                                </div>
+
+                                <div id="expenseAccountSearchWrapper" class="{% if form.expense_account.value %}d-none{% endif %}">
+                                    <div class="input-group">
+                                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted fs-xs"></i></span>
+                                        <input type="text" id="expenseAccountSearchInput" class="form-control border-start-0" placeholder="Search expense category (e.g. Tea, Rent, Electricity)..." autocomplete="off">
+                                    </div>
+                                    <div id="expenseAccountSearchResults" class="async-results-dropdown shadow-lg"></div>
+                                </div>
+                            </div>
                             {% if form.expense_account.errors %}
                                 <div class="text-danger fs-2xs mt-1">{{ form.expense_account.errors }}</div>
                             {% endif %}
@@ -177,11 +253,34 @@
                                 {% endif %}
                             </div>
 
+                            <!-- Asynchronous Payment Account (Cash/Bank) Selector -->
                             <div class="mb-3">
                                 <label class="form-label fs-xs fw-bold text-dark mb-1">
                                     Paid From (Payment Account) * (भुक्तानी भएको खाता)
                                 </label>
-                                {{ form.payment_account }}
+                                <input type="hidden" name="payment_account" id="id_payment_account" value="{{ form.payment_account.value|default:'' }}" required>
+                                
+                                <div class="async-search-container">
+                                    <div id="paymentAccountSelectedCard" class="async-selected-card {% if not form.payment_account.value %}d-none{% endif %}">
+                                        <div>
+                                            <div class="fw-bold text-dark fs-xs" id="paymentAccountSelectedName">
+                                                {% if form.instance.payment_account %}{{ form.instance.payment_account.code }} - {{ form.instance.payment_account.name }}{% else %}Selected Payment Source{% endif %}
+                                            </div>
+                                            <small class="text-muted fs-2xs">Cash or Bank Asset</small>
+                                        </div>
+                                        <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-2xs" id="clearPaymentAccountBtn">
+                                            <i class="fas fa-times me-1"></i> Change
+                                        </button>
+                                    </div>
+
+                                    <div id="paymentAccountSearchWrapper" class="{% if form.payment_account.value %}d-none{% endif %}">
+                                        <div class="input-group">
+                                            <span class="input-group-text bg-light border-end-0"><i class="fas fa-wallet text-muted fs-xs"></i></span>
+                                            <input type="text" id="paymentAccountSearchInput" class="form-control border-start-0" placeholder="Search cash float or bank account..." autocomplete="off">
+                                        </div>
+                                        <div id="paymentAccountSearchResults" class="async-results-dropdown shadow-lg"></div>
+                                    </div>
+                                </div>
                                 {% if form.payment_account.errors %}
                                     <div class="text-danger fs-2xs mt-1">{{ form.payment_account.errors }}</div>
                                 {% endif %}
@@ -237,47 +336,215 @@
 </div>
 
 <script>
-    function applyPreset(accountTextPart, desc, payee) {
-        const select = document.getElementById('id_expense_account');
-        if (select) {
-            for (let i = 0; i < select.options.length; i++) {
-                if (select.options[i].text.toLowerCase().includes(accountTextPart.toLowerCase().split('(')[0].trim())) {
-                    select.selectedIndex = i;
-                    break;
-                }
-            }
-        }
-        const descInput = document.getElementById('id_description');
-        if (descInput && (!descInput.value || descInput.value.trim() === '')) {
-            descInput.value = desc;
-        }
-        const payeeInput = document.getElementById('id_payee_recipient');
-        if (payeeInput && (!payeeInput.value || payeeInput.value.trim() === '')) {
-            payeeInput.value = payee;
-        }
-        updatePostingPreview();
+    function debounce(func, wait = 250) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
     }
 
     function updatePostingPreview() {
-        const expSelect = document.getElementById('id_expense_account');
-        const paySelect = document.getElementById('id_payment_account');
+        const drText = document.getElementById('expenseAccountSelectedName').innerText;
+        const crText = document.getElementById('paymentAccountSelectedName').innerText;
         
         const drSpan = document.getElementById('previewDrAcc');
         const crSpan = document.getElementById('previewCrAcc');
 
-        if (expSelect && drSpan) {
-            drSpan.textContent = expSelect.selectedIndex >= 0 ? expSelect.options[expSelect.selectedIndex].text : '[Expense Account]';
-        }
-        if (paySelect && crSpan) {
-            crSpan.textContent = paySelect.selectedIndex >= 0 ? paySelect.options[paySelect.selectedIndex].text : '[Payment Account]';
+        if (drSpan) drSpan.textContent = drText || '[Expense Account]';
+        if (crSpan) crSpan.textContent = crText || '[Payment Account]';
+    }
+
+    // Preset Applicator: Queries matching expense category and sets narrative
+    async function applyPreset(accountQuery, desc, payee) {
+        const descInput = document.getElementById('id_description');
+        if (descInput) descInput.value = desc;
+
+        const payeeInput = document.getElementById('id_payee_recipient');
+        if (payeeInput) payeeInput.value = payee;
+
+        try {
+            const resp = await fetch(`/accounting/api/accounts/search/?category=EXPENSE&q=${encodeURIComponent(accountQuery)}`);
+            if (resp.ok) {
+                const data = await resp.json();
+                const accounts = data.results || data || [];
+                if (accounts.length > 0) {
+                    const acc = accounts[0];
+                    const expHidden = document.getElementById('id_expense_account');
+                    const expName = document.getElementById('expenseAccountSelectedName');
+                    const expCard = document.getElementById('expenseAccountSelectedCard');
+                    const expWrapper = document.getElementById('expenseAccountSearchWrapper');
+
+                    expHidden.value = acc.id;
+                    expName.innerText = `${acc.code} - ${acc.name}`;
+                    expCard.classList.remove('d-none');
+                    expWrapper.classList.add('d-none');
+                    updatePostingPreview();
+                }
+            }
+        } catch (e) {
+            console.error('Error auto-setting preset:', e);
         }
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        const expSelect = document.getElementById('id_expense_account');
-        const paySelect = document.getElementById('id_payment_account');
-        if (expSelect) expSelect.addEventListener('change', updatePostingPreview);
-        if (paySelect) paySelect.addEventListener('change', updatePostingPreview);
+        // 1. Expense Category Search
+        const expHidden = document.getElementById('id_expense_account');
+        const expInput = document.getElementById('expenseAccountSearchInput');
+        const expWrapper = document.getElementById('expenseAccountSearchWrapper');
+        const expResults = document.getElementById('expenseAccountSearchResults');
+        const expCard = document.getElementById('expenseAccountSelectedCard');
+        const expName = document.getElementById('expenseAccountSelectedName');
+        const clearExpBtn = document.getElementById('clearExpenseAccountBtn');
+
+        function selectExpenseAccount(acc) {
+            expHidden.value = acc.id;
+            expName.innerText = `${acc.code} - ${acc.name}`;
+            expCard.classList.remove('d-none');
+            expWrapper.classList.add('d-none');
+            expResults.classList.remove('show');
+            expInput.value = '';
+            updatePostingPreview();
+        }
+
+        if (clearExpBtn) {
+            clearExpBtn.addEventListener('click', () => {
+                expHidden.value = '';
+                expCard.classList.add('d-none');
+                expWrapper.classList.remove('d-none');
+                expInput.value = '';
+                expInput.focus();
+                updatePostingPreview();
+            });
+        }
+
+        if (expInput) {
+            const handleExpSearch = debounce(async (query) => {
+                try {
+                    expResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching expense categories...</div>';
+                    expResults.classList.add('show');
+
+                    const resp = await fetch(`/accounting/api/accounts/search/?category=EXPENSE&q=${encodeURIComponent(query)}`);
+                    if (!resp.ok) throw new Error('Query failed');
+                    const data = await resp.json();
+                    const accounts = data.results || data || [];
+
+                    if (!accounts.length) {
+                        expResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No matching expense account found.</div>';
+                        return;
+                    }
+
+                    let html = '';
+                    accounts.forEach(a => {
+                        html += `
+                            <div class="async-result-item" data-acc='${JSON.stringify(a).replace(/'/g, "&apos;")}'>
+                                <div class="fw-bold text-dark fs-xs">${escapeHtml(a.code)} &bull; ${escapeHtml(a.name)}</div>
+                                <div class="text-muted fs-2xs">${escapeHtml(a.group_name || a.category || '')}</div>
+                            </div>
+                        `;
+                    });
+                    expResults.innerHTML = html;
+
+                    expResults.querySelectorAll('.async-result-item').forEach(el => {
+                        el.addEventListener('click', () => {
+                            selectExpenseAccount(JSON.parse(el.dataset.acc));
+                        });
+                    });
+                } catch (err) {
+                    expResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying accounts.</div>';
+                }
+            }, 200);
+
+            expInput.addEventListener('input', (e) => handleExpSearch(e.target.value.trim()));
+            expInput.addEventListener('focus', (e) => handleExpSearch(e.target.value.trim()));
+        }
+
+        // 2. Payment Account (Cash/Bank) Search
+        const payHidden = document.getElementById('id_payment_account');
+        const payInput = document.getElementById('paymentAccountSearchInput');
+        const payWrapper = document.getElementById('paymentAccountSearchWrapper');
+        const payResults = document.getElementById('paymentAccountSearchResults');
+        const payCard = document.getElementById('paymentAccountSelectedCard');
+        const payName = document.getElementById('paymentAccountSelectedName');
+        const clearPayBtn = document.getElementById('clearPaymentAccountBtn');
+
+        function selectPaymentAccount(acc) {
+            payHidden.value = acc.id;
+            payName.innerText = `${acc.code} - ${acc.name}`;
+            payCard.classList.remove('d-none');
+            payWrapper.classList.add('d-none');
+            payResults.classList.remove('show');
+            payInput.value = '';
+            updatePostingPreview();
+        }
+
+        if (clearPayBtn) {
+            clearPayBtn.addEventListener('click', () => {
+                payHidden.value = '';
+                payCard.classList.add('d-none');
+                payWrapper.classList.remove('d-none');
+                payInput.value = '';
+                payInput.focus();
+                updatePostingPreview();
+            });
+        }
+
+        if (payInput) {
+            const handlePaySearch = debounce(async (query) => {
+                try {
+                    payResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching payment sources...</div>';
+                    payResults.classList.add('show');
+
+                    const resp = await fetch(`/accounting/api/accounts/search/?category=PAYMENT&q=${encodeURIComponent(query)}`);
+                    if (!resp.ok) throw new Error('Query failed');
+                    const data = await resp.json();
+                    const accounts = data.results || data || [];
+
+                    if (!accounts.length) {
+                        payResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No cash or bank account found.</div>';
+                        return;
+                    }
+
+                    let html = '';
+                    accounts.forEach(a => {
+                        html += `
+                            <div class="async-result-item" data-acc='${JSON.stringify(a).replace(/'/g, "&apos;")}'>
+                                <div class="fw-bold text-dark fs-xs">${escapeHtml(a.code)} &bull; ${escapeHtml(a.name)}</div>
+                                <div class="text-muted fs-2xs">${escapeHtml(a.group_name || a.category || '')}</div>
+                            </div>
+                        `;
+                    });
+                    payResults.innerHTML = html;
+
+                    payResults.querySelectorAll('.async-result-item').forEach(el => {
+                        el.addEventListener('click', () => {
+                            selectPaymentAccount(JSON.parse(el.dataset.acc));
+                        });
+                    });
+                } catch (err) {
+                    payResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying payment accounts.</div>';
+                }
+            }, 200);
+
+            payInput.addEventListener('input', (e) => handlePaySearch(e.target.value.trim()));
+            payInput.addEventListener('focus', (e) => handlePaySearch(e.target.value.trim()));
+        }
+
+        document.addEventListener('click', (e) => {
+            if (expResults && !expResults.contains(e.target) && e.target !== expInput) {
+                expResults.classList.remove('show');
+            }
+            if (payResults && !payResults.contains(e.target) && e.target !== payInput) {
+                payResults.classList.remove('show');
+            }
+        });
+
         updatePostingPreview();
     });
 </script>

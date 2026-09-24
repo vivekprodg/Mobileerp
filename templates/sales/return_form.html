@@ -50,6 +50,11 @@
     align-items: center;
     gap: 5px;
 }
+
+/* Quick Estimate Search Overlay */
+#invoiceSearchResultsDropdown .dropdown-item:hover {
+    background-color: #eff6ff;
+}
 </style>
 {% endblock %}
 
@@ -70,6 +75,33 @@
             <a href="{% url 'sales:estimate_detail' estimate.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
                 &larr; Back to Bill Details
             </a>
+        </div>
+    </div>
+
+    <!-- Quick Bill / Estimate Lookup Bar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="row g-2 align-items-center">
+            <div class="col-12 col-md-3">
+                <label class="form-label fw-bold text-dark fs-xs mb-0">
+                    <i class="fas fa-magnifying-glass text-primary me-1"></i> Look Up Another Invoice:
+                </label>
+                <small class="text-muted fs-2xs d-block">Switch to another bill</small>
+            </div>
+            <div class="col-12 col-md-9 position-relative">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0 text-muted"><i class="fas fa-file-invoice"></i></span>
+                    <input type="text" 
+                           id="invoiceLookupSearchInput" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Search by Bill / Estimate # (e.g. EST-00123), Customer Name, or Phone (98XXXXXXXX)..." 
+                           autocomplete="off">
+                    <button type="button" class="btn btn-light border-0 text-muted" id="clearInvoiceLookupBtn" style="display: none;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <!-- Results Dropdown -->
+                <div id="invoiceSearchResultsDropdown" class="dropdown-menu shadow-lg w-100 p-0 rounded-3 mt-1 border" style="display:none; max-height: 280px; overflow-y: auto; z-index: 1050;"></div>
+            </div>
         </div>
     </div>
 
@@ -321,6 +353,88 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // =========================================================================
+    // 1. ASYNCHRONOUS ESTIMATE / INVOICE LOOKUP API
+    // =========================================================================
+    const lookupInput = document.getElementById('invoiceLookupSearchInput');
+    const clearLookupBtn = document.getElementById('clearInvoiceLookupBtn');
+    const lookupDropdown = document.getElementById('invoiceSearchResultsDropdown');
+    let lookupDebounce = null;
+
+    if (lookupInput && lookupDropdown) {
+        lookupInput.addEventListener('input', function() {
+            const query = this.value.trim();
+            if (clearLookupBtn) clearLookupBtn.style.display = query ? 'block' : 'none';
+
+            clearTimeout(lookupDebounce);
+            if (query.length < 2) {
+                lookupDropdown.style.display = 'none';
+                lookupDropdown.innerHTML = '';
+                return;
+            }
+
+            lookupDebounce = setTimeout(() => {
+                lookupDropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-2 text-primary"></i>Searching invoices...</div>';
+                lookupDropdown.style.display = 'block';
+
+                fetch(`/sales/api/estimates/search/?q=${encodeURIComponent(query)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const results = Array.isArray(data) ? data : (data.results || []);
+                        if (!results.length) {
+                            lookupDropdown.innerHTML = `<div class="p-3 text-center text-muted fs-xs">No estimates found matching "${query}"</div>`;
+                            return;
+                        }
+
+                        lookupDropdown.innerHTML = results.map(est => {
+                            const formattedTotal = Number(est.grand_total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            const targetUrl = `/sales/estimates/${est.id}/return/`;
+                            return `
+                                <a href="${targetUrl}" class="dropdown-item py-2 px-3 border-bottom d-flex justify-content-between align-items-center text-decoration-none">
+                                    <div>
+                                        <div class="fw-bold fs-xs text-dark">
+                                            <i class="fas fa-file-invoice text-primary me-1"></i> ${est.estimate_number || 'Estimate #' + est.id}
+                                        </div>
+                                        <small class="text-muted fs-2xs">
+                                            Customer: <strong>${est.customer_name || est.recipient_display_name || 'Walk-in Customer'}</strong> 
+                                            ${est.customer_phone ? `&bull; ${est.customer_phone}` : ''} 
+                                            &bull; ${est.bill_date_ad || ''}
+                                        </small>
+                                    </div>
+                                    <div class="text-end">
+                                        <span class="badge bg-light text-primary border font-monospace fs-xs">Rs. ${formattedTotal}</span>
+                                        <small class="text-muted d-block fs-2xs">Click to process return &rarr;</small>
+                                    </div>
+                                </a>
+                            `;
+                        }).join('');
+                    })
+                    .catch(err => {
+                        console.error('[InvoiceLookup] Error:', err);
+                        lookupDropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Error searching estimates</div>';
+                    });
+            }, 250);
+        });
+
+        if (clearLookupBtn) {
+            clearLookupBtn.addEventListener('click', () => {
+                lookupInput.value = '';
+                clearLookupBtn.style.display = 'none';
+                lookupDropdown.style.display = 'none';
+                lookupInput.focus();
+            });
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!lookupInput.contains(e.target) && !lookupDropdown.contains(e.target)) {
+                lookupDropdown.style.display = 'none';
+            }
+        });
+    }
+
+    // =========================================================================
+    // 2. ITEM SELECTION, RESTOCKING ROUTE & REFUND SUMMARY CALCULATION
+    // =========================================================================
     const checkboxes = document.querySelectorAll('.return-item-checkbox');
     const qtyInputs = document.querySelectorAll('.return-qty-input');
     const defectiveToggles = document.querySelectorAll('.defective-toggle');

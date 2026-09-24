@@ -4,8 +4,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.db import transaction
+from django.db.models import Q
 
-from apps.sales.models import PhoneExchangeTradeIn, TradeInInspectionChecklist, TradeInLegalUndertaking
+from apps.sales.models import (
+    SalesEstimate, SalesEstimateItem,
+    PhoneExchangeTradeIn, TradeInInspectionChecklist, TradeInLegalUndertaking
+)
 from apps.sales.api.serializers import (
     TradeInValuationCalculateSerializer, PhoneExchangeTradeInSerializer
 )
@@ -13,59 +17,183 @@ from apps.sales.services.trade_in_engine import TradeInValuationEngine
 from apps.integrations.mdms.nta_checker import NTAMDMSClient
 from apps.core.models import SystemConfiguration
 
+class SalesEstimateSearchAPIView(APIView):
+    """
+    Search past completed/finalized sales estimates and POS invoices for:
+    - Customer Sales Returns
+    - Warranty verification & repair tracking
+    - Fast invoice retrieval and slip reprinting
+
+    Behavior:
+    1. If `q` is empty:
+       Returns up to 15 most recent completed bills for the active branch context.
+    2. If `q` is provided:
+       Performs high-performance indexed search matching:
+       - estimate_number (exact/icontains)
+       - customer_name_manual / linked customer name
+       - customer_phone_manual / linked customer phone
+       - customer_pan
+       - Sold device IMEI 1 (items__imei_number) or Secondary IMEI 2 (items__secondary_imei).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get('q', '').strip()
+        branch = getattr(request, 'active_branch', None)
+
+        try:
+            limit = int(request.GET.get('limit', 15))
+            limit = max(1, min(limit, 50))
+        except (ValueError, TypeError):
+            limit = 15
+
+        qs = SalesEstimate.objects.all().select_related(
+            'customer', 'branch', 'cashier', 'salesperson'
+        ).prefetch_related('items__product')
+
+        if branch and not request.user.is_superuser:
+            qs = qs.filter(branch=branch)
+
+        if not q:
+            # If no query provided, return the most recent active/completed sales
+            qs = qs.filter(status__in=['COMPLETED', 'PARTIALLY_RETURNED'])
+            qs = qs.order_by('-bill_date_ad', '-created_at')[:limit]
+        else:
+            # Query provided: search across header and item IMEI attributes
+            search_filter = (
+                Q(estimate_number__icontains=q) |
+                Q(customer_name_manual__icontains=q) |
+                Q(customer_phone_manual__icontains=q) |
+                Q(customer_pan__icontains=q) |
+                Q(customer__name__icontains=q) |
+                Q(customer__phone_number__icontains=q) |
+                Q(items__imei_number__icontains=q) |
+                Q(items__secondary_imei__icontains=q)
+            )
+            qs = qs.filter(search_filter).distinct().order_by('-bill_date_ad', '-created_at')[:limit]
+
+        results = []
+        for est in qs:
+            results.append({
+                'id': est.id,
+                'estimate_number': est.estimate_number,
+                'bill_date_ad': est.bill_date_ad.isoformat() if est.bill_date_ad else '',
+                'bill_date_bs': est.bill_date_bs or '',
+                'fiscal_year': est.fiscal_year or '',
+                'customer_name': est.recipient_display_name,
+                'customer_phone': est.customer_phone_manual or (est.customer.phone_number if est.customer else ''),
+                'customer_pan': est.customer_pan or '',
+                'subtotal': str(est.subtotal),
+                'grand_total': str(est.grand_total),
+                'paid_amount': str(est.paid_amount),
+                'due_amount': str(est.due_amount),
+                'status': est.status,
+                'status_display': est.get_status_display(),
+                'payment_status': est.payment_status,
+                'payment_status_display': est.get_payment_status_display(),
+                'items_count': est.items.count(),
+                'has_trade_in_exchange': est.has_trade_in_exchange,
+                'trade_in_discount_amount': str(est.trade_in_discount_amount),
+            })
+
+        return Response({
+            'status': 'success',
+            'count': len(results),
+            'results': results
+        }, status=status.HTTP_200_OK)
 
 class TradeInVoucherLookupAPIView(APIView):
     """
-    API endpoint for POS cashiers to look up an active/unattached Trade-In voucher by voucher number.
-    Returns the valuation amount and traded-in device details for cart credit attachment.
+    API endpoint for POS cashiers to look up active and unattached Trade-In vouchers.
+    - If `voucher` parameter is supplied:
+        Fetches the exact single voucher for direct cart credit deduction.
+    - If `voucher` is empty/omitted:
+        Returns up to 20 unattached, available vouchers (status DRAFT or VALUATED)
+        filtered by active branch context so the cashier can browse or pick one.
     """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
         voucher_code = request.GET.get('voucher', '').strip()
-        if not voucher_code:
-            return Response(
-                {'error': 'Voucher number parameter is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
+        search_query = request.GET.get('q', '').strip()
         branch = getattr(request, 'active_branch', None)
+
         qs = PhoneExchangeTradeIn.objects.filter(
-            voucher_number__iexact=voucher_code,
             status__in=['DRAFT', 'VALUATED']
-        )
+        ).select_related('customer', 'branch')
 
         if branch and not request.user.is_superuser:
             qs = qs.filter(branch=branch)
 
-        voucher = qs.select_related('customer', 'branch').first()
+        # 1. Exact or specified voucher lookup
+        if voucher_code:
+            voucher = qs.filter(voucher_number__iexact=voucher_code).first()
+            if not voucher:
+                return Response(
+                    {'error': f"Trade-In voucher '{voucher_code}' not found, expired, or already attached to another bill."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
-        if not voucher:
-            return Response(
-                {'error': f"Trade-In voucher '{voucher_code}' not found, expired, or already attached to another bill."},
-                status=status.HTTP_404_NOT_FOUND
+            return Response({
+                'status': 'success',
+                'id': voucher.id,
+                'voucher_number': voucher.voucher_number,
+                'brand_name': voucher.brand_name,
+                'model_name': voucher.model_name,
+                'ram_capacity': voucher.ram_capacity or '',
+                'storage_capacity': voucher.storage_capacity or '',
+                'color_variant': voucher.color_variant or '',
+                'imei_1': voucher.imei_1,
+                'mdms_status': voucher.mdms_status,
+                'market_base_value': str(voucher.market_base_value),
+                'total_deductions': str(voucher.total_deductions),
+                'final_trade_in_value': str(voucher.final_trade_in_value),
+                'recommended_condition_grade': voucher.recommended_condition_grade,
+                'customer_name': voucher.customer_name_manual or (voucher.customer.name if voucher.customer else 'Walk-in'),
+                'customer_phone': voucher.customer_phone_manual or (voucher.customer.phone_number if voucher.customer else ''),
+                'status': voucher.status
+            }, status=status.HTTP_200_OK)
+
+        # 2. Browse / Search list when voucher parameter is not explicitly supplied
+        if search_query:
+            qs = qs.filter(
+                Q(voucher_number__icontains=search_query) |
+                Q(imei_1__icontains=search_query) |
+                Q(customer_name_manual__icontains=search_query) |
+                Q(customer_phone_manual__icontains=search_query) |
+                Q(brand_name__icontains=search_query) |
+                Q(model_name__icontains=search_query)
             )
+
+        vouchers = qs.order_by('-created_at')[:20]
+        results = [
+            {
+                'id': v.id,
+                'voucher_number': v.voucher_number,
+                'brand_name': v.brand_name,
+                'model_name': v.model_name,
+                'ram_capacity': v.ram_capacity or '',
+                'storage_capacity': v.storage_capacity or '',
+                'color_variant': v.color_variant or '',
+                'imei_1': v.imei_1,
+                'mdms_status': v.mdms_status,
+                'market_base_value': str(v.market_base_value),
+                'total_deductions': str(v.total_deductions),
+                'final_trade_in_value': str(v.final_trade_in_value),
+                'recommended_condition_grade': v.recommended_condition_grade,
+                'customer_name': v.customer_name_manual or (v.customer.name if v.customer else 'Walk-in'),
+                'customer_phone': v.customer_phone_manual or (v.customer.phone_number if v.customer else ''),
+                'status': v.status,
+                'created_at': v.created_at.strftime('%Y-%m-%d %H:%M') if v.created_at else ''
+            }
+            for v in vouchers
+        ]
 
         return Response({
             'status': 'success',
-            'id': voucher.id,
-            'voucher_number': voucher.voucher_number,
-            'brand_name': voucher.brand_name,
-            'model_name': voucher.model_name,
-            'ram_capacity': voucher.ram_capacity or '',
-            'storage_capacity': voucher.storage_capacity or '',
-            'color_variant': voucher.color_variant or '',
-            'imei_1': voucher.imei_1,
-            'mdms_status': voucher.mdms_status,
-            'market_base_value': str(voucher.market_base_value),
-            'total_deductions': str(voucher.total_deductions),
-            'final_trade_in_value': str(voucher.final_trade_in_value),
-            'recommended_condition_grade': voucher.recommended_condition_grade,
-            'customer_name': voucher.customer_name_manual or (voucher.customer.name if voucher.customer else 'Walk-in'),
-            'customer_phone': voucher.customer_phone_manual or (voucher.customer.phone_number if voucher.customer else ''),
-            'status': voucher.status
+            'count': len(results),
+            'results': results
         }, status=status.HTTP_200_OK)
-
 
 class TradeInValuationCalculateAPIView(APIView):
     """
@@ -111,7 +239,6 @@ class TradeInValuationCalculateAPIView(APIView):
             'deduction_breakdown': result['deduction_breakdown']
         })
 
-
 class NTAMDMSCheckAPIView(APIView):
     """
     Instant 1-click NTA MDMS verification endpoint for counter staff.
@@ -127,11 +254,10 @@ class NTAMDMSCheckAPIView(APIView):
         res['badge_html'] = NTAMDMSClient.format_mdms_badge(res['status'])
         return Response(res)
 
-
 class TradeInVoucherCreateAPIView(APIView):
     """
     API endpoint committing a full Trade-In voucher to attach directly to POS cart.
-    Creates the PhoneExchangeTradeIn, TradeInInspectionChecklist, and TradeInLegalUndertaking records.
+    Creates PhoneExchangeTradeIn, TradeInInspectionChecklist, and TradeInLegalUndertaking records.
     """
     permission_classes = [permissions.IsAuthenticated]
 

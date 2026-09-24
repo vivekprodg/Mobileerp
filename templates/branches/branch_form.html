@@ -32,6 +32,32 @@
     border: 1px solid #e2e8f0;
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 }
+.manager-dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1055;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+    max-height: 250px;
+    overflow-y: auto;
+    margin-top: 4px;
+}
+.manager-item-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    transition: background 0.15s ease-in-out;
+}
+.manager-item-btn:hover {
+    background-color: #f1f5f9;
+}
 </style>
 {% endblock %}
 
@@ -69,7 +95,7 @@
     {% endif %}
 
     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
-        <form method="post" enctype="multipart/form-data" novalidate>
+        <form method="post" enctype="multipart/form-data" autocomplete="off" novalidate>
             {% csrf_token %}
 
             <!-- SECTION 1: White-Label Branding & Company Identity -->
@@ -151,9 +177,36 @@
                     <label class="form-label fw-bold text-dark fs-xs">Official Email</label>
                     {{ form.email }}
                 </div>
-                <div class="col-md-4">
+
+                <!-- Asynchronous Designated Branch Manager Search Component -->
+                <div class="col-md-4 position-relative">
                     <label class="form-label fw-bold text-dark fs-xs">Designated Branch Manager</label>
-                    {{ form.manager }}
+                    
+                    <!-- Hidden field holding user ID for Django form submission -->
+                    <input type="hidden" name="manager" id="id_manager_hidden" value="{{ form.manager.value|default:'' }}">
+                    
+                    <div class="input-group">
+                        <span class="input-group-text bg-light text-muted border-end-0"><i class="fas fa-user-tie"></i></span>
+                        <input type="text" id="managerSearchInput" class="form-control border-start-0" 
+                               placeholder="Search authorized manager..." 
+                               value="{% if form.instance.manager %}{{ form.instance.manager.get_full_name|default:form.instance.manager.username }}{% endif %}">
+                        <button type="button" class="btn btn-outline-secondary {% if not form.instance.manager %}d-none{% endif %}" id="clearManagerBtn" title="Unassign manager">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+
+                    <!-- Dropdown Results -->
+                    <div id="managerDropdownMenu" class="manager-dropdown-menu d-none">
+                        <div class="p-2 border-bottom text-muted fs-2xs fw-bold text-uppercase bg-light">
+                            <i class="fas fa-user-shield me-1"></i> Authorized Managers
+                        </div>
+                        <div id="managerListContainer"></div>
+                    </div>
+
+                    <small class="text-muted fs-2xs mt-1 d-block">Search by manager name or username.</small>
+                    {% if form.manager.errors %}
+                        <div class="text-danger fs-2xs mt-1">{{ form.manager.errors }}</div>
+                    {% endif %}
                 </div>
             </div>
 
@@ -200,6 +253,9 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    // -------------------------------------------------------------
+    // Logo Upload Instant Preview
+    // -------------------------------------------------------------
     const logoInput = document.querySelector('input[type="file"][name="logo"]');
     const logoPreviewImg = document.getElementById('branchLogoImgPreview');
     const logoPlaceholder = document.getElementById('logoPlaceholderIcon');
@@ -220,6 +276,106 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // -------------------------------------------------------------
+    // Manager Asynchronous Autocomplete
+    // -------------------------------------------------------------
+    const mgrInput = document.getElementById('managerSearchInput');
+    const mgrHidden = document.getElementById('id_manager_hidden');
+    const mgrDropdown = document.getElementById('managerDropdownMenu');
+    const mgrList = document.getElementById('managerListContainer');
+    const clearMgrBtn = document.getElementById('clearManagerBtn');
+
+    let mgrTimer = null;
+    let cachedManagers = null;
+
+    function renderManagers(users) {
+        mgrList.innerHTML = '';
+        if (!users || users.length === 0) {
+            mgrList.innerHTML = '<div class="p-2 text-center text-muted fs-xs">No authorized manager found.</div>';
+            mgrDropdown.classList.remove('d-none');
+            return;
+        }
+
+        users.forEach(u => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'manager-item-btn';
+            const fullName = u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username;
+            btn.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong class="text-dark fs-xs d-block">${fullName}</strong>
+                        <span class="text-muted fs-2xs">@${u.username} ${u.email ? '&bull; ' + u.email : ''}</span>
+                    </div>
+                    <span class="badge bg-primary bg-opacity-10 text-primary fs-2xs">Manager</span>
+                </div>
+            `;
+            btn.addEventListener('click', () => {
+                mgrHidden.value = u.id;
+                mgrInput.value = fullName;
+                clearMgrBtn.classList.remove('d-none');
+                mgrDropdown.classList.add('d-none');
+            });
+            mgrList.appendChild(btn);
+        });
+
+        mgrDropdown.classList.remove('d-none');
+    }
+
+    async function fetchManagers(q = '') {
+        try {
+            const url = q.trim() 
+                ? `/users/api/search/?role=MANAGER&q=${encodeURIComponent(q.trim())}` 
+                : `/users/api/search/?role=MANAGER&limit=20`;
+            const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) throw new Error('User API offline');
+            const data = await res.json();
+            const list = data.results || (Array.isArray(data) ? data : []);
+            if (!q.trim()) cachedManagers = list;
+            renderManagers(list);
+        } catch (e) {
+            console.error(e);
+            mgrList.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Unable to load managers.</div>';
+            mgrDropdown.classList.remove('d-none');
+        }
+    }
+
+    mgrInput.addEventListener('focus', () => {
+        if (cachedManagers) {
+            renderManagers(cachedManagers);
+        } else {
+            fetchManagers('');
+        }
+    });
+
+    mgrInput.addEventListener('input', () => {
+        const query = mgrInput.value;
+        mgrHidden.value = '';
+        if (!query.trim()) {
+            clearMgrBtn.classList.add('d-none');
+        } else {
+            clearMgrBtn.classList.remove('d-none');
+        }
+        clearTimeout(mgrTimer);
+        mgrTimer = setTimeout(() => {
+            fetchManagers(query);
+        }, 220);
+    });
+
+    clearMgrBtn.addEventListener('click', () => {
+        mgrInput.value = '';
+        mgrHidden.value = '';
+        clearMgrBtn.classList.add('d-none');
+        fetchManagers('');
+        mgrInput.focus();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!mgrInput.contains(e.target) && !mgrDropdown.contains(e.target)) {
+            mgrDropdown.classList.add('d-none');
+        }
+    });
 });
 </script>
 {% endblock %}

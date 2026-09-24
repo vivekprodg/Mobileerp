@@ -85,7 +85,7 @@ class ShopLoginView(LoginView):
 
     def form_invalid(self, form):
         raw_identifier = self.request.POST.get('username', '').strip()
-        
+
         if raw_identifier:
             attempts_key = self._get_attempts_cache_key(raw_identifier)
             lockout_key = self._get_lockout_cache_key(raw_identifier)
@@ -164,11 +164,9 @@ class UserListView(StaffManagementAccessMixin, ListView):
         req_user = self.request.user
         qs = User.objects.select_related('assigned_branch')
 
-        # Role-based visibility enforcement
         is_owner_or_super = req_user.is_superuser or getattr(req_user, 'role', '') == 'OWNER'
 
         if not is_owner_or_super:
-            # Branch Manager scoping: exclude Super Admins and Owners, isolate to manager's branch
             manager_branch = getattr(req_user, 'assigned_branch', None)
             qs = qs.filter(
                 is_superuser=False
@@ -216,7 +214,6 @@ class UserCreateView(StaffManagementAccessMixin, CreateView):
 
     def form_valid(self, form):
         req_user = self.request.user
-        # If created by Branch Manager, force assigned branch and disallow OWNER role
         if not req_user.is_superuser and getattr(req_user, 'role', '') == 'MANAGER':
             form.instance.assigned_branch = req_user.assigned_branch
             if form.instance.role == 'OWNER':
@@ -236,11 +233,10 @@ class UserUpdateView(StaffManagementAccessMixin, UpdateView):
     def get_queryset(self):
         req_user = self.request.user
         is_owner_or_super = req_user.is_superuser or getattr(req_user, 'role', '') == 'OWNER'
-        
+
         if is_owner_or_super:
             return User.objects.all()
-        
-        # Branch Managers can only access staff in their branch and cannot access Super Admins/Owners
+
         manager_branch = getattr(req_user, 'assigned_branch', None)
         return User.objects.filter(
             is_superuser=False
@@ -270,7 +266,7 @@ class UserUpdateView(StaffManagementAccessMixin, UpdateView):
 class ValidateManagerPinAPIView(LoginRequiredMixin, View):
     """
     AJAX endpoint validating Manager/Owner override PINs on POS terminals.
-    1. Tracks and isolates failed PIN attempts per authenticated user session (preventing shared-IP store lockouts).
+    1. Tracks and isolates failed PIN attempts per authenticated user session.
     2. Allows targeting a specific supervisor ID for precise audit responsibility tracking.
     3. Verifies candidate PINs via constant-time cryptographic salted hash comparisons.
     """
@@ -334,3 +330,85 @@ class ValidateManagerPinAPIView(LoginRequiredMixin, View):
             'status': 'error',
             'message': 'Invalid Manager Override PIN. Please verify credentials.'
         }, status=403)
+
+
+class UserSearchAPIView(LoginRequiredMixin, View):
+    """
+    Dedicated JSON search endpoint for lightweight, dynamic staff lookups across
+    POS cashier selection, technician ticket assignment, sales commissions,
+    and branch management forms.
+    Supports filtering by query (q), role, and branch isolation.
+    """
+
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get('q', '').strip()
+        role_filter = request.GET.get('role', '').strip()
+        branch_id = request.GET.get('branch', '').strip()
+        include_inactive = request.GET.get('include_inactive', '0') in ['1', 'true', 'True']
+
+        req_user = request.user
+        is_owner_or_super = req_user.is_superuser or getattr(req_user, 'role', '') == 'OWNER'
+
+        qs = User.objects.select_related('assigned_branch')
+
+        # 1. Active status filtering
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+
+        # 2. Branch isolation scoping
+        if not is_owner_or_super:
+            manager_branch = getattr(req_user, 'assigned_branch', None)
+            qs = qs.filter(
+                assigned_branch=manager_branch,
+                is_superuser=False
+            ).exclude(role='OWNER')
+        else:
+            if branch_id:
+                qs = qs.filter(assigned_branch_id=branch_id)
+
+        # 3. Role filter (supports comma-separated list like 'STAFF,MANAGER')
+        if role_filter:
+            roles = [r.strip().upper() for r in role_filter.split(',') if r.strip()]
+            if len(roles) == 1:
+                qs = qs.filter(role=roles[0])
+            elif len(roles) > 1:
+                qs = qs.filter(role__in=roles)
+
+        # 4. Search term across name, username, and mobile
+        if q:
+            qs = qs.filter(
+                Q(username__icontains=q) |
+                Q(first_name__icontains=q) |
+                Q(last_name__icontains=q) |
+                Q(phone_number__icontains=q)
+            )
+
+        # Cap results to top 30 to preserve UI responsiveness
+        staff_records = qs.order_by('first_name', 'last_name', 'username')[:30]
+
+        results = []
+        for u in staff_records:
+            full_name = u.get_full_name() or u.username
+            branch_name = u.assigned_branch.name if u.assigned_branch else "All Branches / Head Office"
+            results.append({
+                'id': u.id,
+                'text': f"{full_name} ({u.get_role_display()}) - {u.phone_number}",
+                'username': u.username,
+                'full_name': full_name,
+                'first_name': u.first_name,
+                'last_name': u.last_name,
+                'role': u.role,
+                'role_display': u.get_role_display(),
+                'phone_number': u.phone_number,
+                'email': u.email,
+                'branch_id': u.assigned_branch_id,
+                'branch_name': branch_name,
+                'is_active': u.is_active,
+                'has_pin': u.has_pin(),
+            })
+
+        return JsonResponse({
+            'status': 'success',
+            'count': len(results),
+            'results': results
+        })

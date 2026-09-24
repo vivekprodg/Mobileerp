@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -5,6 +6,7 @@ from django.shortcuts import render
 from django.views.generic import TemplateView, View, ListView
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import JsonResponse
+from django.urls import reverse, NoReverseMatch
 from django.db.models import Sum, F, Q, Count, DecimalField, Value, Case, When, ExpressionWrapper
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -19,6 +21,28 @@ from apps.branches.models import Branch
 from apps.core.models import SystemConfiguration, AuditLog
 from apps.core.utils.nepali_date_converter import ad_to_bs_string, bs_to_ad_date
 from apps.core.utils.barcode_generator import BarcodeGenerator
+
+logger = logging.getLogger(__name__)
+
+def safe_url(view_candidates, pk=None, default_path='#', **kwargs):
+    """
+    Safely resolves Django view names without throwing NoReverseMatch exceptions.
+    Attempts multiple view names in order and falls back to default_path.
+    """
+    if isinstance(view_candidates, str):
+        view_candidates = [view_candidates]
+
+    for vn in view_candidates:
+        try:
+            if pk is not None:
+                return reverse(vn, args=[pk])
+            elif kwargs:
+                return reverse(vn, kwargs=kwargs)
+            else:
+                return reverse(vn)
+        except NoReverseMatch:
+            continue
+    return default_path
 
 class DashboardHomeView(LoginRequiredMixin, TemplateView):
     """
@@ -146,7 +170,6 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         supplier_payable_total = supplier_agg['total']
         active_suppliers_count = supplier_agg['count']
 
-        # Evaluate overdue suppliers using raw tuples (values_list) without instantiating model objects
         supplier_dates = supplier_due_qs.filter(last_purchase_date__isnull=False).values_list('last_purchase_date', 'credit_period_days')
         overdue_suppliers_count = sum(
             1 for lp_date, credit_days in supplier_dates
@@ -241,7 +264,6 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
             'active_repair_count': active_repairs_count,
         }
 
-        # Cache metrics for 60 seconds
         cache.set(cache_key, kpi_payload, timeout=60)
         context.update(kpi_payload)
         return context
@@ -304,6 +326,445 @@ class AuditLogListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
             'total_logs_count': AuditLog.objects.count()
         })
         return context
+
+class GlobalSearchAPIView(LoginRequiredMixin, View):
+    """
+    Unified Global Search API.
+    Performs instantaneous multi-entity lookups across:
+      1. Products (name, SKU, barcode, model)
+      2. Handset IMEI Instances (IMEI 1, IMEI 2, Serial, UID)
+      3. Customers (Name, Mobile, PAN)
+      4. Suppliers (Company, Contact, Phone, PAN, Code)
+      5. Sales Invoices / Estimates (Estimate #, Manual Customer, Phone, PAN)
+      6. Goods Received Notes / GRN (GRN #, Supplier Bill #, Supplier Name)
+      7. Repair Tickets (Ticket #, IMEI, Device, Customer)
+      8. Chart of Accounts (Code, Name, System Tag)
+      9. Staff Users (Username, Name, Mobile)
+    Each query block is isolated in try-except safeguards so an error in one module
+    never halts the search response.
+    """
+
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get('q', '').strip()
+        if len(q) < 2:
+            return JsonResponse({
+                'status': 'success',
+                'query': q,
+                'total_count': 0,
+                'categories': [],
+                'results': []
+            })
+
+        active_branch = getattr(request, 'active_branch', None) or getattr(request.user, 'assigned_branch', None)
+        is_owner_or_super = request.user.is_superuser or getattr(request.user, 'role', '') == 'OWNER'
+
+        categories = []
+        flat_results = []
+
+        # ---------------------------------------------------------------------
+        # 1. PRODUCTS
+        # ---------------------------------------------------------------------
+        try:
+            prod_filter = Q(name__icontains=q) | Q(sku__icontains=q) | Q(barcode__icontains=q)
+            if hasattr(Product, 'model_name'):
+                prod_filter |= Q(model_name__icontains=q)
+            if hasattr(Product, 'model_number'):
+                prod_filter |= Q(model_number__icontains=q)
+
+            products = Product.objects.filter(prod_filter, is_active=True).select_related('category', 'brand')[:5]
+            if products.exists():
+                prod_items = []
+                for p in products:
+                    detail_url = safe_url(
+                        ['inventory:product_detail', 'inventory:product_edit'],
+                        pk=p.id,
+                        default_path=f"/inventory/products/{p.id}/"
+                    )
+                    cat_name = p.category.name if getattr(p, 'category', None) else "Product"
+                    item_dict = {
+                        'title': p.name,
+                        'subtitle': f"SKU: {p.sku or 'N/A'} | Barcode: {p.barcode or 'N/A'} | Price: Rs. {p.selling_price:,.2f}",
+                        'badge': cat_name,
+                        'badge_color': 'info',
+                        'url': detail_url,
+                        'category': 'Products',
+                        'icon': 'bi-box-seam'
+                    }
+                    prod_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Products',
+                    'icon': 'bi-box-seam',
+                    'count': len(prod_items),
+                    'items': prod_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying Products: {e}")
+
+        # ---------------------------------------------------------------------
+        # 2. ITEM INSTANCES (IMEI / SERIAL)
+        # ---------------------------------------------------------------------
+        try:
+            imei_filter = Q(imei_1__icontains=q)
+            if hasattr(ItemInstance, 'imei_2'):
+                imei_filter |= Q(imei_2__icontains=q)
+            if hasattr(ItemInstance, 'serial_number'):
+                imei_filter |= Q(serial_number__icontains=q)
+            if hasattr(ItemInstance, 'device_uid'):
+                imei_filter |= Q(device_uid__icontains=q)
+
+            instances_qs = ItemInstance.objects.filter(imei_filter).select_related('product', 'branch')
+            if active_branch and not is_owner_or_super:
+                instances_qs = instances_qs.filter(branch=active_branch)
+
+            instances = instances_qs[:5]
+            if instances.exists():
+                instance_items = []
+                for inst in instances:
+                    inst_url = safe_url(
+                        ['inventory:instance_detail', 'inventory:product_detail'],
+                        pk=inst.product_id,
+                        default_path=f"/inventory/products/{inst.product_id}/"
+                    )
+                    status_text = inst.get_status_display() if hasattr(inst, 'get_status_display') else inst.status
+                    item_dict = {
+                        'title': f"{inst.product.name} (IMEI: {inst.imei_1})",
+                        'subtitle': f"Branch: {inst.branch.name if inst.branch else 'HQ'} | Serial: {getattr(inst, 'serial_number', 'N/A') or 'N/A'}",
+                        'badge': status_text,
+                        'badge_color': 'success' if inst.status == 'IN_STOCK' else 'secondary',
+                        'url': inst_url,
+                        'category': 'Smartphones & IMEI',
+                        'icon': 'bi-phone'
+                    }
+                    instance_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Smartphones & IMEI',
+                    'icon': 'bi-phone',
+                    'count': len(instance_items),
+                    'items': instance_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying ItemInstances: {e}")
+
+        # ---------------------------------------------------------------------
+        # 3. CUSTOMERS
+        # ---------------------------------------------------------------------
+        try:
+            cust_filter = Q(name__icontains=q) | Q(phone_number__icontains=q)
+            if hasattr(Customer, 'pan_number'):
+                cust_filter |= Q(pan_number__icontains=q)
+
+            customers = Customer.objects.filter(cust_filter, is_active=True)[:5]
+            if customers.exists():
+                cust_items = []
+                for c in customers:
+                    cust_url = safe_url(
+                        ['customers:customer_detail', 'customers:customer_edit'],
+                        pk=c.id,
+                        default_path=f"/customers/{c.id}/"
+                    )
+                    bal = getattr(c, 'current_credit_balance', Decimal('0.00'))
+                    item_dict = {
+                        'title': c.name,
+                        'subtitle': f"Phone: {c.phone_number} | Due Balance: Rs. {bal:,.2f}",
+                        'badge': f"PAN: {c.pan_number}" if getattr(c, 'pan_number', None) else "Customer",
+                        'badge_color': 'danger' if bal > Decimal('0.00') else 'primary',
+                        'url': cust_url,
+                        'category': 'Customers',
+                        'icon': 'bi-people'
+                    }
+                    cust_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Customers',
+                    'icon': 'bi-people',
+                    'count': len(cust_items),
+                    'items': cust_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying Customers: {e}")
+
+        # ---------------------------------------------------------------------
+        # 4. SUPPLIERS
+        # ---------------------------------------------------------------------
+        try:
+            supp_filter = Q(company_name__icontains=q)
+            if hasattr(Supplier, 'contact_person'):
+                supp_filter |= Q(contact_person__icontains=q)
+            if hasattr(Supplier, 'phone_number'):
+                supp_filter |= Q(phone_number__icontains=q)
+            if hasattr(Supplier, 'pan_number'):
+                supp_filter |= Q(pan_number__icontains=q)
+            if hasattr(Supplier, 'code'):
+                supp_filter |= Q(code__icontains=q)
+
+            suppliers = Supplier.objects.filter(supp_filter, is_active=True)[:5]
+            if suppliers.exists():
+                supp_items = []
+                for s in suppliers:
+                    supp_url = safe_url(
+                        ['purchases:supplier_detail', 'purchases:supplier_edit'],
+                        pk=s.id,
+                        default_path=f"/purchases/suppliers/{s.id}/"
+                    )
+                    payable = getattr(s, 'current_balance', Decimal('0.00'))
+                    item_dict = {
+                        'title': s.company_name,
+                        'subtitle': f"Contact: {getattr(s, 'contact_person', 'N/A') or 'N/A'} | Phone: {getattr(s, 'phone_number', 'N/A') or 'N/A'} | Payable: Rs. {payable:,.2f}",
+                        'badge': f"PAN: {s.pan_number}" if getattr(s, 'pan_number', None) else "Supplier",
+                        'badge_color': 'warning text-dark',
+                        'url': supp_url,
+                        'category': 'Suppliers',
+                        'icon': 'bi-truck'
+                    }
+                    supp_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Suppliers',
+                    'icon': 'bi-truck',
+                    'count': len(supp_items),
+                    'items': supp_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying Suppliers: {e}")
+
+        # ---------------------------------------------------------------------
+        # 5. SALES INVOICES / ESTIMATES
+        # ---------------------------------------------------------------------
+        try:
+            sales_filter = Q(estimate_number__icontains=q)
+            if hasattr(SalesEstimate, 'customer_name_manual'):
+                sales_filter |= Q(customer_name_manual__icontains=q)
+            if hasattr(SalesEstimate, 'customer_phone_manual'):
+                sales_filter |= Q(customer_phone_manual__icontains=q)
+            if hasattr(SalesEstimate, 'customer_pan'):
+                sales_filter |= Q(customer_pan__icontains=q)
+
+            sales_qs = SalesEstimate.objects.filter(sales_filter).select_related('customer', 'branch')
+            if active_branch and not is_owner_or_super:
+                sales_qs = sales_qs.filter(branch=active_branch)
+
+            estimates = sales_qs.order_by('-created_at')[:5]
+            if estimates.exists():
+                sale_items = []
+                for est in estimates:
+                    sale_url = safe_url(
+                        ['sales:estimate_detail', 'sales:sales_receipt'],
+                        pk=est.id,
+                        default_path=f"/sales/{est.id}/"
+                    )
+                    buyer = est.customer.name if est.customer else (getattr(est, 'customer_name_manual', '') or "Walk-in Customer")
+                    item_dict = {
+                        'title': f"Bill #{est.estimate_number}",
+                        'subtitle': f"Buyer: {buyer} | Total: Rs. {est.grand_total:,.2f} | Date: {est.bill_date_ad}",
+                        'badge': est.get_status_display() if hasattr(est, 'get_status_display') else est.status,
+                        'badge_color': 'success' if est.status == 'COMPLETED' else 'secondary',
+                        'url': sale_url,
+                        'category': 'Sales Estimates',
+                        'icon': 'bi-receipt'
+                    }
+                    sale_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Sales Estimates',
+                    'icon': 'bi-receipt',
+                    'count': len(sale_items),
+                    'items': sale_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying SalesEstimate: {e}")
+
+        # ---------------------------------------------------------------------
+        # 6. GOODS RECEIVED NOTES (PURCHASES)
+        # ---------------------------------------------------------------------
+        try:
+            grn_filter = Q(grn_number__icontains=q)
+            if hasattr(GoodsReceivedNote, 'supplier_bill_no'):
+                grn_filter |= Q(supplier_bill_no__icontains=q)
+            grn_filter |= Q(supplier__company_name__icontains=q)
+
+            grn_qs = GoodsReceivedNote.objects.filter(grn_filter).select_related('supplier', 'branch')
+            if active_branch and not is_owner_or_super:
+                grn_qs = grn_qs.filter(branch=active_branch)
+
+            grns = grn_qs.order_by('-created_at')[:5]
+            if grns.exists():
+                grn_items = []
+                for g in grns:
+                    grn_url = safe_url(
+                        ['purchases:grn_detail'],
+                        pk=g.id,
+                        default_path=f"/purchases/grn/{g.id}/"
+                    )
+                    supp_name = g.supplier.company_name if g.supplier else "Direct Vendor"
+                    item_dict = {
+                        'title': f"GRN #{g.grn_number}",
+                        'subtitle': f"Vendor: {supp_name} | Bill Ref: {g.supplier_bill_no or 'N/A'} | Total: Rs. {g.net_total_amount:,.2f}",
+                        'badge': g.get_status_display() if hasattr(g, 'get_status_display') else g.status,
+                        'badge_color': 'info',
+                        'url': grn_url,
+                        'category': 'Purchases & GRN',
+                        'icon': 'bi-bag-check'
+                    }
+                    grn_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Purchases & GRN',
+                    'icon': 'bi-bag-check',
+                    'count': len(grn_items),
+                    'items': grn_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying GRNs: {e}")
+
+        # ---------------------------------------------------------------------
+        # 7. REPAIR TICKETS
+        # ---------------------------------------------------------------------
+        try:
+            rep_filter = Q(ticket_number__icontains=q)
+            if hasattr(RepairTicket, 'imei_or_serial'):
+                rep_filter |= Q(imei_or_serial__icontains=q)
+            if hasattr(RepairTicket, 'customer_name_manual'):
+                rep_filter |= Q(customer_name_manual__icontains=q)
+            if hasattr(RepairTicket, 'customer_phone_manual'):
+                rep_filter |= Q(customer_phone_manual__icontains=q)
+            if hasattr(RepairTicket, 'device_model'):
+                rep_filter |= Q(device_model__icontains=q)
+
+            rep_qs = RepairTicket.objects.filter(rep_filter).select_related('customer', 'branch')
+            if active_branch and not is_owner_or_super:
+                rep_qs = rep_qs.filter(branch=active_branch)
+
+            repairs = rep_qs.order_by('-created_at')[:5]
+            if repairs.exists():
+                rep_items = []
+                for r in repairs:
+                    rep_url = safe_url(
+                        ['repairs:ticket_detail'],
+                        pk=r.id,
+                        default_path=f"/repairs/{r.id}/"
+                    )
+                    buyer = r.customer.name if r.customer else (getattr(r, 'customer_name_manual', '') or 'Counter Client')
+                    status_lbl = r.get_service_status_display() if hasattr(r, 'get_service_status_display') else getattr(r, 'service_status', 'OPEN')
+                    item_dict = {
+                        'title': f"Repair Ticket #{r.ticket_number}",
+                        'subtitle': f"Client: {buyer} | Device: {getattr(r, 'device_model', 'Handset')} | IMEI: {getattr(r, 'imei_or_serial', 'N/A')}",
+                        'badge': status_lbl,
+                        'badge_color': 'warning text-dark',
+                        'url': rep_url,
+                        'category': 'Repair Tickets',
+                        'icon': 'bi-tools'
+                    }
+                    rep_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Repair Tickets',
+                    'icon': 'bi-tools',
+                    'count': len(rep_items),
+                    'items': rep_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying RepairTickets: {e}")
+
+        # ---------------------------------------------------------------------
+        # 8. CHART OF ACCOUNTS
+        # ---------------------------------------------------------------------
+        try:
+            from apps.accounting.models import Account
+            acc_filter = Q(code__icontains=q) | Q(name__icontains=q)
+            if hasattr(Account, 'system_tag'):
+                acc_filter |= Q(system_tag__icontains=q)
+
+            accounts = Account.objects.filter(acc_filter, is_active=True)[:5]
+            if accounts.exists():
+                acc_items = []
+                for a in accounts:
+                    acc_url = safe_url(
+                        ['accounting:ledger_detail', 'accounting:account_detail'],
+                        pk=a.id,
+                        default_path=f"/accounting/ledger/{a.id}/"
+                    )
+                    item_dict = {
+                        'title': f"GL {a.code} - {a.name}",
+                        'subtitle': f"Type: {a.get_account_type_display() if hasattr(a, 'get_account_type_display') else getattr(a, 'account_type', '')} | Balance: Rs. {getattr(a, 'current_balance', Decimal('0.00')):,.2f}",
+                        'badge': getattr(a, 'system_tag', 'GL Account') or 'Account',
+                        'badge_color': 'secondary',
+                        'url': acc_url,
+                        'category': 'Chart of Accounts',
+                        'icon': 'bi-journal-bookmark'
+                    }
+                    acc_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Chart of Accounts',
+                    'icon': 'bi-journal-bookmark',
+                    'count': len(acc_items),
+                    'items': acc_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying Accounts: {e}")
+
+        # ---------------------------------------------------------------------
+        # 9. SYSTEM USERS & STAFF
+        # ---------------------------------------------------------------------
+        try:
+            from apps.users.models import User
+            user_filter = (
+                Q(username__icontains=q) |
+                Q(first_name__icontains=q) |
+                Q(last_name__icontains=q) |
+                Q(phone_number__icontains=q)
+            )
+            users_qs = User.objects.filter(user_filter, is_active=True).select_related('assigned_branch')
+            if not is_owner_or_super:
+                users_qs = users_qs.filter(assigned_branch=active_branch).exclude(role='OWNER').filter(is_superuser=False)
+
+            users = users_qs[:5]
+            if users.exists():
+                user_items = []
+                for u in users:
+                    user_url = safe_url(
+                        ['users:user_edit', 'users:user_list'],
+                        pk=u.id,
+                        default_path=f"/users/{u.id}/edit/"
+                    )
+                    item_dict = {
+                        'title': u.get_full_name() or u.username,
+                        'subtitle': f"Username: {u.username} | Mobile: {u.phone_number} | Branch: {u.assigned_branch.name if u.assigned_branch else 'HQ'}",
+                        'badge': u.get_role_display(),
+                        'badge_color': 'dark',
+                        'url': user_url,
+                        'category': 'Staff & Users',
+                        'icon': 'bi-person-badge'
+                    }
+                    user_items.append(item_dict)
+                    flat_results.append(item_dict)
+
+                categories.append({
+                    'category': 'Staff & Users',
+                    'icon': 'bi-person-badge',
+                    'count': len(user_items),
+                    'items': user_items
+                })
+        except Exception as e:
+            logger.warning(f"GlobalSearch error querying Users: {e}")
+
+        return JsonResponse({
+            'status': 'success',
+            'query': q,
+            'total_count': len(flat_results),
+            'categories': categories,
+            'results': flat_results
+        })
 
 class ConvertDateAPIView(LoginRequiredMixin, View):
     """AJAX helper to instantly convert between AD and BS dates."""

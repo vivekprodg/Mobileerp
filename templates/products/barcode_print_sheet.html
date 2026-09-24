@@ -1,6 +1,49 @@
 {% extends "core/base.html" %}
+{% load static %}
 
 {% block title %}Print Barcode Labels | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.search-results-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1055;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    max-height: 280px;
+    overflow-y: auto;
+    margin-top: 4px;
+}
+.search-item-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 14px;
+    border: none;
+    background: transparent;
+    transition: background 0.15s ease-in-out;
+}
+.search-item-btn:hover, .search-item-btn:focus {
+    background-color: #f1f5f9;
+    outline: none;
+}
+.search-item-btn.selected {
+    background-color: #e2e8f0;
+}
+#liveStickerPreview {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+#liveStickerPreview:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.08) !important;
+}
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="container-fluid px-4 py-4">
@@ -8,7 +51,7 @@
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
             <h4 class="fw-bold text-dark mb-1">
-                <i class="fas fa-barcode text-primary me-2"></i> Barcode & Price Sticker Generator
+                <i class="fas fa-barcode text-primary me-2"></i> Barcode &amp; Price Sticker Generator
             </h4>
             <p class="text-muted fs-xs mb-0">Generate batch thermal barcode labels for mobile accessories, glasses, and phone boxes</p>
         </div>
@@ -25,13 +68,48 @@
                     <i class="fas fa-sliders text-primary me-2"></i> Print Batch Settings
                 </h6>
 
-                <form method="post" id="barcodeBatchForm">
+                <form method="post" id="barcodeBatchForm" autocomplete="off">
                     {% csrf_token %}
-                    
-                    <div class="mb-4">
+
+                    <!-- Asynchronous Product Search Input -->
+                    <div class="mb-4 position-relative">
                         <label class="form-label fw-bold text-dark fs-sm">Select Product / Item <span class="text-danger">*</span></label>
-                        {{ form.product }}
-                        <small class="text-muted fs-xs mt-1 d-block">Search by Product Name, Model, or SKU</small>
+                        
+                        <!-- Hidden form field holding the actual product ID for Django submission -->
+                        <input type="hidden" name="product" id="selectedProductId" value="{{ form.product.value|default:'' }}" required>
+
+                        <div class="input-group">
+                            <span class="input-group-text bg-light border-end-0 text-muted">
+                                <i class="fas fa-search"></i>
+                            </span>
+                            <input type="text" id="productSearchInput" class="form-control border-start-0 ps-0" 
+                                   placeholder="Type product name, SKU, or scan box barcode..." 
+                                   value="{% if form.instance.product %}{{ form.instance.product.name }}{% endif %}">
+                            <button type="button" class="btn btn-outline-secondary d-none" id="clearProductBtn" title="Clear selection">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <!-- Dropdown Results Container -->
+                        <div id="productResultsDropdown" class="search-results-dropdown d-none">
+                            <div class="p-2 border-bottom text-muted fs-2xs fw-bold text-uppercase bg-light" id="dropdownHeader">
+                                <i class="fas fa-clock-rotate-left me-1"></i> Recent Products
+                            </div>
+                            <div id="resultsListContainer"></div>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mt-1">
+                            <small class="text-muted fs-2xs">Focus input to view 20 most recent items, or type to search catalog.</small>
+                            <span id="selectedProductBadge" class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 rounded-pill fs-2xs d-none">
+                                <i class="fas fa-check me-1"></i> Product Linked
+                            </span>
+                        </div>
+
+                        {% if form.product.errors %}
+                        <div class="text-danger fs-2xs mt-1">
+                            {{ form.product.errors }}
+                        </div>
+                        {% endif %}
                     </div>
 
                     <div class="row g-3 mb-4">
@@ -48,14 +126,14 @@
                     <div class="p-3 bg-light rounded-3 border mb-4">
                         <div class="d-flex align-items-center gap-2 text-dark fs-xs fw-semibold">
                             <i class="fas fa-info-circle text-primary fs-6"></i>
-                            <span>Compatible with 50x25mm Label rolls (Xprinter / TSC / Zebra) & 80mm POS Printers.</span>
+                            <span>Compatible with standard 50x25mm Label rolls (Xprinter / TSC / Zebra / Gprinter) &amp; 80mm POS Thermal Printers.</span>
                         </div>
                     </div>
 
                     <div class="d-flex justify-content-end gap-2">
-                        <button type="reset" class="btn btn-outline-secondary px-4">Reset</button>
-                        <button type="submit" class="btn btn-primary px-4 shadow-sm fw-bold">
-                            <i class="fas fa-print me-2"></i> Generate & Print Stickers
+                        <button type="button" class="btn btn-outline-secondary px-4 rounded-pill" id="resetFormBtn">Reset</button>
+                        <button type="submit" class="btn btn-primary px-4 rounded-pill shadow-sm fw-bold">
+                            <i class="fas fa-print me-2"></i> Generate &amp; Print Stickers
                         </button>
                     </div>
                 </form>
@@ -66,25 +144,30 @@
         <div class="col-12 col-lg-5">
             <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100 d-flex flex-column align-items-center justify-content-center text-center">
                 <h6 class="fw-bold text-dark border-bottom pb-3 w-100 text-start mb-4">
-                    <i class="fas fa-eye text-success me-2"></i> Live Sticker Preview (50x25mm)
+                    <i class="fas fa-eye text-success me-2"></i> Live Thermal Sticker Preview (50x25mm)
                 </h6>
 
                 <!-- Simulated Thermal Sticker -->
-                <div id="liveStickerPreview" class="p-3 border rounded-3 bg-white shadow-sm d-flex flex-column align-items-center justify-content-center" style="width: 220px; min-height: 120px; border: 2px dashed #94a3b8 !important;">
-                    <div class="fw-bold text-dark fs-xs text-uppercase" id="previewShopName">{{ SYS_CONFIG.company_name_en|truncatechars:24 }}</div>
-                    <div class="fw-semibold text-muted" style="font-size: 0.7rem;" id="previewProdName">Select a product...</div>
+                <div id="liveStickerPreview" class="p-3 border rounded-3 bg-white shadow-sm d-flex flex-column align-items-center justify-content-center" 
+                     style="width: 230px; min-height: 125px; border: 2px dashed #94a3b8 !important;">
+                    <div class="fw-bold text-dark fs-xs text-uppercase" id="previewShopName">
+                        {{ SYS_CONFIG.company_name_en|default:"SMART MOBILE & OPTICAL"|truncatechars:26 }}
+                    </div>
+                    <div class="fw-semibold text-muted text-truncate w-100 px-2 mt-1" style="font-size: 0.72rem;" id="previewProdName">
+                        Select a product...
+                    </div>
                     
-                    <!-- Simulated Barcode Bars -->
-                    <div class="my-2 d-flex justify-content-center">
-                        <svg id="previewBarcodeSvg" height="38" width="160"></svg>
+                    <!-- Dynamic Barcode SVG -->
+                    <div class="my-1 d-flex justify-content-center w-100">
+                        <svg id="previewBarcodeSvg" style="max-width: 190px;"></svg>
                     </div>
 
                     <div class="fw-bold text-dark font-monospace fs-sm" id="previewPrice">Rs. 0.00</div>
-                    <div class="text-muted" style="font-size: 0.55rem;">(Incl. All Taxes)</div>
+                    <div class="text-muted" style="font-size: 0.55rem;" id="previewTaxInfo">(Incl. All Taxes)</div>
                 </div>
 
                 <div class="text-muted fs-xs mt-4">
-                    <i class="fas fa-check-circle text-success me-1"></i> Formats barcode in standard <strong>Code128 / EAN-13</strong>.
+                    <i class="fas fa-check-circle text-success me-1"></i> Formats barcode dynamically in standard <strong>Code128 / EAN-13</strong>.
                 </div>
             </div>
         </div>
@@ -96,27 +179,214 @@
 <!-- JsBarcode Library for live preview rendering -->
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script>
-function updateLivePreview() {
-    const select = document.getElementById('productSelectDropdown');
-    const selectedText = select.options[select.selectedIndex]?.text || 'Sample Product';
-    
-    document.getElementById('previewProdName').innerText = selectedText.substring(0, 26);
-    
-    // Draw sample Code128 barcode
-    try {
-        JsBarcode("#previewBarcodeSvg", "890123456789", {
-            format: "CODE128",
-            width: 1.4,
-            height: 32,
-            displayValue: true,
-            fontSize: 9,
-            margin: 0
-        });
-    } catch(e) {}
-}
-
 document.addEventListener('DOMContentLoaded', () => {
-    updateLivePreview();
+    const searchInput = document.getElementById('productSearchInput');
+    const hiddenProductId = document.getElementById('selectedProductId');
+    const dropdown = document.getElementById('productResultsDropdown');
+    const resultsContainer = document.getElementById('resultsListContainer');
+    const dropdownHeader = document.getElementById('dropdownHeader');
+    const clearBtn = document.getElementById('clearProductBtn');
+    const badge = document.getElementById('selectedProductBadge');
+    const resetBtn = document.getElementById('resetFormBtn');
+
+    // Preview DOM handles
+    const previewProdName = document.getElementById('previewProdName');
+    const previewPrice = document.getElementById('previewPrice');
+    const barcodeSvg = document.getElementById('previewBarcodeSvg');
+
+    let debounceTimer = null;
+    let recentProductsCache = null;
+
+    // Render Barcode via JsBarcode
+    function renderBarcode(code) {
+        const cleanCode = (code || '000000000000').toString().trim();
+        try {
+            JsBarcode(barcodeSvg, cleanCode, {
+                format: "CODE128",
+                width: 1.3,
+                height: 32,
+                displayValue: true,
+                fontSize: 9,
+                margin: 0,
+                fontOptions: "bold"
+            });
+        } catch (e) {
+            console.warn("JsBarcode auto-fallback:", e);
+            try {
+                JsBarcode(barcodeSvg, cleanCode.replace(/[^a-zA-Z0-9]/g, "") || "000000", {
+                    format: "CODE128",
+                    width: 1.2,
+                    height: 30,
+                    displayValue: true,
+                    fontSize: 8
+                });
+            } catch (err) {
+                // Ignore silent drawing errors
+            }
+        }
+    }
+
+    // Update Live Sticker Details
+    function updatePreview(name, price, barcode) {
+        previewProdName.innerText = name || 'Select a product...';
+        const formattedPrice = price ? parseFloat(price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
+        previewPrice.innerText = `Rs. ${formattedPrice}`;
+        renderBarcode(barcode || 'SAMPLE128');
+    }
+
+    // Set Selected Product
+    function setSelectedProduct(item) {
+        hiddenProductId.value = item.id;
+        searchInput.value = item.name;
+        clearBtn.classList.remove('d-none');
+        badge.classList.remove('d-none');
+        dropdown.classList.add('d-none');
+
+        const barcodeVal = (item.extra_data && item.extra_data.barcode) ? item.extra_data.barcode : (item.barcode || item.sku || `PROD-${item.id}`);
+        const priceVal = (item.extra_data && item.extra_data.selling_price) ? item.extra_data.selling_price : (item.selling_price || item.price || 0);
+
+        updatePreview(item.name, priceVal, barcodeVal);
+    }
+
+    // Render items into dropdown
+    function renderDropdownItems(items, isRecent = false) {
+        resultsContainer.innerHTML = '';
+        if (isRecent) {
+            dropdownHeader.innerHTML = '<i class="fas fa-clock-rotate-left me-1"></i> 20 Most Recent Products';
+        } else {
+            dropdownHeader.innerHTML = `<i class="fas fa-filter me-1"></i> Search Results (${items.length})`;
+        }
+
+        if (!items || items.length === 0) {
+            resultsContainer.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No matching products found.</div>';
+            dropdown.classList.remove('d-none');
+            return;
+        }
+
+        items.forEach(item => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'search-item-btn';
+            
+            const barcode = (item.extra_data && item.extra_data.barcode) || item.barcode || item.sku || 'No Barcode';
+            const price = (item.extra_data && item.extra_data.selling_price) || item.selling_price || item.price || 0;
+            const model = (item.extra_data && item.extra_data.model) || item.model || '';
+
+            btn.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong class="text-dark fs-xs d-block">${item.name}</strong>
+                        <span class="text-muted fs-2xs font-monospace">
+                            <i class="fas fa-barcode me-1"></i>${barcode} ${model ? '&bull; ' + model : ''}
+                        </span>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-primary bg-opacity-10 text-primary fs-2xs font-monospace">Rs. ${parseFloat(price).toFixed(2)}</span>
+                    </div>
+                </div>
+            `;
+
+            btn.addEventListener('click', () => {
+                setSelectedProduct(item);
+            });
+
+            resultsContainer.appendChild(btn);
+        });
+
+        dropdown.classList.remove('d-none');
+    }
+
+    // Fetch Products
+    async function fetchProducts(query = '') {
+        try {
+            const url = query.trim() 
+                ? `/products/api/search/?mode=simple&q=${encodeURIComponent(query.trim())}` 
+                : `/products/api/search/?mode=simple&limit=20`;
+
+            const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) throw new Error('Search request failed');
+            const data = await res.json();
+            const results = data.results || (Array.isArray(data) ? data : []);
+            
+            if (!query.trim()) {
+                recentProductsCache = results;
+            }
+
+            renderDropdownItems(results, !query.trim());
+        } catch (err) {
+            console.error('Error loading products:', err);
+            resultsContainer.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying products catalog.</div>';
+            dropdown.classList.remove('d-none');
+        }
+    }
+
+    // Zero-query focus event: displays 20 most recent products
+    searchInput.addEventListener('focus', () => {
+        if (!searchInput.value.trim()) {
+            if (recentProductsCache) {
+                renderDropdownItems(recentProductsCache, true);
+            } else {
+                fetchProducts('');
+            }
+        } else {
+            dropdown.classList.remove('d-none');
+        }
+    });
+
+    // Debounced Search on keyup
+    searchInput.addEventListener('input', () => {
+        const query = searchInput.value;
+        if (hiddenProductId.value) {
+            hiddenProductId.value = '';
+            badge.classList.add('d-none');
+        }
+
+        if (!query.trim()) {
+            clearBtn.classList.add('d-none');
+            fetchProducts('');
+            return;
+        }
+
+        clearBtn.classList.remove('d-none');
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            fetchProducts(query);
+        }, 220);
+    });
+
+    // Clear Selection
+    clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        hiddenProductId.value = '';
+        clearBtn.classList.add('d-none');
+        badge.classList.add('d-none');
+        updatePreview('Select a product...', 0, 'SAMPLE128');
+        fetchProducts('');
+        searchInput.focus();
+    });
+
+    // Reset Form
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            hiddenProductId.value = '';
+            clearBtn.classList.add('d-none');
+            badge.classList.add('d-none');
+            dropdown.classList.add('d-none');
+            document.getElementById('barcodeBatchForm').reset();
+            updatePreview('Select a product...', 0, 'SAMPLE128');
+        });
+    }
+
+    // Close dropdown on click outside
+    document.addEventListener('click', (e) => {
+        if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.add('d-none');
+        }
+    });
+
+    // Initialize Default State
+    renderBarcode('890123456789');
 });
 </script>
 {% endblock %}

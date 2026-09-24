@@ -90,6 +90,15 @@
     border-color: #2563eb !important;
 }
 
+.flash-autofill-active {
+    animation: autofillGlow 1.5s ease-out;
+}
+
+@keyframes autofillGlow {
+    0% { background-color: rgba(34, 197, 94, 0.25); border-color: #22c55e; }
+    100% { background-color: inherit; border-color: inherit; }
+}
+
 /* ==========================================================================
    CAMERA SCANNER MODAL & VIEWFINDER RETICLE STYLES
    ========================================================================== */
@@ -262,6 +271,27 @@
                     </div>
 
                     <div class="row g-3">
+                        <!-- Benchmark Phone Model Fast Autocomplete Lookup -->
+                        <div class="col-12">
+                            <div class="p-3 bg-primary bg-opacity-10 border border-primary border-opacity-25 rounded-3">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <label class="form-label fw-bold text-primary fs-xs mb-0">
+                                        <i class="fas fa-bolt me-1"></i> Quick Model Benchmark Lookup (Auto-Populate Specs &amp; Base Price)
+                                    </label>
+                                    <span class="badge bg-primary fs-2xs">Master Catalog</span>
+                                </div>
+                                <div class="position-relative mt-1">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text bg-white border-primary border-opacity-25"><i class="fas fa-search text-primary"></i></span>
+                                        <input type="text" id="benchmarkModelSearchInput" class="form-control border-primary border-opacity-25 shadow-none" placeholder="Search benchmark model (e.g., iPhone 13 Pro 128GB, Galaxy S23, Redmi Note 12)..." autocomplete="off">
+                                        <button type="button" class="btn btn-outline-secondary" id="clearBenchmarkSearchBtn" style="display: none;">&times;</button>
+                                    </div>
+                                    <div id="benchmarkSearchResults" class="list-group position-absolute w-100 shadow-lg mt-1 rounded-3 border-0 overflow-hidden" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
+                                </div>
+                                <small class="text-muted fs-2xs mt-1 d-block">Selecting a model automatically sets Brand, Model, Storage, RAM, and Benchmark Market Value.</small>
+                            </div>
+                        </div>
+
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Brand Name <span class="text-danger">*</span></label>
                             {{ intake_form.brand_name }}
@@ -298,7 +328,6 @@
                                     <i class="fas fa-shield-halved me-1"></i> Verify NTA MDMS
                                 </button>
                             </div>
-                            <!-- Result alert placed DIRECTLY under the verify group -->
                             <div id="mdmsResultBanner" class="d-none mt-2"></div>
                         </div>
 
@@ -328,7 +357,7 @@
                     </div>
                 </div>
 
-                <!-- STEP 2: 10-Point Technical Diagnostic Inspection (Organized into 3 Sub-sections) -->
+                <!-- STEP 2: 10-Point Technical Diagnostic Inspection -->
                 <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4" id="step2Card">
                     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
                         <h6 class="fw-bold text-dark mb-0">
@@ -413,6 +442,27 @@
                     </div>
 
                     <div class="row g-3">
+                        <!-- Customer KYC Fast Search Bar -->
+                        <div class="col-12">
+                            <div class="p-3 bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded-3">
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <label class="form-label fw-bold text-danger fs-xs mb-0">
+                                        <i class="fas fa-user-check me-1"></i> Quick Search Existing Customer / KYC Profile
+                                    </label>
+                                    <span class="badge bg-danger fs-2xs">Directory Lookup</span>
+                                </div>
+                                <div class="position-relative mt-1">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text bg-white border-danger border-opacity-25"><i class="fas fa-address-book text-danger"></i></span>
+                                        <input type="text" id="customerKycSearchInput" class="form-control border-danger border-opacity-25 shadow-none" placeholder="Search by Customer Name, Mobile 98XXXXXXXX, or Citizenship / PAN..." autocomplete="off">
+                                        <button type="button" class="btn btn-outline-secondary" id="clearCustomerKycSearchBtn" style="display: none;">&times;</button>
+                                    </div>
+                                    <div id="customerKycSearchResults" class="list-group position-absolute w-100 shadow-lg mt-1 rounded-3 border-0 overflow-hidden" style="z-index: 1050; max-height: 250px; overflow-y: auto; display: none;"></div>
+                                </div>
+                                <small class="text-muted fs-2xs mt-1 d-block">Selecting an existing customer will prefill full name, citizenship details, issued district, and address.</small>
+                            </div>
+                        </div>
+
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Customer Full Name (as in Citizenship) <span class="text-danger">*</span></label>
                             {{ undertaking_form.customer_full_name }}
@@ -474,7 +524,7 @@
                             </div>
                         </div>
 
-                        <!-- Digital Signature (Responsive Canvas) -->
+                        <!-- Digital Signature -->
                         <div class="col-12">
                             <div class="d-flex justify-content-between align-items-center mb-1">
                                 <label class="form-label fw-bold text-dark fs-xs mb-0">Customer Digital Signature / Thumbprint:</label>
@@ -585,10 +635,8 @@
             </div>
             
             <div class="modal-body tradein-scanner-modal-body">
-                <!-- Live Video Feed -->
                 <video id="tradeInCameraFeedVideo" class="tradein-scanner-video-feed" playsinline autoplay muted></video>
                 
-                <!-- Dynamic Banner Overlay -->
                 <div class="tradein-camera-banner shadow-sm">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <span class="badge bg-primary fs-2xs px-2 py-1" id="tradeInModalTargetBadge">PRIMARY IMEI 1</span>
@@ -599,7 +647,6 @@
                     </div>
                 </div>
 
-                <!-- Aiming Reticle with Animated Laser -->
                 <div class="tradein-scanner-viewfinder">
                     <div class="tradein-aiming-reticle">
                         <div class="tradein-corner-tr"></div>
@@ -608,7 +655,6 @@
                     </div>
                 </div>
 
-                <!-- Floating Toolbar Controls -->
                 <div class="position-absolute bottom-0 start-0 end-0 p-3 d-flex justify-content-center gap-2 z-3">
                     <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="tradeInTorchToggleBtn" style="display: none;">
                         <i class="fas fa-bolt me-1 text-warning"></i> Flashlight
@@ -638,8 +684,281 @@
 <script src="{% static 'js/repair_camera_capture.js' %}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
     // =========================================================================
-    // 1. DIGITAL SIGNATURE CANVAS HANDLER
+    // 1. BENCHMARK PHONE MODEL LOOKUP (STANDARDIZED API CONTRACT)
+    // =========================================================================
+    const benchmarkInput = document.getElementById('benchmarkModelSearchInput');
+    const clearBenchmarkBtn = document.getElementById('clearBenchmarkSearchBtn');
+    const benchmarkResults = document.getElementById('benchmarkSearchResults');
+
+    const brandInput = document.querySelector('[name="brand_name"]');
+    const modelInput = document.querySelector('[name="model_name"]');
+    const storageInput = document.querySelector('[name="storage_capacity"]');
+    const ramInput = document.querySelector('[name="ram_capacity"]');
+    const baseValueInput = document.querySelector('[name="market_base_value"]');
+
+    if (benchmarkInput) {
+        let benchmarkDebounce = null;
+
+        benchmarkInput.addEventListener('input', () => {
+            const query = benchmarkInput.value.trim();
+            if (clearBenchmarkBtn) clearBenchmarkBtn.style.display = query ? 'inline-block' : 'none';
+
+            clearTimeout(benchmarkDebounce);
+            if (query.length < 2) {
+                benchmarkResults.style.display = 'none';
+                benchmarkResults.innerHTML = '';
+                return;
+            }
+
+            benchmarkDebounce = setTimeout(async () => {
+                benchmarkResults.style.display = 'block';
+                benchmarkResults.innerHTML = `
+                    <div class="list-group-item bg-white text-muted py-2 text-center fs-xs">
+                        <i class="fas fa-circle-notch fa-spin me-1 text-primary"></i> Searching catalog benchmark models...
+                    </div>
+                `;
+
+                try {
+                    const res = await fetch(`/products/api/search/?mode=simple&q=${encodeURIComponent(query)}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    const items = Array.isArray(data) ? data : (data.results || data.items || []);
+
+                    if (items.length === 0) {
+                        benchmarkResults.innerHTML = `
+                            <div class="list-group-item bg-white text-muted py-2 text-center fs-xs">
+                                No models found matching "${escapeHtml(query)}". You can type specs manually below.
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    benchmarkResults.innerHTML = items.map(p => {
+                        const extra = p.extra_data || {};
+                        const brand = extra.brand || p.brand || p.brand_name || '';
+                        const model = extra.model || p.model || p.model_name || p.title || p.name || '';
+                        const storage = extra.storage || p.storage || p.internal_storage || '';
+                        const ram = extra.ram || p.ram || '';
+                        const basePrice = Number(extra.base_market_value || extra.selling_price || p.selling_price || p.price || 0);
+
+                        return `
+                            <button type="button" class="list-group-item list-group-item-action py-2 px-3 border-bottom d-flex justify-content-between align-items-center benchmark-option-btn"
+                                data-brand="${escapeHtml(brand)}"
+                                data-model="${escapeHtml(model)}"
+                                data-storage="${escapeHtml(storage)}"
+                                data-ram="${escapeHtml(ram)}"
+                                data-base-price="${basePrice}">
+                                <div>
+                                    <span class="badge bg-primary me-1 fs-2xs">${escapeHtml(brand || 'PHONE')}</span>
+                                    <strong class="text-dark fs-xs">${escapeHtml(model)}</strong>
+                                    ${storage ? `<span class="badge bg-light text-dark border ms-1 fs-2xs">${escapeHtml(storage)}</span>` : ''}
+                                    ${ram ? `<span class="badge bg-light text-muted border ms-1 fs-2xs">${escapeHtml(ram)} RAM</span>` : ''}
+                                </div>
+                                <div class="text-end">
+                                    <small class="text-muted fs-2xs d-block">Benchmark Pristine</small>
+                                    <strong class="text-success font-monospace fs-xs">Rs. ${basePrice.toLocaleString()}</strong>
+                                </div>
+                            </button>
+                        `;
+                    }).join('');
+
+                    benchmarkResults.querySelectorAll('.benchmark-option-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const brandVal = btn.dataset.brand;
+                            const modelVal = btn.dataset.model;
+                            const storageVal = btn.dataset.storage;
+                            const ramVal = btn.dataset.ram;
+                            const baseVal = btn.dataset.basePrice;
+
+                            if (brandInput && brandVal) brandInput.value = brandVal;
+                            if (modelInput && modelVal) modelInput.value = modelVal;
+                            if (storageInput && storageVal) storageInput.value = storageVal;
+                            if (ramInput && ramVal) ramInput.value = ramVal;
+                            if (baseValueInput && baseVal && Number(baseVal) > 0) {
+                                baseValueInput.value = baseVal;
+                                baseValueInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                baseValueInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+
+                            [brandInput, modelInput, storageInput, ramInput, baseValueInput].forEach(el => {
+                                if (el) {
+                                    el.classList.add('flash-autofill-active');
+                                    setTimeout(() => el.classList.remove('flash-autofill-active'), 1500);
+                                }
+                            });
+
+                            benchmarkInput.value = `${brandVal} ${modelVal} (${storageVal})`.trim();
+                            benchmarkResults.style.display = 'none';
+                        });
+                    });
+                } catch (err) {
+                    benchmarkResults.innerHTML = `
+                        <div class="list-group-item bg-white text-danger py-2 text-center fs-xs">
+                            <i class="fas fa-triangle-exclamation me-1"></i> Error querying model benchmark catalog.
+                        </div>
+                    `;
+                }
+            }, 250);
+        });
+
+        if (clearBenchmarkBtn) {
+            clearBenchmarkBtn.addEventListener('click', () => {
+                benchmarkInput.value = '';
+                clearBenchmarkBtn.style.display = 'none';
+                benchmarkResults.style.display = 'none';
+                benchmarkInput.focus();
+            });
+        }
+    }
+
+    // =========================================================================
+    // 2. CUSTOMER KYC PROFILE LOOKUP (STANDARDIZED API CONTRACT)
+    // =========================================================================
+    const kycInput = document.getElementById('customerKycSearchInput');
+    const clearKycBtn = document.getElementById('clearCustomerKycSearchBtn');
+    const kycResults = document.getElementById('customerKycSearchResults');
+
+    const customerNameInput = document.querySelector('[name="customer_full_name"]');
+    const fatherSpouseInput = document.querySelector('[name="customer_father_or_spouse_name"]');
+    const idTypeSelect = document.querySelector('[name="id_type"]');
+    const idNumberInput = document.querySelector('[name="id_number"]');
+    const idDistrictInput = document.querySelector('[name="id_issued_district"]');
+    const permAddressInput = document.querySelector('[name="permanent_address"]');
+    const currAddressInput = document.querySelector('[name="current_address"]');
+
+    if (kycInput) {
+        let kycDebounce = null;
+
+        kycInput.addEventListener('input', () => {
+            const query = kycInput.value.trim();
+            if (clearKycBtn) clearKycBtn.style.display = query ? 'inline-block' : 'none';
+
+            clearTimeout(kycDebounce);
+            if (query.length < 2) {
+                kycResults.style.display = 'none';
+                kycResults.innerHTML = '';
+                return;
+            }
+
+            kycDebounce = setTimeout(async () => {
+                kycResults.style.display = 'block';
+                kycResults.innerHTML = `
+                    <div class="list-group-item bg-white text-muted py-2 text-center fs-xs">
+                        <i class="fas fa-circle-notch fa-spin me-1 text-danger"></i> Searching customer directory...
+                    </div>
+                `;
+
+                try {
+                    const res = await fetch(`/customers/api/search/?q=${encodeURIComponent(query)}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    const customers = Array.isArray(data) ? data : (data.results || data.customers || []);
+
+                    if (customers.length === 0) {
+                        kycResults.innerHTML = `
+                            <div class="list-group-item bg-white text-muted py-2 text-center fs-xs">
+                                No registered customer found. Fill details manually below for new customer.
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    kycResults.innerHTML = customers.map(c => {
+                        const extra = c.extra_data || {};
+                        const name = extra.name || c.title || c.name || '';
+                        const phone = extra.phone || c.phone || '';
+                        const idNum = extra.id_number || extra.citizenship_number || extra.pan || c.pan || '';
+                        const district = extra.id_issued_district || extra.district || '';
+                        const permAddr = extra.permanent_address || extra.address || c.address || '';
+                        const currAddr = extra.current_address || permAddr;
+                        const father = extra.father_or_spouse_name || extra.father_name || '';
+                        const idType = extra.id_type || 'CITIZENSHIP';
+
+                        return `
+                            <button type="button" class="list-group-item list-group-item-action py-2 px-3 border-bottom d-flex justify-content-between align-items-center kyc-option-btn"
+                                data-name="${escapeHtml(name)}"
+                                data-father="${escapeHtml(father)}"
+                                data-id-type="${escapeHtml(idType)}"
+                                data-id-num="${escapeHtml(idNum)}"
+                                data-district="${escapeHtml(district)}"
+                                data-perm-addr="${escapeHtml(permAddr)}"
+                                data-curr-addr="${escapeHtml(currAddr)}">
+                                <div>
+                                    <strong class="text-dark fs-xs">${escapeHtml(name)}</strong>
+                                    <span class="text-muted ms-1 font-monospace fs-2xs">${escapeHtml(phone)}</span>
+                                    ${idNum ? `<span class="badge bg-light text-muted border ms-1 fs-2xs">ID: ${escapeHtml(idNum)}</span>` : ''}
+                                </div>
+                                <div class="text-end text-muted fs-2xs">
+                                    ${escapeHtml(permAddr || 'Nepal')}
+                                </div>
+                            </button>
+                        `;
+                    }).join('');
+
+                    kycResults.querySelectorAll('.kyc-option-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            if (customerNameInput && btn.dataset.name) customerNameInput.value = btn.dataset.name;
+                            if (fatherSpouseInput && btn.dataset.father) fatherSpouseInput.value = btn.dataset.father;
+                            if (idTypeSelect && btn.dataset.idType) idTypeSelect.value = btn.dataset.idType;
+                            if (idNumberInput && btn.dataset.idNum) idNumberInput.value = btn.dataset.idNum;
+                            if (idDistrictInput && btn.dataset.district) idDistrictInput.value = btn.dataset.district;
+                            if (permAddressInput && btn.dataset.permAddr) permAddressInput.value = btn.dataset.permAddr;
+                            if (currAddressInput && btn.dataset.currAddr) currAddressInput.value = btn.dataset.currAddr;
+
+                            [customerNameInput, fatherSpouseInput, idTypeSelect, idNumberInput, idDistrictInput, permAddressInput, currAddressInput].forEach(el => {
+                                if (el) {
+                                    el.classList.add('flash-autofill-active');
+                                    setTimeout(() => el.classList.remove('flash-autofill-active'), 1500);
+                                }
+                            });
+
+                            kycInput.value = btn.dataset.name;
+                            kycResults.style.display = 'none';
+                        });
+                    });
+                } catch (err) {
+                    kycResults.innerHTML = `
+                        <div class="list-group-item bg-white text-danger py-2 text-center fs-xs">
+                            <i class="fas fa-triangle-exclamation me-1"></i> Error searching customer database.
+                        </div>
+                    `;
+                }
+            }, 250);
+        });
+
+        if (clearKycBtn) {
+            clearKycBtn.addEventListener('click', () => {
+                kycInput.value = '';
+                clearKycBtn.style.display = 'none';
+                kycResults.style.display = 'none';
+                kycInput.focus();
+            });
+        }
+    }
+
+    // Dismiss popups on click outside
+    document.addEventListener('click', (e) => {
+        if (benchmarkInput && !benchmarkInput.contains(e.target) && !benchmarkResults.contains(e.target)) {
+            benchmarkResults.style.display = 'none';
+        }
+        if (kycInput && !kycInput.contains(e.target) && !kycResults.contains(e.target)) {
+            kycResults.style.display = 'none';
+        }
+    });
+
+    // =========================================================================
+    // 3. DIGITAL SIGNATURE CANVAS CONTROLLER
     // =========================================================================
     const canvas = document.getElementById('signatureCanvas');
     const signatureInput = document.getElementById('id_signature_data');
@@ -695,8 +1014,8 @@ document.addEventListener('DOMContentLoaded', () => {
         canvas.addEventListener('mousemove', move);
         window.addEventListener('mouseup', end);
 
-        canvas.addEventListener('touchstart', start);
-        canvas.addEventListener('touchmove', move);
+        canvas.addEventListener('touchstart', start, { passive: true });
+        canvas.addEventListener('touchmove', move, { passive: true });
         window.addEventListener('touchend', end);
 
         if (clearBtn) {
@@ -708,7 +1027,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 2. HARDWARE USB BARCODE SCAN BUTTONS FOCUS LISTENERS
+    // 4. HARDWARE USB SCANNER FOCUS BUTTONS
     // =========================================================================
     const scanImei1Btn = document.getElementById('scanTradeInImei1Btn');
     const imei1Input = document.querySelector('[name="imei_1"]');
@@ -733,7 +1052,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 3. CAMERA BARCODE / IMEI SCANNER INTEGRATION & AUTO MDMS TRIGGER
+    // 5. CAMERA SCANNER INTEGRATION
     // =========================================================================
     const cameraModalEl = document.getElementById('tradeInCameraScannerModal');
     const videoEl = document.getElementById('tradeInCameraFeedVideo');
@@ -743,7 +1062,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const targetSlotBadge = document.getElementById('tradeInModalTargetBadge');
     const targetSlotText = document.getElementById('tradeInModalTargetSlotText');
 
-    let activeScanTarget = 'imei_1'; // 'imei_1' | 'imei_2'
+    let activeScanTarget = 'imei_1';
     let cameraScannerInstance = null;
     let cameraModalInstance = null;
 
@@ -757,7 +1076,6 @@ document.addEventListener('DOMContentLoaded', () => {
             cooldown: 1200
         });
 
-        // Trigger Camera for IMEI 1
         const camBtn1 = document.getElementById('cameraScanTradeInImei1Btn');
         if (camBtn1) {
             camBtn1.addEventListener('click', () => {
@@ -768,7 +1086,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Trigger Camera for IMEI 2
         const camBtn2 = document.getElementById('cameraScanTradeInImei2Btn');
         if (camBtn2) {
             camBtn2.addEventListener('click', () => {
@@ -779,7 +1096,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Modal Shown -> Start Hardware Camera Stream
         cameraModalEl.addEventListener('shown.bs.modal', async () => {
             if (statusText) {
                 statusText.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1 text-primary"></i> Initializing camera feed...';
@@ -788,7 +1104,6 @@ document.addEventListener('DOMContentLoaded', () => {
             await cameraScannerInstance.start(
                 videoEl,
                 (scannedCode) => {
-                    // Success Callback
                     const cleanCode = scannedCode.trim();
                     if (statusText) {
                         statusText.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> Scanned: <strong>${cleanCode}</strong>`;
@@ -799,11 +1114,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         imei1Input.classList.add('scan-focus-active');
                         setTimeout(() => imei1Input.classList.remove('scan-focus-active'), 1500);
 
-                        // AUTOMATIC 1-TAP NTA MDMS VERIFICATION TRIGGER
                         const verifyBtn = document.getElementById('verifyMdmsBtn');
-                        if (verifyBtn) {
-                            verifyBtn.click();
-                        }
+                        if (verifyBtn) verifyBtn.click();
                     } else if (activeScanTarget === 'imei_2' && imei2Input) {
                         imei2Input.value = cleanCode;
                         imei2Input.classList.add('scan-focus-active');
@@ -821,7 +1133,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             );
 
-            // Display torch button if supported
             if (cameraScannerInstance.hasTorch && torchBtn) {
                 torchBtn.style.display = 'inline-flex';
             } else if (torchBtn) {
@@ -833,7 +1144,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Modal Hidden -> Stop Camera Hardware
         cameraModalEl.addEventListener('hidden.bs.modal', () => {
             if (cameraScannerInstance) {
                 cameraScannerInstance.stop();
@@ -845,7 +1155,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Toggle Flashlight
         if (torchBtn) {
             torchBtn.addEventListener('click', async () => {
                 const state = await cameraScannerInstance.toggleTorch();
@@ -854,7 +1163,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Switch Camera Lens
         if (switchLensBtn) {
             switchLensBtn.addEventListener('click', async () => {
                 await cameraScannerInstance.switchCamera();

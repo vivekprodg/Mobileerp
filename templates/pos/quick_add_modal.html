@@ -28,28 +28,38 @@
                             <small class="text-muted fs-2xs mt-1 d-block">Scan box barcode or leave empty if this item has no barcode.</small>
                         </div>
                         
+                        <!-- Asynchronous Dynamic Categories Dropdown -->
                         <div class="col-12 col-md-6">
-                            <label class="form-label fw-bold text-dark fs-xs">Category</label>
-                            <select name="category" id="quickProdCategory" class="form-select">
-                                <option value="">-- General / Accessories --</option>
-                                {% if categories %}
-                                    {% for cat in categories %}
-                                        <option value="{{ cat.id }}">{{ cat.name }}</option>
-                                    {% endfor %}
-                                {% else %}
-                                    <option value="1">Mobile Accessories</option>
-                                {% endif %}
-                            </select>
+                            <label class="form-label fw-bold text-dark fs-xs">Category <span class="text-danger">*</span></label>
+                            <div class="position-relative">
+                                <select name="category" 
+                                        id="quickProdCategory" 
+                                        class="form-select" 
+                                        data-autocomplete-url="/inventory/api/categories/search/" 
+                                        required>
+                                    <option value="">-- Loading Categories... --</option>
+                                </select>
+                                <div id="quickProdCategorySpinner" class="spinner-border spinner-border-sm text-primary position-absolute end-0 top-50 translate-middle-y me-4 d-none" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
                         </div>
 
+                        <!-- Asynchronous Dynamic Units Dropdown -->
                         <div class="col-12 col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Base Unit <span class="text-danger">*</span></label>
-                            <select name="base_unit" id="quickProdUnit" class="form-select">
-                                <option value="1" selected>Piece (Pcs)</option>
-                                <option value="2">Pair (PR)</option>
-                                <option value="3">Set</option>
-                                <option value="4">Box</option>
-                            </select>
+                            <div class="position-relative">
+                                <select name="base_unit" 
+                                        id="quickProdUnit" 
+                                        class="form-select" 
+                                        data-autocomplete-url="/inventory/api/units/search/" 
+                                        required>
+                                    <option value="">-- Loading Units... --</option>
+                                </select>
+                                <div id="quickProdUnitSpinner" class="spinner-border spinner-border-sm text-primary position-absolute end-0 top-50 translate-middle-y me-4 d-none" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="col-6">
@@ -85,3 +95,126 @@
         </div>
     </div>
 </div>
+
+<script>
+/**
+ * Asynchronous Category & Base Unit Zero-Query Loader for Quick Add Accessory Modal
+ */
+(function() {
+    const quickModal = document.getElementById('quickAddProductModal');
+    if (!quickModal) return;
+
+    let categoriesLoaded = false;
+    let unitsLoaded = false;
+
+    async function fetchAndPopulateCategories() {
+        const categorySelect = document.getElementById('quickProdCategory');
+        const spinner = document.getElementById('quickProdCategorySpinner');
+        if (!categorySelect) return;
+
+        const url = categorySelect.dataset.autocompleteUrl || '/inventory/api/categories/search/';
+        if (spinner) spinner.classList.remove('d-none');
+
+        try {
+            const response = await fetch(`${url}?q=&limit=100`, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const results = Array.isArray(data) ? data : (data.results || data.categories || []);
+
+            categorySelect.innerHTML = '<option value="">-- Select Category --</option>';
+            if (results.length > 0) {
+                results.forEach(cat => {
+                    const opt = document.createElement('option');
+                    opt.value = cat.id;
+                    opt.textContent = cat.name || cat.title;
+                    categorySelect.appendChild(opt);
+                });
+                categoriesLoaded = true;
+            } else {
+                categorySelect.innerHTML = '<option value="">-- No Categories Configured --</option>';
+            }
+        } catch (err) {
+            console.warn('Asynchronous category lookup error:', err);
+            categorySelect.innerHTML = `
+                <option value="">-- General / Accessories --</option>
+                <option value="1">Mobile Accessories</option>
+                <option value="2">Chargers & Cables</option>
+                <option value="3">Tempered Glass & Covers</option>
+            `;
+        } finally {
+            if (spinner) spinner.classList.add('d-none');
+        }
+    }
+
+    async function fetchAndPopulateUnits() {
+        const unitSelect = document.getElementById('quickProdUnit');
+        const spinner = document.getElementById('quickProdUnitSpinner');
+        if (!unitSelect) return;
+
+        const url = unitSelect.dataset.autocompleteUrl || '/inventory/api/units/search/';
+        if (spinner) spinner.classList.remove('d-none');
+
+        try {
+            const response = await fetch(`${url}?q=&limit=100`, {
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const results = Array.isArray(data) ? data : (data.results || data.units || []);
+
+            unitSelect.innerHTML = '';
+            if (results.length > 0) {
+                results.forEach((unit, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = unit.id;
+                    const symbol = unit.symbol || unit.code ? ` (${unit.symbol || unit.code})` : '';
+                    opt.textContent = `${unit.name}${symbol}`;
+                    // Default to piece / pcs if matched
+                    const lowerName = (unit.name || '').toLowerCase();
+                    const lowerCode = (unit.code || unit.symbol || '').toLowerCase();
+                    if (idx === 0 || lowerName.includes('piece') || lowerCode === 'pcs') {
+                        opt.selected = true;
+                    }
+                    unitSelect.appendChild(opt);
+                });
+                unitsLoaded = true;
+            } else {
+                unitSelect.innerHTML = `
+                    <option value="1" selected>Piece (Pcs)</option>
+                    <option value="2">Pair (PR)</option>
+                    <option value="3">Set</option>
+                    <option value="4">Box</option>
+                `;
+            }
+        } catch (err) {
+            console.warn('Asynchronous units lookup error:', err);
+            unitSelect.innerHTML = `
+                <option value="1" selected>Piece (Pcs)</option>
+                <option value="2">Pair (PR)</option>
+                <option value="3">Set</option>
+                <option value="4">Box</option>
+            `;
+        } finally {
+            if (spinner) spinner.classList.add('d-none');
+        }
+    }
+
+    // Zero-query auto-fill triggered whenever the modal is opened
+    quickModal.addEventListener('show.bs.modal', function() {
+        if (!categoriesLoaded) {
+            fetchAndPopulateCategories();
+        }
+        if (!unitsLoaded) {
+            fetchAndPopulateUnits();
+        }
+    });
+})();
+</script>

@@ -12,12 +12,11 @@ from django.utils.translation import gettext_lazy as _
 from apps.core.models import TimeStampedModel
 from apps.branches.models import Branch
 
-
 class UnitOfMeasurement(TimeStampedModel):
     """Standard Base Units: Piece, Pair, Set, Meter, Gram, Kilogram."""
-    name = models.CharField(max_length=50, unique=True, verbose_name=_("Unit Name (e.g. Piece, Pair)"))
+    name = models.CharField(max_length=50, unique=True, db_index=True, verbose_name=_("Unit Name (e.g. Piece, Pair)"))
     name_np = models.CharField(max_length=50, blank=True, null=True, verbose_name=_("Nepali Unit Name (e.g. पिस, जोडी)"))
-    code = models.CharField(max_length=10, unique=True, verbose_name=_("Short Code (e.g. PCS, PR, BOX)"))
+    code = models.CharField(max_length=10, unique=True, db_index=True, verbose_name=_("Short Code (e.g. PCS, PR, BOX)"))
     allow_decimal = models.BooleanField(default=False, help_text=_("Enable for kg, meter, weight items."))
 
     class Meta:
@@ -25,16 +24,18 @@ class UnitOfMeasurement(TimeStampedModel):
         ordering = ['name']
         verbose_name = _('Unit of Measurement')
         verbose_name_plural = _('Units of Measurement')
+        indexes = [
+            models.Index(fields=['name'], name='idx_uom_name'),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.code})"
 
-
 class ProductCategory(TimeStampedModel):
     """Top-level categories: Mobile Phones, Mobile Accessories, Smartwatches, Spectacles, Sunglasses, etc."""
-    name = models.CharField(max_length=100, unique=True, verbose_name=_("Category Name"))
+    name = models.CharField(max_length=100, unique=True, db_index=True, verbose_name=_("Category Name"))
     name_np = models.CharField(max_length=100, blank=True, null=True, verbose_name=_("Category Name (Nepali)"))
-    code = models.CharField(max_length=20, unique=True, verbose_name=_("Code (e.g. MOB, ACC, OPT)"))
+    code = models.CharField(max_length=20, unique=True, db_index=True, verbose_name=_("Code (e.g. MOB, ACC, OPT)"))
     description = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True, db_index=True)
 
@@ -43,15 +44,18 @@ class ProductCategory(TimeStampedModel):
         ordering = ['name']
         verbose_name = _('Product Category')
         verbose_name_plural = _('Product Categories')
+        indexes = [
+            models.Index(fields=['name'], name='idx_prodcat_name'),
+            models.Index(fields=['is_active', 'name'], name='idx_prodcat_active_name'),
+        ]
 
     def __str__(self):
         return self.name
 
-
 class ProductSubCategory(TimeStampedModel):
     category = models.ForeignKey(ProductCategory, on_delete=models.CASCADE, related_name='subcategories')
-    name = models.CharField(max_length=100, verbose_name=_("Sub-Category Name"))
-    code = models.CharField(max_length=20, blank=True, null=True)
+    name = models.CharField(max_length=100, db_index=True, verbose_name=_("Sub-Category Name"))
+    code = models.CharField(max_length=20, blank=True, null=True, db_index=True)
 
     class Meta:
         db_table = 'inv_subcategories'
@@ -59,13 +63,15 @@ class ProductSubCategory(TimeStampedModel):
         ordering = ['name']
         verbose_name = _('Product Sub-Category')
         verbose_name_plural = _('Product Sub-Categories')
+        indexes = [
+            models.Index(fields=['category', 'name'], name='idx_subcat_cat_name'),
+        ]
 
     def __str__(self):
         return f"{self.category.name} -> {self.name}"
 
-
 class Brand(TimeStampedModel):
-    name = models.CharField(max_length=100, unique=True, verbose_name=_("Brand Name"))
+    name = models.CharField(max_length=100, unique=True, db_index=True, verbose_name=_("Brand Name"))
     origin_country = models.CharField(max_length=50, blank=True, default="Nepal")
 
     class Meta:
@@ -73,10 +79,12 @@ class Brand(TimeStampedModel):
         ordering = ['name']
         verbose_name = _('Brand')
         verbose_name_plural = _('Brands')
+        indexes = [
+            models.Index(fields=['name'], name='idx_brand_name'),
+        ]
 
     def __str__(self):
         return self.name
-
 
 class Product(TimeStampedModel):
     """
@@ -133,8 +141,8 @@ class Product(TimeStampedModel):
     category = models.ForeignKey(ProductCategory, on_delete=models.PROTECT, related_name='products')
     subcategory = models.ForeignKey(ProductSubCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
     brand = models.ForeignKey(Brand, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
-    model_name = models.CharField(max_length=150, blank=True, null=True, verbose_name=_("Model Name"))
-    model_number = models.CharField(max_length=100, blank=True, null=True, verbose_name=_("Model Number"))
+    model_name = models.CharField(max_length=150, blank=True, null=True, db_index=True, verbose_name=_("Model Name"))
+    model_number = models.CharField(max_length=100, blank=True, null=True, db_index=True, verbose_name=_("Model Number"))
     is_spare_part = models.BooleanField(default=False, db_index=True, verbose_name=_("Is Repair Spare Part"))
 
     # 2. Mobile Variant Information
@@ -229,6 +237,10 @@ class Product(TimeStampedModel):
             models.Index(fields=['category', 'brand'], name='idx_prod_cat_brand'),
             models.Index(fields=['name', 'selling_price'], name='idx_prod_name_price'),
             models.Index(fields=['rack_number', 'shelf_identifier'], name='idx_prod_rack_shelf'),
+            models.Index(fields=['model_name'], name='idx_prod_model_name'),
+            models.Index(fields=['model_number'], name='idx_prod_model_num'),
+            models.Index(fields=['brand', 'model_name'], name='idx_prod_brand_model'),
+            models.Index(fields=['name'], name='idx_prod_name'),
         ]
 
     def __str__(self):
@@ -248,7 +260,6 @@ class Product(TimeStampedModel):
             if self.barcode == '':
                 self.barcode = None
         super().save(*args, **kwargs)
-
 
 class ProductComponentWarrantyRule(TimeStampedModel):
     """Component-level warranty rules per product model (e.g. Device 12M, Battery 6M, Screen 6M)."""
@@ -282,7 +293,6 @@ class ProductComponentWarrantyRule(TimeStampedModel):
     def __str__(self):
         return f"{self.product.name} -> {self.get_component_type_display()}: {self.warranty_months} Months"
 
-
 class UnitConversion(TimeStampedModel):
     """Packaging unit conversion: e.g. 1 Box of Tempered Glass = 50 Pieces."""
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='unit_conversions')
@@ -299,7 +309,6 @@ class UnitConversion(TimeStampedModel):
 
     def __str__(self):
         return f"1 {self.unit_name} = {self.conversion_factor} {self.product.base_unit.code} ({self.product.name})"
-
 
 class BranchStock(TimeStampedModel):
     """Real-time sellable, reserved, and quarantined defective stock levels per branch."""
@@ -335,7 +344,6 @@ class BranchStock(TimeStampedModel):
     def is_low_stock(self) -> bool:
         return self.quantity <= self.low_stock_threshold
 
-
 class ProductBatch(TimeStampedModel):
     """Tracks non-serialized multi-date inventory batches for accessories and spare parts."""
     batch_number = models.CharField(max_length=60, db_index=True, verbose_name=_("Batch Number"))
@@ -363,7 +371,6 @@ class ProductBatch(TimeStampedModel):
     def save(self, *args, **kwargs):
         self.is_depleted = self.quantity_remaining <= Decimal('0.000')
         super().save(*args, **kwargs)
-
 
 class ItemInstance(TimeStampedModel):
     """
@@ -453,9 +460,9 @@ class ItemInstance(TimeStampedModel):
     purchase_date = models.DateField(blank=True, null=True, db_index=True)
 
     # Outward Sales Tracking
-    sold_invoice_reference = models.CharField(max_length=60, blank=True, null=True)
+    sold_invoice_reference = models.CharField(max_length=60, blank=True, null=True, db_index=True)
     customer_name = models.CharField(max_length=150, blank=True, null=True)
-    customer_phone = models.CharField(max_length=30, blank=True, null=True)
+    customer_phone = models.CharField(max_length=30, blank=True, null=True, db_index=True)
     sale_date = models.DateField(blank=True, null=True, db_index=True)
     sold_price = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
     warranty_start_date = models.DateField(blank=True, null=True)
@@ -488,6 +495,12 @@ class ItemInstance(TimeStampedModel):
             models.Index(fields=['product', 'branch', 'status'], name='idx_instance_prod_br_status'),
             models.Index(fields=['imei_1', 'status'], name='idx_instance_imei1_status'),
             models.Index(fields=['imei_2', 'status'], name='idx_instance_imei2_status'),
+            models.Index(fields=['serial_number', 'status'], name='idx_inst_serial_status'),
+            models.Index(fields=['device_barcode', 'status'], name='idx_inst_barcode_status'),
+            models.Index(fields=['sold_invoice_reference'], name='idx_inst_sold_invoice'),
+            models.Index(fields=['customer_phone'], name='idx_inst_cust_phone'),
+            models.Index(fields=['status', 'created_at'], name='idx_inst_status_created'),
+            models.Index(fields=['branch', 'status'], name='idx_inst_branch_status'),
         ]
 
     def clean(self):
@@ -545,7 +558,6 @@ class ItemInstance(TimeStampedModel):
     def is_mdms_compliant(self) -> bool:
         return self.mdms_status in ['REGISTERED_OFFICIAL', 'INDIVIDUAL_CUSTOMS_PAID', 'EXEMPT']
 
-
 class DeviceComponentWarranty(TimeStampedModel):
     """Active customer component warranty ledger for a specific sold IMEI (e.g. Battery 6M, Screen 6M)."""
     STATUS_CHOICES = [
@@ -582,7 +594,6 @@ class DeviceComponentWarranty(TimeStampedModel):
     def is_currently_valid(self) -> bool:
         today = date.today()
         return self.status == 'ACTIVE' and (self.warranty_expiry_date >= today)
-
 
 class VendorRMAClaim(TimeStampedModel):
     """Return to Vendor (RMA) tracking voucher for claiming defective components from distributors."""
@@ -625,7 +636,6 @@ class VendorRMAClaim(TimeStampedModel):
             models.Index(fields=['supplier', 'status'], name='idx_rma_supplier_status'),
         ]
 
-
 class VendorRMAClaimItem(TimeStampedModel):
     """Line item in a Vendor RMA Claim linked to customer repair replacements."""
     RESOLUTION_CHOICES = [
@@ -649,7 +659,6 @@ class VendorRMAClaimItem(TimeStampedModel):
         db_table = 'inv_vendor_rma_claim_items'
         verbose_name = _('Vendor RMA Claim Item')
         verbose_name_plural = _('Vendor RMA Claim Items')
-
 
 class StockMovementLog(TimeStampedModel):
     """Audit ledger tracking inventory movements, IMEI instances, trade-in buybacks, and branch transfers."""
@@ -677,7 +686,7 @@ class StockMovementLog(TimeStampedModel):
     previous_quantity = models.DecimalField(max_digits=12, decimal_places=3)
     new_quantity = models.DecimalField(max_digits=12, decimal_places=3)
     reference_document = models.CharField(max_length=100, blank=True, null=True)
-    imei_or_serial_number = models.CharField(max_length=100, blank=True, null=True)
+    imei_or_serial_number = models.CharField(max_length=100, blank=True, null=True, db_index=True)
     remarks = models.TextField(blank=True, null=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
 
@@ -690,6 +699,7 @@ class StockMovementLog(TimeStampedModel):
             models.Index(fields=['product', 'branch', 'created_at'], name='idx_movelog_prod_br_date'),
             models.Index(fields=['movement_type', 'created_at'], name='idx_movelog_type_date'),
             models.Index(fields=['reference_document'], name='idx_movelog_ref_doc'),
+            models.Index(fields=['imei_or_serial_number'], name='idx_movelog_imei_serial'),
         ]
 
 # Backward compatibility alias

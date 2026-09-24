@@ -315,17 +315,6 @@
         </div>
     </div>
 
-    <!-- Linked Service Repair Ticket Pre-Fill Banner (If launched from workshop desk) -->
-    {% if prefill_repair_ticket %}
-    <div class="alert alert-info py-2 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs flex-shrink-0" id="linkedRepairBanner">
-        <span>
-            <i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>#{{ prefill_repair_ticket.ticket_number }}</strong> 
-            ({{ prefill_repair_ticket.product.name }} &bull; Payable: <strong>Rs. {{ prefill_repair_ticket.final_total_amount }}</strong>)
-        </span>
-        <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); if(window.smartPos){ window.smartPos.repairTicketId=null; }" aria-label="Close"></button>
-    </div>
-    {% endif %}
-
     <!-- Active Sequential IMEI Scanning Banner -->
     <div id="dualImeiActivePrompt" class="dual-imei-scanning-banner p-2 mb-2 d-none shadow-sm flex-shrink-0">
         <div class="d-flex justify-content-between align-items-center">
@@ -362,8 +351,20 @@
         <!-- LEFT COLUMN: Product Catalog, Search & Scan (7 Cols) -->
         <div class="col-12 col-lg-7 d-flex flex-column h-100">
             
-            <!-- Fast Search Bar & Barcode Scanner Input -->
+            <!-- Fast Search Bar & Barcode Scanner Input with Global Shortcut Indicators -->
             <div class="card border-0 shadow-sm rounded-4 p-2 bg-white mb-2 flex-shrink-0">
+                <div class="d-flex justify-content-between align-items-center px-1 mb-1 fs-2xs text-muted">
+                    <span class="fw-bold"><i class="fas fa-barcode text-primary me-1"></i> Barcode &amp; Product Search</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-light text-secondary border font-mono fs-2xs px-2 py-0.5" title="Focus barcode search bar">
+                            <kbd class="bg-white text-dark border me-1">F2</kbd> Product Scan
+                        </span>
+                        <span class="badge bg-light text-secondary border font-mono fs-2xs px-2 py-0.5" title="Launch global universal search">
+                            <kbd class="bg-white text-dark border me-1">Ctrl + K</kbd> Global Search
+                        </span>
+                    </div>
+                </div>
+
                 <div class="input-group input-group-lg">
                     <span class="input-group-text bg-primary text-white border-0 py-2">
                         <i class="fas fa-barcode fs-5"></i>
@@ -488,21 +489,54 @@
                         </small>
                     </div>
 
-                    <!-- 3. Customer & PAN Selector Row -->
+                    <!-- 3. Standardized Customer Selection & Operational Shortcuts -->
                     <div class="d-flex align-items-center justify-content-between gap-2">
-                        <div class="input-group input-group-sm flex-grow-1">
-                            <span class="input-group-text bg-white border-0"><i class="fas fa-user text-muted"></i></span>
-                            <input type="text" id="posCustomerInput" class="form-control border-0" placeholder="Walk-in Customer (or Search Phone)">
+                        <!-- Customer Field managed by POSCustomerManager in pos_engine.js -->
+                        <div class="flex-grow-1 position-relative">
+                            <div class="input-group input-group-sm bg-white rounded-3 border">
+                                <span class="input-group-text bg-transparent border-0 pe-1">
+                                    <i class="fas fa-user text-muted"></i>
+                                </span>
+                                <input type="text" 
+                                       id="posCustomerInput" 
+                                       class="form-control border-0 bg-transparent ps-1" 
+                                       placeholder="Walk-in Customer (click for recent/debtors)"
+                                       autocomplete="off">
+                            </div>
                         </div>
-                        <div class="input-group input-group-sm" style="max-width: 140px;">
-                            <span class="input-group-text bg-white border-0 font-monospace fs-2xs">PAN</span>
-                            <input type="text" id="posCustomerPanInput" class="form-control border-0 font-monospace fs-xs" placeholder="9-Digit PAN" maxlength="15">
+
+                        <!-- 9-Digit Tax PAN Field -->
+                        <div class="input-group input-group-sm bg-white rounded-3 border" style="max-width: 130px;">
+                            <span class="input-group-text bg-transparent border-0 font-monospace fs-2xs px-1 text-muted">PAN</span>
+                            <input type="text" id="posCustomerPanInput" class="form-control border-0 font-monospace fs-xs px-1" placeholder="9-Digit" maxlength="15">
                         </div>
+
+                        <!-- Action Controls: Repair Ticket Attach, Trade-in Exchange, Shortcuts -->
                         <div class="d-flex gap-1 flex-shrink-0">
-                            <button type="button" class="btn btn-outline-warning btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark" id="attachTradeInPromptBtn" data-bs-toggle="modal" data-bs-target="#exchangeModal" title="Attach Trade-In Voucher">
+                            <!-- Direct Repair Ticket Search & Link Button (Unified with pos_engine.js) -->
+                            <button type="button" 
+                                    class="btn btn-outline-info btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark" 
+                                    id="attachRepairPromptBtn" 
+                                    title="Search &amp; Attach Ready Repair Ticket [F7]">
+                                <i class="fas fa-wrench text-info me-1"></i> Repair [F7]
+                            </button>
+
+                            <!-- Trade-in Voucher Attach Button -->
+                            <button type="button" 
+                                    class="btn btn-outline-warning btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark" 
+                                    id="attachTradeInPromptBtn" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#exchangeModal" 
+                                    title="Attach Trade-In Voucher">
                                 <i class="fas fa-repeat text-warning-emphasis me-1"></i> Exchange
                             </button>
-                            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill text-nowrap fs-xs" data-bs-toggle="modal" data-bs-target="#shortcutsModal" title="POS Shortcuts">
+
+                            <!-- Keyboard Shortcuts Help -->
+                            <button type="button" 
+                                    class="btn btn-outline-dark btn-sm rounded-pill text-nowrap fs-xs" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#shortcutsModal" 
+                                    title="POS Shortcuts">
                                 <i class="fas fa-keyboard"></i>
                             </button>
                         </div>
@@ -569,7 +603,7 @@
                                     Rs.
                                 </button>
                             </div>
-                            <!-- Hidden button preserving #posBillDiscountTypeToggleBtn ID for legacy script references -->
+                            <!-- Hidden button preserving legacy script compatibility -->
                             <button type="button" id="posBillDiscountTypeToggleBtn" class="d-none">%</button>
                         </div>
                         
@@ -686,9 +720,13 @@
                 <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-3">
-                <div class="mb-2">
+                <div class="position-relative mb-2">
                     <label class="form-label fs-xs fw-bold text-dark mb-1">Old Phone Model Name / Voucher Ref</label>
-                    <input type="text" id="exchangePhoneModel" class="form-control" placeholder="e.g. Redmi Note 10 Pro or EXC-BR-XXXXXX">
+                    <input type="text" 
+                           id="exchangePhoneModel" 
+                           class="form-control" 
+                           placeholder="e.g. Redmi Note 10 Pro or EXC-BR-XXXXXX"
+                           autocomplete="off">
                 </div>
                 <div class="mb-2">
                     <label class="form-label fs-xs fw-bold text-dark mb-1">Agreed Buy-Back Value (NPR)</label>
@@ -864,10 +902,8 @@
             </div>
             
             <div class="modal-body pos-scanner-modal-body">
-                <!-- Video Stream Feed -->
                 <video id="posCameraFeedVideo" class="scanner-video-feed" playsinline autoplay muted></video>
                 
-                <!-- Aiming Reticle Overlay with Animated Laser -->
                 <div class="scanner-viewfinder-overlay">
                     <div class="scanner-aiming-reticle">
                         <div class="scanner-corner-tr"></div>
@@ -876,7 +912,6 @@
                     </div>
                 </div>
 
-                <!-- Floating Controls Toolbar with Image File Picker -->
                 <div class="scanner-controls-bar flex-wrap">
                     <label class="btn btn-primary btn-sm rounded-pill px-3 py-1 bg-opacity-90 fs-xs fw-bold shadow-sm" style="cursor: pointer;">
                         <i class="fas fa-image me-1"></i> Pick Box Picture
@@ -919,7 +954,7 @@
 
 <script>
 /**
- * POS Interactive Controls, Nepali Date Confirmation & Backdating Controller
+ * POS Interactive Controls, Nepali Date Controller & Operational Event Listeners
  */
 document.addEventListener('DOMContentLoaded', () => {
     // =========================================================================
@@ -993,11 +1028,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Toggle custom date picker bar
     if (btnChangeBillDate && customDatePickerWrapper) {
         btnChangeBillDate.addEventListener('click', async () => {
             if (customDatePickerWrapper.classList.contains('d-none')) {
-                // If cashier is not privileged, demand Supervisor PIN
                 if (!canBackdate) {
                     if (window.smartPos && window.smartPos.checkout) {
                         const pin = await window.smartPos.checkout.promptForManagerPin(
@@ -1023,7 +1056,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Apply custom B.S. date
     if (btnApplyCustomDate && posBillDateBsInput) {
         btnApplyCustomDate.addEventListener('click', () => {
             const chosenDate = posBillDateBsInput.value.trim();
@@ -1060,7 +1092,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Reset date to today
     if (btnResetTodayDate) {
         btnResetTodayDate.addEventListener('click', () => {
             updateConfirmedBillDateUI(todayBsDate);
@@ -1070,7 +1101,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Hook custom B.S. bill date into checkout payload builder
     if (window.smartPos && window.smartPos.checkout) {
         const originalBuildPayload = window.smartPos.checkout.buildPayload.bind(window.smartPos.checkout);
         window.smartPos.checkout.buildPayload = function(payments) {
@@ -1083,7 +1113,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 3. DUAL-MODE BILL DISCOUNT SWITCH [% | Rs.] CONTROLS
+    // 3. GLOBAL SHORTCUTS LISTENER: F2 (PRODUCT SCAN) & CTRL + K (GLOBAL SEARCH)
+    // =========================================================================
+    const searchInput = document.getElementById('posProductSearchInput');
+    window.addEventListener('keydown', (e) => {
+        // [F2] Focus POS Search Input
+        if (e.key === 'F2') {
+            e.preventDefault();
+            if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+        // [Ctrl + K] Universal Quick Search Command Palette
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            if (typeof window.openGlobalSearchModal === 'function') {
+                window.openGlobalSearchModal();
+            } else if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+    });
+
+    // =========================================================================
+    // 4. DUAL-MODE BILL DISCOUNT SWITCH [% | Rs.] CONTROLS
     // =========================================================================
     const btnDiscountPercent = document.getElementById('btnDiscountModePercent');
     const btnDiscountFixed = document.getElementById('btnDiscountModeFixed');
@@ -1149,7 +1204,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 4. SUPERVISOR OVERRIDE MODAL: DISCOUNT REASON DROPDOWN & NOTES SYNC
+    // 5. SUPERVISOR OVERRIDE MODAL: DISCOUNT REASON DROPDOWN & NOTES SYNC
     // =========================================================================
     const reasonSelect = document.getElementById('posDiscountReasonSelect');
     const reasonNotesContainer = document.getElementById('posDiscountReasonNotesContainer');
@@ -1210,7 +1265,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 5. CAMERA BARCODE SCANNER INTEGRATION
+    // 6. CAMERA BARCODE SCANNER INTEGRATION
     // =========================================================================
     const openCameraBtn = document.getElementById('posOpenCameraButton');
     const cameraModalEl = document.getElementById('posCameraScannerModal');
@@ -1279,8 +1334,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (posCameraScannerInstance) {
                 posCameraScannerInstance.stop();
             }
-            if (window.smartPos && window.smartPos.searchInput) {
-                window.smartPos.searchInput.focus();
+            if (window.smartPos && window.smartPos.catalogService && window.smartPos.catalogService.searchInput) {
+                window.smartPos.catalogService.searchInput.focus();
             }
         });
 
@@ -1326,21 +1381,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 6. MODAL CLOSE & RESET FOCUS LISTENERS
+    // 7. MODAL CLOSE & RESET FOCUS LISTENERS
     // =========================================================================
     const finishReceiptBtn = document.getElementById('finishReceiptBtn');
     const closeReceiptBtn = document.getElementById('closeReceiptBtn');
     [finishReceiptBtn, closeReceiptBtn].forEach(btn => {
         if (btn) {
             btn.addEventListener('click', () => {
-                if (window.smartPos && window.smartPos.searchInput) {
-                    setTimeout(() => window.smartPos.searchInput.focus(), 300);
+                if (window.smartPos && window.smartPos.catalogService && window.smartPos.catalogService.searchInput) {
+                    setTimeout(() => window.smartPos.catalogService.searchInput.focus(), 300);
                 }
             });
         }
     });
 
-    const searchInput = document.getElementById('posProductSearchInput');
     if (searchInput) {
         searchInput.focus();
     }

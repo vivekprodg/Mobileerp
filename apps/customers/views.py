@@ -9,7 +9,11 @@ Capabilities:
    - Sub-ledger entry creation prior to balance adjustment.
    - Synchronous, unswallowed double-entry GL receipt voucher posting.
    - Balance cache recalculation strictly from ledger entries upon posting success.
-4. POS Fast Auto-Complete Lookup API: Real-time search by phone number or name.
+4. Unified Customer Search API:
+   - When query string is empty, returns the top 15 most recently active customers or debtors.
+   - Partial matching across name, phone number, and PAN.
+   - Adheres to the Unified Search JSON Contract (id, title, subtitle, badge, extra_data).
+   - Backwards compatible with POS auto-complete.
 """
 
 import logging
@@ -314,28 +318,118 @@ class CustomerUdhaariPaymentView(LoginRequiredMixin, UserPassesTestMixin, View):
 
 
 class CustomerSearchAPIView(LoginRequiredMixin, View):
-    """Fast lookup endpoint for POS screen auto-completion (expanded to 20 results)."""
+    """
+    Unified Customer Search API endpoint.
+    Serves both fast POS auto-completion and B2B Tax Invoicing Lookups.
+
+    Capabilities:
+    1. If `q` is empty: Returns the top 15 most recently active customers or those with outstanding Udhaari.
+    2. If `q` is provided: Searches across name, phone number, and PAN using partial matching.
+    3. Conforms to the Unified Search Contract (id, title, subtitle, badge, extra_data).
+    4. Maintains full backward compatibility with legacy POS JavaScript endpoints.
+    """
 
     def get(self, request, *args, **kwargs):
-        term = request.GET.get('q', '').strip()
-        if len(term) < 2:
-            return JsonResponse({'results': []})
+        q = request.GET.get('q', '').strip()
+        customer_type = request.GET.get('type', '').strip()
+        has_debt = request.GET.get('has_debt', '').strip()
 
-        qs = Customer.objects.filter(
-            Q(name__icontains=term) | Q(phone_number__icontains=term) | Q(pan_number__icontains=term),
-            is_active=True
-        )[:20]
+        qs = Customer.objects.filter(is_active=True).select_related('preferred_branch')
 
-        results = [
-            {
-                'id': c.id,
-                'name': c.name,
-                'phone': c.phone_number,
-                'pan': c.pan_number or '',
-                'customer_type': c.customer_type,
-                'credit_balance': str(c.current_credit_balance),
-                'credit_limit': str(c.credit_limit),
+        if customer_type:
+            qs = qs.filter(customer_type=customer_type.upper())
+
+        if has_debt in ['1', 'true', 'True']:
+            qs = qs.filter(current_credit_balance__gt=Decimal('0.00'))
+
+        if q:
+            # Partial search across name, phone, and PAN
+            cust_filter = (
+                Q(name__icontains=q) |
+                Q(phone_number__icontains=q)
+            )
+            if hasattr(Customer, 'pan_number'):
+                cust_filter |= Q(pan_number__icontains=q)
+            if hasattr(Customer, 'email'):
+                cust_filter |= Q(email__icontains=q)
+
+            qs = qs.filter(cust_filter).order_by('-current_credit_balance', 'name')[:25]
+        else:
+            # When empty query: Return the 15 most recently active customers or those with outstanding Udhaari
+            qs = qs.order_by('-current_credit_balance', '-updated_at')[:15]
+
+        results = []
+        for c in qs:
+            c_type = getattr(c, 'customer_type', 'RETAIL') or 'RETAIL'
+            c_type_display = c.get_customer_type_display() if hasattr(c, 'get_customer_type_display') else c_type
+            pan = getattr(c, 'pan_number', '') or ''
+            phone = getattr(c, 'phone_number', '') or ''
+            addr = getattr(c, 'address', '') or ''
+            email = getattr(c, 'email', '') or ''
+            bal = getattr(c, 'current_credit_balance', Decimal('0.00'))
+            limit = getattr(c, 'credit_limit', Decimal('0.00'))
+
+            # Badge determination
+            if bal > Decimal('0.00'):
+                badge = f"Due: Rs. {bal:,.2f}"
+                badge_color = 'danger'
+            elif pan:
+                badge = f"PAN: {pan}"
+                badge_color = 'primary'
+            else:
+                badge = c_type_display
+                badge_color = 'secondary'
+
+            # Subtitle construction
+            subtitle_parts = [f"Ph: {phone}"]
+            if pan:
+                subtitle_parts.append(f"PAN: {pan}")
+            if bal > Decimal('0.00'):
+                subtitle_parts.append(f"Due: Rs. {bal:,.2f}")
+            elif addr:
+                subtitle_parts.append(addr[:30])
+            subtitle = " | ".join(subtitle_parts)
+
+            extra_data = {
+                'credit_balance': str(bal),
+                'credit_limit': str(limit),
+                'pan_number': pan,
+                'phone_number': phone,
+                'address': addr,
+                'email': email,
+                'customer_type': c_type,
+                'customer_type_display': c_type_display,
+                'wholesale_or_retail_badge': c_type_display,
+                'preferred_branch_id': c.preferred_branch_id if getattr(c, 'preferred_branch_id', None) else None,
+                'preferred_branch_name': c.preferred_branch.name if getattr(c, 'preferred_branch', None) else '',
             }
-            for c in qs
-        ]
-        return JsonResponse({'results': results})
+
+            results.append({
+                # Unified Search Contract
+                'id': c.id,
+                'title': c.name,
+                'subtitle': subtitle,
+                'badge': badge,
+                'badge_color': badge_color,
+                'extra_data': extra_data,
+
+                # Select2 / Autocomplete Compatibility
+                'text': f"{c.name} ({phone})" if phone else c.name,
+
+                # POS Form Backwards Compatibility
+                'name': c.name,
+                'phone': phone,
+                'pan': pan,
+                'address': addr,
+                'email': email,
+                'customer_type': c_type,
+                'credit_balance': str(bal),
+                'credit_limit': str(limit),
+            })
+
+        return JsonResponse({
+            'status': 'success',
+            'query': q,
+            'count': len(results),
+            'results': results
+        })

@@ -268,7 +268,7 @@
 }
 
 .inv-search {
-    flex: 1 1 240px;
+    flex: 1 1 280px;
     position: relative;
 }
 
@@ -305,6 +305,44 @@
     transform: translateY(-50%);
     color: #98a2b3;
     pointer-events: none;
+    z-index: 2;
+}
+
+/* Real-Time Catalog Hints Dropdown */
+.inv-search-hints-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: #ffffff;
+    border: 1px solid var(--inv-border);
+    border-radius: 12px;
+    box-shadow: var(--inv-shadow-lg);
+    max-height: 380px;
+    overflow-y: auto;
+    z-index: 1060;
+}
+
+.inv-search-hint-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    text-decoration: none;
+    color: var(--inv-text);
+    transition: background 0.15s ease;
+    cursor: pointer;
+}
+
+.inv-search-hint-item:last-child {
+    border-bottom: none;
+}
+
+.inv-search-hint-item:hover,
+.inv-search-hint-item.active {
+    background-color: var(--inv-primary-soft);
 }
 
 .inv-select {
@@ -683,6 +721,7 @@
     outline: none;
     font-size: 12.5px;
     color: var(--inv-text);
+    width: 100%;
 }
 
 .inv-modal-footer {
@@ -692,7 +731,7 @@
     gap: 10px;
 }
 
-/* Quick Add Category/SubCategory/Brand/Unit Button (Prominent 28x28px) */
+/* Quick Add Button (Prominent 28x28px) */
 .inv-quick-add-btn {
     display: inline-flex;
     align-items: center;
@@ -862,11 +901,15 @@
                 </a>
             </div>
 
-            <!-- TOOLBAR -->
+            <!-- TOOLBAR WITH REAL-TIME CATALOG FILTER HINTS -->
             <form method="get" class="inv-toolbar" id="filterForm">
-                <div class="inv-search">
+                <div class="inv-search position-relative" id="catalogSearchContainer">
                     <i class="fas fa-search inv-search-icon"></i>
-                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" placeholder="Search by phone name, RAM/ROM, SKU, processor or rack...">
+                    <input type="text" name="q" id="catalogSearchInput" value="{{ request.GET.q|default:'' }}" 
+                           placeholder="Search phone name, RAM/ROM, SKU, barcode..." autocomplete="off">
+                    
+                    <!-- Live Instant Search Hints Dropdown -->
+                    <div class="inv-search-hints-dropdown d-none" id="catalogSearchHints"></div>
                 </div>
 
                 <select class="inv-select" name="category" id="catalogCategoryFilter" onchange="document.getElementById('filterForm').submit()">
@@ -920,7 +963,6 @@
                         <tr>
                             <td>
                                 <div class="inv-product-cell">
-                                    <!-- DYNAMIC PRODUCT PHOTO THUMBNAIL CONTAINER WITH FALLBACK -->
                                     <div class="inv-product-image">
                                         {% if product.image %}
                                             <img src="{{ product.image.url }}" 
@@ -1120,7 +1162,7 @@
 </div>
 
 <!-- =========================================================
-     1. QUICK ADD PRODUCT MODAL
+     1. QUICK ADD PRODUCT MODAL (STANDARDIZED CONTEXTUAL INPUTS)
      ========================================================= -->
 <div class="inv-modal-overlay" id="addProductModal">
     <div class="inv-modal">
@@ -1157,49 +1199,70 @@
                     <input class="inv-form-input" name="sku" placeholder="e.g. SAM-A55-256">
                 </div>
 
-                <!-- CATEGORY DROPDOWN WITH QUICK-ADD TRIGGER BUTTON -->
+                <!-- 1. CATEGORY ASYNC CONTEXTUAL SEARCH -->
                 <div class="inv-form-group">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="inv-form-label mb-0">Category *</label>
-                        <button type="button" class="inv-quick-add-btn" id="openQuickCategoryBtn" title="Quick Add New Category" data-bs-toggle="tooltip">
+                        <button type="button" class="inv-quick-add-btn" id="openQuickCategoryBtn" title="Quick Add New Category">
                             <i class="fas fa-plus"></i>
                         </button>
                     </div>
-                    <select class="inv-form-input" name="category" id="productCategorySelect" required>
-                        <option value="" disabled selected>-- Select Category --</option>
-                        {% for cat in categories %}
-                            <option value="{{ cat.id }}">{{ cat.name }}</option>
-                        {% endfor %}
-                    </select>
+                    <div class="contextual-search-wrapper" 
+                         id="modalCategoryWrapper" 
+                         data-search-url="/inventory/api/categories/search/" 
+                         data-search-type="category" 
+                         data-placeholder="Search or pick category...">
+                        <input type="hidden" name="category" id="modal_product_category" required>
+                        <input type="text" 
+                               class="inv-form-input async-search-input" 
+                               id="modal_category_display"
+                               placeholder="Search or pick category..." 
+                               autocomplete="off">
+                    </div>
                 </div>
 
-                <!-- SUBCATEGORY DROPDOWN WITH QUICK-ADD TRIGGER BUTTON -->
+                <!-- 2. SUBCATEGORY ASYNC CONTEXTUAL SEARCH (CHAINED) -->
                 <div class="inv-form-group">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="inv-form-label mb-0">Sub-Category</label>
-                        <button type="button" class="inv-quick-add-btn" id="openQuickSubCategoryBtn" title="Quick Add SubCategory" data-bs-toggle="tooltip">
+                        <button type="button" class="inv-quick-add-btn" id="openQuickSubCategoryBtn" title="Quick Add SubCategory">
                             <i class="fas fa-plus"></i>
                         </button>
                     </div>
-                    <select class="inv-form-input" name="subcategory" id="productSubCategorySelect">
-                        <option value="">-- Optional SubCategory --</option>
-                    </select>
+                    <div class="contextual-search-wrapper" 
+                         id="modalSubCategoryWrapper" 
+                         data-search-url="/inventory/api/subcategories/search/" 
+                         data-search-type="subcategory" 
+                         data-placeholder="Pick category first or search...">
+                        <input type="hidden" name="subcategory" id="modal_product_subcategory">
+                        <input type="text" 
+                               class="inv-form-input async-search-input" 
+                               id="modal_subcategory_display"
+                               placeholder="Pick category first or search..." 
+                               autocomplete="off">
+                    </div>
                 </div>
 
-                <!-- BRAND DROPDOWN WITH QUICK-ADD TRIGGER BUTTON -->
+                <!-- 3. BRAND ASYNC CONTEXTUAL SEARCH -->
                 <div class="inv-form-group">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="inv-form-label mb-0">Brand</label>
-                        <button type="button" class="inv-quick-add-btn" id="openQuickBrandBtn" title="Quick Add New Brand" data-bs-toggle="tooltip">
+                        <button type="button" class="inv-quick-add-btn" id="openQuickBrandBtn" title="Quick Add New Brand">
                             <i class="fas fa-plus"></i>
                         </button>
                     </div>
-                    <select class="inv-form-input" name="brand" id="productBrandSelect">
-                        <option value="">-- Select Brand --</option>
-                        {% for b in brands %}
-                            <option value="{{ b.id }}">{{ b.name }}</option>
-                        {% endfor %}
-                    </select>
+                    <div class="contextual-search-wrapper" 
+                         id="modalBrandWrapper" 
+                         data-search-url="/inventory/api/brands/search/" 
+                         data-search-type="brand" 
+                         data-placeholder="Search brand (Apple, Samsung...)">
+                        <input type="hidden" name="brand" id="modal_product_brand">
+                        <input type="text" 
+                               class="inv-form-input async-search-input" 
+                               id="modal_brand_display"
+                               placeholder="Search brand (Apple, Samsung...)" 
+                               autocomplete="off">
+                    </div>
                 </div>
 
                 <div class="inv-form-group">
@@ -1246,21 +1309,26 @@
                     <input class="inv-form-input" name="rack_number" placeholder="e.g. Rack-M01">
                 </div>
 
-                <!-- BASE UNIT DROPDOWN WITH QUICK-ADD TRIGGER BUTTON -->
+                <!-- 4. BASE ATOMIC UNIT ASYNC CONTEXTUAL SEARCH -->
                 <div class="inv-form-group">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="inv-form-label mb-0">Base Atomic Unit *</label>
-                        <button type="button" class="inv-quick-add-btn" id="openQuickUnitBtn" title="Quick Add Unit of Measurement" data-bs-toggle="tooltip">
+                        <button type="button" class="inv-quick-add-btn" id="openQuickUnitBtn" title="Quick Add Unit of Measurement">
                             <i class="fas fa-plus"></i>
                         </button>
                     </div>
-                    <select class="inv-form-input" name="base_unit" id="productUnitSelect" required>
-                        {% for u in units %}
-                            <option value="{{ u.id }}" {% if u.code == 'PCS' %}selected{% endif %}>{{ u.name }} ({{ u.code }})</option>
-                        {% empty %}
-                            <option value="1">Piece (Pcs)</option>
-                        {% endfor %}
-                    </select>
+                    <div class="contextual-search-wrapper" 
+                         id="modalUnitWrapper" 
+                         data-search-url="/inventory/api/units/search/" 
+                         data-search-type="unit" 
+                         data-placeholder="Select unit (Pcs, Box, Set...)">
+                        <input type="hidden" name="base_unit" id="modal_product_unit" required>
+                        <input type="text" 
+                               class="inv-form-input async-search-input" 
+                               id="modal_unit_display"
+                               placeholder="Select unit (Pcs, Box, Set...)" 
+                               autocomplete="off">
+                    </div>
                 </div>
 
                 <div class="inv-form-group full">
@@ -1282,7 +1350,7 @@
 <!-- =========================================================
      2. QUICK ADD CATEGORY POPUP MODAL
      ========================================================= -->
-<div class="inv-modal-overlay" id="quickCategoryModal" style="z-index: 1060;">
+<div class="inv-modal-overlay" id="quickCategoryModal" style="z-index: 1080;">
     <div class="inv-modal" style="width: min(440px, 100%);">
         <div class="inv-modal-header" style="background:#f8fafc;">
             <div>
@@ -1319,7 +1387,7 @@
 <!-- =========================================================
      3. QUICK ADD SUBCATEGORY POPUP MODAL
      ========================================================= -->
-<div class="inv-modal-overlay" id="quickSubCategoryModal" style="z-index: 1060;">
+<div class="inv-modal-overlay" id="quickSubCategoryModal" style="z-index: 1080;">
     <div class="inv-modal" style="width: min(460px, 100%);">
         <div class="inv-modal-header" style="background:#f8fafc;">
             <div>
@@ -1366,7 +1434,7 @@
 <!-- =========================================================
      4. QUICK ADD BRAND POPUP MODAL
      ========================================================= -->
-<div class="inv-modal-overlay" id="quickBrandModal" style="z-index: 1060;">
+<div class="inv-modal-overlay" id="quickBrandModal" style="z-index: 1080;">
     <div class="inv-modal" style="width: min(440px, 100%);">
         <div class="inv-modal-header" style="background:#f8fafc;">
             <div>
@@ -1403,7 +1471,7 @@
 <!-- =========================================================
      5. QUICK ADD UNIT OF MEASUREMENT (UOM) POPUP MODAL
      ========================================================= -->
-<div class="inv-modal-overlay" id="quickUnitModal" style="z-index: 1060;">
+<div class="inv-modal-overlay" id="quickUnitModal" style="z-index: 1080;">
     <div class="inv-modal" style="width: min(460px, 100%);">
         <div class="inv-modal-header" style="background:#f8fafc;">
             <div>
@@ -1452,7 +1520,7 @@
 <!-- =========================================================
      6. EXPLANATORY WARNING MODAL FOR IMEI ZERO-STOCK RULES
      ========================================================= -->
-<div class="inv-modal-overlay" id="productWarningModal" style="z-index: 1070;">
+<div class="inv-modal-overlay" id="productWarningModal" style="z-index: 1090;">
     <div class="inv-modal" style="width: min(520px, 100%);">
         <div class="inv-modal-header bg-warning bg-opacity-10 border-warning border-opacity-25">
             <div class="d-flex align-items-center gap-2">
@@ -1493,6 +1561,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const quickProductForm = document.getElementById('quickAddForm');
     const submitQuickProductBtn = document.getElementById('submitQuickProductBtn');
 
+    const modalCategoryWrapper = document.getElementById('modalCategoryWrapper');
+    const modalSubCategoryWrapper = document.getElementById('modalSubCategoryWrapper');
+    const modalBrandWrapper = document.getElementById('modalBrandWrapper');
+    const modalUnitWrapper = document.getElementById('modalUnitWrapper');
+
     const categoryModal = document.getElementById('quickCategoryModal');
     const openCatBtn = document.getElementById('openQuickCategoryBtn');
     const closeCatBtn = document.getElementById('closeQuickCategoryBtn');
@@ -1500,8 +1573,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const quickCategoryForm = document.getElementById('quickCategoryForm');
     const catNameInput = document.getElementById('quickCatNameInput');
     const catCodeInput = document.getElementById('quickCatCodeInput');
-    const categorySelect = document.getElementById('productCategorySelect');
-    const catalogFilter = document.getElementById('catalogCategoryFilter');
+    const catalogCategoryFilter = document.getElementById('catalogCategoryFilter');
 
     const subCategoryModal = document.getElementById('quickSubCategoryModal');
     const openSubCatBtn = document.getElementById('openQuickSubCategoryBtn');
@@ -1511,7 +1583,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const subCatParentSelect = document.getElementById('quickSubCatParentSelect');
     const subCatNameInput = document.getElementById('quickSubCatNameInput');
     const subCatCodeInput = document.getElementById('quickSubCatCodeInput');
-    const productSubCategorySelect = document.getElementById('productSubCategorySelect');
 
     const brandModal = document.getElementById('quickBrandModal');
     const openBrandBtn = document.getElementById('openQuickBrandBtn');
@@ -1520,7 +1591,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const quickBrandForm = document.getElementById('quickBrandForm');
     const brandNameInput = document.getElementById('quickBrandNameInput');
     const brandCountryInput = document.getElementById('quickBrandCountryInput');
-    const productBrandSelect = document.getElementById('productBrandSelect');
     const catalogBrandFilter = document.getElementById('catalogBrandFilter');
 
     const unitModal = document.getElementById('quickUnitModal');
@@ -1532,7 +1602,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const unitCodeInput = document.getElementById('quickUnitCodeInput');
     const unitNameNpInput = document.getElementById('quickUnitNameNpInput');
     const unitDecimalCheck = document.getElementById('quickUnitDecimalCheck');
-    const productUnitSelect = document.getElementById('productUnitSelect');
 
     const warningModal = document.getElementById('productWarningModal');
     const warningTextEl = document.getElementById('productWarningText');
@@ -1546,7 +1615,50 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeProductBtn) closeProductBtn.addEventListener('click', () => closeModal(productModal));
     if (cancelProductBtn) cancelProductBtn.addEventListener('click', () => closeModal(productModal));
 
-    // Category Modal triggers
+    // =========================================================================
+    // 1. Dynamic Dropdown Chaining: Category -> Subcategory
+    // =========================================================================
+    if (modalCategoryWrapper && modalSubCategoryWrapper) {
+        modalCategoryWrapper.addEventListener('item-selected', (e) => {
+            const cat = e.detail;
+            if (cat && cat.id) {
+                const newSubcatUrl = `/inventory/api/subcategories/search/?category_id=${cat.id}`;
+                modalSubCategoryWrapper.dataset.searchUrl = newSubcatUrl;
+                modalSubCategoryWrapper.dataset.autocompleteUrl = newSubcatUrl;
+                
+                // Clear existing subcategory selection
+                const subcatHidden = modalSubCategoryWrapper.querySelector('input[type="hidden"]');
+                const subcatInput = modalSubCategoryWrapper.querySelector('.async-search-input');
+                const subcatChip = modalSubCategoryWrapper.querySelector('.async-selected-chip');
+                if (subcatHidden) subcatHidden.value = '';
+                if (subcatInput) {
+                    subcatInput.value = '';
+                    subcatInput.classList.remove('d-none');
+                }
+                if (subcatChip) subcatChip.classList.add('d-none');
+
+                if (subCatParentSelect) subCatParentSelect.value = cat.id;
+            }
+        });
+
+        modalCategoryWrapper.addEventListener('item-cleared', () => {
+            const defaultSubcatUrl = '/inventory/api/subcategories/search/';
+            modalSubCategoryWrapper.dataset.searchUrl = defaultSubcatUrl;
+            modalSubCategoryWrapper.dataset.autocompleteUrl = defaultSubcatUrl;
+
+            const subcatHidden = modalSubCategoryWrapper.querySelector('input[type="hidden"]');
+            const subcatInput = modalSubCategoryWrapper.querySelector('.async-search-input');
+            const subcatChip = modalSubCategoryWrapper.querySelector('.async-selected-chip');
+            if (subcatHidden) subcatHidden.value = '';
+            if (subcatInput) {
+                subcatInput.value = '';
+                subcatInput.classList.remove('d-none');
+            }
+            if (subcatChip) subcatChip.classList.add('d-none');
+        });
+    }
+
+    // Modal Triggers for Sub-Popups
     if (openCatBtn) {
         openCatBtn.addEventListener('click', () => {
             if (catNameInput) catNameInput.value = '';
@@ -1558,13 +1670,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeCatBtn) closeCatBtn.addEventListener('click', () => closeModal(categoryModal));
     if (cancelCatBtn) cancelCatBtn.addEventListener('click', () => closeModal(categoryModal));
 
-    // SubCategory Modal triggers
     if (openSubCatBtn) {
         openSubCatBtn.addEventListener('click', () => {
             if (subCatNameInput) subCatNameInput.value = '';
             if (subCatCodeInput) subCatCodeInput.value = '';
-            if (subCatParentSelect && categorySelect && categorySelect.value) {
-                subCatParentSelect.value = categorySelect.value;
+            const selectedCatId = document.getElementById('modal_product_category')?.value;
+            if (selectedCatId && subCatParentSelect) {
+                subCatParentSelect.value = selectedCatId;
             }
             openModal(subCategoryModal);
             setTimeout(() => subCatNameInput && subCatNameInput.focus(), 100);
@@ -1573,7 +1685,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeSubCatBtn) closeSubCatBtn.addEventListener('click', () => closeModal(subCategoryModal));
     if (cancelSubCatBtn) cancelSubCatBtn.addEventListener('click', () => closeModal(subCategoryModal));
 
-    // Brand Modal triggers
     if (openBrandBtn) {
         openBrandBtn.addEventListener('click', () => {
             if (brandNameInput) brandNameInput.value = '';
@@ -1585,7 +1696,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeBrandBtn) closeBrandBtn.addEventListener('click', () => closeModal(brandModal));
     if (cancelBrandBtn) cancelBrandBtn.addEventListener('click', () => closeModal(brandModal));
 
-    // Unit Modal triggers
     if (openUnitBtn) {
         openUnitBtn.addEventListener('click', () => {
             if (unitNameInput) unitNameInput.value = '';
@@ -1610,27 +1720,55 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            if (warningModal && warningModal.classList.contains('show')) window.location.reload();
-            else if (unitModal && unitModal.classList.contains('show')) closeModal(unitModal);
-            else if (brandModal && brandModal.classList.contains('show')) closeModal(brandModal);
-            else if (subCategoryModal && subCategoryModal.classList.contains('show')) closeModal(subCategoryModal);
-            else if (categoryModal && categoryModal.classList.contains('show')) closeModal(categoryModal);
-            else if (productModal && productModal.classList.contains('show')) closeModal(productModal);
-        }
-    });
+    // =========================================================================
+    // 2. Standardized Quick-Add Submissions via Universal Component Selection
+    // =========================================================================
+    const getCsrf = () => document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
 
-    // 1. AJAX Handler: Quick Category Creation
+    function triggerComponentSelection(wrapperEl, item) {
+        if (!wrapperEl || !item) return;
+
+        const hiddenInput = wrapperEl.querySelector('input[type="hidden"]');
+        const textInput = wrapperEl.querySelector('.async-search-input');
+        const chip = wrapperEl.querySelector('.async-selected-chip');
+
+        const id = item.id !== undefined ? item.id : item.pk;
+        const title = item.name || item.title || item.label || 'Item';
+        const subtitle = item.code || item.symbol || '';
+        const displayLabel = subtitle ? `${title} (${subtitle})` : title;
+
+        if (hiddenInput) {
+            hiddenInput.value = id;
+            hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        if (chip) {
+            const chipLabel = chip.querySelector('.chip-label');
+            if (chipLabel) chipLabel.textContent = displayLabel;
+            chip.classList.remove('d-none');
+        }
+
+        if (textInput) {
+            textInput.value = displayLabel;
+            textInput.classList.add('d-none');
+        }
+
+        // Dispatch universal custom event
+        const payload = {
+            bubbles: true,
+            cancelable: true,
+            detail: Object.assign({}, item, { id: id, title: title, extra_data: item })
+        };
+        wrapperEl.dispatchEvent(new CustomEvent('item-selected', payload));
+    }
+
     if (quickCategoryForm) {
         quickCategoryForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const name = catNameInput.value.trim();
             const code = catCodeInput.value.trim();
-            if (!name) { alert('Please enter a category name.'); return; }
+            if (!name) return;
 
-            const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
-            const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
             const saveBtn = document.getElementById('saveQuickCategoryBtn');
             saveBtn.disabled = true;
             saveBtn.innerText = 'Saving...';
@@ -1638,50 +1776,21 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const resp = await fetch("{% url 'inventory:category_quick_create_api' %}", {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
                     body: JSON.stringify({ name: name, code: code })
                 });
-
                 const data = await resp.json();
 
                 if (data.status === 'success' && data.category) {
-                    const newId = data.category.id;
-                    const newName = data.category.name;
-
-                    if (categorySelect) {
-                        let exists = false;
-                        for (let opt of categorySelect.options) {
-                            if (opt.value == newId) { exists = true; break; }
-                        }
-                        if (!exists) {
-                            const newOption = new Option(newName, newId, true, true);
-                            categorySelect.add(newOption);
-                        }
-                        categorySelect.value = newId;
+                    if (modalCategoryWrapper) triggerComponentSelection(modalCategoryWrapper, data.category);
+                    if (catalogCategoryFilter) {
+                        catalogCategoryFilter.add(new Option(data.category.name, data.category.id));
                     }
-
-                    if (subCatParentSelect) {
-                        let exists = false;
-                        for (let opt of subCatParentSelect.options) {
-                            if (opt.value == newId) { exists = true; break; }
-                        }
-                        if (!exists) {
-                            const newOption = new Option(newName, newId, false, false);
-                            subCatParentSelect.add(newOption);
-                        }
-                    }
-
-                    if (catalogFilter) {
-                        const filterOption = new Option(newName, newId, false, false);
-                        catalogFilter.add(filterOption);
-                    }
-
                     closeModal(categoryModal);
                 } else {
                     alert('Error: ' + (data.message || 'Could not create category.'));
                 }
             } catch (err) {
-                console.error(err);
                 alert('Failed to connect to server.');
             } finally {
                 saveBtn.disabled = false;
@@ -1690,7 +1799,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 2. AJAX Handler: Quick SubCategory Creation
     if (quickSubCategoryForm) {
         quickSubCategoryForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -1698,11 +1806,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const name = subCatNameInput ? subCatNameInput.value.trim() : '';
             const code = subCatCodeInput ? subCatCodeInput.value.trim() : '';
 
-            if (!parentCatId) { alert('Please select a parent category.'); return; }
-            if (!name) { alert('Please enter a subcategory name.'); return; }
+            if (!parentCatId || !name) return;
 
-            const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
-            const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
             const saveBtn = document.getElementById('saveQuickSubCategoryBtn');
             saveBtn.disabled = true;
             saveBtn.innerText = 'Saving...';
@@ -1710,34 +1815,18 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const resp = await fetch("{% url 'inventory:subcategory_quick_create_api' %}", {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
                     body: JSON.stringify({ category_id: parentCatId, name: name, code: code })
                 });
-
                 const data = await resp.json();
 
                 if (data.status === 'success' && data.subcategory) {
-                    const newId = data.subcategory.id;
-                    const newName = data.subcategory.name;
-
-                    if (productSubCategorySelect) {
-                        let exists = false;
-                        for (let opt of productSubCategorySelect.options) {
-                            if (opt.value == newId) { exists = true; break; }
-                        }
-                        if (!exists) {
-                            const newOption = new Option(newName, newId, true, true);
-                            productSubCategorySelect.add(newOption);
-                        }
-                        productSubCategorySelect.value = newId;
-                    }
-
+                    if (modalSubCategoryWrapper) triggerComponentSelection(modalSubCategoryWrapper, data.subcategory);
                     closeModal(subCategoryModal);
                 } else {
                     alert('Error: ' + (data.message || 'Could not create sub-category.'));
                 }
             } catch (err) {
-                console.error(err);
                 alert('Failed to connect to server.');
             } finally {
                 saveBtn.disabled = false;
@@ -1746,17 +1835,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 3. AJAX Handler: Quick Brand Creation
     if (quickBrandForm) {
         quickBrandForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const name = brandNameInput ? brandNameInput.value.trim() : '';
             const country = brandCountryInput ? brandCountryInput.value.trim() : '';
+            if (!name) return;
 
-            if (!name) { alert('Please enter a brand name.'); return; }
-
-            const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
-            const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
             const saveBtn = document.getElementById('saveQuickBrandBtn');
             saveBtn.disabled = true;
             saveBtn.innerText = 'Saving...';
@@ -1764,45 +1849,21 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const resp = await fetch("{% url 'inventory:brand_quick_create_api' %}", {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
                     body: JSON.stringify({ name: name, origin_country: country })
                 });
-
                 const data = await resp.json();
 
                 if (data.status === 'success' && data.brand) {
-                    const newId = data.brand.id;
-                    const newName = data.brand.name;
-
-                    if (productBrandSelect) {
-                        let exists = false;
-                        for (let opt of productBrandSelect.options) {
-                            if (opt.value == newId) { exists = true; break; }
-                        }
-                        if (!exists) {
-                            const newOption = new Option(newName, newId, true, true);
-                            productBrandSelect.add(newOption);
-                        }
-                        productBrandSelect.value = newId;
-                    }
-
+                    if (modalBrandWrapper) triggerComponentSelection(modalBrandWrapper, data.brand);
                     if (catalogBrandFilter) {
-                        let existsInFilter = false;
-                        for (let opt of catalogBrandFilter.options) {
-                            if (opt.value == newId) { existsInFilter = true; break; }
-                        }
-                        if (!existsInFilter) {
-                            const filterOption = new Option(newName, newId, false, false);
-                            catalogBrandFilter.add(filterOption);
-                        }
+                        catalogBrandFilter.add(new Option(data.brand.name, data.brand.id));
                     }
-
                     closeModal(brandModal);
                 } else {
                     alert('Error: ' + (data.message || 'Could not create brand.'));
                 }
             } catch (err) {
-                console.error(err);
                 alert('Failed to connect to server.');
             } finally {
                 saveBtn.disabled = false;
@@ -1811,7 +1872,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 4. AJAX Handler: Quick Unit of Measurement (UOM) Creation
     if (quickUnitForm) {
         quickUnitForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -1820,11 +1880,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const nameNp = unitNameNpInput ? unitNameNpInput.value.trim() : '';
             const allowDecimal = unitDecimalCheck ? unitDecimalCheck.checked : false;
 
-            if (!name) { alert('Please enter a unit name.'); return; }
-            if (!code) { alert('Please enter a unit short code (e.g. MTR, BOX).'); return; }
+            if (!name || !code) return;
 
-            const csrfTokenEl = document.querySelector('[name=csrfmiddlewaretoken]');
-            const csrfToken = csrfTokenEl ? csrfTokenEl.value : '';
             const saveBtn = document.getElementById('saveQuickUnitBtn');
             saveBtn.disabled = true;
             saveBtn.innerText = 'Saving...';
@@ -1832,34 +1889,18 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const resp = await fetch("{% url 'inventory:unit_quick_create_api' %}", {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
                     body: JSON.stringify({ name: name, code: code, name_np: nameNp, allow_decimal: allowDecimal })
                 });
-
                 const data = await resp.json();
 
                 if (data.status === 'success' && data.unit) {
-                    const newId = data.unit.id;
-                    const newLabel = `${data.unit.name} (${data.unit.code})`;
-
-                    if (productUnitSelect) {
-                        let exists = false;
-                        for (let opt of productUnitSelect.options) {
-                            if (opt.value == newId) { exists = true; break; }
-                        }
-                        if (!exists) {
-                            const newOption = new Option(newLabel, newId, true, true);
-                            productUnitSelect.add(newOption);
-                        }
-                        productUnitSelect.value = newId;
-                    }
-
+                    if (modalUnitWrapper) triggerComponentSelection(modalUnitWrapper, data.unit);
                     closeModal(unitModal);
                 } else {
                     alert('Error: ' + (data.message || 'Could not register unit.'));
                 }
             } catch (err) {
-                console.error(err);
                 alert('Failed to connect to server.');
             } finally {
                 saveBtn.disabled = false;
@@ -1868,7 +1909,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 5. AJAX Handler: Quick Product Creation
+    // Quick Product Form Submission
     if (quickProductForm) {
         quickProductForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -1907,9 +1948,133 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             } catch (err) {
-                console.error(err);
-                alert('Failed to communicate with catalog server. Form will be submitted directly.');
                 quickProductForm.submit();
+            }
+        });
+    }
+
+    // =========================================================================
+    // 3. Real-Time Catalog Filter Hints (Search Dropdown)
+    // =========================================================================
+    const searchInput = document.getElementById('catalogSearchInput');
+    const hintsDropdown = document.getElementById('catalogSearchHints');
+    let searchDebounceTimer = null;
+    let currentHintIndex = -1;
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    if (searchInput && hintsDropdown) {
+        function hideHints() {
+            hintsDropdown.classList.add('d-none');
+            hintsDropdown.innerHTML = '';
+            currentHintIndex = -1;
+        }
+
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.trim();
+            clearTimeout(searchDebounceTimer);
+
+            if (query.length < 2) {
+                hideHints();
+                return;
+            }
+
+            searchDebounceTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/products/api/search/?mode=simple&q=${encodeURIComponent(query)}`);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    const items = Array.isArray(data) ? data : (data.results || data.items || []);
+
+                    if (items.length === 0) {
+                        hintsDropdown.innerHTML = `
+                            <div class="p-3 text-center text-muted fs-xs">
+                                <i class="fas fa-circle-info me-1"></i> No matching products found for "<strong>${escapeHtml(query)}</strong>"
+                                <div class="mt-1 fs-2xs">Press Enter to submit standard table filter.</div>
+                            </div>
+                        `;
+                        hintsDropdown.classList.remove('d-none');
+                        return;
+                    }
+
+                    hintsDropdown.innerHTML = items.slice(0, 7).map((p, idx) => {
+                        const name = p.name || p.title || 'Product';
+                        const sku = p.sku || p.model || '';
+                        const price = p.selling_price || p.price ? `Rs. ${parseFloat(p.selling_price || p.price).toFixed(2)}` : '';
+                        const stock = p.stock ?? p.current_stock ?? null;
+                        const url = p.url || `/inventory/products/${p.id}/`;
+
+                        return `
+                            <a href="${url}" class="inv-search-hint-item" data-index="${idx}">
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-2">
+                                        <i class="fas fa-mobile-screen"></i>
+                                    </span>
+                                    <div>
+                                        <strong class="d-block text-dark fs-xs">${escapeHtml(name)}</strong>
+                                        <small class="text-muted fs-2xs font-mono">SKU: ${escapeHtml(sku)} ${stock !== null ? `&bull; Stock: ${stock}` : ''}</small>
+                                    </div>
+                                </div>
+                                <div class="text-end">
+                                    <span class="inv-price text-primary fs-xs d-block">${price}</span>
+                                    <span class="badge bg-light text-secondary border fs-2xs">View Detail &rarr;</span>
+                                </div>
+                            </a>
+                        `;
+                    }).join('');
+
+                    hintsDropdown.classList.remove('d-none');
+                } catch (err) {
+                    console.warn('[CatalogHints] Failed to fetch:', err);
+                    hideHints();
+                }
+            }, 220);
+        });
+
+        searchInput.addEventListener('keydown', (e) => {
+            const items = hintsDropdown.querySelectorAll('.inv-search-hint-item');
+            if (hintsDropdown.classList.contains('d-none') || items.length === 0) {
+                return;
+            }
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                currentHintIndex = (currentHintIndex + 1) % items.length;
+                updateHintActive(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                currentHintIndex = (currentHintIndex - 1 + items.length) % items.length;
+                updateHintActive(items);
+            } else if (e.key === 'Enter') {
+                if (currentHintIndex >= 0 && currentHintIndex < items.length) {
+                    e.preventDefault();
+                    items[currentHintIndex].click();
+                }
+            } else if (e.key === 'Escape') {
+                hideHints();
+            }
+        });
+
+        function updateHintActive(items) {
+            items.forEach((it, idx) => {
+                it.classList.toggle('active', idx === currentHintIndex);
+                if (idx === currentHintIndex) {
+                    it.scrollIntoView({ block: 'nearest' });
+                }
+            });
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !hintsDropdown.contains(e.target)) {
+                hideHints();
             }
         });
     }

@@ -9,6 +9,7 @@ class User(AbstractUser):
     """
     Custom Shop User model enforcing Role-Based Scoping, Branch Isolation,
     and Salted PBKDF2-Hashed POS Manager Override PINs (SEC-02 Compliance).
+    Features high-performance compound indexing on role, branch, and status.
     """
     ROLE_CHOICES = [
         ('OWNER', 'Shop Owner / Central Admin (मालिक)'),
@@ -27,6 +28,7 @@ class User(AbstractUser):
     phone_number = models.CharField(
         max_length=20,
         unique=True,
+        db_index=True,
         verbose_name=_("Mobile Number (Nepal 98XXXXXXXX)"),
         help_text=_("Primary 10-digit mobile number for terminal login and notifications.")
     )
@@ -36,6 +38,7 @@ class User(AbstractUser):
         null=True,
         blank=True,
         related_name='staff_members',
+        db_index=True,
         verbose_name=_("Assigned Store Branch"),
         help_text=_("Standard Cashiers and Sales Staff are strictly locked to this store branch.")
     )
@@ -49,7 +52,6 @@ class User(AbstractUser):
     failed_login_attempts = models.PositiveIntegerField(default=0, verbose_name=_("Failed Login Counter"))
     is_locked = models.BooleanField(default=False, verbose_name=_("Account Locked"))
 
-    # Required field for createsuperuser command
     REQUIRED_FIELDS = ['phone_number']
 
     class Meta:
@@ -57,6 +59,12 @@ class User(AbstractUser):
         ordering = ['username']
         verbose_name = _('System User')
         verbose_name_plural = _('System Users')
+        indexes = [
+            models.Index(fields=['role', 'assigned_branch']),
+            models.Index(fields=['is_active', 'assigned_branch']),
+            models.Index(fields=['role', 'is_active']),
+            models.Index(fields=['phone_number']),
+        ]
 
     def __str__(self):
         return f"{self.get_full_name() or self.username} ({self.get_role_display()})"

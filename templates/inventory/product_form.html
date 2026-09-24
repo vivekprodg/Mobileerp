@@ -197,18 +197,91 @@
                             <label class="form-label fw-bold text-dark fs-xs">Product Full Name <span class="text-danger">*</span></label>
                             {{ form.name }}
                         </div>
+
+                        <!-- 1. Category Universal Contextual Search with Quick-Add -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Category <span class="text-danger">*</span></label>
-                            {{ form.category }}
+                            <div class="contextual-search-wrapper" 
+                                 id="categorySearchWrapper" 
+                                 data-search-url="/inventory/api/categories/search/" 
+                                 data-search-type="category" 
+                                 data-placeholder="Search category or click to browse..."
+                                 data-initial-id="{{ form.instance.category.id|default:form.category.value|default:'' }}"
+                                 data-initial-title="{{ form.instance.category.name|default:'' }}">
+                                <input type="hidden" name="category" id="id_category" value="{{ form.instance.category.id|default:form.category.value|default:'' }}" required>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white text-muted"><i class="fas fa-shapes text-primary"></i></span>
+                                    <input type="text" class="form-control contextual-search-input async-search-input" 
+                                           id="category_search_display"
+                                           placeholder="Search category or click to browse..." 
+                                           value="{% if form.instance.category %}{{ form.instance.category.name }}{% endif %}" 
+                                           autocomplete="off">
+                                    <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#quickAddCategoryModal" title="Add New Category">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            {% if form.category.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.category.errors|striptags }}</div>
+                            {% endif %}
                         </div>
+
+                        <!-- 2. Subcategory Universal Contextual Search Chained to Category -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Sub-Category</label>
-                            {{ form.subcategory }}
+                            <div class="contextual-search-wrapper" 
+                                 id="subcategorySearchWrapper" 
+                                 data-search-url="/inventory/api/subcategories/search/{% if form.category.value %}?category_id={{ form.category.value }}{% endif %}" 
+                                 data-search-type="subcategory" 
+                                 data-placeholder="Select category first or search subcategory..."
+                                 data-initial-id="{{ form.instance.subcategory.id|default:form.subcategory.value|default:'' }}"
+                                 data-initial-title="{{ form.instance.subcategory.name|default:'' }}">
+                                <input type="hidden" name="subcategory" id="id_subcategory" value="{{ form.instance.subcategory.id|default:form.subcategory.value|default:'' }}">
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white text-muted"><i class="fas fa-sitemap text-info"></i></span>
+                                    <input type="text" class="form-control contextual-search-input async-search-input" 
+                                           id="subcategory_search_display"
+                                           placeholder="Select category first or search subcategory..." 
+                                           value="{% if form.instance.subcategory %}{{ form.instance.subcategory.name }}{% endif %}" 
+                                           autocomplete="off">
+                                    <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#quickAddSubcategoryModal" title="Add New Subcategory">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            {% if form.subcategory.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.subcategory.errors|striptags }}</div>
+                            {% endif %}
                         </div>
+
+                        <!-- 3. Brand Universal Contextual Search with Quick-Add -->
                         <div class="col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Brand <span class="text-danger">*</span></label>
-                            {{ form.brand }}
+                            <div class="contextual-search-wrapper" 
+                                 id="brandSearchWrapper" 
+                                 data-search-url="/inventory/api/brands/search/" 
+                                 data-search-type="brand" 
+                                 data-placeholder="Search brand (Apple, Samsung, Xiaomi...)"
+                                 data-initial-id="{{ form.instance.brand.id|default:form.brand.value|default:'' }}"
+                                 data-initial-title="{{ form.instance.brand.name|default:'' }}">
+                                <input type="hidden" name="brand" id="id_brand" value="{{ form.instance.brand.id|default:form.brand.value|default:'' }}" required>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white text-muted"><i class="fas fa-tag text-primary"></i></span>
+                                    <input type="text" class="form-control contextual-search-input async-search-input" 
+                                           id="brand_search_display"
+                                           placeholder="Search brand (Apple, Samsung, Xiaomi...)" 
+                                           value="{% if form.instance.brand %}{{ form.instance.brand.name }}{% endif %}" 
+                                           autocomplete="off">
+                                    <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#quickAddBrandModal" title="Add New Brand">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            {% if form.brand.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.brand.errors|striptags }}</div>
+                            {% endif %}
                         </div>
+
                         <div class="col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Model Name</label>
                             {{ form.model_name }}
@@ -225,16 +298,40 @@
                             <label class="form-label fw-bold text-dark fs-xs">Product Barcode (Optional)</label>
                             {{ form.barcode }}
                         </div>
+
+                        <!-- 4. Base Unit Universal Contextual Search with Quick-Add -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Base Unit <span class="text-danger">*</span></label>
-                            {{ form.base_unit }}
+                            <div class="contextual-search-wrapper" 
+                                 id="unitSearchWrapper" 
+                                 data-search-url="/inventory/api/units/search/" 
+                                 data-search-type="unit" 
+                                 data-placeholder="Select unit (Pcs, Box, Set...)"
+                                 data-initial-id="{{ form.instance.base_unit.id|default:form.base_unit.value|default:'' }}"
+                                 data-initial-title="{{ form.instance.base_unit.name|default:'' }}"
+                                 data-initial-subtitle="{% if form.instance.base_unit %}{{ form.instance.base_unit.code }}{% endif %}">
+                                <input type="hidden" name="base_unit" id="id_base_unit" value="{{ form.instance.base_unit.id|default:form.base_unit.value|default:'' }}" required>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white text-muted"><i class="fas fa-cubes text-secondary"></i></span>
+                                    <input type="text" class="form-control contextual-search-input async-search-input" 
+                                           id="unit_search_display"
+                                           placeholder="Select unit (Pcs, Box, Set...)" 
+                                           value="{% if form.instance.base_unit %}{{ form.instance.base_unit.name }}{% endif %}" 
+                                           autocomplete="off">
+                                    <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#quickAddUnitModal" title="Add New Unit">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            {% if form.base_unit.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.base_unit.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
                         <!-- PRODUCT IMAGE WITH PHOTO PREVIEW & LIVE SELECTOR -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Product Image</label>
                             
-                            <!-- Current Photo Preview / Live Upload Container -->
                             <div class="current-photo-preview-box" id="currentPhotoWrapper">
                                 <div class="position-relative flex-shrink-0" style="width: 60px; height: 60px;">
                                     {% if form.instance.image %}
@@ -661,6 +758,110 @@
     </form>
 </div>
 
+<!-- ==========================================================================
+     QUICK-ADD MODALS FOR CATEGORY, SUBCATEGORY, BRAND, UNIT
+     ========================================================================== -->
+
+<!-- Modal: Quick Add Category -->
+<div class="modal fade" id="quickAddCategoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-primary text-white border-0 py-3">
+                <h6 class="modal-title fw-bold"><i class="fas fa-plus-circle me-1"></i> Quick Add Category</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold fs-xs text-dark">Category Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="quickCatName" placeholder="e.g. Smartphones, Audio, Power Banks" required>
+                </div>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="quickCatIsMobile" checked>
+                    <label class="form-check-label fw-semibold fs-xs" for="quickCatIsMobile">Contains Mobile Phones / IMEI Tracked Items</label>
+                </div>
+                <div id="quickCatError" class="text-danger fs-2xs d-none"></div>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="saveQuickCategoryBtn">Save Category</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Quick Add Subcategory -->
+<div class="modal fade" id="quickAddSubcategoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-info text-white border-0 py-3">
+                <h6 class="modal-title fw-bold"><i class="fas fa-plus-circle me-1"></i> Quick Add Sub-Category</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold fs-xs text-dark">Subcategory Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="quickSubcatName" placeholder="e.g. Flagship 5G, Foldables, Budget" required>
+                </div>
+                <div id="quickSubcatError" class="text-danger fs-2xs d-none"></div>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info text-white btn-sm px-4 rounded-pill fw-bold" id="saveQuickSubcategoryBtn">Save Sub-Category</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Quick Add Brand -->
+<div class="modal fade" id="quickAddBrandModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-primary text-white border-0 py-3">
+                <h6 class="modal-title fw-bold"><i class="fas fa-plus-circle me-1"></i> Quick Add Brand</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold fs-xs text-dark">Brand Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="quickBrandName" placeholder="e.g. Apple, OnePlus, Google" required>
+                </div>
+                <div id="quickBrandError" class="text-danger fs-2xs d-none"></div>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="saveQuickBrandBtn">Save Brand</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Quick Add Base Unit -->
+<div class="modal fade" id="quickAddUnitModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-secondary text-white border-0 py-3">
+                <h6 class="modal-title fw-bold"><i class="fas fa-plus-circle me-1"></i> Quick Add Base Unit</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold fs-xs text-dark">Unit Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="quickUnitName" placeholder="e.g. Pieces, Box, Pack" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold fs-xs text-dark">Symbol / Code</label>
+                    <input type="text" class="form-control font-monospace" id="quickUnitCode" placeholder="e.g. PCS, BOX, SET">
+                </div>
+                <div id="quickUnitError" class="text-danger fs-2xs d-none"></div>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-secondary btn-sm px-4 rounded-pill fw-bold" id="saveQuickUnitBtn">Save Unit</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- UNSAVED CHANGES CANCEL MODAL -->
 <div class="modal fade" id="cancelConfirmModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-sm">
@@ -679,19 +880,75 @@
 </div>
 
 <script>
+/**
+ * Product Form Behavioral Controller
+ * Relies strictly on the master contextual_search.js engine loaded from base.html.
+ */
 document.addEventListener('DOMContentLoaded', () => {
-    const categorySelect = document.getElementById('id_category_select') || document.querySelector('[name="category"]');
+    const categoryWrapper = document.getElementById('categorySearchWrapper');
+    const subcategoryWrapper = document.getElementById('subcategorySearchWrapper');
+    const brandWrapper = document.getElementById('brandSearchWrapper');
+    const unitWrapper = document.getElementById('unitSearchWrapper');
     const imeiCheckbox = document.getElementById('id_requires_imei') || document.querySelector('[name="requires_imei_tracking"]');
     const mobilePanels = document.querySelectorAll('.mobile-feature-panel');
     const mobileIndicator = document.getElementById('mobileSpecsIndicator');
 
+    const getCsrf = () => document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+
+    // =========================================================================
+    // 1. Dynamic Dropdown Chaining: Category -> Subcategory
+    // =========================================================================
+    if (categoryWrapper && subcategoryWrapper) {
+        categoryWrapper.addEventListener('item-selected', (e) => {
+            const cat = e.detail;
+            if (cat && cat.id) {
+                const newSubcatUrl = `/inventory/api/subcategories/search/?category_id=${cat.id}`;
+                subcategoryWrapper.dataset.searchUrl = newSubcatUrl;
+                subcategoryWrapper.dataset.autocompleteUrl = newSubcatUrl;
+                
+                // Clear existing subcategory selection to ensure child belongs to parent
+                const subcatHidden = subcategoryWrapper.querySelector('input[type="hidden"]');
+                const subcatInput = subcategoryWrapper.querySelector('.async-search-input');
+                const subcatChip = subcategoryWrapper.querySelector('.async-selected-chip');
+                if (subcatHidden) subcatHidden.value = '';
+                if (subcatInput) {
+                    subcatInput.value = '';
+                    subcatInput.classList.remove('d-none');
+                }
+                if (subcatChip) subcatChip.classList.add('d-none');
+            }
+            evaluateMobileDisplay();
+        });
+
+        categoryWrapper.addEventListener('item-cleared', () => {
+            const defaultSubcatUrl = '/inventory/api/subcategories/search/';
+            subcategoryWrapper.dataset.searchUrl = defaultSubcatUrl;
+            subcategoryWrapper.dataset.autocompleteUrl = defaultSubcatUrl;
+            
+            const subcatHidden = subcategoryWrapper.querySelector('input[type="hidden"]');
+            const subcatInput = subcategoryWrapper.querySelector('.async-search-input');
+            const subcatChip = subcategoryWrapper.querySelector('.async-selected-chip');
+            if (subcatHidden) subcatHidden.value = '';
+            if (subcatInput) {
+                subcatInput.value = '';
+                subcatInput.classList.remove('d-none');
+            }
+            if (subcatChip) subcatChip.classList.add('d-none');
+
+            evaluateMobileDisplay();
+        });
+    }
+
+    // =========================================================================
+    // 2. Mobile Specifications Visibility Auto-Toggle
+    // =========================================================================
     function evaluateMobileDisplay() {
         let isMobileCategory = false;
-        if (categorySelect && categorySelect.selectedIndex >= 0) {
-            const selectedText = categorySelect.options[categorySelect.selectedIndex].text.toLowerCase();
-            if (selectedText.includes('phone') || selectedText.includes('mobile') || selectedText.includes('smartphone') || selectedText.includes('स्मार्टफोन')) {
-                isMobileCategory = true;
-            }
+        const catInput = document.getElementById('category_search_display');
+        const selectedText = catInput ? catInput.value.toLowerCase() : '';
+
+        if (selectedText.includes('phone') || selectedText.includes('mobile') || selectedText.includes('smartphone') || selectedText.includes('स्मार्टफोन')) {
+            isMobileCategory = true;
         }
         if (imeiCheckbox && imeiCheckbox.checked) {
             isMobileCategory = true;
@@ -702,16 +959,199 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (mobileIndicator) {
-            if (isMobileCategory) mobileIndicator.classList.remove('d-none');
-            else mobileIndicator.classList.add('d-none');
+            mobileIndicator.classList.toggle('d-none', !isMobileCategory);
         }
     }
 
-    if (categorySelect) categorySelect.addEventListener('change', evaluateMobileDisplay);
-    if (imeiCheckbox) imeiCheckbox.addEventListener('change', evaluateMobileDisplay);
+    if (imeiCheckbox) {
+        imeiCheckbox.addEventListener('change', evaluateMobileDisplay);
+    }
     evaluateMobileDisplay();
 
-    // Instant Image Preview on File Selection
+    // =========================================================================
+    // 3. Quick-Add Modal Submissions with Standardized Component Selection
+    // =========================================================================
+    function triggerComponentSelection(wrapperEl, item) {
+        if (!wrapperEl || !item) return;
+
+        const hiddenInput = wrapperEl.querySelector('input[type="hidden"]');
+        const textInput = wrapperEl.querySelector('.async-search-input');
+        const chip = wrapperEl.querySelector('.async-selected-chip');
+
+        const id = item.id !== undefined ? item.id : item.pk;
+        const title = item.name || item.title || item.label || 'Item';
+        const subtitle = item.code || item.symbol || '';
+        const displayLabel = subtitle ? `${title} (${subtitle})` : title;
+
+        if (hiddenInput) {
+            hiddenInput.value = id;
+            hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        if (chip) {
+            const chipLabel = chip.querySelector('.chip-label');
+            if (chipLabel) chipLabel.textContent = displayLabel;
+            chip.classList.remove('d-none');
+        }
+
+        if (textInput) {
+            textInput.value = displayLabel;
+            textInput.classList.add('d-none');
+        }
+
+        // Dispatch universal custom event
+        const payload = {
+            bubbles: true,
+            cancelable: true,
+            detail: Object.assign({}, item, { id: id, title: title, extra_data: item })
+        };
+        wrapperEl.dispatchEvent(new CustomEvent('item-selected', payload));
+    }
+
+    // Quick Add Category Action
+    const saveQuickCatBtn = document.getElementById('saveQuickCategoryBtn');
+    if (saveQuickCatBtn && categoryWrapper) {
+        saveQuickCatBtn.addEventListener('click', async () => {
+            const nameInput = document.getElementById('quickCatName');
+            const name = nameInput ? nameInput.value.trim() : '';
+            const isMobile = document.getElementById('quickCatIsMobile')?.checked;
+            const errEl = document.getElementById('quickCatError');
+
+            if (!name) {
+                if (errEl) { errEl.innerText = 'Category name is required.'; errEl.classList.remove('d-none'); }
+                return;
+            }
+
+            try {
+                const res = await fetch('/inventory/api/categories/create/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                    body: JSON.stringify({ name: name, is_mobile: isMobile })
+                });
+                const data = await res.json();
+                if (res.ok && (data.id || data.pk)) {
+                    triggerComponentSelection(categoryWrapper, data);
+                    bootstrap.Modal.getInstance(document.getElementById('quickAddCategoryModal'))?.hide();
+                    if (nameInput) nameInput.value = '';
+                    if (errEl) errEl.classList.add('d-none');
+                } else {
+                    throw new Error(data.message || 'Failed to save category');
+                }
+            } catch (err) {
+                if (errEl) { errEl.innerText = err.message; errEl.classList.remove('d-none'); }
+            }
+        });
+    }
+
+    // Quick Add Subcategory Action
+    const saveQuickSubcatBtn = document.getElementById('saveQuickSubcategoryBtn');
+    if (saveQuickSubcatBtn && subcategoryWrapper) {
+        saveQuickSubcatBtn.addEventListener('click', async () => {
+            const nameInput = document.getElementById('quickSubcatName');
+            const name = nameInput ? nameInput.value.trim() : '';
+            const catId = document.getElementById('id_category')?.value;
+            const errEl = document.getElementById('quickSubcatError');
+
+            if (!name) {
+                if (errEl) { errEl.innerText = 'Subcategory name is required.'; errEl.classList.remove('d-none'); }
+                return;
+            }
+
+            try {
+                const res = await fetch('/inventory/api/subcategories/create/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                    body: JSON.stringify({ name: name, category_id: catId || null })
+                });
+                const data = await res.json();
+                if (res.ok && (data.id || data.pk)) {
+                    triggerComponentSelection(subcategoryWrapper, data);
+                    bootstrap.Modal.getInstance(document.getElementById('quickAddSubcategoryModal'))?.hide();
+                    if (nameInput) nameInput.value = '';
+                    if (errEl) errEl.classList.add('d-none');
+                } else {
+                    throw new Error(data.message || 'Failed to save subcategory');
+                }
+            } catch (err) {
+                if (errEl) { errEl.innerText = err.message; errEl.classList.remove('d-none'); }
+            }
+        });
+    }
+
+    // Quick Add Brand Action
+    const saveQuickBrandBtn = document.getElementById('saveQuickBrandBtn');
+    if (saveQuickBrandBtn && brandWrapper) {
+        saveQuickBrandBtn.addEventListener('click', async () => {
+            const nameInput = document.getElementById('quickBrandName');
+            const name = nameInput ? nameInput.value.trim() : '';
+            const errEl = document.getElementById('quickBrandError');
+
+            if (!name) {
+                if (errEl) { errEl.innerText = 'Brand name is required.'; errEl.classList.remove('d-none'); }
+                return;
+            }
+
+            try {
+                const res = await fetch('/inventory/api/brands/create/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                    body: JSON.stringify({ name: name })
+                });
+                const data = await res.json();
+                if (res.ok && (data.id || data.pk)) {
+                    triggerComponentSelection(brandWrapper, data);
+                    bootstrap.Modal.getInstance(document.getElementById('quickAddBrandModal'))?.hide();
+                    if (nameInput) nameInput.value = '';
+                    if (errEl) errEl.classList.add('d-none');
+                } else {
+                    throw new Error(data.message || 'Failed to save brand');
+                }
+            } catch (err) {
+                if (errEl) { errEl.innerText = err.message; errEl.classList.remove('d-none'); }
+            }
+        });
+    }
+
+    // Quick Add Base Unit Action
+    const saveQuickUnitBtn = document.getElementById('saveQuickUnitBtn');
+    if (saveQuickUnitBtn && unitWrapper) {
+        saveQuickUnitBtn.addEventListener('click', async () => {
+            const nameInput = document.getElementById('quickUnitName');
+            const name = nameInput ? nameInput.value.trim() : '';
+            const codeInput = document.getElementById('quickUnitCode');
+            const code = codeInput ? codeInput.value.trim() : '';
+            const errEl = document.getElementById('quickUnitError');
+
+            if (!name) {
+                if (errEl) { errEl.innerText = 'Unit name is required.'; errEl.classList.remove('d-none'); }
+                return;
+            }
+
+            try {
+                const res = await fetch('/inventory/api/units/create/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                    body: JSON.stringify({ name: name, symbol: code })
+                });
+                const data = await res.json();
+                if (res.ok && (data.id || data.pk)) {
+                    triggerComponentSelection(unitWrapper, data);
+                    bootstrap.Modal.getInstance(document.getElementById('quickAddUnitModal'))?.hide();
+                    if (nameInput) nameInput.value = '';
+                    if (codeInput) codeInput.value = '';
+                    if (errEl) errEl.classList.add('d-none');
+                } else {
+                    throw new Error(data.message || 'Failed to save unit');
+                }
+            } catch (err) {
+                if (errEl) { errEl.innerText = err.message; errEl.classList.remove('d-none'); }
+            }
+        });
+    }
+
+    // =========================================================================
+    // 4. Image Live Preview Controller
+    // =========================================================================
     const imageFileInput = document.querySelector('input[type="file"][name="image"]');
     const imagePreview = document.getElementById('productFormImagePreview');
     const photoPlaceholder = document.getElementById('productPhotoPlaceholder');
@@ -735,11 +1175,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Dirty Form Change Detection
+    // =========================================================================
+    // 5. Unsaved Changes Guard
+    // =========================================================================
     const masterForm = document.getElementById('productMasterForm');
     let formIsDirty = false;
-    masterForm.addEventListener('change', () => { formIsDirty = true; });
-    masterForm.addEventListener('input', () => { formIsDirty = true; });
+    if (masterForm) {
+        masterForm.addEventListener('change', () => { formIsDirty = true; });
+        masterForm.addEventListener('input', () => { formIsDirty = true; });
+    }
 
     const cancelBtn = document.getElementById('cancelFormBtn');
     if (cancelBtn) {

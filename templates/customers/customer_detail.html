@@ -15,7 +15,7 @@
         <div class="d-flex gap-2">
             <!-- Gated: Only Store Owners, Managers, or Accountants can record Udhaari repayments -->
             {% if IS_OWNER or IS_MANAGER or IS_ACCOUNTANT or user.is_superuser %}
-            <button type="button" class="btn btn-success btn-sm rounded-pill px-3 fw-bold" data-bs-toggle="modal" data-bs-target="#repayModal">
+            <button type="button" class="btn btn-success btn-sm rounded-pill px-3 fw-bold shadow-xs" data-bs-toggle="modal" data-bs-target="#repayModal">
                 <i class="fas fa-hand-holding-dollar me-1"></i> Receive Repayment
             </button>
             {% endif %}
@@ -33,14 +33,14 @@
         <div class="col-12 col-md-4">
             <div class="card border-0 shadow-sm rounded-4 p-3 bg-danger bg-opacity-10 border border-danger border-opacity-25 h-100">
                 <span class="text-danger fw-bold fs-xs text-uppercase">Current Outstanding Udhaari</span>
-                <h3 class="fw-bold text-danger mt-1 mb-0">Rs. {{ customer.current_credit_balance|floatformat:2 }}</h3>
+                <h3 class="fw-bold text-danger mt-1 mb-0 font-monospace">Rs. {{ customer.current_credit_balance|floatformat:2 }}</h3>
                 <small class="text-muted">Limit: Rs. {{ customer.credit_limit|floatformat:2 }}</small>
             </div>
         </div>
         <div class="col-12 col-md-4">
             <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100">
                 <span class="text-muted fw-semibold fs-xs text-uppercase">Cumulative Lifetime Spend</span>
-                <h3 class="fw-bold text-dark mt-1 mb-0">Rs. {{ customer.total_spent|floatformat:2 }}</h3>
+                <h3 class="fw-bold text-dark mt-1 mb-0 font-monospace">Rs. {{ customer.total_spent|floatformat:2 }}</h3>
                 <small class="text-muted">Across all visits &amp; branches</small>
             </div>
         </div>
@@ -74,9 +74,9 @@
                             </span>
                         </td>
                         <td><code>{{ entry.reference_invoice|default:"-" }}</code></td>
-                        <td class="fw-bold text-danger">{% if entry.entry_type == 'DEBIT' %}Rs. {{ entry.amount|floatformat:2 }}{% else %}-{% endif %}</td>
-                        <td class="fw-bold text-success">{% if entry.entry_type == 'CREDIT' %}Rs. {{ entry.amount|floatformat:2 }}{% else %}-{% endif %}</td>
-                        <td class="fw-bold text-dark">Rs. {{ entry.resulting_balance|floatformat:2 }}</td>
+                        <td class="fw-bold text-danger font-monospace">{% if entry.entry_type == 'DEBIT' %}Rs. {{ entry.amount|floatformat:2 }}{% else %}-{% endif %}</td>
+                        <td class="fw-bold text-success font-monospace">{% if entry.entry_type == 'CREDIT' %}Rs. {{ entry.amount|floatformat:2 }}{% else %}-{% endif %}</td>
+                        <td class="fw-bold text-dark font-monospace">Rs. {{ entry.resulting_balance|floatformat:2 }}</td>
                         <td>{{ entry.recorded_by.username|default:"System" }}</td>
                     </tr>
                     {% empty %}
@@ -95,7 +95,7 @@
 <div class="modal fade" id="repayModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-            <form action="{% url 'customers:customer_payment' customer.pk %}" method="post">
+            <form action="{% url 'customers:customer_payment' customer.pk %}" method="post" id="repaymentForm" novalidate>
                 {% csrf_token %}
                 <div class="modal-header bg-success text-white border-0 py-3">
                     <h5 class="modal-title fs-6 fw-bold"><i class="fas fa-hand-holding-dollar me-2"></i> Receive Udhaari Payment</h5>
@@ -103,19 +103,44 @@
                 </div>
                 <div class="modal-body p-4">
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Repayment Amount (NPR)</label>
+                        <label class="form-label fw-semibold fs-xs">Repayment Amount (NPR) <span class="text-danger">*</span></label>
                         {{ payment_form.amount }}
                     </div>
+
+                    <!-- Destination Account Standard Contextual Autocomplete Picker -->
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Payment Mode</label>
+                        <label class="form-label fw-semibold fs-xs">
+                            Destination Account (Cash Drawer / Bank / Digital Wallet) <span class="text-danger">*</span>
+                        </label>
+                        <div class="contextual-search-wrapper"
+                             id="repayDestinationAccountWrapper"
+                             data-search-url="/accounting/api/accounts/search/?category=PAYMENT"
+                             data-search-type="account"
+                             data-placeholder="Search Cash, Bank, or Wallet account..."
+                             data-initial-id="{{ payment_form.destination_account.value|default:'' }}">
+                            <input type="hidden" name="destination_account" id="id_destination_account" value="{{ payment_form.destination_account.value|default:'' }}" required>
+                            <input type="text" class="form-control contextual-search-input async-search-input"
+                                   id="repay_destination_account_display"
+                                   placeholder="Search Cash, Bank, or Wallet account..."
+                                   autocomplete="off">
+                        </div>
+                        {% if payment_form.destination_account.errors %}
+                        <div class="text-danger fs-2xs mt-1">{{ payment_form.destination_account.errors }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold fs-xs">Payment Mode</label>
                         {{ payment_form.payment_mode }}
                     </div>
+
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Reference Receipt / Transaction No</label>
+                        <label class="form-label fw-semibold fs-xs">Reference Receipt / Transaction No</label>
                         {{ payment_form.reference_invoice }}
                     </div>
+
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Remarks</label>
+                        <label class="form-label fw-semibold fs-xs">Remarks</label>
                         {{ payment_form.remarks }}
                     </div>
                 </div>
@@ -127,5 +152,31 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Automatically synchronize payment mode dropdown when account is chosen in universal search
+    const repayWrapper = document.getElementById('repayDestinationAccountWrapper');
+    const paymentModeSelect = document.querySelector('[name="payment_mode"]');
+
+    if (repayWrapper && paymentModeSelect) {
+        repayWrapper.addEventListener('item-selected', (e) => {
+            const acc = e.detail;
+            if (!acc) return;
+            const extra = acc.extra_data || acc;
+            const tag = (extra.system_tag || acc.system_tag || '').toUpperCase();
+            const title = (acc.title || acc.name || '').toUpperCase();
+
+            if (tag === 'CASH' || title.includes('CASH')) {
+                paymentModeSelect.value = 'CASH';
+            } else if (tag === 'BANK' || title.includes('BANK')) {
+                paymentModeSelect.value = 'BANK_TRANSFER';
+            } else if (tag === 'FONEPAY' || tag === 'ESEWA' || tag === 'KHALTI' || title.includes('WALLET') || title.includes('QR')) {
+                paymentModeSelect.value = 'WALLET';
+            }
+        });
+    }
+});
+</script>
 {% endif %}
 {% endblock %}

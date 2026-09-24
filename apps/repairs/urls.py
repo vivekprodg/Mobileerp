@@ -1,10 +1,17 @@
 from django.urls import path
 from apps.repairs.views import (
-    RepairDashboardView, RepairTicketCreateView, RepairTicketDetailView,
-    RepairDiagnosticsVerdictView, RepairSparePartInstallView,
-    RepairStatusUpdateView, CustomerQuotationApprovalView,
-    PublicTrackingPortalView, RepairClaimTokenPrintView,
-    RepairJobSheetA4PrintView, OpticalServiceDeskView
+    RepairDashboardView,
+    RepairTicketCreateView,
+    RepairTicketDetailView,
+    RepairDiagnosticsVerdictView,
+    RepairSparePartInstallView,
+    RepairStatusUpdateView,
+    RepairTicketSearchAPIView,
+    CustomerQuotationApprovalView,
+    PublicTrackingPortalView,
+    RepairClaimTokenPrintView,
+    RepairJobSheetA4PrintView,
+    OpticalServiceDeskView
 )
 
 app_name = 'repairs'
@@ -31,4 +38,7 @@ urlpatterns = [
 
     # Optical & Eyewear Service Desk
     path('optical/', OpticalServiceDeskView.as_view(), name='optical_desk'),
+
+    # POS / Workshop Search API Endpoint
+    path('api/tickets/search/', RepairTicketSearchAPIView.as_view(), name='ticket_search_api'),
 ]

@@ -1,7 +1,12 @@
 from django.urls import path
 from apps.users.views import (
-    ShopLoginView, ShopLogoutView, UserListView,
-    UserCreateView, UserUpdateView, ValidateManagerPinAPIView
+    ShopLoginView,
+    ShopLogoutView,
+    UserListView,
+    UserCreateView,
+    UserUpdateView,
+    ValidateManagerPinAPIView,
+    UserSearchAPIView
 )
 
 app_name = 'users'
@@ -13,4 +18,5 @@ urlpatterns = [
     path('create/', UserCreateView.as_view(), name='user_create'),
     path('<int:pk>/edit/', UserUpdateView.as_view(), name='user_edit'),
     path('api/validate-pin/', ValidateManagerPinAPIView.as_view(), name='validate_pin'),
+    path('api/search/', UserSearchAPIView.as_view(), name='user_search_api'),
 ]

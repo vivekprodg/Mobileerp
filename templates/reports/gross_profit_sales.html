@@ -90,6 +90,19 @@
     padding: 2px 7px;
     border-radius: 6px;
 }
+/* Compact filter styling for async dropdown groups */
+.filter-async-group .async-search-input {
+    font-size: 0.8125rem;
+    padding: 0.25rem 0.5rem;
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.375rem;
+    min-height: 31px;
+}
+.filter-async-group .async-selected-chip {
+    padding: 2px 8px;
+    font-size: 0.75rem;
+}
 </style>
 {% endblock %}
 
@@ -229,13 +242,17 @@
         </div>
     </div>
 
-    <!-- Multi-Parameter Filter Toolbar -->
+    <!-- Multi-Parameter Filter Toolbar with Standard Visible Search Inputs -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-center">
+        <form method="get" id="grossProfitFilterForm" class="row g-2 align-items-center">
+            <!-- Product Text Search -->
             <div class="col-12 col-md-3">
-                <input type="text" name="q" value="{{ filters.q|default:'' }}" class="form-control form-control-sm bg-light border-0 font-monospace" placeholder="Search Product, SKU, Barcode...">
+                <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                       class="form-control form-control-sm bg-light border-0 font-monospace" 
+                       placeholder="Search Product, SKU, Barcode...">
             </div>
 
+            <!-- Margin Tier Selector -->
             <div class="col-6 col-md-2">
                 <select name="margin_tier" class="form-select form-select-sm bg-light border-0">
                     <option value="">All Margin Tiers</option>
@@ -246,24 +263,41 @@
                 </select>
             </div>
 
+            <!-- Asynchronous Category Contextual Search with Visible Text Input -->
             <div class="col-6 col-md-2">
-                <select name="category" class="form-select form-select-sm bg-light border-0">
-                    <option value="all">All Categories</option>
-                    {% for cat in categories %}
-                        <option value="{{ cat.id }}" {% if filters.category_id == cat.id|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
-                    {% endfor %}
-                </select>
+                <div class="contextual-search-wrapper filter-async-group"
+                     id="filterCategoryWrapper"
+                     data-search-url="/inventory/api/categories/search/"
+                     data-search-type="category"
+                     data-placeholder="All Categories"
+                     data-initial-id="{% if filters.category_id and filters.category_id != 'all' %}{{ filters.category_id }}{% endif %}"
+                     data-initial-title="{% for cat in categories %}{% if filters.category_id == cat.id|stringformat:'s' %}{{ cat.name }}{% endif %}{% endfor %}">
+                    <input type="hidden" name="category" id="filter_profit_category_id" value="{% if filters.category_id and filters.category_id != 'all' %}{{ filters.category_id }}{% endif %}">
+                    <input type="text" class="form-control form-control-sm contextual-search-input async-search-input"
+                           placeholder="All Categories"
+                           value="{% for cat in categories %}{% if filters.category_id == cat.id|stringformat:'s' %}{{ cat.name }}{% endif %}{% endfor %}"
+                           autocomplete="off">
+                </div>
             </div>
 
+            <!-- Asynchronous Brand Contextual Search with Visible Text Input -->
             <div class="col-6 col-md-2">
-                <select name="brand" class="form-select form-select-sm bg-light border-0">
-                    <option value="all">All Brands</option>
-                    {% for b in brands %}
-                        <option value="{{ b.id }}" {% if filters.brand_id == b.id|stringformat:"s" %}selected{% endif %}>{{ b.name }}</option>
-                    {% endfor %}
-                </select>
+                <div class="contextual-search-wrapper filter-async-group"
+                     id="filterBrandWrapper"
+                     data-search-url="/inventory/api/brands/search/"
+                     data-search-type="brand"
+                     data-placeholder="All Brands"
+                     data-initial-id="{% if filters.brand_id and filters.brand_id != 'all' %}{{ filters.brand_id }}{% endif %}"
+                     data-initial-title="{% for b in brands %}{% if filters.brand_id == b.id|stringformat:'s' %}{{ b.name }}{% endif %}{% endfor %}">
+                    <input type="hidden" name="brand" id="filter_profit_brand_id" value="{% if filters.brand_id and filters.brand_id != 'all' %}{{ filters.brand_id }}{% endif %}">
+                    <input type="text" class="form-control form-control-sm contextual-search-input async-search-input"
+                           placeholder="All Brands"
+                           value="{% for b in brands %}{% if filters.brand_id == b.id|stringformat:'s' %}{{ b.name }}{% endif %}{% endfor %}"
+                           autocomplete="off">
+                </div>
             </div>
 
+            <!-- Date Range Pickers -->
             <div class="col-6 col-md-2">
                 <div class="input-group input-group-sm">
                     <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date">
@@ -272,9 +306,10 @@
                 </div>
             </div>
 
+            <!-- Actions -->
             <div class="col-6 col-md-1 d-flex gap-1">
                 <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
-                {% if filters.q or filters.margin_tier or filters.category_id or filters.brand_id %}
+                {% if filters.q or filters.margin_tier or filters.category_id or filters.brand_id or start_date or end_date %}
                 <a href="{% url 'reports:gross_profit' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
                 {% endif %}
             </div>
@@ -404,4 +439,28 @@
     </div>
 
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const filterForm = document.getElementById('grossProfitFilterForm');
+    const catWrapper = document.getElementById('filterCategoryWrapper');
+    const brandWrapper = document.getElementById('filterBrandWrapper');
+    const marginSelect = filterForm ? filterForm.querySelector('select[name="margin_tier"]') : null;
+
+    // Auto-submit on category and brand selection or clearing
+    [catWrapper, brandWrapper].forEach(wrapper => {
+        if (wrapper && filterForm) {
+            wrapper.addEventListener('item-selected', () => filterForm.submit());
+            wrapper.addEventListener('item-cleared', () => filterForm.submit());
+        }
+    });
+
+    // Auto-submit when changing margin tier
+    if (marginSelect && filterForm) {
+        marginSelect.addEventListener('change', () => filterForm.submit());
+    }
+});
+</script>
 {% endblock %}

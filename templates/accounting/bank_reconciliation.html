@@ -3,6 +3,59 @@
 
 {% block title %}Bank Reconciliation (बैंक हिसाब मिलान) | {{ COMPANY_NAME }}{% endblock %}
 
+{% block extra_head %}
+<style>
+.async-search-container {
+    position: relative;
+}
+
+.async-results-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+    max-height: 250px;
+    overflow-y: auto;
+    margin-top: 4px;
+    display: none;
+}
+
+.async-results-dropdown.show {
+    display: block;
+}
+
+.async-result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.15s ease;
+}
+
+.async-result-item:last-child {
+    border-bottom: none;
+}
+
+.async-result-item:hover {
+    background-color: #f8fafc;
+}
+
+.async-selected-card {
+    background: #ffffff;
+    border: 1px solid #3b82f6;
+    border-radius: 10px;
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid px-3 px-md-4 py-3">
 
@@ -201,7 +254,7 @@
 
 </div>
 
-<!-- Modal: Start New Bank Reconciliation Session -->
+<!-- Modal: Start New Bank Reconciliation Session (Asynchronous Bank Account Search) -->
 <div class="modal fade" id="newReconciliationModal" tabindex="-1" aria-labelledby="newReconciliationModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
@@ -216,10 +269,35 @@
                 {% csrf_token %}
                 <div class="modal-body p-4">
                     <div class="row g-3">
+                        <!-- Asynchronous Bank GL Account Selector -->
                         <div class="col-12 col-md-6">
                             <label class="form-label fs-xs fw-bold text-dark mb-1">Bank GL Account * (बैंक खाता)</label>
-                            {{ form.bank_account }}
+                            <input type="hidden" name="bank_account" id="id_bank_account" value="{{ form.bank_account.value|default:'' }}" required>
+                            
+                            <div class="async-search-container">
+                                <div id="bankAccountSelectedCard" class="async-selected-card d-none">
+                                    <div>
+                                        <div class="fw-bold text-primary fs-xs" id="bankAccountSelectedName">Selected Bank Account</div>
+                                        <small class="text-muted fs-2xs" id="bankAccountSelectedDetails">Bank Ledger</small>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-2xs" id="clearBankAccountBtn">
+                                        <i class="fas fa-times me-1"></i> Change
+                                    </button>
+                                </div>
+
+                                <div id="bankAccountSearchWrapper">
+                                    <div class="input-group">
+                                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-building-columns text-muted fs-xs"></i></span>
+                                        <input type="text" id="bankAccountSearchInput" class="form-control border-start-0" placeholder="Search bank account by name or code..." autocomplete="off">
+                                    </div>
+                                    <div id="bankAccountSearchResults" class="async-results-dropdown shadow-lg"></div>
+                                </div>
+                            </div>
+                            {% if form.bank_account.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.bank_account.errors }}</div>
+                            {% endif %}
                         </div>
+
                         <div class="col-12 col-md-6">
                             <label class="form-label fs-xs fw-bold text-dark mb-1">Store Outlet * (शाखा)</label>
                             {{ form.branch }}
@@ -249,4 +327,98 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    function debounce(func, wait = 250) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    const bankHidden = document.getElementById('id_bank_account');
+    const bankInput = document.getElementById('bankAccountSearchInput');
+    const bankWrapper = document.getElementById('bankAccountSearchWrapper');
+    const bankResults = document.getElementById('bankAccountSearchResults');
+    const bankCard = document.getElementById('bankAccountSelectedCard');
+    const bankName = document.getElementById('bankAccountSelectedName');
+    const bankDetails = document.getElementById('bankAccountSelectedDetails');
+    const clearBankBtn = document.getElementById('clearBankAccountBtn');
+
+    function selectBankAccount(acc) {
+        bankHidden.value = acc.id;
+        bankName.innerText = `${acc.code} - ${acc.name}`;
+        bankDetails.innerText = `Type: Bank Asset | Branch: ${acc.branch_name || 'All'}`;
+        bankCard.classList.remove('d-none');
+        bankWrapper.classList.add('d-none');
+        bankResults.classList.remove('show');
+        bankInput.value = '';
+    }
+
+    if (clearBankBtn) {
+        clearBankBtn.addEventListener('click', () => {
+            bankHidden.value = '';
+            bankCard.classList.add('d-none');
+            bankWrapper.classList.remove('d-none');
+            bankInput.value = '';
+            bankInput.focus();
+        });
+    }
+
+    if (bankInput) {
+        const handleBankSearch = debounce(async (query) => {
+            try {
+                bankResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching bank accounts...</div>';
+                bankResults.classList.add('show');
+
+                const resp = await fetch(`/accounting/api/accounts/search/?system_tag=BANK&q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Query failed');
+                const data = await resp.json();
+                const accounts = data.results || data || [];
+
+                if (!accounts.length) {
+                    bankResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No bank GL account found.</div>';
+                    return;
+                }
+
+                let html = '';
+                accounts.forEach(a => {
+                    html += `
+                        <div class="async-result-item" data-acc='${JSON.stringify(a).replace(/'/g, "&apos;")}'>
+                            <div class="fw-bold text-dark fs-xs"><i class="fas fa-building-columns text-primary me-1"></i>${escapeHtml(a.code)} &bull; ${escapeHtml(a.name)}</div>
+                            <div class="text-muted fs-2xs">${escapeHtml(a.bank_name || a.group_name || 'Bank Asset')}</div>
+                        </div>
+                    `;
+                });
+                bankResults.innerHTML = html;
+
+                bankResults.querySelectorAll('.async-result-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        selectBankAccount(JSON.parse(el.dataset.acc));
+                    });
+                });
+            } catch (err) {
+                bankResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying bank accounts.</div>';
+            }
+        }, 200);
+
+        bankInput.addEventListener('input', (e) => handleBankSearch(e.target.value.trim()));
+        bankInput.addEventListener('focus', (e) => handleBankSearch(e.target.value.trim()));
+    }
+
+    document.addEventListener('click', (e) => {
+        if (bankResults && !bankResults.contains(e.target) && e.target !== bankInput) {
+            bankResults.classList.remove('show');
+        }
+    });
+});
+</script>
 {% endblock %}

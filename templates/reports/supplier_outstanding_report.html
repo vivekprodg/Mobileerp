@@ -175,15 +175,25 @@
         </div>
     </div>
 
-    <!-- Multi-Parameter Filter Toolbar -->
+    <!-- Multi-Parameter Filter Toolbar with Universal Supplier Search -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-center">
+        <form method="get" class="row g-2 align-items-center" id="supplierOutstandingFilterForm">
+            <!-- Standardized Contextual Supplier Autocomplete Search -->
             <div class="col-12 col-md-4">
-                <div class="input-group input-group-sm">
-                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
-                    <input type="text" name="q" value="{{ filters.q|default:'' }}" 
-                           class="form-control bg-light border-0" 
-                           placeholder="Search Supplier Name, Code, Phone, PAN, Bank A/C...">
+                <div class="contextual-search-wrapper"
+                     id="supplierFilterWrapper"
+                     data-search-url="/purchases/suppliers/api/search/"
+                     data-search-type="supplier"
+                     data-placeholder="Search Supplier Name, PAN, or Phone..."
+                     data-initial-id="{{ selected_supplier.id|default:filters.supplier|default:'' }}"
+                     data-initial-title="{{ selected_supplier.company_name|default:'' }}"
+                     data-initial-subtitle="{% if selected_supplier.code %}Code: {{ selected_supplier.code }}{% endif %}">
+                    <input type="hidden" name="supplier" id="selectedSupplierId" value="{{ selected_supplier.id|default:filters.supplier|default:'' }}">
+                    <input type="text"
+                           class="form-control form-control-sm contextual-search-input async-search-input"
+                           placeholder="Search Supplier Name, PAN, or Phone..."
+                           value="{{ selected_supplier.company_name|default:'' }}"
+                           autocomplete="off">
                 </div>
             </div>
 
@@ -207,7 +217,7 @@
 
             <div class="col-12 col-md-2 d-flex gap-1">
                 <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
-                {% if filters.q or filters.status or filters.supplier_type %}
+                {% if filters.supplier or filters.q or filters.status or filters.supplier_type %}
                 <a href="{% url 'reports:supplier_outstanding' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
                 {% endif %}
             </div>
@@ -423,4 +433,21 @@
     </div>
 
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Automatically submit filter form when a supplier is selected or cleared in universal search
+    const supplierWrapper = document.getElementById('supplierFilterWrapper');
+    const filterForm = document.getElementById('supplierOutstandingFilterForm');
+
+    if (supplierWrapper && filterForm) {
+        supplierWrapper.addEventListener('item-selected', () => {
+            filterForm.submit();
+        });
+        supplierWrapper.addEventListener('item-cleared', () => {
+            filterForm.submit();
+        });
+    }
+});
+</script>
 {% endblock %}

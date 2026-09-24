@@ -8,6 +8,7 @@ from django.views.generic import ListView, DetailView, CreateView, UpdateView, V
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
 from django.urls import reverse_lazy, reverse
+from django.http import JsonResponse
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 
@@ -17,7 +18,6 @@ from apps.inventory.models import Product, ItemInstance, BranchStock
 from apps.inventory.services import InventoryService
 from apps.core.models import AuditLog
 
-
 class BranchListView(LoginRequiredMixin, ListView):
     model = Branch
     template_name = 'branches/branch_list.html'
@@ -25,7 +25,6 @@ class BranchListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         return Branch.objects.select_related('manager').order_by('-is_main_branch', 'name')
-
 
 class BranchCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = Branch
@@ -56,7 +55,6 @@ class BranchCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
         messages.success(self.request, f"Branch '{self.object.name}' successfully registered.")
         return response
 
-
 class BranchUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Branch
     form_class = BranchForm
@@ -85,7 +83,6 @@ class BranchUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
 
         messages.success(self.request, f"Branch '{self.object.name}' updated successfully.")
         return response
-
 
 class SwitchBranchContextView(LoginRequiredMixin, View):
     """
@@ -116,6 +113,67 @@ class SwitchBranchContextView(LoginRequiredMixin, View):
         messages.success(request, f"Active store context switched to: {branch.name} ({branch.code})")
         return redirect(next_url)
 
+class BranchSearchAPIView(LoginRequiredMixin, View):
+    """
+    Dedicated search and selection endpoint for Store Branches.
+    Supports searching by name, branch code, city, or district.
+    Supports filtering out a specific branch (e.g. source branch in transfer requisition).
+    """
+
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get('q', '').strip()
+        exclude_id = request.GET.get('exclude_id', '').strip()
+        include_inactive = request.GET.get('include_inactive', '0') in ['1', 'true', 'True']
+
+        qs = Branch.objects.select_related('manager')
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+
+        if exclude_id and exclude_id.isdigit():
+            qs = qs.exclude(id=int(exclude_id))
+
+        if q:
+            branch_filter = Q(name__icontains=q) | Q(code__icontains=q)
+            if hasattr(Branch, 'city'):
+                branch_filter |= Q(city__icontains=q)
+            if hasattr(Branch, 'district'):
+                branch_filter |= Q(district__icontains=q)
+            if hasattr(Branch, 'address'):
+                branch_filter |= Q(address__icontains=q)
+            qs = qs.filter(branch_filter)
+
+        branches = qs.order_by('-is_main_branch', 'name')[:25]
+        results = []
+        for b in branches:
+            loc = []
+            if getattr(b, 'city', None):
+                loc.append(b.city)
+            if getattr(b, 'district', None):
+                loc.append(b.district)
+            location_str = ", ".join(loc) if loc else (getattr(b, 'address', '') or 'Nepal')
+            badge = "Main Branch (HQ)" if b.is_main_branch else (location_str or "Outlet")
+
+            results.append({
+                'id': b.id,
+                'code': b.code,
+                'name': b.name,
+                'title': f"{b.name} ({b.code})",
+                'subtitle': f"Location: {location_str} | Phone: {getattr(b, 'phone', 'N/A') or 'N/A'}",
+                'badge': badge,
+                'badge_color': 'primary' if b.is_main_branch else 'secondary',
+                'is_main_branch': b.is_main_branch,
+                'city': getattr(b, 'city', '') or '',
+                'district': getattr(b, 'district', '') or '',
+                'address': getattr(b, 'address', '') or '',
+                'phone': getattr(b, 'phone', '') or '',
+                'text': f"{b.name} ({b.code})"
+            })
+
+        return JsonResponse({
+            'status': 'success',
+            'count': len(results),
+            'results': results
+        })
 
 class StockTransferListView(LoginRequiredMixin, ListView):
     model = StockTransferRequest
@@ -133,7 +191,6 @@ class StockTransferListView(LoginRequiredMixin, ListView):
             qs = qs.filter(Q(source_branch=active_branch) | Q(destination_branch=active_branch))
 
         return qs.order_by('-created_at')
-
 
 class StockTransferCreateView(LoginRequiredMixin, View):
     template_name = 'branches/transfer_form.html'
@@ -172,7 +229,7 @@ class StockTransferCreateView(LoginRequiredMixin, View):
                     for item in items:
                         if item.product and item.quantity > Decimal('0.000'):
                             item.transfer_request = transfer
-                            
+
                             # Validate IMEI if product requires IMEI tracking
                             if item.product.requires_imei_tracking:
                                 clean_imei = str(item.scanned_imei_or_serial or '').strip()
@@ -227,7 +284,6 @@ class StockTransferCreateView(LoginRequiredMixin, View):
             'formset': formset,
             'source_branch': source
         })
-
 
 class StockTransferDispatchView(LoginRequiredMixin, UserPassesTestMixin, View):
     """
@@ -291,7 +347,6 @@ class StockTransferDispatchView(LoginRequiredMixin, UserPassesTestMixin, View):
 
         return redirect('branches:transfer_list')
 
-
 class StockTransferReceiveView(LoginRequiredMixin, UserPassesTestMixin, View):
     """
     Executes physical inventory receipt at destination branch:
@@ -354,3 +409,62 @@ class StockTransferReceiveView(LoginRequiredMixin, UserPassesTestMixin, View):
             messages.error(request, f"Stock receipt failed: {str(e)}")
 
         return redirect('branches:transfer_list')
+
+class StockTransferSearchAPIView(LoginRequiredMixin, View):
+    """
+    Search endpoint for stock transfer requisitions and consignments.
+    Allows cashiers and managers to locate transfers by transfer number,
+    source/destination branch name, or consignment notes.
+    """
+
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get('q', '').strip()
+        status_filter = request.GET.get('status', '').strip()
+        active_branch = getattr(request, 'active_branch', None) or getattr(request.user, 'assigned_branch', None)
+        is_owner_or_super = request.user.is_superuser or getattr(request.user, 'role', '') == 'OWNER'
+
+        qs = StockTransferRequest.objects.select_related(
+            'source_branch', 'destination_branch', 'requested_by'
+        ).prefetch_related('items__product')
+
+        if active_branch and not is_owner_or_super:
+            qs = qs.filter(Q(source_branch=active_branch) | Q(destination_branch=active_branch))
+
+        if status_filter:
+            qs = qs.filter(status=status_filter.upper())
+
+        if q:
+            transfer_filter = (
+                Q(transfer_no__icontains=q) |
+                Q(source_branch__name__icontains=q) |
+                Q(destination_branch__name__icontains=q)
+            )
+            if hasattr(StockTransferRequest, 'notes'):
+                transfer_filter |= Q(notes__icontains=q)
+            if hasattr(StockTransferRequest, 'remarks'):
+                transfer_filter |= Q(remarks__icontains=q)
+            qs = qs.filter(transfer_filter)
+
+        transfers = qs.order_by('-created_at')[:25]
+        results = []
+        for t in transfers:
+            item_count = t.items.count()
+            results.append({
+                'id': t.id,
+                'transfer_no': t.transfer_no,
+                'title': f"Transfer #{t.transfer_no}",
+                'subtitle': f"{t.source_branch.name} ➔ {t.destination_branch.name} ({item_count} items)",
+                'source_branch_name': t.source_branch.name,
+                'destination_branch_name': t.destination_branch.name,
+                'status': t.status,
+                'badge': t.get_status_display() if hasattr(t, 'get_status_display') else t.status,
+                'badge_color': 'success' if t.status == 'RECEIVED' else ('warning' if t.status == 'DISPATCHED' else 'info'),
+                'created_at': t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '',
+                'text': f"Transfer #{t.transfer_no} ({t.source_branch.code} ➔ {t.destination_branch.code})",
+            })
+
+        return JsonResponse({
+            'status': 'success',
+            'count': len(results),
+            'results': results
+        })

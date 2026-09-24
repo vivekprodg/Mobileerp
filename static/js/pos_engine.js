@@ -1,33 +1,28 @@
 /**
- * POS Counter Terminal & Parked Bill Engine (Smart Multi-Attribute Matching & Zero Storage Architecture)
+ * POS Counter Terminal & Parked Bill Engine
+ * High-Performance Decoupled Architecture with Zero-Query Customer Lookup & Repair Bridge
  *
  * Core Capabilities:
- * 1. Optimized Terminal Boot:
- *    - Replaced the full-inventory query (?q=a) with top 24 frequently sold items.
- *    - On-demand debounced server-side catalog searching & category-scoped queries.
- * 2. Explicit Item Discount Types:
- *    - Three discrete modes per line item: NONE, PERCENTAGE (%), and AMOUNT (Rs.).
- *    - Mode toggles: [None | % | Rs.] segmented control on every cart row.
- *    - Direct Amount Usage: In AMOUNT mode, entered value is deducted directly as cash concession.
- *    - Real-Time Effective Percentage: Displays exact mathematical concession percentage against line gross.
- *    - Multi-Quantity Clarity: When Quantity > 1, indicates total line deduction, per-unit discount, and effective percentage.
- *    - Supervisor Limit Warning: Real-time badge alerting if concession exceeds product max discount or store threshold.
- *    - Non-Discountable Enforcement: Disables discount controls when product.is_discountable is false.
- * 3. Dual-Mode Bill-Level Discounts:
- *    - Interactive toggle [% | Rs.] with proportional allocation across discountable items.
- * 4. Parked Bill State Preservation (F9 / F10):
- *    - Serializes and restores exact line discount types (NONE, PERCENTAGE, AMOUNT), input values, and reasons.
- * 5. Multi-Attribute Smart Category Filtering:
- *    - Dynamic category filtering with smart keyword patterns and database Category IDs.
- * 6. Instant Gun Scanner Routing & Dual-IMEI Auto-Match:
- *    - Automatically pairs IMEI 1 and IMEI 2 from catalog/server without unnecessary modal prompts on exact match.
- * 7. Interactive Dual-IMEI Capture Modal:
- *    - Handset box picker and auto-matched secondary IMEI.
+ * 1. Zero-Query Customer Discovery (POSCustomerManager):
+ *    - Automatically shows top 15 recent customers and outstanding debtors on input focus/click.
+ *    - Standardized JSON contract consumption: { title, subtitle, badge, badge_class, extra_data }.
+ * 2. Decoupled Product Catalog Service (POSCatalogService):
+ *    - Isolated catalog state, debounced server querying, and multi-attribute classification.
+ * 3. Quick Workshop Repair Ticket Bridge (POSRepairTicketManager):
+ *    - Terminal search & 1-click attachment of ready-for-pickup repair tickets (Hotkey: F7).
+ *    - Auto-syncs customer profile and inserts repair service charges into the cart.
+ * 4. Explicit Item Discount Types:
+ *    - Three discrete modes: NONE, PERCENTAGE (%), and AMOUNT (Rs.).
+ *    - Real-time mathematical concession percentage against line gross with supervisor limit badges.
+ * 5. Dual-Mode Bill-Level Discounts:
+ *    - Proportional allocation across discountable items (inclusive/exclusive VAT safe).
+ * 6. Parked Bill State Preservation (F9 / F10):
+ *    - Serializes and restores exact line discount types, values, reasons, and customer link.
+ * 7. Hardware Scanner & Dual-IMEI Collision Guard:
+ *    - Automatic SIM1/SIM2 pairing and duplicate IMEI cart prevention.
  * 8. Strict Walk-In Credit (Udhaari) Guard:
- *    - Blocks credit sales for anonymous walk-ins, mandating a registered customer profile.
- * 9. Server-Side Catalog Price Integrity (SEC-01) & Salted Manager PIN Overrides (SEC-02).
- * 10. Multi-Mode & Split Checkout (F8) with Trade-In Buy-Back Credit deductions & Transaction Ref Tracking.
- * 11. Emergency Offline Safety Net (IndexedDB `pending_sales` queue) & Web Audio chime synthesis.
+ *    - Enforces registered customer profile for any transaction with outstanding balance or credit.
+ * 9. Salted Manager PIN Overrides & Emergency Offline Queue (IndexedDB `pending_sales`).
  */
 
 // ============================================================================
@@ -86,12 +81,14 @@ class POSAudioSynthesizer {
             gain.connect(ctx.destination);
             osc.start();
             osc.stop(ctx.currentTime + 0.09);
-        } catch (e) {}
+        } catch (e) {
+            // AudioContext autoplay policies silently ignored
+        }
     }
 }
 
 // ============================================================================
-// 2. CUSTOMER & UDHAARI MANAGEMENT MODULE
+// 2. CUSTOMER & UDHAARI MANAGEMENT MODULE (ZERO-QUERY DROPDOWN & CONTRACT)
 // ============================================================================
 class POSCustomerManager {
     constructor(engine) {
@@ -103,6 +100,7 @@ class POSCustomerManager {
         this.debounceTimer = null;
         this.searchResults = [];
         this.highlightedIndex = -1;
+        this.isFetchingZeroQuery = false;
 
         this.createDropdownElement();
         this.createSelectedBadgeElement();
@@ -117,7 +115,7 @@ class POSCustomerManager {
             this.dropdownEl = document.createElement('div');
             this.dropdownEl.id = 'posCustomerSearchDropdown';
             this.dropdownEl.className = 'dropdown-menu shadow-lg border bg-white p-1 w-100 rounded-3';
-            this.dropdownEl.style.cssText = 'position: absolute; top: 100%; left: 0; right: 0; z-index: 1050; max-height: 280px; overflow-y: auto; display: none; margin-top: 4px;';
+            this.dropdownEl.style.cssText = 'position: absolute; top: 100%; left: 0; right: 0; z-index: 1055; max-height: 320px; overflow-y: auto; display: none; margin-top: 4px;';
             parent.appendChild(this.dropdownEl);
         }
     }
@@ -143,6 +141,21 @@ class POSCustomerManager {
 
     initEvents() {
         if (this.customerInput && this.customerInput.tagName !== 'SELECT') {
+            // Zero-query: Opening dropdown immediately on click or focus
+            this.customerInput.addEventListener('focus', () => {
+                if (!this.selectedCustomer) {
+                    const query = this.customerInput.value.trim();
+                    this.search(query, true);
+                }
+            });
+
+            this.customerInput.addEventListener('click', () => {
+                if (!this.selectedCustomer && (!this.dropdownEl || this.dropdownEl.style.display === 'none')) {
+                    const query = this.customerInput.value.trim();
+                    this.search(query, true);
+                }
+            });
+
             this.customerInput.addEventListener('input', (e) => {
                 const query = e.target.value.trim();
                 clearTimeout(this.debounceTimer);
@@ -151,11 +164,9 @@ class POSCustomerManager {
                     this.clearCustomer(false);
                 }
 
-                if (query.length >= 2) {
-                    this.debounceTimer = setTimeout(() => this.search(query), 220);
-                } else {
-                    this.hideDropdown();
-                }
+                this.debounceTimer = setTimeout(() => {
+                    this.search(query, query.length === 0);
+                }, 180);
             });
 
             this.customerInput.addEventListener('keydown', (e) => {
@@ -226,24 +237,35 @@ class POSCustomerManager {
         }
     }
 
-    async search(query) {
+    /**
+     * Standardized search routing.
+     * When isZeroQuery is true, fetches top 15 recent and indebted customers.
+     */
+    async search(query = '', isZeroQuery = false) {
         try {
-            const response = await fetch(`${this.searchApiUrl}?q=${encodeURIComponent(query)}`);
+            let url = `${this.searchApiUrl}?`;
+            if (isZeroQuery || !query) {
+                url += 'limit=15&include_debtors=true&recent=true';
+            } else {
+                url += `q=${encodeURIComponent(query)}&limit=15`;
+            }
+
+            const response = await fetch(url);
             if (!response.ok) return;
             const data = await response.json();
             this.searchResults = data.results || [];
-            this.renderDropdown();
+            this.renderDropdown(isZeroQuery);
         } catch (err) {
-            console.error('[POSCustomerManager] Search error:', err);
+            console.error('[POSCustomerManager] Customer lookup error:', err);
         }
     }
 
-    renderDropdown() {
+    renderDropdown(isZeroQuery = false) {
         if (!this.dropdownEl) return;
 
         if (this.searchResults.length === 0) {
             this.dropdownEl.innerHTML = `
-                <div class="px-3 py-2 text-muted fs-xs text-center">
+                <div class="px-3 py-3 text-muted fs-xs text-center">
                     <i class="fas fa-user-slash me-1 opacity-50"></i> No registered customers found.
                 </div>
             `;
@@ -252,38 +274,55 @@ class POSCustomerManager {
         }
 
         this.highlightedIndex = -1;
-        this.dropdownEl.innerHTML = this.searchResults.map((c, idx) => {
-            const creditBal = parseFloat(c.credit_balance || 0);
-            const hasDebt = creditBal > 0;
-            const typeLabel = c.customer_type === 'WHOLESALE' ? 'Wholesale' : (c.customer_type === 'VIP' ? 'VIP' : 'Retail');
-            const typeBadgeClass = c.customer_type === 'WHOLESALE' ? 'bg-info text-dark' : (c.customer_type === 'VIP' ? 'bg-warning text-dark' : 'bg-light text-muted border');
+        const headerHtml = isZeroQuery ? `
+            <div class="px-2 py-1 bg-light border-bottom text-muted fs-2xs fw-bold text-uppercase d-flex justify-content-between">
+                <span><i class="fas fa-history me-1"></i> Recent & Debtors</span>
+                <span>Top 15</span>
+            </div>
+        ` : '';
+
+        const itemsHtml = this.searchResults.map((c, idx) => {
+            // Standardized JSON Contract: { title, subtitle, badge, badge_class, extra_data }
+            const extra = c.extra_data || {};
+            const name = c.title || extra.name || c.name || 'Unknown Customer';
+            const subtitle = c.subtitle || `${extra.phone || c.phone || 'No phone'} ${extra.pan || c.pan ? '• PAN: ' + (extra.pan || c.pan) : ''}`;
+            const debt = parseFloat(extra.credit_balance !== undefined ? extra.credit_balance : (c.credit_balance || 0));
+            const custType = extra.customer_type || c.customer_type || 'RETAIL';
+
+            let badgeHtml = '';
+            if (c.badge) {
+                const bClass = c.badge_class || (debt > 0 ? 'bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25' : 'bg-success bg-opacity-10 text-success');
+                badgeHtml = `<span class="badge ${bClass} fs-2xs px-2 py-1 font-monospace">${escapeHtml(c.badge)}</span>`;
+            } else if (debt > 0) {
+                badgeHtml = `<span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-2xs px-2 py-1 font-monospace">Due: Rs. ${debt.toFixed(2)}</span>`;
+            } else {
+                badgeHtml = `<span class="badge bg-success bg-opacity-10 text-success fs-2xs px-1">Clear</span>`;
+            }
+
+            const typeTag = custType === 'WHOLESALE' 
+                ? '<span class="badge bg-info text-dark fs-3xs px-1">WHOLESALE</span>' 
+                : (custType === 'VIP' ? '<span class="badge bg-warning text-dark fs-3xs px-1">VIP</span>' : '');
 
             return `
                 <div class="dropdown-item p-2 rounded-2 pointer d-flex justify-content-between align-items-center border-bottom border-light customer-search-item" 
                      data-customer-index="${idx}" role="button" tabindex="0">
-                    <div class="d-flex flex-column">
-                        <div class="fw-bold text-dark fs-xs d-flex align-items-center gap-1">
-                            <span>${escapeHtml(c.name)}</span>
-                            <span class="badge ${typeBadgeClass} fs-2xs px-1">${typeLabel}</span>
+                    <div class="d-flex flex-column text-truncate pe-2">
+                        <div class="fw-bold text-dark fs-xs d-flex align-items-center gap-1 text-truncate">
+                            <span class="text-truncate">${escapeHtml(name)}</span>
+                            ${typeTag}
                         </div>
-                        <div class="text-muted fs-2xs font-monospace mt-1">
-                            <i class="fas fa-phone fs-2xs me-1 text-success"></i>${escapeHtml(c.phone)}
-                            ${c.pan ? ` &bull; PAN: ${escapeHtml(c.pan)}` : ''}
+                        <div class="text-muted fs-2xs font-monospace mt-1 text-truncate">
+                            ${escapeHtml(subtitle)}
                         </div>
                     </div>
                     <div class="text-end ps-2 flex-shrink-0">
-                        ${hasDebt ? `
-                            <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">
-                                Udhaari: Rs. ${creditBal.toFixed(2)}
-                            </span>
-                        ` : `
-                            <span class="badge bg-success bg-opacity-10 text-success fs-2xs">Clear</span>
-                        `}
+                        ${badgeHtml}
                     </div>
                 </div>
             `;
         }).join('');
 
+        this.dropdownEl.innerHTML = headerHtml + itemsHtml;
         this.showDropdown();
     }
 
@@ -315,7 +354,18 @@ class POSCustomerManager {
         this.highlightedIndex = -1;
     }
 
-    selectCustomer(customer) {
+    selectCustomer(rawItem) {
+        // Resolve customer object from standard contract or legacy payload
+        const extra = rawItem.extra_data || {};
+        const customer = {
+            id: rawItem.id || extra.id,
+            name: extra.name || rawItem.title || rawItem.name,
+            phone: extra.phone || rawItem.phone || '',
+            pan: extra.pan || rawItem.pan || '',
+            customer_type: extra.customer_type || rawItem.customer_type || 'RETAIL',
+            credit_balance: parseFloat(extra.credit_balance !== undefined ? extra.credit_balance : (rawItem.credit_balance || 0))
+        };
+
         this.selectedCustomer = customer;
         this.hideDropdown();
 
@@ -342,11 +392,11 @@ class POSCustomerManager {
 
             const nameEl = document.getElementById('selectedCustomerChipName');
             if (nameEl) {
-                nameEl.innerText = `${customer.name} (${customer.phone})`;
+                nameEl.innerText = `${customer.name} (${customer.phone || 'No phone'})`;
             }
 
             const udhaariBadge = document.getElementById('selectedCustomerUdhaariBadge');
-            const debt = parseFloat(customer.credit_balance || 0);
+            const debt = customer.credit_balance || 0;
             if (udhaariBadge) {
                 if (debt > 0) {
                     udhaariBadge.innerText = `Udhaari: Rs. ${debt.toFixed(2)}`;
@@ -386,7 +436,585 @@ class POSCustomerManager {
 }
 
 // ============================================================================
-// 3. CART & PRICING ENGINE MODULE (EXPLICIT NONE, %, AND AMOUNT (Rs.) MODES)
+// 3. WORKSHOP REPAIR TICKET LOOKUP & ATTACHMENT BRIDGE
+// ============================================================================
+class POSRepairTicketManager {
+    constructor(engine) {
+        this.engine = engine;
+        this.searchApiUrl = '/repairs/api/search/';
+        this.modalEl = document.getElementById('posRepairLookupModal');
+        this.ensureModalExists();
+        this.initEvents();
+    }
+
+    ensureModalExists() {
+        if (document.getElementById('posRepairLookupModal')) {
+            this.modalEl = document.getElementById('posRepairLookupModal');
+            return;
+        }
+
+        const modalDiv = document.createElement('div');
+        modalDiv.id = 'posRepairLookupModal';
+        modalDiv.className = 'modal fade';
+        modalDiv.tabIndex = -1;
+        modalDiv.setAttribute('data-bs-backdrop', 'static');
+        modalDiv.innerHTML = `
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                    <div class="modal-header bg-dark text-white border-0 py-3 px-4">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-wrench"></i></span>
+                            <div>
+                                <h6 class="modal-title fs-sm fw-bold text-white mb-0">Attach Workshop Repair Ticket</h6>
+                                <small class="text-white-50 fs-3xs">Search by Ticket #, Customer, Phone, or IMEI</small>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body p-3 bg-light">
+                        <div class="input-group mb-3 shadow-sm rounded-3 overflow-hidden">
+                            <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                            <input type="text" id="posRepairTicketSearchInput" class="form-control border-start-0" 
+                                   placeholder="Enter ticket #, customer name, phone, or IMEI..." autocomplete="off">
+                            <button class="btn btn-primary px-3 fw-bold" type="button" id="posExecuteRepairSearchBtn">Search</button>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="fw-bold fs-xs text-secondary text-uppercase">Tickets Ready for Delivery</span>
+                            <button type="button" class="btn btn-link btn-sm p-0 fs-2xs text-decoration-none" id="posReloadReadyRepairsBtn">
+                                <i class="fas fa-sync-alt me-1"></i> Refresh Ready List
+                            </button>
+                        </div>
+
+                        <div class="bg-white border rounded-3 p-1" style="max-height: 340px; overflow-y: auto;" id="posRepairTicketResultsContainer">
+                            <div class="text-center py-4 text-muted fs-xs">
+                                <i class="fas fa-tools fs-2 d-block mb-2 opacity-25"></i>
+                                Loading repair tickets ready for pickup...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modalDiv);
+        this.modalEl = modalDiv;
+    }
+
+    initEvents() {
+        const attachBtn = document.getElementById('posAttachRepairBtn') || document.getElementById('attachRepairPromptBtn');
+        if (attachBtn) {
+            attachBtn.addEventListener('click', () => this.openModal());
+        }
+
+        const searchInput = document.getElementById('posRepairTicketSearchInput');
+        const searchBtn = document.getElementById('posExecuteRepairSearchBtn');
+        const refreshBtn = document.getElementById('posReloadReadyRepairsBtn');
+
+        if (searchInput) {
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.searchTickets(searchInput.value.trim());
+                }
+            });
+        }
+
+        if (searchBtn && searchInput) {
+            searchBtn.addEventListener('click', () => this.searchTickets(searchInput.value.trim()));
+        }
+
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => this.searchTickets(''));
+        }
+
+        const resultsContainer = document.getElementById('posRepairTicketResultsContainer');
+        if (resultsContainer) {
+            resultsContainer.addEventListener('click', (e) => {
+                const selectBtn = e.target.closest('.select-repair-ticket-btn');
+                if (selectBtn) {
+                    const ticketDataRaw = selectBtn.dataset.ticketJson;
+                    if (ticketDataRaw) {
+                        try {
+                            const ticket = JSON.parse(decodeURIComponent(ticketDataRaw));
+                            this.attachTicketToCart(ticket);
+                        } catch (err) {
+                            console.error('[POSRepairTicketManager] Parse error:', err);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    openModal() {
+        if (!this.modalEl) return;
+        const modal = bootstrap.Modal.getOrCreateInstance(this.modalEl);
+        modal.show();
+        this.searchTickets('');
+        setTimeout(() => {
+            const input = document.getElementById('posRepairTicketSearchInput');
+            if (input) input.focus();
+        }, 250);
+    }
+
+    async searchTickets(query = '') {
+        const container = document.getElementById('posRepairTicketResultsContainer');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="text-center py-4 text-muted fs-xs">
+                <span class="spinner-border spinner-border-sm me-2 text-primary"></span>
+                Searching repair records...
+            </div>
+        `;
+
+        try {
+            let url = `${this.searchApiUrl}?`;
+            if (query) {
+                url += `q=${encodeURIComponent(query)}`;
+            } else {
+                url += 'status=READY_FOR_DELIVERY,COMPLETED&limit=20';
+            }
+
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('Repair lookup failed');
+            const data = await resp.json();
+            const tickets = data.results || data.tickets || [];
+
+            this.renderResults(tickets);
+        } catch (err) {
+            container.innerHTML = `
+                <div class="text-center py-4 text-danger fs-xs">
+                    <i class="fas fa-exclamation-triangle me-1"></i> Failed to retrieve repair tickets.
+                </div>
+            `;
+        }
+    }
+
+    renderResults(tickets) {
+        const container = document.getElementById('posRepairTicketResultsContainer');
+        if (!container) return;
+
+        if (!tickets || tickets.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-4 text-muted fs-xs">
+                    <i class="fas fa-box-open fs-2 d-block mb-2 opacity-25"></i>
+                    No ready-for-delivery repair tickets found.
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = tickets.map(t => {
+            const ticketId = t.id || t.ticket_id;
+            const ticketNo = t.ticket_number || `#${ticketId}`;
+            const customerName = t.customer_name || 'Walk-in Customer';
+            const customerPhone = t.customer_phone || '';
+            const device = `${t.brand_name || ''} ${t.model_name || t.device_model || 'Device'}`.trim();
+            const totalPayable = parseFloat(t.payable_amount !== undefined ? t.payable_amount : (t.total_amount || t.cost || 0));
+            const status = t.status || 'READY';
+            const imei = t.imei || t.imei_1 || '';
+
+            const serialized = encodeURIComponent(JSON.stringify({
+                id: ticketId,
+                ticket_number: ticketNo,
+                customer_id: t.customer_id || null,
+                customer_name: customerName,
+                customer_phone: customerPhone,
+                customer_pan: t.customer_pan || '',
+                device_model: device,
+                imei: imei,
+                payable_amount: totalPayable,
+                problem_description: t.problem_description || t.fault || ''
+            }));
+
+            return `
+                <div class="d-flex align-items-center justify-content-between p-2 border-bottom hover-bg-light rounded-2">
+                    <div class="pe-2 text-truncate">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-dark font-monospace fs-2xs">${escapeHtml(ticketNo)}</span>
+                            <span class="fw-bold fs-xs text-dark text-truncate">${escapeHtml(device)}</span>
+                            <span class="badge bg-success bg-opacity-10 text-success fs-3xs">${escapeHtml(status)}</span>
+                        </div>
+                        <div class="text-muted fs-2xs mt-1">
+                            <i class="fas fa-user me-1 text-secondary"></i>${escapeHtml(customerName)} 
+                            ${customerPhone ? `&bull; <i class="fas fa-phone me-1 text-secondary"></i>${escapeHtml(customerPhone)}` : ''}
+                            ${imei ? `&bull; <span class="font-monospace">IMEI: ${escapeHtml(imei)}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-3 flex-shrink-0">
+                        <div class="text-end">
+                            <span class="d-block text-muted fs-3xs">Payable</span>
+                            <span class="fw-bold font-monospace fs-xs text-primary">Rs. ${totalPayable.toFixed(2)}</span>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-1 fs-2xs fw-bold select-repair-ticket-btn" 
+                                data-ticket-json="${serialized}">
+                            <i class="fas fa-link me-1"></i> Attach
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    attachTicketToCart(ticket) {
+        this.engine.repairTicketId = ticket.id;
+
+        // 1. Auto-select customer if available
+        if (ticket.customer_name) {
+            this.engine.customerManager.selectCustomer({
+                id: ticket.customer_id || null,
+                name: ticket.customer_name,
+                phone: ticket.customer_phone || '',
+                pan: ticket.customer_pan || '',
+                customer_type: 'RETAIL',
+                credit_balance: 0
+            });
+        }
+
+        // 2. Add repair delivery service item to cart
+        this.engine.cart.addItem({
+            product_id: null,
+            category_name: 'REPAIR SERVICE',
+            name: `Workshop Repair: ${ticket.ticket_number} (${ticket.device_model})`,
+            unit_price: ticket.payable_amount,
+            price: ticket.payable_amount,
+            official_unit_price: ticket.payable_amount,
+            quantity: 1,
+            discount_type: 'NONE',
+            discount_value: 0,
+            is_discountable: true,
+            requires_imei: Boolean(ticket.imei),
+            imei_1: ticket.imei || '',
+            imei_number: ticket.imei || ''
+        });
+
+        // 3. Render Top Banner
+        const container = document.querySelector('.pos-workspace-container') || document.querySelector('.container-fluid');
+        if (container) {
+            const oldBanner = document.getElementById('linkedRepairBanner');
+            if (oldBanner) oldBanner.remove();
+
+            const banner = document.createElement('div');
+            banner.id = 'linkedRepairBanner';
+            banner.className = 'alert alert-info py-1 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs shadow-sm';
+            banner.innerHTML = `
+                <span><i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>${escapeHtml(ticket.ticket_number)}</strong> (${escapeHtml(ticket.device_model)}) &bull; Rs. ${ticket.payable_amount.toFixed(2)}</span>
+                <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); window.smartPos.repairTicketId=null;"></button>
+            `;
+            container.prepend(banner);
+        }
+
+        const modal = bootstrap.Modal.getInstance(this.modalEl);
+        if (modal) modal.hide();
+
+        this.engine.showNotification(`Repair Ticket ${ticket.ticket_number} attached to bill.`, 'success');
+        POSAudioSynthesizer.play('second');
+    }
+}
+
+// ============================================================================
+// 4. DECOUPLED PRODUCT CATALOG & SEARCH SERVICE
+// ============================================================================
+class POSCatalogService {
+    constructor(engine) {
+        this.engine = engine;
+        this.initialProducts = [];
+        this.allLoadedProducts = [];
+        this.currentCategory = 'ALL';
+        this.currentCategoryId = null;
+        this.searchDebounceTimer = null;
+
+        this.searchInput = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
+        this.clearSearchBtn = document.getElementById('clearSearchBtn');
+        this.categoryPills = document.querySelectorAll('.cat-pill');
+        this.productGrid = document.getElementById('productGridContainer') || document.getElementById('posSearchResultsContainer');
+
+        this.initEvents();
+    }
+
+    initEvents() {
+        if (this.searchInput) {
+            this.searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    clearTimeout(this.searchDebounceTimer);
+                    this.engine.handleDirectImeiOrBarcodeScan(this.searchInput.value.trim());
+                }
+            });
+
+            this.searchInput.addEventListener('input', (e) => {
+                const val = e.target.value;
+                const cleanVal = val.trim();
+                if (cleanVal.length >= 14 && /^\d+$/.test(cleanVal)) {
+                    clearTimeout(this.searchDebounceTimer);
+                    this.engine.handleDirectImeiOrBarcodeScan(cleanVal);
+                } else {
+                    this.handleSearchInput(val);
+                }
+            });
+        }
+
+        if (this.clearSearchBtn) {
+            this.clearSearchBtn.addEventListener('click', () => {
+                clearTimeout(this.searchDebounceTimer);
+                if (this.searchInput) this.searchInput.value = '';
+                this.allLoadedProducts = [...(this.initialProducts || [])];
+                this.filterCatalogBySearch('');
+                if (this.searchInput) this.searchInput.focus();
+            });
+        }
+
+        this.categoryPills.forEach(pill => {
+            pill.addEventListener('click', () => {
+                this.categoryPills.forEach(p => p.classList.remove('active'));
+                pill.classList.add('active');
+
+                if (pill.dataset.categoryId) {
+                    this.currentCategoryId = parseInt(pill.dataset.categoryId, 10);
+                    this.currentCategory = pill.dataset.categoryKey || '';
+                } else {
+                    this.currentCategoryId = null;
+                    this.currentCategory = pill.dataset.categoryKey || 'ALL';
+                }
+
+                const currentQuery = this.searchInput ? this.searchInput.value.trim() : '';
+                if (currentQuery) {
+                    this.handleSearchInput(currentQuery);
+                } else {
+                    this.filterCatalogByCategory();
+                }
+            });
+        });
+    }
+
+    async loadInitialCatalog() {
+        try {
+            const customerType = this.engine.cart.customerType || 'RETAIL';
+            const resp = await fetch(`/products/api/search/?top_selling=true&limit=24&customer_type=${customerType}`);
+            if (!resp.ok) throw new Error('Could not load catalog');
+            const data = await resp.json();
+            this.initialProducts = data.results || [];
+            this.allLoadedProducts = [...this.initialProducts];
+            this.renderCatalog(this.allLoadedProducts);
+        } catch (err) {
+            console.warn('[POSCatalogService] Initial load fallback:', err);
+            if (this.productGrid) {
+                this.productGrid.innerHTML = `
+                    <div class="col-12 text-center py-5 text-muted">
+                        <i class="fas fa-barcode fs-2 mb-2 d-block opacity-25"></i>
+                        Scan an IMEI or barcode to add items directly to the bill.
+                    </div>
+                `;
+            }
+        }
+    }
+
+    handleSearchInput(val) {
+        clearTimeout(this.searchDebounceTimer);
+        const cleanVal = (val || '').trim();
+
+        if (!cleanVal) {
+            this.allLoadedProducts = [...(this.initialProducts || [])];
+            this.filterCatalogBySearch('');
+            return;
+        }
+
+        this.filterCatalogBySearch(cleanVal.toLowerCase());
+
+        this.searchDebounceTimer = setTimeout(() => {
+            this.performOnlineCatalogSearch(cleanVal);
+        }, 220);
+    }
+
+    async performOnlineCatalogSearch(query) {
+        if (!query || query.length < 2) return;
+        try {
+            const customerType = this.engine.cart.customerType || 'RETAIL';
+            let url = `/products/api/search/?q=${encodeURIComponent(query)}&customer_type=${customerType}`;
+            if (this.currentCategoryId) {
+                url += `&category_id=${this.currentCategoryId}`;
+            }
+
+            const resp = await fetch(url);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const results = data.results || [];
+
+            if (this.searchInput && this.searchInput.value.trim().toLowerCase() === query.toLowerCase()) {
+                this.allLoadedProducts = results;
+                this.filterCatalogBySearch(query.toLowerCase());
+            }
+        } catch (err) {
+            console.error('[POSCatalogService] Server search error:', err);
+        }
+    }
+
+    async filterCatalogByCategory() {
+        if (this.currentCategory === 'ALL' && !this.currentCategoryId) {
+            this.allLoadedProducts = [...(this.initialProducts || [])];
+            this.renderCatalog(this.allLoadedProducts);
+            return;
+        }
+
+        const localMatches = this.getMatchingCatalogProducts('', this.initialProducts || []);
+        if (localMatches.length > 0) {
+            this.allLoadedProducts = [...(this.initialProducts || [])];
+            this.renderCatalog(localMatches);
+            return;
+        }
+
+        try {
+            const customerType = this.engine.cart.customerType || 'RETAIL';
+            let url = `/products/api/search/?limit=24&customer_type=${customerType}`;
+            if (this.currentCategoryId) {
+                url += `&category_id=${this.currentCategoryId}`;
+            } else if (this.currentCategory) {
+                url += `&category=${encodeURIComponent(this.currentCategory)}`;
+            }
+
+            const resp = await fetch(url);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const results = data.results || [];
+            this.allLoadedProducts = results;
+            this.renderCatalog(results);
+        } catch (err) {
+            console.error('[POSCatalogService] Category search error:', err);
+            this.renderCatalog([]);
+        }
+    }
+
+    isPhoneProduct(p) {
+        if (!p) return false;
+        if (p.category_key === 'PHONES') return true;
+        if (p.requires_imei === true || p.match_type === 'IMEI') return true;
+        if ((p.ram && String(p.ram).trim() !== '') || (p.storage && String(p.storage).trim() !== '')) return true;
+
+        const text = `${p.name || ''} ${p.model_name || ''} ${p.specs || ''} ${p.category_name || ''} ${p.brand_name || ''}`.toLowerCase();
+        const phoneKeywords = [
+            'iphone', 'galaxy', 'redmi', 'poco', 'realme', 'oneplus', 'pixel',
+            'oppo', 'vivo', 'infinix', 'tecno', 'honor', 'motorola', 'nokia',
+            'xperia', 'smartphone', 'mobile', 'phone', 'ह्यान्डसेट', 'स्मार्टफोन'
+        ];
+        if (phoneKeywords.some(kw => text.includes(kw))) return true;
+
+        const phoneRegex = /\b(1[1-6]|se)\s+(128|256|512|64|32|1tb)\b|\b(1[1-6])\s+(pro|plus|max|promax|ultra)\b|\b\d{1,2}\s+\d{2,4}\s+(black|blue|pink|white|green|gold|silver|titanium|yellow|purple)\b/i;
+        return phoneRegex.test(text);
+    }
+
+    getMatchingCatalogProducts(query = '', sourceList = null) {
+        const cleanQuery = query.toLowerCase().trim();
+        const listToFilter = sourceList || this.allLoadedProducts;
+
+        return listToFilter.filter(p => {
+            let matchesCat = false;
+
+            if (this.currentCategoryId) {
+                matchesCat = (p.category_id && parseInt(p.category_id, 10) === this.currentCategoryId);
+            } else if (this.currentCategory === 'ALL') {
+                matchesCat = true;
+            } else if (this.currentCategory === 'PHONES') {
+                matchesCat = this.isPhoneProduct(p);
+            } else if (this.currentCategory === 'CHARGERS') {
+                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
+                matchesCat = (p.category_key === 'CHARGERS') || ['charger', 'cable', 'adapter', 'power', 'chrg', 'चार्जर', 'केबल', 'type-c', 'lightning'].some(k => text.includes(k));
+            } else if (this.currentCategory === 'GLASS_COVER') {
+                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
+                matchesCat = (p.category_key === 'GLASS_COVER') || ['glass', 'cover', 'case', 'tempered', 'protector', 'कभर', 'ग्लास', 'गिलास', 'screen guard', 'skin'].some(k => text.includes(k));
+            } else if (this.currentCategory === 'AUDIO') {
+                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
+                matchesCat = (p.category_key === 'AUDIO') || ['audio', 'earbud', 'headphone', 'airpod', 'neckband', 'speaker', 'earphone', 'tws', 'handsfree', 'एयरबड्स', 'हेडफोन'].some(k => text.includes(k));
+            } else if (this.currentCategory === 'PARTS') {
+                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
+                matchesCat = (p.category_key === 'PARTS') || p.is_spare_part === true || ['part', 'spare', 'battery', 'display', 'screen replacement', 'touch panel', 'मर्मत', 'पार्ट्स'].some(k => text.includes(k));
+            } else {
+                matchesCat = (p.category_key === this.currentCategory || (p.category_name && p.category_name.toUpperCase() === this.currentCategory));
+            }
+
+            const matchesQuery = cleanQuery === '' || 
+                (p.name && p.name.toLowerCase().includes(cleanQuery)) || 
+                (p.brand_name && p.brand_name.toLowerCase().includes(cleanQuery)) || 
+                (p.model_name && p.model_name.toLowerCase().includes(cleanQuery)) ||
+                (p.specs && p.specs.toLowerCase().includes(cleanQuery)) ||
+                (p.sku && p.sku.toLowerCase().includes(cleanQuery)) ||
+                (p.barcode && p.barcode.toLowerCase().includes(cleanQuery)) ||
+                (p.imei_1 && p.imei_1.toLowerCase().includes(cleanQuery)) ||
+                (p.imei_2 && p.imei_2.toLowerCase().includes(cleanQuery));
+
+            return matchesCat && matchesQuery;
+        });
+    }
+
+    filterCatalogBySearch(query = '') {
+        const filtered = this.getMatchingCatalogProducts(query);
+        this.renderCatalog(filtered);
+    }
+
+    renderCatalog(products) {
+        if (!this.productGrid) return;
+        this.productGrid.innerHTML = '';
+
+        if (products.length === 0) {
+            this.productGrid.innerHTML = `
+                <div class="col-12 text-center py-5 text-muted">
+                    <i class="fas fa-search fs-2 opacity-25 d-block mb-2"></i>
+                    No products matched your search.
+                </div>
+            `;
+            return;
+        }
+
+        products.forEach(prod => {
+            const isPhone = this.isPhoneProduct(prod);
+            let avatarClass = prod.avatar_class || (isPhone ? 'avatar-phone' : 'avatar-part');
+            let iconClass = prod.icon_class || (isPhone ? 'fas fa-mobile-screen' : 'fas fa-box');
+
+            if (isPhone && (!prod.avatar_class || prod.avatar_class === 'avatar-phone')) {
+                const brand = (prod.brand_name || '').toLowerCase();
+                const name = (prod.name || '').toLowerCase();
+                if (brand.includes('apple') || name.includes('iphone')) {
+                    iconClass = 'fab fa-apple';
+                } else if (brand.includes('samsung') || name.includes('galaxy')) {
+                    iconClass = 'fas fa-mobile-screen';
+                } else {
+                    iconClass = 'fas fa-mobile-screen-button';
+                }
+                avatarClass = 'avatar-phone';
+            }
+
+            const card = document.createElement('div');
+            card.className = 'product-card';
+            card.onclick = () => this.engine.handleProductCardClick(prod);
+
+            const displaySpecs = prod.specs || (prod.ram && prod.storage ? `${prod.ram}/${prod.storage}` : '');
+
+            card.innerHTML = `
+                <div>
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <div class="cat-icon-avatar ${avatarClass}">
+                            <i class="${iconClass}"></i>
+                        </div>
+                        <div class="text-truncate">
+                            <span class="badge bg-light text-dark border fs-2xs">${escapeHtml(prod.brand_name || 'Generic')}</span>
+                            ${isPhone ? '<span class="badge bg-primary bg-opacity-10 text-primary fs-2xs ms-1">IMEI</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="fw-bold text-dark fs-sm text-truncate" title="${escapeHtml(prod.name)}">${escapeHtml(prod.name)}</div>
+                    <small class="text-muted fs-2xs d-block text-truncate mt-1">${escapeHtml(displaySpecs)}</small>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                    <span class="fw-bold font-mono text-primary fs-xs">Rs. ${parseFloat(prod.price || prod.selling_price || 0).toLocaleString()}</span>
+                    <span class="badge bg-light text-muted border fs-2xs">${parseInt(prod.available_stock || 0)} in stock</span>
+                </div>
+            `;
+            this.productGrid.appendChild(card);
+        });
+    }
+}
+
+// ============================================================================
+// 5. CART & PRICING ENGINE MODULE (EXPLICIT NONE, %, AND AMOUNT (Rs.) MODES)
 // ============================================================================
 class POSCart {
     constructor(engine) {
@@ -397,8 +1025,7 @@ class POSCart {
         this.customerPan = '';
         this.customerType = 'RETAIL';
 
-        // Dual-Mode Bill Discount State
-        this.billDiscountType = 'PERCENTAGE'; // 'PERCENTAGE' or 'AMOUNT'
+        this.billDiscountType = 'PERCENTAGE';
         this.billDiscountValue = 0;
         this.billDiscountPercent = 0;
         this.billDiscountReason = '';
@@ -425,7 +1052,6 @@ class POSCart {
                 labelSpan.innerHTML = `<span>Bill Discount:</span>`;
             }
 
-            // Input group with compact toggle button [% | Rs.]
             const group = document.createElement('div');
             group.className = 'input-group input-group-sm';
             group.style.width = '135px';
@@ -480,7 +1106,6 @@ class POSCart {
 
     bindEvents() {
         if (this.cartTableBody) {
-            // Change event handler for quantities, prices, and discounts
             this.cartTableBody.addEventListener('change', (e) => {
                 const qtyInput = e.target.closest('.cart-qty-input');
                 if (qtyInput) {
@@ -504,7 +1129,6 @@ class POSCart {
                 }
             });
 
-            // Real-time live input listener for discount amounts and rates
             this.cartTableBody.addEventListener('input', (e) => {
                 const discInput = e.target.closest('.cart-disc-input');
                 if (discInput) {
@@ -514,7 +1138,6 @@ class POSCart {
                 }
             });
 
-            // Click event handler for remove and discrete 3-way discount mode toggles
             this.cartTableBody.addEventListener('click', (e) => {
                 const removeBtn = e.target.closest('.cart-remove-btn');
                 if (removeBtn) {
@@ -526,7 +1149,7 @@ class POSCart {
                 const modeBtn = e.target.closest('.cart-disc-mode-btn');
                 if (modeBtn) {
                     const idx = parseInt(modeBtn.dataset.cartIndex, 10);
-                    const mode = modeBtn.dataset.mode; // 'NONE', 'PERCENTAGE', 'AMOUNT'
+                    const mode = modeBtn.dataset.mode;
                     this.setItemDiscountMode(idx, mode);
                     return;
                 }
@@ -557,11 +1180,11 @@ class POSCart {
     addItem(product) {
         if (!product) return;
 
-        const isImei = Boolean(product.requires_imei || product.match_type === 'IMEI' || this.engine.isPhoneProduct(product));
+        const isImei = Boolean(product.requires_imei || product.match_type === 'IMEI' || this.engine.catalogService.isPhoneProduct(product));
         const incomingImei1 = (product.imei_1 || product.imei1 || product.imei_number || '').trim();
         const incomingImei2 = (product.imei_2 || product.imei2 || product.secondary_imei || '').trim();
 
-        // 1. Dual-IMEI Collision Check across all items
+        // 1. Dual-IMEI Collision Check
         if (isImei && (incomingImei1 || incomingImei2)) {
             const duplicateItem = this.items.find(existingItem => {
                 const existingImei1 = (existingItem.imei_number || existingItem.imei_1 || existingItem.imei1 || '').trim();
@@ -613,7 +1236,7 @@ class POSCart {
             ? parseFloat(product.quantity)
             : 1;
 
-        // 3. Discount Initialization (Explicitly NONE, PERCENTAGE, or AMOUNT)
+        // 3. Discount Initialization
         let discountType = 'NONE';
         const rawDiscType = String(product.discount_type || '').toUpperCase().trim();
         if (rawDiscType === 'AMOUNT' || rawDiscType === 'FIXED') {
@@ -637,13 +1260,12 @@ class POSCart {
         const maxDiscountPercent = product.max_discount_percent !== undefined ? parseFloat(product.max_discount_percent) : 10;
         const conversionId = product.package_conversion_id || product.conversion_id || product.unit_conversion_id || null;
 
-        // Non-discountable items are strictly initialized to NONE with 0 discount
         if (!isDiscountable) {
             discountType = 'NONE';
             discountValue = 0;
         }
 
-        // 4. Group non-serialized accessories if already present
+        // 4. Group Non-Serialized Accessories
         const nonImeiMatch = !isImei
             ? this.items.find(i => (i.product_id === (product.product_id || product.id)) && ((i.conversion_id || null) === conversionId))
             : null;
@@ -1238,7 +1860,7 @@ class POSCart {
 }
 
 // ============================================================================
-// 4. TRADE-IN & EXCHANGE MANAGER MODULE
+// 6. TRADE-IN & EXCHANGE MANAGER MODULE
 // ============================================================================
 class POSTradeInManager {
     constructor(engine) {
@@ -1309,7 +1931,7 @@ class POSTradeInManager {
 }
 
 // ============================================================================
-// 5. PARKED BILL / HOLD CART MANAGER MODULE (F9 / F10)
+// 7. PARKED BILL / HOLD CART MANAGER MODULE (F9 / F10)
 // ============================================================================
 class POSHoldCartManager {
     constructor(engine) {
@@ -1566,7 +2188,7 @@ class POSHoldCartManager {
 }
 
 // ============================================================================
-// 6. CHECKOUT, OVERRIDE PIN & OFFLINE ENGINE
+// 8. CHECKOUT, OVERRIDE PIN & OFFLINE ENGINE
 // ============================================================================
 class POSCheckout {
     constructor(engine) {
@@ -1723,22 +2345,16 @@ class POSCheckout {
 
         const totals = this.engine.cart.calculateTotals();
         const cash = parseFloat(document.getElementById('splitCashAmt')?.value) || 0;
-
         const fonepay = parseFloat(document.getElementById('splitFonepayAmt')?.value) || 0;
         const fonepayRef = (document.getElementById('splitFonepayRef')?.value || '').trim();
-
         const esewa = parseFloat(document.getElementById('splitEsewaAmt')?.value) || 0;
         const esewaRef = (document.getElementById('splitEsewaRef')?.value || '').trim();
-
         const khalti = parseFloat(document.getElementById('splitKhaltiAmt')?.value) || 0;
         const khaltiRef = (document.getElementById('splitKhaltiRef')?.value || '').trim();
-
         const card = parseFloat(document.getElementById('splitCardAmt')?.value) || 0;
         const cardRef = (document.getElementById('splitCardRef')?.value || '').trim();
-
         const bank = parseFloat(document.getElementById('splitBankAmt')?.value) || 0;
         const bankRef = (document.getElementById('splitBankRef')?.value || '').trim();
-
         const credit = parseFloat(document.getElementById('splitCreditAmt')?.value) || 0;
         const creditRef = (document.getElementById('splitCreditRef')?.value || '').trim();
 
@@ -1984,7 +2600,7 @@ class POSCheckout {
 }
 
 // ============================================================================
-// 7. MASTER POS ENGINE ORCHESTRATOR
+// 9. MASTER POS ENGINE ORCHESTRATOR
 // ============================================================================
 class SmartPOSEngine {
     constructor() {
@@ -1994,26 +2610,24 @@ class SmartPOSEngine {
         this.defaultVatRate = taxConfigEl ? parseFloat(taxConfigEl.dataset.defaultVatRate || 0) : 0;
         this.supervisorThreshold = taxConfigEl ? parseFloat(taxConfigEl.dataset.managerApprovalDiscount || 10) : 10;
 
-        this.currentCategory = 'ALL';
-        this.currentCategoryId = null;
-        this.initialProducts = [];
-        this.allLoadedProducts = [];
         this.pendingPhoneProduct = null;
         this.repairTicketId = null;
-        this.searchDebounceTimer = null;
 
         this.initDomElements();
 
+        // Instantiate decoupled modules
         this.customerManager = new POSCustomerManager(this);
         this.tradeInManager = new POSTradeInManager(this);
         this.cart = new POSCart(this);
         this.holdCartManager = new POSHoldCartManager(this);
         this.checkout = new POSCheckout(this);
+        this.repairManager = new POSRepairTicketManager(this);
+        this.catalogService = new POSCatalogService(this);
 
         this.bindEvents();
         this.initHotkeys();
         this.detectLinkedRepairTicket();
-        this.loadInitialCatalog();
+        this.catalogService.loadInitialCatalog();
 
         // Hardware scanner listener bridge
         if (typeof BarcodeScannerListener !== 'undefined') {
@@ -2029,18 +2643,6 @@ class SmartPOSEngine {
     }
 
     initDomElements() {
-        this.searchInput = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
-        this.clearSearchBtn = document.getElementById('clearSearchBtn');
-        this.categoryPills = document.querySelectorAll('.cat-pill');
-        this.productGrid = document.getElementById('productGridContainer') || document.getElementById('posSearchResultsContainer');
-        this.cartContainer = document.getElementById('cartItemsContainer') || document.getElementById('posCartTableBody');
-
-        this.subtotalText = document.getElementById('posSubtotalText') || document.getElementById('billSubtotalText');
-        this.grandTotalText = document.getElementById('posGrandTotalText') || document.getElementById('billGrandTotalText');
-        this.exchangeRow = document.getElementById('posTradeInRow') || document.getElementById('exchangeDiscountRow');
-        this.exchangeText = document.getElementById('posTradeInText') || document.getElementById('billExchangeText');
-        this.discountInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
-
         this.quickCashBtn = document.getElementById('posDirectCashCheckoutBtn') || document.getElementById('quickCashPayBtn');
         this.digitalPayBtn = document.getElementById('posSplitPaymentBtn') || document.getElementById('digitalPayBtn');
         this.clearCartBtn = document.getElementById('clearCartBtn');
@@ -2061,62 +2663,6 @@ class SmartPOSEngine {
     }
 
     bindEvents() {
-        // Fast Search Input & Barcode Gun Listener
-        if (this.searchInput) {
-            this.searchInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    clearTimeout(this.searchDebounceTimer);
-                    this.handleDirectImeiOrBarcodeScan(this.searchInput.value.trim());
-                }
-            });
-
-            this.searchInput.addEventListener('input', (e) => {
-                const val = e.target.value;
-                const cleanVal = val.trim();
-                if (cleanVal.length >= 14 && /^\d+$/.test(cleanVal)) {
-                    clearTimeout(this.searchDebounceTimer);
-                    this.handleDirectImeiOrBarcodeScan(cleanVal);
-                } else {
-                    this.handleSearchInput(val);
-                }
-            });
-        }
-
-        if (this.clearSearchBtn) {
-            this.clearSearchBtn.addEventListener('click', () => {
-                clearTimeout(this.searchDebounceTimer);
-                if (this.searchInput) this.searchInput.value = '';
-                this.allLoadedProducts = [...(this.initialProducts || [])];
-                this.filterCatalogBySearch('');
-                if (this.searchInput) this.searchInput.focus();
-            });
-        }
-
-        // Category Filter Buttons (Supports Smart Keys and Category IDs)
-        this.categoryPills.forEach(pill => {
-            pill.addEventListener('click', () => {
-                this.categoryPills.forEach(p => p.classList.remove('active'));
-                pill.classList.add('active');
-
-                if (pill.dataset.categoryId) {
-                    this.currentCategoryId = parseInt(pill.dataset.categoryId, 10);
-                    this.currentCategory = pill.dataset.categoryKey || '';
-                } else {
-                    this.currentCategoryId = null;
-                    this.currentCategory = pill.dataset.categoryKey || 'ALL';
-                }
-
-                const currentQuery = this.searchInput ? this.searchInput.value.trim() : '';
-                if (currentQuery) {
-                    this.handleSearchInput(currentQuery);
-                } else {
-                    this.filterCatalogByCategory();
-                }
-            });
-        });
-
-        // Modal IMEI Pairing Listeners
         if (this.modalInStockSelect) {
             this.modalInStockSelect.addEventListener('change', () => this.handleInStockSelectChange());
         }
@@ -2129,12 +2675,10 @@ class SmartPOSEngine {
             this.confirmImeiBtn.addEventListener('click', () => this.confirmImeiAddition());
         }
 
-        // Trade-In Exchange Listener
         if (this.applyExchangeBtn) {
             this.applyExchangeBtn.addEventListener('click', () => this.applyExchangeDiscount());
         }
 
-        // Direct Attach Trade-In Button (Voucher Lookup)
         const attachTradeInBtn = document.getElementById('attachTradeInPromptBtn');
         if (attachTradeInBtn) {
             attachTradeInBtn.addEventListener('click', () => {
@@ -2142,22 +2686,6 @@ class SmartPOSEngine {
                 if (voucherCode) {
                     this.tradeInManager.attachByVoucherNumber(voucherCode);
                 }
-            });
-        }
-
-        // Bill Discount Input Listener
-        if (this.discountInput) {
-            ['input', 'change'].forEach(evt => {
-                this.discountInput.addEventListener(evt, (e) => {
-                    let val = parseFloat(e.target.value) || 0;
-                    if (this.cart.billDiscountType === 'PERCENTAGE') {
-                        val = Math.max(0, Math.min(100, val));
-                    } else {
-                        val = Math.max(0, val);
-                    }
-                    this.cart.billDiscountValue = val;
-                    this.cart.render();
-                });
             });
         }
 
@@ -2189,10 +2717,14 @@ class SmartPOSEngine {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'F2') {
                 e.preventDefault();
-                if (this.searchInput) this.searchInput.focus();
+                const searchInp = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
+                if (searchInp) searchInp.focus();
             } else if (e.key === 'F4') {
                 e.preventDefault();
                 this.checkout.processDirectCash();
+            } else if (e.key === 'F7') {
+                e.preventDefault();
+                this.repairManager.openModal();
             } else if (e.key === 'F8') {
                 e.preventDefault();
                 this.openSplitPaymentModal();
@@ -2219,7 +2751,7 @@ class SmartPOSEngine {
             if (container) {
                 const banner = document.createElement('div');
                 banner.id = 'linkedRepairBanner';
-                banner.className = 'alert alert-info py-1 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs';
+                banner.className = 'alert alert-info py-1 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs shadow-sm';
                 banner.innerHTML = `
                     <span><i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>#${this.repairTicketId}</strong> (Delivery on checkout)</span>
                     <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); window.smartPos.repairTicketId=null;"></button>
@@ -2229,134 +2761,12 @@ class SmartPOSEngine {
         }
     }
 
-    /**
-     * Optimized Initial Catalog Boot:
-     * Restricts initial payload to the top 24 frequently sold products.
-     * Prevents browser freezing and excessive memory allocation on POS terminal load.
-     */
-    async loadInitialCatalog() {
-        try {
-            const customerType = this.cart.customerType || 'RETAIL';
-            const resp = await fetch(`/products/api/search/?top_selling=true&limit=24&customer_type=${customerType}`);
-            if (!resp.ok) throw new Error('Could not load catalog');
-            const data = await resp.json();
-            this.initialProducts = data.results || [];
-            this.allLoadedProducts = [...this.initialProducts];
-            this.renderCatalog(this.allLoadedProducts);
-        } catch (err) {
-            console.warn('[POS] Falling back to direct query', err);
-            if (this.productGrid) {
-                this.productGrid.innerHTML = `
-                    <div class="col-12 text-center py-5 text-muted">
-                        <i class="fas fa-barcode fs-2 mb-2 d-block opacity-25"></i>
-                        Scan an IMEI or barcode to add items directly to the bill.
-                    </div>
-                `;
-            }
-        }
-    }
-
-    handleSearchInput(val) {
-        clearTimeout(this.searchDebounceTimer);
-        const cleanVal = (val || '').trim();
-
-        if (!cleanVal) {
-            this.allLoadedProducts = [...(this.initialProducts || [])];
-            this.filterCatalogBySearch('');
-            return;
-        }
-
-        // Instant snappy filter on in-memory items
-        this.filterCatalogBySearch(cleanVal.toLowerCase());
-
-        // Debounced on-demand server search for full database inventory reach
-        this.searchDebounceTimer = setTimeout(() => {
-            this.performOnlineCatalogSearch(cleanVal);
-        }, 220);
-    }
-
-    async performOnlineCatalogSearch(query) {
-        if (!query || query.length < 2) return;
-        try {
-            const customerType = this.cart.customerType || 'RETAIL';
-            let url = `/products/api/search/?q=${encodeURIComponent(query)}&customer_type=${customerType}`;
-            if (this.currentCategoryId) {
-                url += `&category_id=${this.currentCategoryId}`;
-            }
-
-            const resp = await fetch(url);
-            if (!resp.ok) return;
-            const data = await resp.json();
-            const results = data.results || [];
-
-            if (this.searchInput && this.searchInput.value.trim().toLowerCase() === query.toLowerCase()) {
-                this.allLoadedProducts = results;
-                this.filterCatalogBySearch(query.toLowerCase());
-            }
-        } catch (err) {
-            console.error('[POS] Online catalog search error:', err);
-        }
-    }
-
-    async filterCatalogByCategory() {
-        if (this.currentCategory === 'ALL' && !this.currentCategoryId) {
-            this.allLoadedProducts = [...(this.initialProducts || [])];
-            this.renderCatalog(this.allLoadedProducts);
-            return;
-        }
-
-        const localMatches = this.getMatchingCatalogProducts('', this.initialProducts || []);
-        if (localMatches.length > 0) {
-            this.allLoadedProducts = [...(this.initialProducts || [])];
-            this.renderCatalog(localMatches);
-            return;
-        }
-
-        try {
-            const customerType = this.cart.customerType || 'RETAIL';
-            let url = `/products/api/search/?limit=24&customer_type=${customerType}`;
-            if (this.currentCategoryId) {
-                url += `&category_id=${this.currentCategoryId}`;
-            } else if (this.currentCategory) {
-                url += `&category=${encodeURIComponent(this.currentCategory)}`;
-            }
-
-            const resp = await fetch(url);
-            if (!resp.ok) return;
-            const data = await resp.json();
-            const results = data.results || [];
-            this.allLoadedProducts = results;
-            this.renderCatalog(results);
-        } catch (err) {
-            console.error('[POS] Category on-demand fetch error:', err);
-            this.renderCatalog([]);
-        }
-    }
-
-    isPhoneProduct(p) {
-        if (!p) return false;
-        if (p.category_key === 'PHONES') return true;
-        if (p.requires_imei === true || p.match_type === 'IMEI') return true;
-        if ((p.ram && String(p.ram).trim() !== '') || (p.storage && String(p.storage).trim() !== '')) return true;
-
-        const text = `${p.name || ''} ${p.model_name || ''} ${p.specs || ''} ${p.category_name || ''} ${p.brand_name || ''}`.toLowerCase();
-        const phoneKeywords = [
-            'iphone', 'galaxy', 'redmi', 'poco', 'realme', 'oneplus', 'pixel',
-            'oppo', 'vivo', 'infinix', 'tecno', 'honor', 'motorola', 'nokia',
-            'xperia', 'smartphone', 'mobile', 'phone', 'ह्यान्डसेट', 'स्मार्टफोन'
-        ];
-        if (phoneKeywords.some(kw => text.includes(kw))) return true;
-
-        const phoneRegex = /\b(1[1-6]|se)\s+(128|256|512|64|32|1tb)\b|\b(1[1-6])\s+(pro|plus|max|promax|ultra)\b|\b\d{1,2}\s+\d{2,4}\s+(black|blue|pink|white|green|gold|silver|titanium|yellow|purple)\b/i;
-        return phoneRegex.test(text);
-    }
-
     async handleDirectImeiOrBarcodeScan(scannedCode) {
         if (!scannedCode) return;
         const cleanCode = scannedCode.trim();
 
         // 1. Check in-memory catalog
-        const memoryPool = [...this.allLoadedProducts, ...(this.initialProducts || [])];
+        const memoryPool = [...this.catalogService.allLoadedProducts, ...(this.catalogService.initialProducts || [])];
         for (const prod of memoryPool) {
             if (prod.in_stock_units && prod.in_stock_units.length > 0) {
                 const matchedUnit = prod.in_stock_units.find(
@@ -2374,9 +2784,10 @@ class SmartPOSEngine {
                         imei2: matchedUnit.imei_2 || '',
                         requires_imei: true
                     });
-                    if (this.searchInput) {
-                        this.searchInput.value = '';
-                        this.filterCatalogBySearch('');
+                    const searchInp = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
+                    if (searchInp) {
+                        searchInp.value = '';
+                        this.catalogService.filterCatalogBySearch('');
                     }
                     POSAudioSynthesizer.play('success');
                     return;
@@ -2396,16 +2807,18 @@ class SmartPOSEngine {
                 const item = results[0];
                 if (item.match_type === 'IMEI') {
                     this.cart.addItem(item);
-                    if (this.searchInput) {
-                        this.searchInput.value = '';
-                        this.filterCatalogBySearch('');
+                    const searchInp = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
+                    if (searchInp) {
+                        searchInp.value = '';
+                        this.catalogService.filterCatalogBySearch('');
                     }
                     POSAudioSynthesizer.play('success');
-                } else if (!item.requires_imei && !this.isPhoneProduct(item)) {
+                } else if (!item.requires_imei && !this.catalogService.isPhoneProduct(item)) {
                     this.cart.addItem(item);
-                    if (this.searchInput) {
-                        this.searchInput.value = '';
-                        this.filterCatalogBySearch('');
+                    const searchInp = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
+                    if (searchInp) {
+                        searchInp.value = '';
+                        this.catalogService.filterCatalogBySearch('');
                     }
                     POSAudioSynthesizer.play('success');
                 } else {
@@ -2416,122 +2829,13 @@ class SmartPOSEngine {
                 POSAudioSynthesizer.play('error');
             }
         } catch (err) {
-            console.error('[POS] Scan lookup error', err);
+            console.error('[SmartPOSEngine] Scan lookup error', err);
             this.showNotification('Catalog lookup communication error.', 'danger');
         }
     }
 
-    getMatchingCatalogProducts(query = '', sourceList = null) {
-        const cleanQuery = query.toLowerCase().trim();
-        const listToFilter = sourceList || this.allLoadedProducts;
-
-        return listToFilter.filter(p => {
-            let matchesCat = false;
-
-            if (this.currentCategoryId) {
-                matchesCat = (p.category_id && parseInt(p.category_id, 10) === this.currentCategoryId);
-            } else if (this.currentCategory === 'ALL') {
-                matchesCat = true;
-            } else if (this.currentCategory === 'PHONES') {
-                matchesCat = this.isPhoneProduct(p);
-            } else if (this.currentCategory === 'CHARGERS') {
-                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
-                matchesCat = (p.category_key === 'CHARGERS') || ['charger', 'cable', 'adapter', 'power', 'chrg', 'चार्जर', 'केबल', 'type-c', 'lightning'].some(k => text.includes(k));
-            } else if (this.currentCategory === 'GLASS_COVER') {
-                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
-                matchesCat = (p.category_key === 'GLASS_COVER') || ['glass', 'cover', 'case', 'tempered', 'protector', 'कभर', 'ग्लास', 'गिलास', 'screen guard', 'skin'].some(k => text.includes(k));
-            } else if (this.currentCategory === 'AUDIO') {
-                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
-                matchesCat = (p.category_key === 'AUDIO') || ['audio', 'earbud', 'headphone', 'airpod', 'neckband', 'speaker', 'earphone', 'tws', 'handsfree', 'एयरबड्स', 'हेडफोन'].some(k => text.includes(k));
-            } else if (this.currentCategory === 'PARTS') {
-                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
-                matchesCat = (p.category_key === 'PARTS') || p.is_spare_part === true || ['part', 'spare', 'battery', 'display', 'screen replacement', 'touch panel', 'मर्मत', 'पार्ट्स'].some(k => text.includes(k));
-            } else {
-                matchesCat = (p.category_key === this.currentCategory || (p.category_name && p.category_name.toUpperCase() === this.currentCategory));
-            }
-
-            const matchesQuery = cleanQuery === '' || 
-                (p.name && p.name.toLowerCase().includes(cleanQuery)) || 
-                (p.brand_name && p.brand_name.toLowerCase().includes(cleanQuery)) || 
-                (p.model_name && p.model_name.toLowerCase().includes(cleanQuery)) ||
-                (p.specs && p.specs.toLowerCase().includes(cleanQuery)) ||
-                (p.sku && p.sku.toLowerCase().includes(cleanQuery)) ||
-                (p.barcode && p.barcode.toLowerCase().includes(cleanQuery)) ||
-                (p.imei_1 && p.imei_1.toLowerCase().includes(cleanQuery)) ||
-                (p.imei_2 && p.imei_2.toLowerCase().includes(cleanQuery));
-
-            return matchesCat && matchesQuery;
-        });
-    }
-
-    filterCatalogBySearch(query = '') {
-        const filtered = this.getMatchingCatalogProducts(query);
-        this.renderCatalog(filtered);
-    }
-
-    renderCatalog(products) {
-        if (!this.productGrid) return;
-        this.productGrid.innerHTML = '';
-
-        if (products.length === 0) {
-            this.productGrid.innerHTML = `
-                <div class="col-12 text-center py-5 text-muted">
-                    <i class="fas fa-search fs-2 opacity-25 d-block mb-2"></i>
-                    No products matched your search.
-                </div>
-            `;
-            return;
-        }
-
-        products.forEach(prod => {
-            const isPhone = this.isPhoneProduct(prod);
-            let avatarClass = prod.avatar_class || (isPhone ? 'avatar-phone' : 'avatar-part');
-            let iconClass = prod.icon_class || (isPhone ? 'fas fa-mobile-screen' : 'fas fa-box');
-
-            if (isPhone && (!prod.avatar_class || prod.avatar_class === 'avatar-phone')) {
-                const brand = (prod.brand_name || '').toLowerCase();
-                const name = (prod.name || '').toLowerCase();
-                if (brand.includes('apple') || name.includes('iphone')) {
-                    iconClass = 'fab fa-apple';
-                } else if (brand.includes('samsung') || name.includes('galaxy')) {
-                    iconClass = 'fas fa-mobile-screen';
-                } else {
-                    iconClass = 'fas fa-mobile-screen-button';
-                }
-                avatarClass = 'avatar-phone';
-            }
-
-            const card = document.createElement('div');
-            card.className = 'product-card';
-            card.onclick = () => this.handleProductCardClick(prod);
-
-            const displaySpecs = prod.specs || (prod.ram && prod.storage ? `${prod.ram}/${prod.storage}` : '');
-
-            card.innerHTML = `
-                <div>
-                    <div class="d-flex align-items-center gap-2 mb-2">
-                        <div class="cat-icon-avatar ${avatarClass}">
-                            <i class="${iconClass}"></i>
-                        </div>
-                        <div class="text-truncate">
-                            <span class="badge bg-light text-dark border fs-2xs">${escapeHtml(prod.brand_name || 'Generic')}</span>
-                            ${isPhone ? '<span class="badge bg-primary bg-opacity-10 text-primary fs-2xs ms-1">IMEI</span>' : ''}
-                        </div>
-                    </div>
-                    <div class="fw-bold text-dark fs-sm text-truncate" title="${escapeHtml(prod.name)}">${escapeHtml(prod.name)}</div>
-                    <small class="text-muted fs-2xs d-block text-truncate mt-1">${escapeHtml(displaySpecs)}</small>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
-                    <span class="fw-bold font-mono text-primary fs-xs">Rs. ${parseFloat(prod.price || prod.selling_price || 0).toLocaleString()}</span>
-                    <span class="badge bg-light text-muted border fs-2xs">${parseInt(prod.available_stock || 0)} in stock</span>
-                </div>
-            `;
-            this.productGrid.appendChild(card);
-        });
-    }
-
     handleProductCardClick(product) {
-        if (this.isPhoneProduct(product)) {
+        if (this.catalogService.isPhoneProduct(product)) {
             this.pendingPhoneProduct = product;
             const titleEl = document.getElementById('imeiModalPhoneName');
             if (titleEl) {
@@ -2763,7 +3067,7 @@ class SmartPOSEngine {
     }
 }
 
-// Aliases for full backward compatibility across templates, hardware scripts & partials
+// Aliases for compatibility
 window.POSEngine = SmartPOSEngine;
 
 // Initialize on DOM Ready

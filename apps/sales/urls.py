@@ -7,14 +7,18 @@ from apps.sales.views import (
     TradeInPoliceUndertakingPrintView
 )
 from apps.sales.api.views import (
-    TradeInVoucherLookupAPIView, TradeInValuationCalculateAPIView,
-    NTAMDMSCheckAPIView, TradeInVoucherCreateAPIView
+    SalesEstimateSearchAPIView,
+    TradeInVoucherLookupAPIView,
+    TradeInValuationCalculateAPIView,
+    NTAMDMSCheckAPIView,
+    TradeInVoucherCreateAPIView
 )
 
 app_name = 'sales'
 
 api_patterns = [
     path('checkout/', POSCheckoutAPIView.as_view(), name='api_checkout'),
+    path('estimates/search/', SalesEstimateSearchAPIView.as_view(), name='api_estimate_search'),
     path('trade-in/lookup/', TradeInVoucherLookupAPIView.as_view(), name='api_trade_in_lookup'),
     path('trade-in/calculate/', TradeInValuationCalculateAPIView.as_view(), name='api_trade_in_calculate'),
     path('trade-in/create/', TradeInVoucherCreateAPIView.as_view(), name='api_trade_in_create'),
@@ -29,7 +33,7 @@ urlpatterns = [
     path('estimates/<int:pk>/thermal-slip/', SalesEstimateThermalSlipView.as_view(), name='estimate_thermal_slip'),
     path('estimates/<int:pk>/cancel/', SalesEstimateCancelView.as_view(), name='estimate_cancel'),
 
-    # Sales Returns & Defective Item Restocking (Section 4)
+    # Sales Returns & Defective Item Restocking
     path('returns/', SalesReturnListView.as_view(), name='return_list'),
     path('returns/create/<int:estimate_id>/', SalesReturnCreateView.as_view(), name='return_create'),
     path('returns/<int:pk>/', SalesReturnDetailView.as_view(), name='return_detail'),

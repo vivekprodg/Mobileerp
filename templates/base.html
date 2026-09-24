@@ -167,6 +167,9 @@
         </main>
     </div>
 
+    <!-- Universal Command Palette Modal (Ctrl + K) -->
+    {% include "includes/_global_search_modal.html" %}
+
     <!-- Core Vendor JS Bundle (Bootstrap 5.3.3): Localized with fallback -->
     <script src="{% static 'js/bootstrap.bundle.min.js' %}"></script>
     <script>
@@ -186,7 +189,11 @@
         }
     </script>
 
-    <!-- Master Layout & Global Event-Driven Nepali Datepicker Controller -->
+    <!-- Asynchronous Contextual & Global Search Controllers -->
+    <script src="{% static 'js/contextual_search.js' %}"></script>
+    <script src="{% static 'js/global_search.js' %}"></script>
+
+    <!-- Master Layout, Nepali Calendar & Global Shortcuts Controller -->
     <script>
         // Desktop Sidebar Collapse Functionality
         function toggleSidebarCollapse() {
@@ -265,6 +272,20 @@
             });
         }
 
+        /**
+         * Open Command Palette Modal
+         */
+        function openGlobalSearchModal() {
+            const searchModalEl = document.getElementById('globalSearchModal');
+            if (!searchModalEl) return;
+
+            let modalInstance = bootstrap.Modal.getInstance(searchModalEl);
+            if (!modalInstance) {
+                modalInstance = new bootstrap.Modal(searchModalEl);
+            }
+            modalInstance.show();
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             const layout = document.getElementById('appLayout');
             const toggleBtn = document.getElementById('sidebarToggleBtn');
@@ -278,31 +299,66 @@
                 toggleBtn.addEventListener('click', toggleSidebarCollapse);
             }
 
-            // Keyboard Shortcut Ctrl+B / Cmd+B for Sidebar Collapse
+            // Global Keyboard Shortcuts
             document.addEventListener('keydown', (e) => {
+                const targetTag = e.target.tagName.toLowerCase();
+                const isFormInput = targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || e.target.isContentEditable;
+
+                // 1. Sidebar Toggle Shortcut: Ctrl + B / Cmd + B
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
                     e.preventDefault();
                     toggleSidebarCollapse();
+                    return;
+                }
+
+                // 2. Command Palette Shortcut: Ctrl + K / Cmd + K
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                    e.preventDefault();
+                    openGlobalSearchModal();
+                    return;
+                }
+
+                // 3. Quick-search Slash Shortcut: '/' when not inside an active form field
+                if (e.key === '/' && !isFormInput) {
+                    e.preventDefault();
+                    openGlobalSearchModal();
+                    return;
                 }
             });
+
+            // Auto-focus Search Field on Modal Display
+            const searchModalEl = document.getElementById('globalSearchModal');
+            if (searchModalEl) {
+                searchModalEl.addEventListener('shown.bs.modal', () => {
+                    const searchInput = document.getElementById('globalSearchInput');
+                    if (searchInput) {
+                        searchInput.focus();
+                        searchInput.select();
+                    }
+                });
+            }
 
             // Initialize Bootstrap Tooltips
             const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
             tooltipTriggerList.map(el => new bootstrap.Tooltip(el));
 
-            // 1. Run once on initial page load
+            // Initial component mounts
             initNepaliDatepickers(document);
 
-            // 2. Event-driven initialization strictly when a Bootstrap Modal is shown
+            // Re-bind on Bootstrap Modal open
             document.addEventListener('shown.bs.modal', (e) => {
                 if (e.target) {
                     initNepaliDatepickers(e.target);
+                    if (typeof window.initContextualSearch === 'function') {
+                        window.initContextualSearch(e.target);
+                    }
                 }
             });
         });
 
-        // Expose globally so dynamic forms (GRN/PO/AJAX rows) can call window.initNepaliDatepickers(newRow)
+        // Globally exposed references
         window.initNepaliDatepickers = initNepaliDatepickers;
+        window.openGlobalSearchModal = openGlobalSearchModal;
     </script>
     {% block extra_scripts %}{% endblock %}
 </body>

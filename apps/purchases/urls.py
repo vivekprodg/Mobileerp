@@ -5,17 +5,38 @@ File Path: apps/purchases/urls.py
 
 from django.urls import path
 from apps.purchases.views import (
-    SupplierListView, SupplierDetailView, SupplierCreateView,
-    SupplierUpdateView, SupplierPaymentRecordView,
-    PurchaseOrderListView, PurchaseOrderCreateView,
-    PurchaseOrderDetailView, PurchaseOrderStatusUpdateView,
-    GRNListView, GRNDetailView, GRNCreateView,
-    PurchaseReturnListView, PurchaseReturnCreateView, PurchaseReturnDetailView
+    # Search APIs
+    SupplierSearchAPIView,
+    GRNSearchAPIView,
+    # Supplier Management
+    SupplierListView,
+    SupplierDetailView,
+    SupplierCreateView,
+    SupplierUpdateView,
+    SupplierPaymentRecordView,
+    # Purchase Orders (PO)
+    PurchaseOrderListView,
+    PurchaseOrderCreateView,
+    PurchaseOrderDetailView,
+    PurchaseOrderStatusUpdateView,
+    # Goods Received Note (GRN)
+    GRNListView,
+    GRNDetailView,
+    GRNCreateView,
+    cancel_grn_view,
+    # Commercial Purchase Returns & Debit Notes
+    PurchaseReturnListView,
+    PurchaseReturnCreateView,
+    PurchaseReturnDetailView,
 )
 
 app_name = 'purchases'
 
 urlpatterns = [
+    # Async Search & Autocomplete APIs
+    path('suppliers/api/search/', SupplierSearchAPIView.as_view(), name='supplier_search_api'),
+    path('grn/api/search/', GRNSearchAPIView.as_view(), name='grn_search_api'),
+
     # Supplier Management
     path('suppliers/', SupplierListView.as_view(), name='supplier_list'),
     path('suppliers/create/', SupplierCreateView.as_view(), name='supplier_create'),
@@ -33,6 +54,7 @@ urlpatterns = [
     path('grn/', GRNListView.as_view(), name='grn_list'),
     path('grn/create/', GRNCreateView.as_view(), name='grn_create'),
     path('grn/<int:pk>/', GRNDetailView.as_view(), name='grn_detail'),
+    path('grn/<int:pk>/cancel/', cancel_grn_view, name='grn_cancel'),
 
     # Commercial Purchase Returns & Debit Notes
     path('returns/', PurchaseReturnListView.as_view(), name='purchase_return_list'),

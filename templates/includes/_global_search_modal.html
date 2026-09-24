@@ -1,0 +1,147 @@
+{% load static %}
+
+<!-- =========================================================================
+     GLOBAL COMMAND PALETTE (CTRL + K) SEARCH DIALOG
+     Universal full-screen overlay command palette with multi-domain partitions:
+     - Smartphones & Hardware Products
+     - IMEI & Serialized Unit Barcodes
+     - Customers & Outstanding Balances
+     - Suppliers & Payables
+     - Sales Invoices & Estimates
+     - Goods Received Notes (GRN)
+     - Repair & Workshop Tickets
+     - Chart of Accounts & Ledgers
+     ========================================================================= -->
+<div class="modal fade global-search-backdrop" id="globalSearchModal" tabindex="-1" aria-labelledby="globalSearchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered global-search-modal-dialog">
+        <div class="modal-content global-search-palette">
+            
+            <!-- 1. Sticky Input Header with Action Spinner & Clear Trigger -->
+            <div class="global-search-header">
+                <i class="fas fa-magnifying-glass search-icon"></i>
+                <input type="text" 
+                       id="globalSearchInput" 
+                       class="form-control global-search-input" 
+                       placeholder="Type a product, IMEI, phone, bill #, customer, or ledger..." 
+                       autocomplete="off" 
+                       spellcheck="false"
+                       aria-label="Global ERP Search Input">
+                
+                <div class="global-search-spinner" id="globalSearchSpinner" role="status" aria-label="Loading search results"></div>
+                
+                <button type="button" class="global-search-clear-btn" id="globalSearchClearBtn" title="Clear input">
+                    <i class="fas fa-circle-xmark"></i>
+                </button>
+            </div>
+
+            <!-- 2. Domain Filter Filter Chips -->
+            <div class="global-search-chips">
+                <button type="button" class="search-filter-chip active" data-filter="all">
+                    <i class="fas fa-layer-group fs-2xs"></i> All Domains
+                </button>
+                <button type="button" class="search-filter-chip" data-filter="products">
+                    <i class="fas fa-mobile-screen fs-2xs text-primary"></i> Products
+                </button>
+                <button type="button" class="search-filter-chip" data-filter="imei">
+                    <i class="fas fa-barcode fs-2xs text-purple"></i> IMEI / Serials
+                </button>
+                <button type="button" class="search-filter-chip" data-filter="customers">
+                    <i class="fas fa-users fs-2xs text-success"></i> Customers
+                </button>
+                <button type="button" class="search-filter-chip" data-filter="invoices">
+                    <i class="fas fa-file-invoice fs-2xs text-info"></i> Invoices
+                </button>
+                <button type="button" class="search-filter-chip" data-filter="repairs">
+                    <i class="fas fa-screwdriver-wrench fs-2xs text-warning"></i> Repairs
+                </button>
+                <button type="button" class="search-filter-chip" data-filter="suppliers">
+                    <i class="fas fa-truck-ramp-box fs-2xs text-secondary"></i> Suppliers
+                </button>
+                <button type="button" class="search-filter-chip" data-filter="accounts">
+                    <i class="fas fa-book-journal-whills fs-2xs text-dark"></i> Ledgers
+                </button>
+            </div>
+
+            <!-- 3. Dynamic Results Body -->
+            <div class="global-search-body" id="globalSearchResultsContainer">
+                
+                <!-- Initial / Idle State: Quick Launchpad -->
+                <div id="globalSearchInitialState" class="search-initial-state">
+                    <p class="fs-xs fw-bold text-uppercase tracking-wider text-muted mb-2">Frequent Actions &amp; Fast Shortcuts</p>
+                    <div class="search-quick-links-grid">
+                        <a href="{% url 'sales:pos_terminal' %}" class="search-quick-card">
+                            <span class="badge bg-warning bg-opacity-20 text-warning-emphasis p-2 rounded-3">
+                                <i class="fas fa-bolt fs-6"></i>
+                            </span>
+                            <div class="text-truncate">
+                                <div>POS Terminal Bill</div>
+                                <span class="text-muted fs-2xs">Instant counter checkout [F2]</span>
+                            </div>
+                        </a>
+                        <a href="{% url 'inventory:product_list' %}" class="search-quick-card">
+                            <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-3">
+                                <i class="fas fa-boxes-stacked fs-6"></i>
+                            </span>
+                            <div class="text-truncate">
+                                <div>Device Stock List</div>
+                                <span class="text-muted fs-2xs">Real-time outlet inventory</span>
+                            </div>
+                        </a>
+                        <a href="{% url 'customers:customer_list' %}" class="search-quick-card">
+                            <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-3">
+                                <i class="fas fa-address-book fs-6"></i>
+                            </span>
+                            <div class="text-truncate">
+                                <div>Customer Directory</div>
+                                <span class="text-muted fs-2xs">Debtor ledgers &amp; history</span>
+                            </div>
+                        </a>
+                        <a href="{% url 'repairs:dashboard' %}" class="search-quick-card">
+                            <span class="badge bg-warning bg-opacity-10 text-warning p-2 rounded-3">
+                                <i class="fas fa-tools fs-6"></i>
+                            </span>
+                            <div class="text-truncate">
+                                <div>Workshop Tickets</div>
+                                <span class="text-muted fs-2xs">Active service &amp; repairs</span>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Async Results Hook (Populated by global_search.js) -->
+                <div id="globalSearchDynamicResults" class="d-none"></div>
+
+                <!-- No Results State -->
+                <div id="globalSearchEmptyState" class="search-empty-state d-none">
+                    <i class="fas fa-magnifying-glass-chart"></i>
+                    <h6 class="fw-bold text-dark mb-1">No matching records found</h6>
+                    <p class="fs-xs text-muted mb-0">Check your spelling or filter query for phones, IMEIs, invoices, or customer names.</p>
+                </div>
+
+            </div>
+
+            <!-- 4. Interactive Keyboard Footer & Branch Identifier -->
+            <div class="global-search-footer">
+                <div class="search-shortcuts-legend">
+                    <div class="search-shortcut-item">
+                        <kbd>↑</kbd><kbd>↓</kbd>
+                        <span>Navigate</span>
+                    </div>
+                    <div class="search-shortcut-item">
+                        <kbd>↵</kbd>
+                        <span>Select</span>
+                    </div>
+                    <div class="search-shortcut-item">
+                        <kbd>ESC</kbd>
+                        <span>Dismiss</span>
+                    </div>
+                </div>
+                <div class="d-flex align-items-center gap-1 font-mono fs-2xs text-muted">
+                    <i class="fas fa-store text-primary"></i>
+                    <span>{{ STORE_OUTLET_NAME|default:"HQ" }}</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>

@@ -14,6 +14,9 @@ Key Capabilities:
 3. Dual-Mode Merchandise Discount Separation:
    - Structured isolation between line-level and bill-level discounts (Amount vs. Percentage).
    - Pure merchandise discounts are cleanly separated from old phone trade-in exchange credits.
+4. Fast Counter Lookup & Search Indexes:
+   - Composite and single-column indexes on customer_phone_manual, customer_name_manual,
+     customer_pan, and branch to optimize real-time POS and return invoice lookups.
 """
 
 import re
@@ -40,7 +43,6 @@ DISCOUNT_TYPE_CHOICES = [
     ('AMOUNT', _('Fixed Amount Concession (नगद रकम छुट)')),
     ('FIXED', _('Fixed Amount [Legacy Alias] (नगद रकम छुट)')),
 ]
-
 
 class SalesEstimate(TimeStampedModel):
     """
@@ -81,13 +83,13 @@ class SalesEstimate(TimeStampedModel):
         verbose_name=_("Linked Customer Profile")
     )
     customer_name_manual = models.CharField(
-        max_length=200, blank=True, null=True, verbose_name=_("Walk-in Customer Name")
+        max_length=200, blank=True, null=True, db_index=True, verbose_name=_("Walk-in Customer Name")
     )
     customer_phone_manual = models.CharField(
-        max_length=25, blank=True, null=True, verbose_name=_("Walk-in Phone")
+        max_length=25, blank=True, null=True, db_index=True, verbose_name=_("Walk-in Phone")
     )
     customer_pan = models.CharField(
-        max_length=15, blank=True, null=True, verbose_name=_("Customer PAN (Optional)")
+        max_length=15, blank=True, null=True, db_index=True, verbose_name=_("Customer PAN (Optional)")
     )
 
     # Date Trackers (Allows Historical Imports from 2080 B.S.)
@@ -228,6 +230,10 @@ class SalesEstimate(TimeStampedModel):
             models.Index(fields=['branch', 'payment_status', 'created_at'], name='idx_est_branch_pay_created'),
             models.Index(fields=['customer', 'bill_date_ad'], name='idx_est_cust_date'),
             models.Index(fields=['salesperson', 'bill_date_ad'], name='idx_est_salesperson_date'),
+            models.Index(fields=['customer_phone_manual'], name='idx_est_cust_phone_man'),
+            models.Index(fields=['customer_name_manual'], name='idx_est_cust_name_man'),
+            models.Index(fields=['customer_pan'], name='idx_est_cust_pan'),
+            models.Index(fields=['branch', 'customer_phone_manual'], name='idx_est_branch_cust_phone'),
         ]
 
     def __str__(self):
@@ -314,11 +320,10 @@ class SalesEstimate(TimeStampedModel):
             return self.trade_in_discount_amount
         return Decimal('0.00')
 
-
 class SalesEstimateItem(TimeStampedModel):
     """
     Line item in sales estimate linked to exact sold IMEI, pricing mode, batch, and warranty card.
-    
+
     SCHEMA CONSTRAINT DESIGN:
     - imei_number and secondary_imei have blank=True, null=True.
     - Non-serialized accessories, repair labor, and historical Mobilesoft tax sales save without database constraint crashes.
@@ -510,7 +515,6 @@ class SalesEstimateItem(TimeStampedModel):
         qty = self.quantity if self.quantity and self.quantity > Decimal('0.000') else Decimal('1.000')
         return (self.item_discount_amount / qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-
 class SalesPaymentTransaction(TimeStampedModel):
     """Split payment recording across Cash, Digital Wallets, Cards, and Udhaari."""
     PAYMENT_MODES = [
@@ -544,7 +548,6 @@ class SalesPaymentTransaction(TimeStampedModel):
 
     def __str__(self):
         return f"{self.estimate.estimate_number} - {self.payment_mode}: Rs. {self.amount}"
-
 
 class PhoneExchangeTradeIn(TimeStampedModel):
     """
@@ -691,7 +694,6 @@ class PhoneExchangeTradeIn(TimeStampedModel):
                     pass
         super().save(*args, **kwargs)
 
-
 class TradeInInspectionChecklist(TimeStampedModel):
     """
     10-Point Technical Diagnostic Inspection for Old Traded-In Phones.
@@ -790,7 +792,6 @@ class TradeInInspectionChecklist(TimeStampedModel):
         verbose_name = _('Trade-In 10-Point Inspection Checklist')
         verbose_name_plural = _('Trade-In 10-Point Inspection Checklists')
 
-
 class TradeInLegalUndertaking(TimeStampedModel):
     """
     Police-Compliant Customer Ownership Handover & Undertaking Record (जिम्मानामा तथा मञ्जुरीनामा).
@@ -857,7 +858,6 @@ class TradeInLegalUndertaking(TimeStampedModel):
 
     def __str__(self):
         return f"Undertaking: {self.customer_full_name} (ID: {self.id_number}) - Voucher {self.trade_in_voucher.voucher_number}"
-
 
 class SalesReturn(TimeStampedModel):
     """
@@ -942,7 +942,6 @@ class SalesReturn(TimeStampedModel):
                 except Exception:
                     pass
         super().save(*args, **kwargs)
-
 
 class SalesReturnItem(TimeStampedModel):
     """

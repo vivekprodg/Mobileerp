@@ -1,7 +1,9 @@
 """
 Django Admin Configuration for Inventory, Warehouses, IMEI Handset Tracking, Batches & Audit Logs.
+Fully integrated with the Enhanced Product Catalog, NTA MDMS Compliance, and Warranty Ledgers.
 """
 
+from decimal import Decimal
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
@@ -15,26 +17,25 @@ from apps.inventory.models import (
 # ==============================================================================
 # 1. INLINE MODEL ADMINS
 # ==============================================================================
-
 class ProductComponentWarrantyRuleInline(admin.TabularInline):
     model = ProductComponentWarrantyRule
     extra = 1
     fields = ['component_type', 'component_name', 'warranty_months', 'coverage_conditions']
-
 
 class UnitConversionInline(admin.TabularInline):
     model = UnitConversion
     extra = 0
     fields = ['unit_name', 'conversion_factor', 'selling_price_per_unit', 'barcode']
 
-
 class BranchStockInline(admin.TabularInline):
     model = BranchStock
     extra = 0
-    fields = ['branch', 'quantity', 'reserved_quantity', 'quarantined_defective_quantity', 'low_stock_threshold']
+    fields = [
+        'branch', 'quantity', 'reserved_quantity',
+        'quarantined_defective_quantity', 'low_stock_threshold'
+    ]
     readonly_fields = ['branch', 'quantity', 'reserved_quantity', 'quarantined_defective_quantity']
     can_delete = False
-
 
 class ProductBatchInline(admin.TabularInline):
     model = ProductBatch
@@ -50,7 +51,6 @@ class ProductBatchInline(admin.TabularInline):
     can_delete = False
     show_change_link = True
 
-
 class ItemInstanceInline(admin.TabularInline):
     model = ItemInstance
     extra = 0
@@ -58,9 +58,9 @@ class ItemInstanceInline(admin.TabularInline):
         'imei_1', 'imei_2', 'imei_2_pending_scan', 'condition', 'mdms_status',
         'source_type', 'landed_cost', 'purchase_date', 'status', 'branch', 'sold_invoice_reference'
     ]
-    readonly_fields = ['device_uid', 'landed_cost', 'purchase_date', 'sold_invoice_reference', 'customer_name']
+    readonly_fields = ['landed_cost', 'purchase_date', 'sold_invoice_reference']
     show_change_link = True
-
+    classes = ('collapse',)
 
 class DeviceComponentWarrantyInline(admin.TabularInline):
     model = DeviceComponentWarranty
@@ -75,7 +75,6 @@ class DeviceComponentWarrantyInline(admin.TabularInline):
     ]
     can_delete = False
 
-
 class VendorRMAClaimItemInline(admin.TabularInline):
     model = VendorRMAClaimItem
     extra = 0
@@ -83,13 +82,12 @@ class VendorRMAClaimItemInline(admin.TabularInline):
         'product', 'defective_serial_or_imei', 'defect_description',
         'resolution', 'replacement_batch_or_serial', 'credit_amount'
     ]
+    autocomplete_fields = ['product']
     show_change_link = True
-
 
 # ==============================================================================
 # 2. PRODUCT CATALOG ADMIN
 # ==============================================================================
-
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = [
@@ -105,8 +103,9 @@ class ProductAdmin(admin.ModelAdmin):
     ]
     search_fields = [
         'name', 'sku', 'barcode', 'model_name', 'model_number',
-        'processor_chipset', 'rack_number'
+        'processor_chipset', 'rack_number', 'shelf_identifier'
     ]
+    autocomplete_fields = ['category', 'subcategory', 'brand', 'base_unit']
     list_select_related = ['category', 'brand', 'base_unit']
     inlines = [
         ProductComponentWarrantyRuleInline, UnitConversionInline,
@@ -234,11 +233,9 @@ class ProductAdmin(admin.ModelAdmin):
         return format_html('<span style="color: #64748b; font-size: 10px;">STANDARD</span>')
     is_spare_part_badge.short_description = _("Item Type")
 
-
 # ==============================================================================
 # 3. ITEM INSTANCE (IMEI / SERIAL) ADMIN
 # ==============================================================================
-
 @admin.register(ItemInstance)
 class ItemInstanceAdmin(admin.ModelAdmin):
     list_display = [
@@ -252,8 +249,10 @@ class ItemInstanceAdmin(admin.ModelAdmin):
     ]
     search_fields = [
         'imei_1', 'imei_2', 'serial_number', 'device_uid',
-        'trade_in_voucher_reference', 'sold_invoice_reference', 'customer_phone'
+        'trade_in_voucher_reference', 'sold_invoice_reference',
+        'customer_phone', 'customer_name', 'purchase_reference'
     ]
+    autocomplete_fields = ['product']
     list_select_related = ['product', 'branch']
     readonly_fields = ['device_uid', 'created_at', 'updated_at']
     inlines = [DeviceComponentWarrantyInline]
@@ -287,6 +286,10 @@ class ItemInstanceAdmin(admin.ModelAdmin):
                 ('warranty_start_date', 'warranty_end_date', 'warranty_remarks')
             )
         }),
+        ("Audit Metadata", {
+            'classes': ('collapse',),
+            'fields': ('created_at', 'updated_at')
+        })
     )
 
     def imei_2_status_badge(self, obj):
@@ -369,24 +372,23 @@ class ItemInstanceAdmin(admin.ModelAdmin):
         )
     status_badge.short_description = _("Stock Status")
 
-
 # ==============================================================================
 # 4. COMPONENT WARRANTY ADMINS
 # ==============================================================================
-
 @admin.register(ProductComponentWarrantyRule)
 class ProductComponentWarrantyRuleAdmin(admin.ModelAdmin):
     list_display = ['product', 'component_type', 'component_name', 'warranty_months', 'coverage_conditions']
     list_filter = ['component_type', 'warranty_months', 'product__brand']
     search_fields = ['product__name', 'component_name', 'coverage_conditions']
+    autocomplete_fields = ['product']
     list_select_related = ['product']
-
 
 @admin.register(DeviceComponentWarranty)
 class DeviceComponentWarrantyAdmin(admin.ModelAdmin):
     list_display = [
         'item_instance', 'component_name', 'component_type', 'warranty_months',
-        'warranty_start_date', 'warranty_expiry_date', 'status_badge', 'claim_count'
+        'warranty_start_date', 'warranty_expiry_date', 'status_badge',
+        'valid_status_badge', 'claim_count'
     ]
     list_filter = ['status', 'component_type', 'warranty_expiry_date']
     search_fields = [
@@ -410,22 +412,49 @@ class DeviceComponentWarrantyAdmin(admin.ModelAdmin):
         )
     status_badge.short_description = _("Warranty Status")
 
+    def valid_status_badge(self, obj):
+        if obj.is_currently_valid:
+            return format_html('<span style="color: #065f46; font-weight: bold;"><i class="fas fa-check-circle"></i> VALID</span>')
+        return format_html('<span style="color: #94a3b8; font-weight: normal;"><i class="fas fa-times-circle"></i> INACTIVE</span>')
+    valid_status_badge.short_description = _("Current Validity")
 
 # ==============================================================================
 # 5. VENDOR RMA CLAIM ADMINS
 # ==============================================================================
-
 @admin.register(VendorRMAClaim)
 class VendorRMAClaimAdmin(admin.ModelAdmin):
     list_display = [
         'rma_number', 'supplier', 'branch', 'status_badge', 'dispatch_date',
-        'total_claimed_parts_count', 'total_credit_amount', 'dispatched_by'
+        'total_claimed_parts_count', 'total_credit_amount', 'dispatched_by', 'resolution_date'
     ]
     list_filter = ['status', 'branch', 'dispatch_date', 'supplier']
     search_fields = ['rma_number', 'supplier__company_name', 'distributor_tracking_ref', 'resolution_notes']
-    list_select_related = ['supplier', 'branch', 'dispatched_by']
+    list_select_related = ['supplier', 'branch', 'dispatched_by', 'resolved_by']
     readonly_fields = ['rma_number', 'created_at', 'updated_at']
+    raw_id_fields = ['supplier', 'dispatched_by', 'resolved_by']
     inlines = [VendorRMAClaimItemInline]
+
+    fieldsets = (
+        ("RMA Identification & Parties", {
+            'fields': (
+                ('rma_number', 'status'),
+                ('supplier', 'branch'),
+                ('dispatch_date', 'distributor_tracking_ref'),
+                'distributor_service_center'
+            )
+        }),
+        ("Settlement & Metrics", {
+            'fields': (
+                ('total_claimed_parts_count', 'total_credit_amount'),
+                ('resolution_date', 'resolved_by'),
+                'resolution_notes'
+            )
+        }),
+        ("Audit Details", {
+            'classes': ('collapse',),
+            'fields': (('dispatched_by', 'created_at', 'updated_at'),)
+        })
+    )
 
     def status_badge(self, obj):
         colors = {
@@ -442,19 +471,34 @@ class VendorRMAClaimAdmin(admin.ModelAdmin):
         )
     status_badge.short_description = _("RMA Status")
 
-
 @admin.register(VendorRMAClaimItem)
 class VendorRMAClaimItemAdmin(admin.ModelAdmin):
-    list_display = ['rma_claim', 'product', 'defective_serial_or_imei', 'resolution', 'replacement_batch_or_serial', 'credit_amount']
-    list_filter = ['resolution', 'rma_claim__supplier']
+    list_display = [
+        'rma_claim', 'product', 'defective_serial_or_imei',
+        'resolution_badge', 'replacement_batch_or_serial', 'credit_amount'
+    ]
+    list_filter = ['resolution', 'rma_claim__supplier', 'rma_claim__status']
     search_fields = ['defective_serial_or_imei', 'product__name', 'rma_claim__rma_number']
+    autocomplete_fields = ['product']
     list_select_related = ['rma_claim', 'product']
 
+    def resolution_badge(self, obj):
+        colors = {
+            'PENDING': '#f59e0b',
+            'REPLACED_WITH_NEW_PART': '#10b981',
+            'CREDIT_NOTE_ISSUED': '#3b82f6',
+            'RETURNED_UNREPAIRED': '#ef4444',
+        }
+        color = colors.get(obj.resolution, '#64748b')
+        return format_html(
+            '<span style="color: white; background-color: {}; padding: 2px 7px; border-radius: 999px; font-weight: 600; font-size: 10px;">{}</span>',
+            color, obj.get_resolution_display()
+        )
+    resolution_badge.short_description = _("Resolution")
 
 # ==============================================================================
-# 6. BATCHES, UNITS & CATEGORIES
+# 6. BATCHES, UNITS, PACKAGING & CATEGORIES
 # ==============================================================================
-
 @admin.register(ProductBatch)
 class ProductBatchAdmin(admin.ModelAdmin):
     list_display = [
@@ -464,15 +508,21 @@ class ProductBatchAdmin(admin.ModelAdmin):
     ]
     list_filter = ['is_depleted', 'branch', 'purchase_date', 'product__category']
     search_fields = ['batch_number', 'product__name', 'product__sku', 'grn_reference', 'supplier_name']
+    autocomplete_fields = ['product']
     list_select_related = ['product', 'branch']
     readonly_fields = ['created_at', 'updated_at']
-
 
 @admin.register(UnitOfMeasurement)
 class UnitOfMeasurementAdmin(admin.ModelAdmin):
     list_display = ['name', 'name_np', 'code', 'allow_decimal']
     search_fields = ['name', 'name_np', 'code']
 
+@admin.register(UnitConversion)
+class UnitConversionAdmin(admin.ModelAdmin):
+    list_display = ['product', 'unit_name', 'conversion_factor', 'selling_price_per_unit', 'barcode']
+    search_fields = ['product__name', 'product__sku', 'unit_name', 'barcode']
+    autocomplete_fields = ['product']
+    list_select_related = ['product']
 
 @admin.register(ProductCategory)
 class ProductCategoryAdmin(admin.ModelAdmin):
@@ -480,35 +530,46 @@ class ProductCategoryAdmin(admin.ModelAdmin):
     list_filter = ['is_active']
     search_fields = ['name', 'code', 'name_np']
 
-
 @admin.register(ProductSubCategory)
 class ProductSubCategoryAdmin(admin.ModelAdmin):
     list_display = ['name', 'category', 'code']
     list_filter = ['category']
     search_fields = ['name', 'code', 'category__name']
+    autocomplete_fields = ['category']
     list_select_related = ['category']
-
 
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
     list_display = ['name', 'origin_country']
     search_fields = ['name', 'origin_country']
 
-
 # ==============================================================================
 # 7. BRANCH STOCK & IMMUTABLE LEDGERS
 # ==============================================================================
-
 @admin.register(BranchStock)
 class BranchStockAdmin(admin.ModelAdmin):
     list_display = [
         'product', 'branch', 'quantity', 'reserved_quantity',
-        'quarantined_defective_quantity', 'low_stock_threshold'
+        'available_quantity_display', 'quarantined_defective_quantity',
+        'low_stock_threshold', 'stock_health_badge'
     ]
     list_filter = ['branch', 'product__category', 'product__is_spare_part']
     search_fields = ['product__name', 'product__sku', 'product__barcode']
+    autocomplete_fields = ['product']
     list_select_related = ['product', 'branch']
+    readonly_fields = ['created_at', 'updated_at']
 
+    def available_quantity_display(self, obj):
+        return format_html('<strong>{}</strong>', obj.available_quantity)
+    available_quantity_display.short_description = _("Available Qty")
+
+    def stock_health_badge(self, obj):
+        if obj.quantity <= Decimal('0.000'):
+            return format_html('<span style="color: white; background-color: #ef4444; padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: bold;">OUT OF STOCK</span>')
+        elif obj.is_low_stock:
+            return format_html('<span style="color: #92400e; background-color: #fef08a; padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: bold;">LOW STOCK</span>')
+        return format_html('<span style="color: #065f46; background-color: #ecfdf5; padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: bold;">HEALTHY</span>')
+    stock_health_badge.short_description = _("Stock Health")
 
 @admin.register(StockMovementLog)
 class StockMovementLogAdmin(admin.ModelAdmin):
@@ -517,14 +578,32 @@ class StockMovementLogAdmin(admin.ModelAdmin):
     Creation, editing, and deletion are permanently disabled.
     """
     list_display = [
-        'created_at', 'movement_type', 'product', 'branch',
-        'quantity_delta', 'new_quantity', 'reference_document',
-        'imei_or_serial_number', 'user'
+        'created_at', 'movement_type_badge', 'product', 'branch',
+        'quantity_delta_display', 'previous_quantity', 'new_quantity',
+        'reference_document', 'imei_or_serial_number', 'user'
     ]
     list_filter = ['movement_type', 'branch', 'created_at']
-    search_fields = ['product__name', 'reference_document', 'imei_or_serial_number', 'remarks']
+    search_fields = [
+        'product__name', 'product__sku', 'reference_document',
+        'imei_or_serial_number', 'remarks'
+    ]
     list_select_related = ['product', 'branch', 'user']
     readonly_fields = [f.name for f in StockMovementLog._meta.fields]
+
+    def movement_type_badge(self, obj):
+        return format_html(
+            '<span style="background-color: #f1f5f9; color: #334155; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 10px;">{}</span>',
+            obj.get_movement_type_display()
+        )
+    movement_type_badge.short_description = _("Movement")
+
+    def quantity_delta_display(self, obj):
+        if obj.quantity_delta > 0:
+            return format_html('<span style="color: #10b981; font-weight: bold;">+{}</span>', obj.quantity_delta)
+        elif obj.quantity_delta < 0:
+            return format_html('<span style="color: #ef4444; font-weight: bold;">{}</span>', obj.quantity_delta)
+        return format_html('<span>0</span>')
+    quantity_delta_display.short_description = _("Delta")
 
     def has_add_permission(self, request):
         return False

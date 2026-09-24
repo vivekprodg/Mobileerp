@@ -284,7 +284,7 @@ class ItemInstanceListView(LoginRequiredMixin, ListView):
         return context
 
 # ==============================================================================
-# UNITS OF MEASUREMENT (UOM) MANAGEMENT VIEWS
+# UNITS OF MEASUREMENT (UOM) MANAGEMENT & SEARCH VIEWS
 # ==============================================================================
 class UnitListView(LoginRequiredMixin, ListView):
     model = UnitOfMeasurement
@@ -417,8 +417,42 @@ class UnitQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
+class UnitSearchAPIView(LoginRequiredMixin, View):
+    """
+    Search and auto-complete endpoint for Units of Measurement (UOM).
+    Returns matched units with code, name, and allow_decimal flags.
+    """
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get('q', '').strip()
+        try:
+            limit = max(1, min(int(request.GET.get('limit', 30)), 100))
+        except (ValueError, TypeError):
+            limit = 30
+
+        qs = UnitOfMeasurement.objects.all()
+        if q:
+            qs = qs.filter(
+                Q(name__icontains=q) |
+                Q(code__icontains=q) |
+                Q(name_np__icontains=q)
+            )
+
+        units = qs.order_by('name')[:limit]
+        results = [
+            {
+                'id': u.id,
+                'name': u.name,
+                'text': f"{u.name} ({u.code})",
+                'code': u.code,
+                'name_np': u.name_np or '',
+                'allow_decimal': u.allow_decimal
+            }
+            for u in units
+        ]
+        return JsonResponse({'status': 'success', 'results': results, 'count': len(results)})
+
 # ==============================================================================
-# PRODUCT CATEGORY MANAGEMENT VIEWS
+# PRODUCT CATEGORY MANAGEMENT & SEARCH VIEWS
 # ==============================================================================
 class CategoryListView(LoginRequiredMixin, ListView):
     model = ProductCategory
@@ -563,8 +597,48 @@ class CategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
+class CategorySearchAPIView(LoginRequiredMixin, View):
+    """
+    Search and filter endpoint for Product Categories.
+    If 'q' is empty, returns all active categories.
+    If 'q' is provided, matches category name, name_np, or short code.
+    """
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get('q', '').strip()
+        include_inactive = request.GET.get('include_inactive', 'false').lower() == 'true'
+
+        try:
+            limit = max(1, min(int(request.GET.get('limit', 50)), 100))
+        except (ValueError, TypeError):
+            limit = 50
+
+        qs = ProductCategory.objects.all()
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+
+        if q:
+            qs = qs.filter(
+                Q(name__icontains=q) |
+                Q(name_np__icontains=q) |
+                Q(code__icontains=q)
+            )
+
+        categories = qs.order_by('name')[:limit]
+        results = [
+            {
+                'id': c.id,
+                'name': c.name,
+                'text': f"{c.name} ({c.name_np})" if c.name_np else c.name,
+                'name_np': c.name_np or '',
+                'code': c.code,
+                'is_active': c.is_active
+            }
+            for c in categories
+        ]
+        return JsonResponse({'status': 'success', 'results': results, 'count': len(results)})
+
 # ==============================================================================
-# PRODUCT SUBCATEGORY QUICK CREATE API VIEW
+# PRODUCT SUBCATEGORY QUICK CREATE & SEARCH API VIEWS
 # ==============================================================================
 class SubCategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
     """
@@ -651,8 +725,47 @@ class SubCategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, Vie
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
+class SubCategorySearchAPIView(LoginRequiredMixin, View):
+    """
+    Search and filter endpoint for Product SubCategories.
+    Accepts 'category_id' to scope subcategories to a specific parent category.
+    Supports partial text search via 'q' on name and code.
+    """
+    def get(self, request, *args, **kwargs):
+        category_id = request.GET.get('category_id') or request.GET.get('category')
+        q = request.GET.get('q', '').strip()
+
+        try:
+            limit = max(1, min(int(request.GET.get('limit', 50)), 100))
+        except (ValueError, TypeError):
+            limit = 50
+
+        qs = ProductSubCategory.objects.select_related('category')
+        if category_id:
+            qs = qs.filter(category_id=category_id)
+
+        if q:
+            qs = qs.filter(
+                Q(name__icontains=q) |
+                Q(code__icontains=q)
+            )
+
+        subcategories = qs.order_by('name')[:limit]
+        results = [
+            {
+                'id': sc.id,
+                'name': sc.name,
+                'text': sc.name,
+                'code': sc.code or '',
+                'category_id': sc.category_id,
+                'category_name': sc.category.name if sc.category else ''
+            }
+            for sc in subcategories
+        ]
+        return JsonResponse({'status': 'success', 'results': results, 'count': len(results)})
+
 # ==============================================================================
-# BRAND MANAGEMENT & QUICK CREATE API VIEWS
+# BRAND MANAGEMENT, QUICK CREATE & SEARCH API VIEWS
 # ==============================================================================
 class BrandListView(LoginRequiredMixin, ListView):
     model = Brand
@@ -792,6 +905,39 @@ class BrandQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
 
         except Exception as err:
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
+
+class BrandSearchAPIView(LoginRequiredMixin, View):
+    """
+    Search and filter endpoint for Brands.
+    If 'q' is empty: Returns top brands ordered alphabetically.
+    If 'q' is provided: Filters by name__icontains or origin_country__icontains.
+    """
+    def get(self, request, *args, **kwargs):
+        q = request.GET.get('q', '').strip()
+
+        try:
+            limit = max(1, min(int(request.GET.get('limit', 50)), 100))
+        except (ValueError, TypeError):
+            limit = 50
+
+        qs = Brand.objects.all()
+        if q:
+            qs = qs.filter(
+                Q(name__icontains=q) |
+                Q(origin_country__icontains=q)
+            )
+
+        brands = qs.order_by('name')[:limit]
+        results = [
+            {
+                'id': b.id,
+                'name': b.name,
+                'text': b.name,
+                'origin_country': b.origin_country or ''
+            }
+            for b in brands
+        ]
+        return JsonResponse({'status': 'success', 'results': results, 'count': len(results)})
 
 # ==============================================================================
 # PRODUCT INVENTORY & CATALOG VIEWS

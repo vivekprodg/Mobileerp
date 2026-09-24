@@ -36,15 +36,12 @@ from apps.core.models import SystemConfiguration, AuditLog
 from apps.users.models import User
 from apps.customers.models import Customer
 
-
 # ==============================================================================
 # IMAGE UPLOAD VALIDATION UTILITY
 # ==============================================================================
-
 ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp'}
 ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB limit
-
 
 def validate_uploaded_image(file_obj):
     """
@@ -71,11 +68,9 @@ def validate_uploaded_image(file_obj):
     except Exception as e:
         raise ValidationError(f"File '{file_obj.name}' is corrupt or not a valid image.") from e
 
-
 # ==============================================================================
 # WORKSHOP DASHBOARD & INTAKE VIEWS
 # ==============================================================================
-
 class RepairDashboardView(LoginRequiredMixin, TemplateView):
     """Workshop dashboard displaying live repair queues and KPI metrics."""
     template_name = 'repairs/repair_dashboard.html'
@@ -115,7 +110,6 @@ class RepairDashboardView(LoginRequiredMixin, TemplateView):
             'branches': Branch.objects.filter(is_active=True),
         })
         return context
-
 
 class RepairTicketCreateView(LoginRequiredMixin, View):
     """
@@ -197,7 +191,6 @@ class RepairTicketCreateView(LoginRequiredMixin, View):
             'products': Product.objects.filter(is_active=True).order_by('name'),
         })
 
-
 class RepairTicketDetailView(LoginRequiredMixin, DetailView):
     """Complete technician workbench with teardown diagnostics, photo evidence, and part replacements."""
     model = RepairTicket
@@ -217,7 +210,6 @@ class RepairTicketDetailView(LoginRequiredMixin, DetailView):
             'part_form': RepairSparePartInstallForm(),
         })
         return context
-
 
 class RepairDiagnosticsVerdictView(LoginRequiredMixin, UserPassesTestMixin, View):
     """Endpoint for technicians to record defect classifications."""
@@ -254,7 +246,6 @@ class RepairDiagnosticsVerdictView(LoginRequiredMixin, UserPassesTestMixin, View
             messages.error(request, f"Failed to save verdict: {str(e)}")
 
         return redirect('repairs:ticket_detail', pk=ticket.pk)
-
 
 class RepairSparePartInstallView(LoginRequiredMixin, UserPassesTestMixin, View):
     """Installs a spare part from stock, deducts inventory, and generates sub-warranties."""
@@ -293,7 +284,6 @@ class RepairSparePartInstallView(LoginRequiredMixin, UserPassesTestMixin, View):
 
         return redirect('repairs:ticket_detail', pk=ticket.pk)
 
-
 class RepairStatusUpdateView(LoginRequiredMixin, UserPassesTestMixin, View):
     """Enforces role permissions on repair stage transitions."""
 
@@ -319,6 +309,92 @@ class RepairStatusUpdateView(LoginRequiredMixin, UserPassesTestMixin, View):
             messages.success(request, f"Ticket status updated to: {ticket.get_service_status_display()}")
         return redirect('repairs:ticket_detail', pk=ticket.pk)
 
+class RepairTicketSearchAPIView(LoginRequiredMixin, View):
+    """
+    API endpoint for POS terminal and workshop live search:
+    - If q is empty: Returns active tickets in READY_FOR_PICKUP or IN_REPAIR status.
+    - If q is provided: Searches across ticket_number, imei_or_serial,
+      customer_name_manual, customer_phone_manual, and product__name.
+    - Returns ticket ID, ticket number, device model, customer info, balance payable,
+      and formatted status badge HTML.
+    """
+
+    def get(self, request, *args, **kwargs):
+        branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        qs = RepairTicket.objects.select_related('product', 'customer', 'branch', 'technician')
+
+        if branch and not request.user.is_superuser:
+            qs = qs.filter(branch=branch)
+
+        q = request.GET.get('q', '').strip()
+        status_param = request.GET.get('status', '').strip()
+
+        if q:
+            qs = qs.filter(
+                Q(ticket_number__icontains=q) |
+                Q(imei_or_serial__icontains=q) |
+                Q(customer_name_manual__icontains=q) |
+                Q(customer_phone_manual__icontains=q) |
+                Q(product__name__icontains=q)
+            )
+        else:
+            if status_param:
+                qs = qs.filter(service_status=status_param)
+            else:
+                qs = qs.filter(service_status__in=['READY_FOR_PICKUP', 'IN_REPAIR'])
+
+        status_colors = {
+            'RECEIVED': '#94a3b8',
+            'DIAGNOSING': '#f59e0b',
+            'QUOTATION_PENDING': '#ec4899',
+            'APPROVED': '#06b6d4',
+            'IN_REPAIR': '#3b82f6',
+            'WAITING_PARTS': '#eab308',
+            'QC_TESTING': '#8b5cf6',
+            'READY_FOR_PICKUP': '#10b981',
+            'DELIVERED': '#059669',
+            'CANCELLED': '#ef4444',
+        }
+
+        tickets_data = []
+        for t in qs.order_by('-created_at')[:50]:
+            balance = max(Decimal('0.00'), t.final_total_amount - t.paid_amount)
+            badge_color = status_colors.get(t.service_status, '#64748b')
+            badge_html = (
+                f'<span style="color: white; background-color: {badge_color}; '
+                f'padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 11px;">'
+                f'{t.get_service_status_display()}</span>'
+            )
+
+            tickets_data.append({
+                'id': t.id,
+                'ticket_number': t.ticket_number,
+                'device_model': t.product.name if t.product else '',
+                'imei_or_serial': t.imei_or_serial,
+                'customer_name': t.customer_name_manual,
+                'customer_phone': t.customer_phone_manual,
+                'service_status': t.service_status,
+                'service_status_display': t.get_service_status_display(),
+                'status_badge_html': badge_html,
+                'claim_type': t.claim_type,
+                'claim_type_display': t.get_claim_type_display(),
+                'labor_charge': float(t.labor_charge),
+                'parts_cost': float(t.parts_cost),
+                'discount_amount': float(t.discount_amount),
+                'final_total_amount': float(t.final_total_amount),
+                'paid_amount': float(t.paid_amount),
+                'balance_payable': float(balance),
+                'technician_name': t.technician.get_full_name() or t.technician.username if t.technician else 'Unassigned',
+                'reported_fault': t.reported_fault,
+                'is_ready_for_pickup': (t.service_status == 'READY_FOR_PICKUP'),
+                'created_at': t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '',
+            })
+
+        return JsonResponse({
+            'success': True,
+            'count': len(tickets_data),
+            'results': tickets_data,
+        })
 
 class CustomerQuotationApprovalView(View):
     """
@@ -383,11 +459,10 @@ class CustomerQuotationApprovalView(View):
             'config': SystemConfiguration.get_solo()
         })
 
-
 class PublicTrackingPortalView(View):
     """
     Self-service tracking portal for customers to check repair progress.
-    Enforces strict full 10-digit mobile number matching to prevent IDOR enumeration privacy leaks.
+    Enforces strict 10-digit mobile number matching to prevent IDOR privacy leaks.
     """
     template_name = 'repairs/public_tracking.html'
 
@@ -409,7 +484,7 @@ class PublicTrackingPortalView(View):
                 invalid_phone_format = True
             else:
                 qs = RepairTicket.objects.filter(ticket_number__iexact=searched_no)
-                
+
                 matched_ticket = qs.filter(
                     Q(customer_phone_manual=clean_phone) |
                     Q(customer_phone_manual=f"+977{clean_phone}") |
@@ -430,7 +505,6 @@ class PublicTrackingPortalView(View):
             'config': SystemConfiguration.get_solo()
         })
 
-
 class RepairClaimTokenPrintView(LoginRequiredMixin, View):
     """Renders 80mm thermal claim slip given to customer upon intake."""
 
@@ -441,7 +515,6 @@ class RepairClaimTokenPrintView(LoginRequiredMixin, View):
             'checklist': getattr(ticket, 'intake_checklist', None),
             'config': SystemConfiguration.get_solo()
         })
-
 
 class RepairJobSheetA4PrintView(LoginRequiredMixin, View):
     """Renders detailed A4 Job Sheet attached to device tray in technician lab."""
@@ -456,16 +529,13 @@ class RepairJobSheetA4PrintView(LoginRequiredMixin, View):
             'config': SystemConfiguration.get_solo()
         })
 
-
 # ==============================================================================
-# OPTICAL & EYEWEAR PRESCRIPTION SERVICE DESK (CLEAN OPTICAL FITTINGS)
+# OPTICAL & EYEWEAR PRESCRIPTION SERVICE DESK
 # ==============================================================================
-
 class OpticalServiceDeskView(LoginRequiredMixin, View):
     """
     Dedicated workspace for ophthalmic prescription lens fittings, frame alignments,
     ultrasonic cleaning, and optical lens coating warranty claims.
-    Custom optical services are created with barcode=None (no forced fake barcodes).
     """
     template_name = 'repairs/optical_service_form.html'
 
@@ -524,7 +594,7 @@ class OpticalServiceDeskView(LoginRequiredMixin, View):
         frame_product_id = request.POST.get('frame_product_id')
         technician_id = request.POST.get('technician_id')
         expected_delivery = request.POST.get('expected_delivery_date')
-        
+
         service_charge = Decimal(str(request.POST.get('service_charge', '0.00') or '0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         lens_price = Decimal(str(request.POST.get('lens_price', '0.00') or '0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         notes = request.POST.get('reported_fault', '').strip()
@@ -575,7 +645,6 @@ class OpticalServiceDeskView(LoginRequiredMixin, View):
                         if not brand_obj:
                             brand_obj = Brand.objects.create(name="Generic Optical", origin_country="Nepal")
 
-                        # Barcode is saved as None (no fake barcode created)
                         product_obj = Product.objects.create(
                             name=form.cleaned_data.get('frame_brand_and_model') or "Prescription Eyewear & Lens Fitting",
                             model_name=form.cleaned_data.get('frame_brand_and_model') or "Optical Frame",

@@ -1,1438 +1,1933 @@
 {% extends "core/base.html" %}
 {% load static humanize %}
 
-{% block title %}Receive Goods (GRN Inward) | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+{% block title %}Goods Received Note (GRN) Inward | {{ SYS_CONFIG.company_name_en|default:COMPANY_NAME }}{% endblock %}
 
 {% block extra_head %}
+<!-- FontAwesome 6 CDN for iconography -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
 <style>
-.grn-card {
+/* ==========================================================================
+   MOBILE SOFT ERP - ULTRA-PREMIUM GRN INWARD (VERTICAL CARD LAYOUT)
+   ========================================================================== */
+:root {
+    --grn-primary: #2563eb;
+    --grn-primary-hover: #1d4ed8;
+    --grn-primary-soft: #eff6ff;
+    --grn-primary-border: #bfdbfe;
+
+    --grn-slate-50: #f8fafc;
+    --grn-slate-100: #f1f5f9;
+    --grn-slate-200: #e2e8f0;
+    --grn-slate-300: #cbd5e1;
+    --grn-slate-400: #94a3b8;
+    --grn-slate-500: #64748b;
+    --grn-slate-600: #475569;
+    --grn-slate-700: #334155;
+    --grn-slate-800: #1e293b;
+    --grn-slate-900: #0f172a;
+
+    --grn-emerald-50: #ecfdf5;
+    --grn-emerald-100: #d1fae5;
+    --grn-emerald-600: #059669;
+    --grn-emerald-700: #047857;
+
+    --grn-amber-50: #fffbeb;
+    --grn-amber-600: #d97706;
+
+    --grn-rose-50: #fff1f2;
+    --grn-rose-100: #ffe4e6;
+    --grn-rose-600: #e11d48;
+    --grn-rose-700: #be123c;
+
+    --grn-purple-50: #faf5ff;
+    --grn-purple-600: #9333ea;
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 18px;
+
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+    --shadow-card: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.04);
+    --shadow-hover: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+    
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Page Header */
+.grn-page-header {
     background: #ffffff;
-    border: 1px solid var(--erp-slate-200);
-    border-radius: 16px;
-    box-shadow: var(--erp-shadow-xs);
+    border: 1.5px solid var(--grn-slate-200);
+    border-radius: var(--radius-lg);
+    padding: 20px 26px;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
 }
 
-.grn-line-item-row {
+.grn-page-header::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 5px;
+    background: linear-gradient(180deg, var(--grn-primary), #3b82f6);
+}
+
+.header-text h1 {
+    font-size: 21px;
+    font-weight: 800;
+    color: var(--grn-slate-900);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+}
+
+.header-text p {
+    font-size: 13px;
+    color: var(--grn-slate-500);
+    margin-bottom: 0;
+    max-width: 920px;
+}
+
+/* Base Card Styles */
+.erp-card {
     background: #ffffff;
-    border: 1px solid var(--erp-slate-200);
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 16px;
-    transition: all 0.2s ease;
+    border: 1.5px solid var(--grn-slate-200);
+    border-radius: var(--radius-xl);
+    margin-bottom: 24px;
+    box-shadow: var(--shadow-card);
+    overflow: visible;
 }
 
-.grn-line-item-row:hover {
-    border-color: var(--erp-primary-border);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+.erp-card-header {
+    padding: 18px 24px;
+    background: #fafbfc;
+    border-bottom: 1.5px solid var(--grn-slate-200);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
 }
 
-.imei-scan-active-box {
-    background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%);
-    border: 2px dashed #0284c7;
-    border-radius: 12px;
-    padding: 14px;
-    margin-top: 10px;
+.erp-card-title {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--grn-slate-900);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    letter-spacing: -0.02em;
 }
 
-.non-imei-notice-box {
-    background: #f8fafc;
-    border: 1px dashed #cbd5e1;
-    border-radius: 12px;
-    padding: 12px 16px;
-    margin-top: 10px;
+.erp-card-title i {
+    color: var(--grn-primary);
 }
 
-.imei-badge-pill {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-    padding: 4px 10px;
-    border-radius: 6px;
-    letter-spacing: 0.02em;
+.erp-card-subtitle {
+    font-size: 12.5px;
+    color: var(--grn-slate-500);
+    margin-top: 3px;
+    font-weight: 400;
 }
 
-.imei-input-field:focus {
-    border-color: #0284c7 !important;
-    box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.25) !important;
-    background-color: #ffffff !important;
+.erp-card-body {
+    padding: 24px;
 }
 
-.scan-indicator-badge {
-    display: inline-flex;
+/* Form Groups & Layout Grid */
+.grid {
+    display: grid;
+    gap: 18px;
+}
+
+.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--grn-slate-700);
+    display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 0.72rem;
+    margin-bottom: 0;
+}
+
+.form-label .req {
+    color: var(--grn-rose-600);
+    font-weight: 800;
+}
+
+.form-label .hint {
+    font-size: 11px;
+    color: var(--grn-slate-400);
+    font-weight: 400;
+    margin-left: auto;
+}
+
+.input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.input-prefix {
+    position: absolute;
+    left: 12px;
+    color: var(--grn-slate-400);
+    font-size: 13px;
     font-weight: 700;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.form-control {
+    width: 100%;
+    height: 42px;
+    background: #ffffff;
+    border: 1.5px solid var(--grn-slate-200);
+    border-radius: var(--radius-md);
+    padding: 8px 14px;
+    font-size: 13.5px;
+    font-family: inherit;
+    color: var(--grn-slate-800);
+    transition: all 0.15s ease-in-out;
+    outline: none;
+}
+
+.form-control:focus {
+    border-color: var(--grn-primary);
+    box-shadow: 0 0 0 3.5px rgba(37, 99, 235, 0.15);
+}
+
+.has-prefix {
+    padding-left: 42px !important;
+}
+
+.font-mono-val {
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+
+textarea.form-control {
+    height: auto;
+    min-height: 84px;
+    resize: vertical;
+}
+
+/* Whole-Bill Consignment Discount Card */
+.consign-discount-card {
+    background: #f8fafc;
+    border: 1.5px dashed var(--grn-slate-300);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.consign-disc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.consign-disc-badge {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--grn-emerald-700);
+    background: var(--grn-emerald-50);
     padding: 3px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
+    border: 1px solid #a7f3d0;
+}
+
+/* Segmented Control Component */
+.segmented-control {
+    display: inline-flex;
+    background: var(--grn-slate-200);
+    padding: 3px;
+    border-radius: 7px;
+    gap: 2px;
+}
+
+.seg-btn {
+    border: none;
+    background: transparent;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--grn-slate-600);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+}
+
+.seg-btn.active {
+    background: #ffffff;
+    color: var(--grn-primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* Compliance Toggles Bar */
+.compliance-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 24px;
+    padding-top: 18px;
+    border-top: 1px solid var(--grn-slate-200);
+    margin-top: 18px;
+}
+
+.toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+    margin-bottom: 0;
+}
+
+.custom-switch {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: var(--grn-slate-300);
+    border-radius: 12px;
+    transition: background 0.2s;
+}
+
+.custom-switch::after {
+    content: "";
+    position: absolute;
+    top: 2.5px;
+    left: 3px;
+    width: 19px;
+    height: 19px;
+    background: #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    transition: transform 0.2s ease;
+}
+
+input[type="checkbox"]:checked + .custom-switch {
+    background: var(--grn-primary);
+}
+
+input[type="checkbox"]:checked + .custom-switch::after {
+    transform: translateX(19px);
+}
+
+.compliance-pill {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 700;
+    margin-left: 6px;
+}
+
+.pill-ird {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+}
+
+.pill-mdms {
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
 }
 
 /* ==========================================================================
-   GRN CAMERA VIEWFINDER STYLES
+   VERTICAL LINE ITEM CARD SYSTEM (TIERED & SPACIOUS)
    ========================================================================== */
-.grn-camera-modal-body {
-    background-color: #0b1120;
-    position: relative;
-    padding: 0;
-    overflow: hidden;
-    min-height: 380px;
-}
-
-.grn-camera-video {
-    width: 100%;
-    height: 100%;
-    max-height: 480px;
-    object-fit: cover;
-    display: block;
-}
-
-.grn-scanner-viewfinder {
-    position: absolute;
-    inset: 0;
+.line-items-stack {
     display: flex;
     flex-direction: column;
+    gap: 22px;
+}
+
+.line-item-card {
+    background: #ffffff;
+    border: 1.5px solid var(--grn-slate-200);
+    border-radius: var(--radius-lg);
+    padding: 20px 24px;
+    position: relative;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.line-item-card:hover {
+    border-color: #cbd5e1;
+    box-shadow: var(--shadow-card);
+}
+
+.line-item-topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1.5px solid var(--grn-slate-100);
+}
+
+.item-counter-badge {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    font-size: 14px;
+    color: var(--grn-slate-900);
+}
+
+.counter-dot {
+    background: var(--grn-slate-900);
+    color: #ffffff;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    pointer-events: none;
-    padding: 20px;
+    font-size: 12px;
+    font-family: var(--font-mono);
 }
 
-.grn-aiming-reticle {
-    width: 280px;
-    height: 170px;
-    border: 2px solid rgba(255, 255, 255, 0.4);
-    border-radius: 16px;
+.btn-remove-row {
+    background: var(--grn-rose-50);
+    border: 1px solid var(--grn-rose-100);
+    color: var(--grn-rose-600);
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+}
+
+.btn-remove-row:hover {
+    background: var(--grn-rose-600);
+    color: #ffffff;
+    border-color: var(--grn-rose-600);
+}
+
+/* Tier 3: High-Visibility Wide Discount Bar */
+.line-discount-vertical-card {
+    background: #f8fafc;
+    border: 1.5px solid #e2e8f0;
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.2s ease;
+}
+
+.line-discount-vertical-card.is-active {
+    background: #ffffff;
+    border-color: #93c5fd;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.08);
+}
+
+.ld-top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ld-title-tag {
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--grn-slate-700);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.ld-title-tag i {
+    color: var(--grn-primary);
+}
+
+.ld-rebate-tag {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 800;
+    color: var(--grn-rose-700);
+    background: var(--grn-rose-100);
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid #fecdd3;
+    white-space: nowrap;
+}
+
+.ld-controls-flex {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.ld-mode-switch {
+    display: inline-flex;
+    background: #e2e8f0;
+    padding: 3px;
+    border-radius: 8px;
+    gap: 2px;
+}
+
+.ld-mode-btn {
+    border: none;
+    background: transparent;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--grn-slate-600);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+}
+
+.ld-mode-btn.active {
+    background: var(--grn-slate-900);
+    color: #ffffff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.ld-input-box {
+    flex: 1;
+    min-width: 200px;
     position: relative;
-    box-shadow: 0 0 0 9999px rgba(11, 17, 32, 0.65);
+    display: flex;
+    align-items: center;
 }
 
-.grn-aiming-reticle::before,
-.grn-aiming-reticle::after {
-    content: '';
+.ld-prefix-sym {
     position: absolute;
-    width: 24px;
-    height: 24px;
-    border-color: #0284c7;
-    border-style: solid;
+    left: 12px;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--grn-slate-500);
+    pointer-events: none;
 }
 
-.grn-aiming-reticle::before {
-    top: -2px;
-    left: -2px;
-    border-width: 4px 0 0 4px;
-    border-top-left-radius: 14px;
+.ld-input-field {
+    width: 100%;
+    height: 40px;
+    background: #ffffff;
+    border: 1.5px solid var(--grn-slate-300);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px 6px 32px;
+    font-size: 13.5px;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: var(--grn-slate-900);
+    outline: none;
+    transition: all 0.15s ease;
 }
 
-.grn-aiming-reticle::after {
-    bottom: -2px;
-    right: -2px;
-    border-width: 0 4px 4px 0;
-    border-bottom-right-radius: 14px;
+.ld-input-field:focus {
+    border-color: var(--grn-primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
-.grn-corner-tr {
+.ld-input-field:disabled {
+    background: var(--grn-slate-100);
+    border-color: var(--grn-slate-200);
+    color: var(--grn-slate-400);
+    cursor: not-allowed;
+    padding-left: 12px;
+}
+
+/* Tier 4: Bottom Metrics Strip */
+.line-footer-strip {
+    margin-top: 18px;
+    background: #fafbfc;
+    border: 1px solid var(--grn-slate-200);
+    border-radius: var(--radius-md);
+    padding: 12px 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.metrics-pills-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 22px;
+    font-size: 13px;
+}
+
+.metric-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--grn-slate-600);
+}
+
+.metric-item strong {
+    font-family: var(--font-mono);
+    color: var(--grn-slate-900);
+}
+
+.cogs-landed-badge {
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    color: #ffffff;
+    padding: 6px 16px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.cogs-landed-badge span.label {
+    color: #94a3b8;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+
+.cogs-landed-badge span.price {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 800;
+    color: #38bdf8;
+}
+
+.btn-dual-imei {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--grn-primary);
+    background: var(--grn-primary-soft);
+    border: 1px solid var(--grn-primary-border);
+    padding: 7px 16px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-weight: 700;
+    transition: all 0.15s ease;
+}
+
+.btn-dual-imei:hover {
+    background: #dbeafe;
+}
+
+/* ==========================================================================
+   SECTION 3: 5 AUDITED KPI VALUATION SUMMARY CARDS
+   ========================================================================== */
+.kpi-deck {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+}
+
+.kpi-tile {
+    background: #ffffff;
+    border: 1.5px solid var(--grn-slate-200);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 145px;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.kpi-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+}
+
+.kpi-tile::before {
+    content: "";
     position: absolute;
-    top: -2px;
-    right: -2px;
-    width: 24px;
-    height: 24px;
-    border-top: 4px solid #0284c7;
-    border-right: 4px solid #0284c7;
-    border-top-right-radius: 14px;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
 }
 
-.grn-corner-bl {
-    position: absolute;
-    bottom: -2px;
-    left: -2px;
-    width: 24px;
-    height: 24px;
-    border-bottom: 4px solid #0284c7;
-    border-left: 4px solid #0284c7;
-    border-bottom-left-radius: 14px;
+.tile-blue::before { background: #2563eb; }
+.tile-emerald::before { background: #10b981; }
+.tile-amber::before { background: #f59e0b; }
+.tile-purple::before { background: #8b5cf6; }
+.tile-rose::before { background: #f43f5e; }
+
+.tile-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
 }
 
-.grn-laser-line {
-    position: absolute;
-    left: 4px;
-    right: 4px;
-    height: 2px;
-    background: linear-gradient(90deg, transparent 0%, #38bdf8 50%, transparent 100%);
-    box-shadow: 0 0 8px #38bdf8;
-    animation: grnLaser 2s ease-in-out infinite alternate;
+.tile-step-num {
+    font-size: 10.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--grn-slate-400);
 }
 
-@keyframes grnLaser {
-    0% { top: 8%; opacity: 0.8; }
-    100% { top: 92%; opacity: 1; }
+.tile-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--grn-slate-800);
+    margin-top: 3px;
 }
 
-.grn-camera-step-banner {
-    position: absolute;
-    top: 14px;
-    left: 14px;
-    right: 14px;
-    z-index: 10;
-    border-radius: 12px;
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    padding: 10px 14px;
+.tile-icon-box {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+}
+
+.tile-blue .tile-icon-box { background: var(--grn-primary-soft); color: var(--grn-primary); }
+.tile-emerald .tile-icon-box { background: var(--grn-emerald-50); color: var(--grn-emerald-600); }
+.tile-amber .tile-icon-box { background: var(--grn-amber-50); color: var(--grn-amber-600); }
+.tile-purple .tile-icon-box { background: var(--grn-purple-50); color: var(--grn-purple-600); }
+.tile-rose .tile-icon-box { background: var(--grn-rose-50); color: var(--grn-rose-600); }
+
+.tile-amount {
+    font-size: 21px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    margin: 10px 0 4px;
+    letter-spacing: -0.5px;
+}
+
+.tile-blue .tile-amount { color: #1d4ed8; }
+.tile-emerald .tile-amount { color: #047857; }
+.tile-amber .tile-amount { color: #b45309; }
+.tile-purple .tile-amount { color: #6d28d9; }
+.tile-rose .tile-amount { color: #be123c; }
+
+.tile-footer {
+    font-size: 11.5px;
+    color: var(--grn-slate-500);
+    display: flex;
+    justify-content: space-between;
+    border-top: 1px dashed var(--grn-slate-200);
+    padding-top: 8px;
+    margin-top: 6px;
+}
+
+/* Action Footer Dock */
+.submit-dock-bar {
+    background: #ffffff;
+    border: 1.5px solid var(--grn-slate-200);
+    border-radius: var(--radius-lg);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-sm);
+}
+
+.audit-msg {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--grn-slate-600);
+}
+
+.audit-msg i {
+    color: var(--grn-emerald-600);
+    font-size: 16px;
+}
+
+.btn-verify-stock {
+    background: linear-gradient(180deg, #15803d, #166534);
+    color: #ffffff;
+    padding: 11px 26px;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 10px rgba(21, 128, 61, 0.25);
+    cursor: pointer;
+    border: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.btn-verify-stock:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(21, 128, 61, 0.35);
+}
+
+/* Responsive Rules */
+@media (max-width: 1200px) {
+    .kpi-deck { grid-template-columns: repeat(3, 1fr); }
+    .grid-cols-4 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+    .kpi-deck { grid-template-columns: 1fr; }
+    .grid-cols-3, .grid-cols-4 { grid-template-columns: 1fr; }
+    .submit-dock-bar { flex-direction: column; gap: 14px; align-items: stretch; }
+    .grn-page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
-    <!-- Page Header -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
-        <div>
-            <h4 class="fw-bold text-dark mb-0">
-                <i class="fas fa-truck-ramp-box text-primary me-2"></i> Goods Received Note (GRN) Inward
-            </h4>
-            <p class="text-muted fs-xs mb-0">
-                Stock physical intake with multi-unit packaging, proportional value-weighted shipping overhead distribution &amp; mandatory Dual-IMEI verification
+<div class="container-fluid px-4 py-4" style="max-width: 1480px;">
+
+    <!-- CLEAN PAGE HEADER -->
+    <header class="grn-page-header">
+        <div class="header-text">
+            <h1>
+                <i class="fa-solid fa-boxes-packing" style="color: var(--grn-primary);"></i>
+                Goods Received Note (GRN) Inward
+            </h1>
+            <p>
+                Stock physical intake with Pre-VAT rate valuation, dual-mode discounts (Amount vs. %), dedicated 13% VAT, value-weighted shipping overhead distribution &amp; mandatory Dual-IMEI verification.
             </p>
         </div>
-        <div class="d-flex gap-2">
-            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
-                &larr; Back to GRN List
+        <div>
+            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold">
+                <i class="fa-solid fa-arrow-left me-1"></i> Back to GRN List
             </a>
         </div>
-    </div>
-
-    <!-- Error Alert Banner -->
-    {% if form.errors or formset.errors %}
-    <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
-        <div class="d-flex align-items-center gap-2 mb-2">
-            <span class="badge bg-danger text-white rounded-pill px-2 py-1 fs-2xs">Validation Error</span>
-            <h6 class="fw-bold text-danger mb-0">Please resolve the following errors:</h6>
-        </div>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        <ul class="mb-0 fs-xs ps-3">
-            {% for field in form %}{% for err in field.errors %}<li><strong>Header:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}
-            {% for f in formset %}{% for field in f %}{% for err in field.errors %}<li><strong>Line Item {{ forloop.parentloop.counter }}:</strong> {{ field.label }} - {{ err }}</li>{% endfor %}{% endfor %}{% endfor %}
-            {% for err in form.non_field_errors %}<li>{{ err }}</li>{% endfor %}
-            {% for err in formset.non_form_errors %}<li>{{ err }}</li>{% endfor %}
-        </ul>
-    </div>
-    {% endif %}
+    </header>
 
     <form method="post" id="grnMasterForm" novalidate>
         {% csrf_token %}
 
-        <!-- Top Header Card -->
-        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
-            <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
-                <i class="fas fa-file-invoice text-primary me-2"></i> 1. Supplier &amp; Consignment Information
-            </h6>
-            
-            <div class="row g-3">
-                <div class="col-12 col-md-4">
-                    <label class="form-label fw-bold text-dark fs-xs">Supplier / Distributor <span class="text-danger">*</span></label>
-                    {{ form.supplier }}
-                </div>
-                <div class="col-12 col-md-4">
-                    <label class="form-label fw-bold text-dark fs-xs">Supplier Invoice / Challan Ref No. <span class="text-danger">*</span></label>
-                    {{ form.supplier_bill_no }}
-                </div>
-                <div class="col-12 col-md-4">
-                    <label class="form-label fw-bold text-dark fs-xs">Bill / Challan Date (AD) <span class="text-danger">*</span></label>
-                    {{ form.bill_date }}
-                </div>
-
-                <div class="col-12 col-md-3">
-                    <label class="form-label fw-bold text-dark fs-xs">Paid Amount (NPR)</label>
-                    {{ form.paid_amount }}
-                </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label fw-bold text-dark fs-xs">Freight / Courier Charge (NPR)</label>
-                    {{ form.extra_freight_charge }}
-                </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label fw-bold text-dark fs-xs">Customs / Duty (NPR)</label>
-                    {{ form.customs_import_charge }}
-                </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label fw-bold text-dark fs-xs">Handling / Insurance (NPR)</label>
-                    {{ form.other_handling_charge }}
-                </div>
-
-                <div class="col-12 col-md-6 d-flex align-items-center">
-                    <div class="form-check form-switch mt-2">
-                        {{ form.is_vat_bill }}
-                        <label class="form-check-label fw-bold text-dark fs-xs">13% VAT Calculation Included in Invoice</label>
+        <!-- SECTION 1: SUPPLIER & CONSIGNMENT INFORMATION -->
+        <section class="erp-card">
+            <div class="erp-card-header">
+                <div>
+                    <div class="erp-card-title">
+                        <i class="fa-solid fa-truck-ramp-box"></i>
+                        1. Supplier &amp; Consignment Information
                     </div>
-                </div>
-                <div class="col-12 col-md-6 d-flex align-items-center">
-                    <div class="form-check form-switch mt-2">
-                        {{ form.distributor_mdms_certified }}
-                        <label class="form-check-label fw-bold text-success fs-xs">Distributor NTA MDMS Certified Import</label>
+                    <div class="erp-card-subtitle">
+                        Log supplier fiscal references, freight, customs clearance and invoice level discounts
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Line Items Section with Dynamic Dual-IMEI Scanning -->
-        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
-            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 border-bottom pb-3 mb-3">
-                <div>
-                    <h6 class="fw-bold text-dark mb-0">
-                        <i class="fas fa-boxes-stacked text-primary me-2"></i> 2. Inward Line Items, Pricing &amp; Mandatory IMEIs
-                    </h6>
-                    <small class="text-muted fs-2xs">Overheads are dynamically allocated based on line value. Serialized phones require 100% exact IMEI pairing.</small>
+            <div class="erp-card-body">
+                
+                <!-- Primary Supplier Reference Grid -->
+                <div class="grid grid-cols-3">
+                    
+                    <div class="form-group">
+                        <label class="form-label">
+                            Supplier / Distributor Name <span class="req">*</span>
+                        </label>
+                        <div class="contextual-search-wrapper" 
+                             id="supplierSearchWrapper"
+                             data-search-url="/purchases/suppliers/api/search/" 
+                             data-search-type="supplier"
+                             data-placeholder="Search supplier by name, company, phone, PAN..."
+                             data-initial-id="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}"
+                             data-initial-title="{{ form.instance.supplier.company_name|default:'' }}"
+                             data-initial-subtitle="{% if form.instance.supplier.code %}Code: {{ form.instance.supplier.code }}{% endif %}">
+                            <input type="hidden" name="supplier" id="id_supplier" value="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}" required>
+                            <input type="text" class="form-control contextual-search-input async-search-input" 
+                                   id="grn_supplier_search_display"
+                                   placeholder="Search supplier by name, company, phone, PAN..." 
+                                   value="{% if form.instance.supplier %}{{ form.instance.supplier.company_name }}{% endif %}" 
+                                   autocomplete="off">
+                        </div>
+                        {% if form.supplier.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.supplier.errors|striptags }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            Supplier Invoice / Challan Ref No. <span class="req">*</span>
+                        </label>
+                        <div class="input-wrap">
+                            <span class="input-prefix"><i class="fa-solid fa-receipt"></i></span>
+                            <input type="text" name="supplier_bill_no" id="id_supplier_bill_no" class="form-control has-prefix font-mono-val" placeholder="e.g. INV-9908 / Chal-54" value="{{ form.supplier_bill_no.value|default:'' }}" required>
+                        </div>
+                        {% if form.supplier_bill_no.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.supplier_bill_no.errors|striptags }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            Bill / Challan Date (AD) <span class="req">*</span>
+                        </label>
+                        <div class="input-wrap">
+                            <span class="input-prefix"><i class="fa-regular fa-calendar"></i></span>
+                            <input type="date" name="bill_date" id="id_bill_date" class="form-control has-prefix" value="{{ form.bill_date.value|date:'Y-m-d'|default:'' }}" required>
+                        </div>
+                        {% if form.bill_date.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.bill_date.errors|striptags }}</div>
+                        {% endif %}
+                    </div>
+
                 </div>
-                <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold" id="addNewLineItemBtn">
-                    <i class="fas fa-plus me-1"></i> Add Another Line
+
+                <!-- Overheads Grid -->
+                <div class="grid grid-cols-4" style="margin-top: 18px;">
+                    
+                    <div class="form-group">
+                        <label class="form-label">
+                            Freight / Courier Charge <span class="hint">NPR</span>
+                        </label>
+                        <div class="input-wrap">
+                            <span class="input-prefix">Rs.</span>
+                            <input type="number" step="0.01" min="0" name="extra_freight_charge" id="overhead-freight" class="form-control has-prefix font-mono-val calc-trigger" value="{{ form.extra_freight_charge.value|default:'0.00' }}">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            Customs / Duty <span class="hint">NPR</span>
+                        </label>
+                        <div class="input-wrap">
+                            <span class="input-prefix">Rs.</span>
+                            <input type="number" step="0.01" min="0" name="customs_import_charge" id="overhead-customs" class="form-control has-prefix font-mono-val calc-trigger" value="{{ form.customs_import_charge.value|default:'0.00' }}">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            Handling / Insurance <span class="hint">NPR</span>
+                        </label>
+                        <div class="input-wrap">
+                            <span class="input-prefix">Rs.</span>
+                            <input type="number" step="0.01" min="0" name="other_handling_charge" id="overhead-handling" class="form-control has-prefix font-mono-val calc-trigger" value="{{ form.other_handling_charge.value|default:'0.00' }}">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">
+                            Spot Paid on Delivery <span class="hint">Deducted from Debt</span>
+                        </label>
+                        <div class="input-wrap">
+                            <span class="input-prefix">Rs.</span>
+                            <input type="number" step="0.01" min="0" name="paid_amount" id="overhead-spotpaid" class="form-control has-prefix font-mono-val calc-trigger" value="{{ form.paid_amount.value|default:'0.00' }}">
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Whole-Bill Discount & Remarks -->
+                <div class="grid" style="grid-template-columns: 1.2fr 1.8fr; margin-top: 18px;">
+                    
+                    <div class="consign-discount-card">
+                        <div class="consign-disc-head">
+                            <span class="form-label" style="font-weight: 800;">
+                                <i class="fa-solid fa-tags" style="color: var(--grn-primary);"></i> Whole-Bill Consignment Discount
+                            </span>
+                            <span id="whole-disc-saved-tag" class="consign-disc-badge">-Rs. 0.00</span>
+                        </div>
+
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select name="bill_discount_type" id="id_bill_discount_type" style="display: none;">
+                                <option value="NONE" {% if form.bill_discount_type.value == 'NONE' %}selected{% endif %}>None</option>
+                                <option value="PERCENTAGE" {% if form.bill_discount_type.value == 'PERCENTAGE' %}selected{% endif %}>Percentage</option>
+                                <option value="AMOUNT" {% if form.bill_discount_type.value == 'AMOUNT' %}selected{% endif %}>Amount</option>
+                            </select>
+
+                            <div class="segmented-control" id="whole-disc-type-group">
+                                <button type="button" class="seg-btn {% if form.bill_discount_type.value == 'NONE' or not form.bill_discount_type.value %}active{% endif %}" data-mode="NONE">None</button>
+                                <button type="button" class="seg-btn {% if form.bill_discount_type.value == 'PERCENTAGE' %}active{% endif %}" data-mode="PERCENTAGE">% Pct</button>
+                                <button type="button" class="seg-btn {% if form.bill_discount_type.value == 'AMOUNT' %}active{% endif %}" data-mode="AMOUNT">Rs. Cash</button>
+                            </div>
+
+                            <div class="input-wrap" style="flex: 1;">
+                                <span class="input-prefix" id="whole-disc-prefix" style="left: 10px;">Rs.</span>
+                                <input type="number" step="any" min="0" name="bill_discount_input_value" id="whole-disc-val" class="form-control font-mono-val calc-trigger" style="padding-left: 36px;" value="{{ form.bill_discount_input_value.value|default:'0.00' }}">
+                            </div>
+                        </div>
+
+                        <div style="font-size: 11.5px; color: var(--grn-slate-500);">
+                            Rebate distributed proportionally across all line items to lower true landed unit cost.
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Consignment Remarks / Stock Delivery Notes</label>
+                        <textarea name="remarks" id="id_remarks" class="form-control" placeholder="Optional notes: e.g. Checked outer cartons, sealed with manufacturer security tape...">{{ form.remarks.value|default:'' }}</textarea>
+                    </div>
+
+                </div>
+
+                <!-- Compliance Toggles -->
+                <div class="compliance-bar">
+                    <label class="toggle-row">
+                        <input type="checkbox" name="is_vat_bill" id="tax-vat-toggle" class="calc-trigger" {% if form.is_vat_bill.value %}checked{% endif %} style="display: none;">
+                        <div class="custom-switch"></div>
+                        <div style="font-size: 13px; font-weight: 700; color: var(--grn-slate-700);">
+                            13% VAT Calculation Included in Invoice (Annex 7 Tax Bill)
+                            <span class="compliance-pill pill-ird">IRD Nepal Compliant</span>
+                        </div>
+                    </label>
+
+                    <label class="toggle-row">
+                        <input type="checkbox" name="distributor_mdms_certified" id="id_distributor_mdms_certified" {% if form.distributor_mdms_certified.value|default:True %}checked{% endif %} style="display: none;">
+                        <div class="custom-switch"></div>
+                        <div style="font-size: 13px; font-weight: 700; color: var(--grn-slate-700);">
+                            Distributor NTA MDMS Certified Import
+                            <span class="compliance-pill pill-mdms">Official Nepal Legal Stock</span>
+                        </div>
+                    </label>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ==========================================================================
+             SECTION 2: VERTICAL LINE ITEMS, PRICING & MANDATORY IMEIs
+             ========================================================================== -->
+        <section class="erp-card">
+            <div class="erp-card-header">
+                <div>
+                    <div class="erp-card-title">
+                        <i class="fa-solid fa-list-check"></i>
+                        2. Inward Line Items, Pricing &amp; Mandatory IMEIs
+                    </div>
+                    <div class="erp-card-subtitle">
+                        Spacious vertical line manifests. Discounts support flat reductions and percentages with full typing room.
+                    </div>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold" id="btn-add-line">
+                    <i class="fa-solid fa-plus me-1"></i> Add Another Line
                 </button>
             </div>
 
-            {{ formset.management_form }}
+            <div class="erp-card-body">
+                <!-- Django Formset Management Form -->
+                {{ formset.management_form }}
 
-            <div id="grnFormsetContainer">
-                {% for item_form in formset %}
-                <div class="grn-line-item-row" data-row-index="{{ forloop.counter0 }}">
-                    {{ item_form.id }}
-                    <div class="row g-3 align-items-end">
-                        <div class="col-12 col-md-3">
-                            <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
-                            {{ item_form.product }}
-                        </div>
-                        <div class="col-6 col-md-2">
-                            <label class="form-label fw-bold text-dark fs-xs">Quantity (Units) <span class="text-danger">*</span></label>
-                            {{ item_form.purchased_quantity }}
-                        </div>
-                        <div class="col-6 col-md-2">
-                            <label class="form-label fw-bold text-dark fs-xs">Unit Purchase Rate <span class="text-danger">*</span></label>
-                            {{ item_form.purchase_rate }}
-                        </div>
-                        <div class="col-6 col-md-2">
-                            <label class="form-label fw-bold text-dark fs-xs">Target Selling MRP (NPR)</label>
-                            {{ item_form.new_selling_price }}
-                        </div>
-                        <div class="col-6 col-md-1">
-                            <label class="form-label fw-bold text-dark fs-xs">Disc (%)</label>
-                            {{ item_form.discount_percent }}
-                        </div>
-                        <div class="col-6 col-md-2 text-end">
-                            {% if formset.can_delete %}
-                                <div class="form-check form-check-inline mt-4">
-                                    {{ item_form.DELETE }}
-                                    <label class="form-check-label text-danger fs-2xs fw-bold">Remove Line</label>
-                                </div>
-                            {% endif %}
-                        </div>
+                <div id="lines-container" class="line-items-stack">
+                    {% for item_form in formset %}
+                    <div class="line-item-card" data-row-index="{{ forloop.counter0 }}" id="line-item-{{ forloop.counter0 }}">
+                        {{ item_form.id }}
 
-                        <!-- Real-time Computed Overhead & Landed Cost Preview Badge -->
-                        <div class="col-12">
-                            <div class="p-2 bg-light rounded border d-flex flex-wrap justify-content-between align-items-center fs-2xs font-monospace">
-                                <span class="text-muted">
-                                    Line Value: <strong class="text-dark" id="lineValueText_{{ forloop.counter0 }}">Rs. 0.00</strong>
-                                </span>
-                                <span class="text-muted">
-                                    Allocated Freight/Customs: <strong class="text-warning-emphasis" id="lineOverheadText_{{ forloop.counter0 }}">+Rs. 0.00</strong>
-                                </span>
-                                <span class="text-primary fw-bold fs-xs">
-                                    Calculated Unit Landed Cost: <strong id="unitLandedCostText_{{ forloop.counter0 }}">Rs. 0.00</strong>
-                                </span>
+                        <!-- Top Header Bar -->
+                        <div class="line-item-topbar">
+                            <div class="item-counter-badge">
+                                <span class="counter-dot">{{ forloop.counter }}</span>
+                                <span>Line Item Reference #{{ forloop.counter }}</span>
+                            </div>
+                            <button type="button" class="btn-remove-row" onclick="deleteLineRow('{{ forloop.counter0 }}')" {% if forloop.first and formset|length == 1 %}style="display:none;"{% endif %}>
+                                <i class="fa-regular fa-trash-can"></i> Remove Line
+                            </button>
+                            <div style="display: none;">
+                                {{ item_form.DELETE }}
                             </div>
                         </div>
 
-                        <!-- Hidden serialized IMEI storage field synced with dual-box scanner -->
-                        <div class="col-12" style="display: none;">
-                            {{ item_form.scanned_imei_list }}
+                        <!-- VERTICAL TIER 1: PRODUCT SEARCH (FULL WIDTH) -->
+                        <div class="form-group mb-3">
+                            <label class="form-label">Product / Handset Model <span class="req">*</span></label>
+                            <div class="contextual-search-wrapper" 
+                                 data-search-url="/products/api/search/?mode=simple" 
+                                 data-search-type="product"
+                                 data-placeholder="Scan barcode or type model/brand..."
+                                 data-initial-id="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}"
+                                 data-initial-title="{{ item_form.instance.product.name|default:'' }}"
+                                 data-initial-subtitle="{% if item_form.instance.product.sku %}SKU: {{ item_form.instance.product.sku }}{% endif %}">
+                                <input type="hidden" name="items-{{ forloop.counter0 }}-product" id="id_items-{{ forloop.counter0 }}-product" value="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}" class="grn-product-id-input" required>
+                                <input type="text" class="form-control contextual-search-input async-search-input grn-product-search-input" 
+                                       placeholder="Scan barcode or type model/brand..." 
+                                       value="{% if item_form.instance.product %}{{ item_form.instance.product.name }}{% endif %}" 
+                                       autocomplete="off">
+                            </div>
                         </div>
 
-                        <!-- NON-IMEI BULK ACCESSORY NOTICE BANNER -->
-                        <div class="col-12">
-                            <div class="non-imei-notice-box d-none" id="nonImeiNoticeRow_{{ forloop.counter0 }}">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <span class="badge bg-secondary bg-opacity-10 text-secondary p-2 rounded-circle">
-                                            <i class="fas fa-boxes-stacked"></i>
-                                        </span>
-                                        <div>
-                                            <strong class="text-dark fs-xs d-block">Standard Non-Serialized Accessory / Item</strong>
-                                            <small class="text-muted fs-2xs">Stock will be received directly as quantity count. No individual IMEI scanning required.</small>
-                                        </div>
-                                    </div>
-                                    <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-3 py-2 rounded-pill">
-                                        <i class="fas fa-check-circle me-1"></i> Bulk Count Mode Active
+                        <!-- VERTICAL TIER 2: QUANTITY, PRE-VAT RATE & TARGET MRP (3 EQUAL COLUMNS) -->
+                        <div class="grid grid-cols-3 mb-3">
+                            <div class="form-group">
+                                <label class="form-label">Qty (Units) <span class="req">*</span></label>
+                                <input type="number" step="any" min="1" 
+                                       name="items-{{ forloop.counter0 }}-purchased_quantity" 
+                                       id="id_items-{{ forloop.counter0 }}-purchased_quantity" 
+                                       class="form-control font-mono-val line-qty-input calc-trigger" 
+                                       value="{{ item_form.purchased_quantity.value|default:'1' }}" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Unit Rate (Pre-VAT) <span class="req">*</span></label>
+                                <div class="input-wrap">
+                                    <span class="input-prefix">Rs.</span>
+                                    <input type="number" step="any" min="0" 
+                                           name="items-{{ forloop.counter0 }}-purchase_rate" 
+                                           id="id_items-{{ forloop.counter0 }}-purchase_rate" 
+                                           class="form-control has-prefix font-mono-val line-rate-input calc-trigger" 
+                                           value="{{ item_form.purchase_rate.value|default:'0.00' }}" required>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Target MRP <span class="hint">Retail (NPR)</span></label>
+                                <div class="input-wrap">
+                                    <span class="input-prefix">Rs.</span>
+                                    <input type="number" step="any" min="0" 
+                                           name="items-{{ forloop.counter0 }}-new_selling_price" 
+                                           id="id_items-{{ forloop.counter0 }}-new_selling_price" 
+                                           class="form-control has-prefix font-mono-val" 
+                                           value="{{ item_form.new_selling_price.value|default:'' }}" 
+                                           placeholder="Retail Price">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- VERTICAL TIER 3: FULL-WIDTH ROOMY LINE DISCOUNT BAR -->
+                        <div class="line-discount-vertical-card {% if item_form.discount_type.value != 'NONE' and item_form.discount_type.value %}is-active{% endif %}" id="line-disc-card-{{ forloop.counter0 }}">
+                            <div class="ld-top-bar">
+                                <div class="ld-title-tag">
+                                    <i class="fa-solid fa-tags"></i> Line Discount Rule
+                                </div>
+                                <span class="ld-rebate-tag" id="ld-badge-{{ forloop.counter0 }}">-Rs. 0.00</span>
+                            </div>
+
+                            <div class="ld-controls-flex">
+                                <select name="items-{{ forloop.counter0 }}-discount_type" id="id_items-{{ forloop.counter0 }}-discount_type" class="line-disc-type-select" style="display: none;">
+                                    <option value="NONE" {% if item_form.discount_type.value == 'NONE' or not item_form.discount_type.value %}selected{% endif %}>None</option>
+                                    <option value="PERCENTAGE" {% if item_form.discount_type.value == 'PERCENTAGE' %}selected{% endif %}>Percentage</option>
+                                    <option value="AMOUNT" {% if item_form.discount_type.value == 'AMOUNT' %}selected{% endif %}>Amount</option>
+                                </select>
+
+                                <div class="ld-mode-switch">
+                                    <button type="button" class="ld-mode-btn {% if item_form.discount_type.value == 'NONE' or not item_form.discount_type.value %}active{% endif %}" data-mode="NONE" onclick="setRowDiscType('{{ forloop.counter0 }}', 'NONE')">None</button>
+                                    <button type="button" class="ld-mode-btn {% if item_form.discount_type.value == 'PERCENTAGE' %}active{% endif %}" data-mode="PERCENTAGE" onclick="setRowDiscType('{{ forloop.counter0 }}', 'PERCENTAGE')">% Percentage</button>
+                                    <button type="button" class="ld-mode-btn {% if item_form.discount_type.value == 'AMOUNT' %}active{% endif %}" data-mode="AMOUNT" onclick="setRowDiscType('{{ forloop.counter0 }}', 'AMOUNT')">Rs. Flat</button>
+                                </div>
+
+                                <!-- Roomy Input Field (No more tiny 15px box!) -->
+                                <div class="ld-input-box">
+                                    <span class="ld-prefix-sym" id="ld-sym-{{ forloop.counter0 }}">
+                                        {% if item_form.discount_type.value == 'PERCENTAGE' %}%{% elif item_form.discount_type.value == 'AMOUNT' %}Rs.{% endif %}
                                     </span>
+                                    <input type="number" step="any" min="0" 
+                                           name="items-{{ forloop.counter0 }}-discount_input_value" 
+                                           id="id_items-{{ forloop.counter0 }}-discount_input_value"
+                                           class="ld-input-field line-disc-val-input calc-trigger" 
+                                           value="{{ item_form.discount_input_value.value|default:'0.00' }}"
+                                           {% if item_form.discount_type.value == 'NONE' or not item_form.discount_type.value %}disabled placeholder="No discount"{% endif %}>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- DEDICATED DUAL-IMEI SCANNING WORKSPACE -->
-                        <div class="col-12">
-                            <div class="imei-scan-active-box d-none" id="imeiWorkspaceRow_{{ forloop.counter0 }}">
-                                <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-2 pb-2 border-bottom border-info border-opacity-25">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <span class="scan-indicator-badge bg-primary text-white">
-                                            <i class="fas fa-barcode"></i> Dual-SIM Phone Scanner
-                                        </span>
-                                        <span class="fs-xs fw-bold text-dark" id="imeiProgressText_{{ forloop.counter0 }}">
-                                            Scanned: 0 / 0 Units
-                                        </span>
-                                    </div>
-                                    
-                                    <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-1 fs-2xs fw-bold row-camera-scan-btn shadow-xs" 
-                                            data-row-index="{{ forloop.counter0 }}" 
-                                            title="Scan Mobile Phone Box via Device Camera or Pick Picture">
-                                        <i class="fas fa-camera me-1"></i> Scan Phone Box (Camera / Image)
-                                    </button>
-                                </div>
+                        <!-- Hidden Scanned IMEI Storage Synced to Django Backend -->
+                        <div style="display: none;">
+                            <textarea name="items-{{ forloop.counter0 }}-scanned_imei_list" id="id_items-{{ forloop.counter0 }}-scanned_imei_list" class="scanned-imei-hidden-input">{{ item_form.scanned_imei_list.value|default:'' }}</textarea>
+                        </div>
 
-                                <!-- Dual Input Fields (IMEI 1 & IMEI 2 with 1-Tap Camera Buttons) -->
-                                <div class="row g-2 align-items-center">
-                                    <div class="col-12 col-md-5">
-                                        <div class="input-group input-group-sm">
-                                            <span class="input-group-text bg-primary text-white border-0 fw-bold fs-xs">IMEI 1</span>
-                                            <input type="text" class="form-control font-monospace fw-bold imei-input-field imei1-box" 
-                                                   id="inputImei1_{{ forloop.counter0 }}" 
-                                                   placeholder="Scan / Enter 15-digit Primary IMEI 1..." 
-                                                   maxlength="18" autocomplete="off">
-                                            <button type="button" class="btn btn-outline-primary btn-sm camera-single-scan-btn" 
-                                                    data-row-index="{{ forloop.counter0 }}" 
-                                                    data-target-slot="imei1" 
-                                                    title="Scan IMEI 1 with Camera">
-                                                <i class="fas fa-camera"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="col-12 col-md-5">
-                                        <div class="input-group input-group-sm">
-                                            <span class="input-group-text bg-info text-white border-0 fw-bold fs-xs">IMEI 2</span>
-                                            <input type="text" class="form-control font-monospace fw-bold imei-input-field imei2-box" 
-                                                   id="inputImei2_{{ forloop.counter0 }}" 
-                                                   placeholder="Scan / Enter 15-digit Secondary IMEI 2..." 
-                                                   maxlength="18" autocomplete="off">
-                                            <button type="button" class="btn btn-outline-info btn-sm camera-single-scan-btn" 
-                                                    data-row-index="{{ forloop.counter0 }}" 
-                                                    data-target-slot="imei2" 
-                                                    title="Scan IMEI 2 with Camera">
-                                                <i class="fas fa-camera"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="col-6 col-md-1">
-                                        <button type="button" class="btn btn-outline-secondary btn-sm w-100 rounded-2 fs-2xs skip-imei2-btn" 
-                                                id="skipImei2Btn_{{ forloop.counter0 }}" title="Skip IMEI 2 for Single SIM phones">
-                                            Skip 2
-                                        </button>
-                                    </div>
-                                    <div class="col-6 col-md-1">
-                                        <button type="button" class="btn btn-primary btn-sm w-100 rounded-2 fs-2xs fw-bold add-imei-pair-btn" 
-                                                id="addPairBtn_{{ forloop.counter0 }}" title="Add Device Pair">
-                                            <i class="fas fa-plus"></i> Add
-                                        </button>
-                                    </div>
+                        <!-- VERTICAL TIER 4: METRICS FOOTER STRIP & DUAL-IMEIS -->
+                        <div class="line-footer-strip">
+                            <div class="metrics-pills-group">
+                                <div class="metric-item">
+                                    Line Gross: <strong id="metric-gross-{{ forloop.counter0 }}">Rs. 0.00</strong>
                                 </div>
+                                <div class="metric-item">
+                                    Net Pre-VAT Base: <strong id="metric-net-{{ forloop.counter0 }}" style="color: var(--grn-primary);">Rs. 0.00</strong>
+                                </div>
+                                <div class="metric-item">
+                                    Allocated Overhead: <strong id="metric-overhead-{{ forloop.counter0 }}" style="color: var(--grn-amber-600);">+Rs. 0.00</strong>
+                                </div>
+                            </div>
 
-                                <!-- Scanned IMEI Device List Table -->
-                                <div class="table-responsive mt-3" style="max-height: 180px; overflow-y: auto;">
-                                    <table class="table table-sm table-bordered bg-white mb-0 fs-xs" id="imeiTable_{{ forloop.counter0 }}">
-                                        <thead class="bg-light text-muted text-uppercase fs-2xs">
-                                            <tr>
-                                                <th style="width: 40px;" class="text-center">#</th>
-                                                <th>IMEI 1 (Primary SIM)</th>
-                                                <th>IMEI 2 (Secondary SIM)</th>
-                                                <th style="width: 50px;" class="text-center">Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="imeiTableBody_{{ forloop.counter0 }}">
-                                            <tr>
-                                                <td colspan="4" class="text-center py-2 text-muted">
-                                                    No IMEIs scanned yet. Ready for barcode scanner, camera, or picture file.
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
+                            <div style="display: flex; align-items: center; gap: 14px;">
+                                <button type="button" class="btn-dual-imei" onclick="openDualImeiModal('{{ forloop.counter0 }}')">
+                                    <i class="fa-solid fa-barcode"></i> Dual-IMEIs (<span id="imei-count-tag-{{ forloop.counter0 }}">0 Units</span>)
+                                </button>
+
+                                <div class="cogs-landed-badge">
+                                    <span class="label">Unit Landed COGS:</span>
+                                    <span class="price" id="metric-cogs-{{ forloop.counter0 }}">Rs. 0.00</span>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
 
-        <!-- Real-time Financial Breakdown & Supplier Ledger Settlement Card -->
-        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
-            <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
-                <i class="fas fa-calculator text-primary me-2"></i> 3. Inward Valuation &amp; Supplier Balance Reconciliation
-            </h6>
-            
-            <div class="row g-3">
-                <div class="col-12 col-md-3">
-                    <div class="p-3 bg-light rounded-3 border">
-                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Gross Merchandise Value</span>
-                        <h4 class="fw-bold text-dark font-monospace mb-0" id="grnSummaryGrossText">Rs. 0.00</h4>
                     </div>
-                </div>
-                <div class="col-12 col-md-3">
-                    <div class="p-3 bg-light rounded-3 border">
-                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Total Overheads (Shipping/Duty)</span>
-                        <h4 class="fw-bold text-warning-emphasis font-monospace mb-0" id="grnSummaryOverheadText">Rs. 0.00</h4>
-                    </div>
-                </div>
-                <div class="col-12 col-md-3">
-                    <div class="p-3 bg-light rounded-3 border">
-                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Total Landed Valuation (COGS)</span>
-                        <h4 class="fw-bold text-primary font-monospace mb-0" id="grnSummaryLandedText">Rs. 0.00</h4>
-                    </div>
-                </div>
-                <div class="col-12 col-md-3">
-                    <div class="p-3 bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded-3">
-                        <span class="text-danger fs-2xs text-uppercase fw-bold d-block">Added to Supplier Debt (Due)</span>
-                        <h4 class="fw-bold text-danger font-monospace mb-0" id="grnSummaryDueText">Rs. 0.00</h4>
-                    </div>
+                    {% endfor %}
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- Sticky Submit Footer -->
-        <div class="card border-0 shadow-sm rounded-4 p-4 bg-white d-flex flex-column flex-md-row justify-content-between align-items-center gap-3">
-            <div class="text-muted fs-xs">
-                <i class="fas fa-shield-halved text-success me-1"></i>
-                Stock quantities, landed costs, and serialized IMEI instances will be updated atomically in the database.
+        <!-- SECTION 3: INWARD VALUATION & SUPPLIER BALANCE RECONCILIATION -->
+        <section class="erp-card">
+            <div class="erp-card-header">
+                <div>
+                    <div class="erp-card-title">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        3. Inward Valuation &amp; Supplier Balance Reconciliation
+                    </div>
+                    <div class="erp-card-subtitle">
+                        Live audited summary split into taxable base, VAT liability, logistical overheads, and net payable debt.
+                    </div>
+                </div>
             </div>
-            <div class="d-flex gap-2">
+
+            <div class="erp-card-body">
+                <div class="kpi-deck">
+
+                    <!-- 1. PRE-VAT -->
+                    <div class="kpi-tile tile-blue">
+                        <div>
+                            <div class="tile-top">
+                                <div>
+                                    <div class="tile-step-num">Step 1</div>
+                                    <div class="tile-title">PRE-VAT MERCHANDISE</div>
+                                </div>
+                                <div class="tile-icon-box"><i class="fa-solid fa-cubes"></i></div>
+                            </div>
+                            <div class="tile-amount" id="sum-pre-vat">Rs. 0.00</div>
+                        </div>
+                        <div class="tile-footer">
+                            <span>Gross: <b id="sum-gross-val">Rs. 0.00</b></span>
+                            <span>Disc: <b id="sum-disc-val" style="color: var(--grn-rose-600);">-Rs. 0.00</b></span>
+                        </div>
+                    </div>
+
+                    <!-- 2. VAT 13% -->
+                    <div class="kpi-tile tile-emerald">
+                        <div>
+                            <div class="tile-top">
+                                <div>
+                                    <div class="tile-step-num">Step 2</div>
+                                    <div class="tile-title">DEDICATED 13% VAT</div>
+                                </div>
+                                <div class="tile-icon-box"><i class="fa-solid fa-receipt"></i></div>
+                            </div>
+                            <div class="tile-amount" id="sum-vat-amt">Rs. 0.00</div>
+                        </div>
+                        <div class="tile-footer">
+                            <span id="vat-status-tag">Annex 7 Taxable</span>
+                            <span id="vat-rate-tag">Rate: 13.0%</span>
+                        </div>
+                    </div>
+
+                    <!-- 3. OVERHEADS -->
+                    <div class="kpi-tile tile-amber">
+                        <div>
+                            <div class="tile-top">
+                                <div>
+                                    <div class="tile-step-num">Step 3</div>
+                                    <div class="tile-title">SHIPPING &amp; OVERHEADS</div>
+                                </div>
+                                <div class="tile-icon-box"><i class="fa-solid fa-truck-fast"></i></div>
+                            </div>
+                            <div class="tile-amount" id="sum-overheads">Rs. 0.00</div>
+                        </div>
+                        <div class="tile-footer">
+                            <span>Freight + Customs + Ins.</span>
+                            <span id="sum-overhead-cnt">0 Items Shared</span>
+                        </div>
+                    </div>
+
+                    <!-- 4. TOTAL LANDED COGS -->
+                    <div class="kpi-tile tile-purple">
+                        <div>
+                            <div class="tile-top">
+                                <div>
+                                    <div class="tile-step-num">Step 4</div>
+                                    <div class="tile-title">TOTAL LANDED (COGS)</div>
+                                </div>
+                                <div class="tile-icon-box"><i class="fa-solid fa-warehouse"></i></div>
+                            </div>
+                            <div class="tile-amount" id="sum-total-cogs">Rs. 0.00</div>
+                        </div>
+                        <div class="tile-footer">
+                            <span>Taxable Base + Overheads</span>
+                            <span>Stock Capitalized</span>
+                        </div>
+                    </div>
+
+                    <!-- 5. NET DUE -->
+                    <div class="kpi-tile tile-rose">
+                        <div>
+                            <div class="tile-top">
+                                <div>
+                                    <div class="tile-step-num">Step 5</div>
+                                    <div class="tile-title">NET DUE (SUPPLIER DEBT)</div>
+                                </div>
+                                <div class="tile-icon-box"><i class="fa-solid fa-money-bill-wave"></i></div>
+                            </div>
+                            <div class="tile-amount" id="sum-net-due">Rs. 0.00</div>
+                        </div>
+                        <div class="tile-footer">
+                            <span>Bill: <b id="sum-bill-total">Rs. 0.00</b></span>
+                            <span>Paid: <b id="sum-paid-spot">Rs. 0.00</b></span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <!-- SUBMISSION ACTION DOCK BAR -->
+        <div class="submit-dock-bar">
+            <div class="audit-msg">
+                <i class="fa-solid fa-shield-halved"></i>
+                <span>Pre-VAT valuation, proportional overheads, and dual-IMEIs will be verified and posted atomically to warehouse stock and General Ledger.</span>
+            </div>
+            <div style="display: flex; gap: 12px;">
                 <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary px-4 rounded-pill">
                     Cancel
                 </a>
-                <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm" id="grnSubmitBtn">
-                    <i class="fas fa-check-circle me-1"></i> Verify &amp; Update Warehouse Stock
+                <button type="submit" class="btn-verify-stock" id="btn-final-submit">
+                    <i class="fa-solid fa-circle-check"></i> Verify &amp; Update Warehouse Stock
                 </button>
             </div>
         </div>
+
     </form>
 </div>
 
-<!-- ==========================================================================
-     GRN DEDICATED INWARD CAMERA & IMAGE SCANNER POPUP MODAL
-     ========================================================================== -->
-<div class="modal fade" id="grnCameraScannerModal" tabindex="-1" aria-labelledby="grnCameraScannerModalLabel" aria-hidden="true" data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark text-white">
-            <div class="modal-header border-bottom border-secondary border-opacity-25 py-2 px-3 bg-dark">
-                <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-barcode"></i></span>
-                    <div>
-                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="grnCameraScannerModalLabel">GRN Box Barcode / IMEI Scanner</h6>
-                        <small class="text-white-50 fs-2xs" id="grnModalSubtitle">Inward Smartphone Registration</small>
-                    </div>
+<!-- DUAL IMEI SCANNER MODAL -->
+<div class="modal fade" id="imeiModal" tabindex="-1" aria-labelledby="imeiModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-dark text-white border-0 py-3 px-4">
+                <div>
+                    <h5 class="modal-title fs-sm fw-bold mb-0" id="imeiModalLabel">
+                        <i class="fa-solid fa-barcode text-primary me-2"></i> Scan Mandatory Dual-IMEIs
+                    </h5>
+                    <small class="text-white-50 fs-2xs" id="imeiModalProductTitle">Model Name</small>
                 </div>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" id="closeGrnCameraBtn"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-
-            <div class="modal-body grn-camera-modal-body">
-                <video id="grnCameraFeedVideo" class="grn-camera-video" playsinline autoplay muted></video>
-                
-                <div class="grn-camera-step-banner shadow-sm">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <span class="badge bg-primary fs-2xs px-2 py-1" id="grnModalCurrentStepBadge">STEP 1: SCAN IMEI 1</span>
-                        <span class="text-white-50 fs-2xs font-monospace" id="grnModalProgressCount">0 / 0 Units</span>
-                    </div>
-                    <div class="text-white fs-xs fw-bold text-truncate" id="grnModalProductTitle">Product Name</div>
-                    <div class="text-info fs-2xs mt-1" id="grnModalStepInstruction">
-                        Align <strong>IMEI 1 barcode</strong> on phone packaging inside aiming reticle, or click <strong>Pick Box Picture</strong> below.
-                    </div>
+            <div class="modal-body p-4" style="max-height: 480px; overflow-y: auto;">
+                <div class="alert alert-info border-0 rounded-3 p-3 fs-xs mb-3">
+                    <i class="fa-solid fa-circle-info me-1"></i> Both IMEI 1 and IMEI 2 are validated against NTA MDMS schema to prevent grey-market white-listing errors.
                 </div>
-
-                <div class="grn-scanner-viewfinder">
-                    <div class="grn-aiming-reticle">
-                        <div class="grn-corner-tr"></div>
-                        <div class="grn-corner-bl"></div>
-                        <div class="grn-laser-line"></div>
-                    </div>
-                </div>
-
-                <div class="position-absolute bottom-0 start-0 end-0 p-3 d-flex justify-content-center flex-wrap gap-2 z-3">
-                    <label class="btn btn-primary btn-sm rounded-pill px-3 py-1 bg-opacity-90 fs-xs fw-bold shadow-sm" style="cursor: pointer;">
-                        <i class="fas fa-image me-1"></i> Pick Box Picture
-                        <input type="file" id="grnModalImageFileInput" accept="image/*" style="display: none;">
-                    </label>
-
-                    <button type="button" class="btn btn-outline-warning btn-sm rounded-pill px-3 py-1 bg-dark bg-opacity-75 fs-xs fw-bold" id="grnModalSkipImei2Btn" style="display: none;">
-                        <i class="fas fa-forward me-1"></i> Single SIM (Skip IMEI 2)
-                    </button>
-                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="grnTorchToggleBtn" style="display: none;">
-                        <i class="fas fa-bolt me-1 text-warning"></i> Flash
-                    </button>
-                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="grnSwitchLensBtn">
-                        <i class="fas fa-camera-rotate me-1 text-info"></i> Flip Lens
-                    </button>
-                </div>
+                <table class="table table-bordered table-sm fs-xs mb-0">
+                    <thead class="bg-light text-muted">
+                        <tr>
+                            <th width="40" class="text-center">#</th>
+                            <th>Primary IMEI 1 (15-digits)</th>
+                            <th>Secondary IMEI 2 (15-digits)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="imeiModalTableBody"></tbody>
+                </table>
             </div>
-
-            <div class="modal-footer border-top border-secondary border-opacity-25 py-2 px-3 bg-dark d-flex justify-content-between align-items-center">
-                <div class="fs-2xs text-white-50" id="grnCameraStatusText">
-                    <i class="fas fa-circle-notch fa-spin me-1 text-primary"></i> 15 FPS Active &bull; Ready
-                </div>
-                <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 py-1 fs-xs" data-bs-dismiss="modal">
-                    Finish &amp; Close Scanner
+            <div class="modal-footer bg-light border-0 py-2 px-3 d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" onclick="saveDualImeisFromModal()">
+                    <i class="fa-solid fa-check me-1"></i> Save IMEIs
                 </button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Extra hidden empty form template for dynamic "+ Add Another Line" -->
-<div id="emptyFormTemplate" style="display: none;">
-    <div class="grn-line-item-row" data-row-index="__prefix__">
-        {{ formset.empty_form.id }}
-        <div class="row g-3 align-items-end">
-            <div class="col-12 col-md-3">
-                <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
-                {{ formset.empty_form.product }}
+<!-- ==========================================================================
+     DYNAMIC ROW TEMPLATE FOR CLIENT-SIDE ADD LINE (MATCHES VERTICAL TIERS)
+     ========================================================================== -->
+<div id="empty-row-template" style="display: none;">
+    <div class="line-item-card" data-row-index="__prefix__" id="line-item-__prefix__">
+        <div class="line-item-topbar">
+            <div class="item-counter-badge">
+                <span class="counter-dot">#</span>
+                <span>Line Item Reference</span>
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-bold text-dark fs-xs">Quantity (Units) <span class="text-danger">*</span></label>
-                {{ formset.empty_form.purchased_quantity }}
+            <button type="button" class="btn-remove-row" onclick="deleteLineRow('__prefix__')">
+                <i class="fa-regular fa-trash-can"></i> Remove Line
+            </button>
+            <div style="display: none;">
+                <input type="checkbox" name="items-__prefix__-DELETE" id="id_items-__prefix__-DELETE">
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-bold text-dark fs-xs">Unit Purchase Rate <span class="text-danger">*</span></label>
-                {{ formset.empty_form.purchase_rate }}
+        </div>
+
+        <div class="form-group mb-3">
+            <label class="form-label">Product / Handset Model <span class="req">*</span></label>
+            <div class="contextual-search-wrapper" 
+                 data-search-url="/products/api/search/?mode=simple" 
+                 data-search-type="product"
+                 data-placeholder="Scan barcode or type model/brand...">
+                <input type="hidden" name="items-__prefix__-product" id="id_items-__prefix__-product" class="grn-product-id-input" required>
+                <input type="text" class="form-control contextual-search-input async-search-input grn-product-search-input" 
+                       placeholder="Scan barcode or type model/brand..." 
+                       autocomplete="off">
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-bold text-dark fs-xs">Target Selling MRP (NPR)</label>
-                {{ formset.empty_form.new_selling_price }}
+        </div>
+
+        <div class="grid grid-cols-3 mb-3">
+            <div class="form-group">
+                <label class="form-label">Qty (Units) <span class="req">*</span></label>
+                <input type="number" step="any" min="1" 
+                       name="items-__prefix__-purchased_quantity" 
+                       id="id_items-__prefix__-purchased_quantity" 
+                       class="form-control font-mono-val line-qty-input calc-trigger" 
+                       value="1" required>
             </div>
-            <div class="col-6 col-md-1">
-                <label class="form-label fw-bold text-dark fs-xs">Disc (%)</label>
-                {{ formset.empty_form.discount_percent }}
-            </div>
-            <div class="col-6 col-md-2 text-end">
-                <div class="form-check form-check-inline mt-4">
-                    {{ formset.empty_form.DELETE }}
-                    <label class="form-check-label text-danger fs-2xs fw-bold">Remove Line</label>
+
+            <div class="form-group">
+                <label class="form-label">Unit Rate (Pre-VAT) <span class="req">*</span></label>
+                <div class="input-wrap">
+                    <span class="input-prefix">Rs.</span>
+                    <input type="number" step="any" min="0" 
+                           name="items-__prefix__-purchase_rate" 
+                           id="id_items-__prefix__-purchase_rate" 
+                           class="form-control has-prefix font-mono-val line-rate-input calc-trigger" 
+                           value="0.00" required>
                 </div>
             </div>
 
-            <!-- Real-time Computed Overhead & Landed Cost Preview Badge -->
-            <div class="col-12">
-                <div class="p-2 bg-light rounded border d-flex flex-wrap justify-content-between align-items-center fs-2xs font-monospace">
-                    <span class="text-muted">
-                        Line Value: <strong class="text-dark" id="lineValueText___prefix__">Rs. 0.00</strong>
-                    </span>
-                    <span class="text-muted">
-                        Allocated Freight/Customs: <strong class="text-warning-emphasis" id="lineOverheadText___prefix__">+Rs. 0.00</strong>
-                    </span>
-                    <span class="text-primary fw-bold fs-xs">
-                        Calculated Unit Landed Cost: <strong id="unitLandedCostText___prefix__">Rs. 0.00</strong>
-                    </span>
+            <div class="form-group">
+                <label class="form-label">Target MRP <span class="hint">Retail (NPR)</span></label>
+                <div class="input-wrap">
+                    <span class="input-prefix">Rs.</span>
+                    <input type="number" step="any" min="0" 
+                           name="items-__prefix__-new_selling_price" 
+                           id="id_items-__prefix__-new_selling_price" 
+                           class="form-control has-prefix font-mono-val" 
+                           placeholder="Retail Price">
+                </div>
+            </div>
+        </div>
+
+        <div class="line-discount-vertical-card" id="line-disc-card-__prefix__">
+            <div class="ld-top-bar">
+                <div class="ld-title-tag">
+                    <i class="fa-solid fa-tags"></i> Line Discount Rule
+                </div>
+                <span class="ld-rebate-tag" id="ld-badge-__prefix__">-Rs. 0.00</span>
+            </div>
+
+            <div class="ld-controls-flex">
+                <select name="items-__prefix__-discount_type" id="id_items-__prefix__-discount_type" class="line-disc-type-select" style="display: none;">
+                    <option value="NONE" selected>None</option>
+                    <option value="PERCENTAGE">Percentage</option>
+                    <option value="AMOUNT">Amount</option>
+                </select>
+
+                <div class="ld-mode-switch">
+                    <button type="button" class="ld-mode-btn active" data-mode="NONE" onclick="setRowDiscType('__prefix__', 'NONE')">None</button>
+                    <button type="button" class="ld-mode-btn" data-mode="PERCENTAGE" onclick="setRowDiscType('__prefix__', 'PERCENTAGE')">% Percentage</button>
+                    <button type="button" class="ld-mode-btn" data-mode="AMOUNT" onclick="setRowDiscType('__prefix__', 'AMOUNT')">Rs. Flat</button>
+                </div>
+
+                <div class="ld-input-box">
+                    <span class="ld-prefix-sym" id="ld-sym-__prefix__"></span>
+                    <input type="number" step="any" min="0" 
+                           name="items-__prefix__-discount_input_value" 
+                           id="id_items-__prefix__-discount_input_value"
+                           class="ld-input-field line-disc-val-input calc-trigger" 
+                           value="0.00" disabled placeholder="No discount">
+                </div>
+            </div>
+        </div>
+
+        <div style="display: none;">
+            <textarea name="items-__prefix__-scanned_imei_list" id="id_items-__prefix__-scanned_imei_list" class="scanned-imei-hidden-input"></textarea>
+        </div>
+
+        <div class="line-footer-strip">
+            <div class="metrics-pills-group">
+                <div class="metric-item">
+                    Line Gross: <strong id="metric-gross-__prefix__">Rs. 0.00</strong>
+                </div>
+                <div class="metric-item">
+                    Net Pre-VAT Base: <strong id="metric-net-__prefix__" style="color: var(--grn-primary);">Rs. 0.00</strong>
+                </div>
+                <div class="metric-item">
+                    Allocated Overhead: <strong id="metric-overhead-__prefix__" style="color: var(--grn-amber-600);">+Rs. 0.00</strong>
                 </div>
             </div>
 
-            <div class="col-12" style="display: none;">
-                {{ formset.empty_form.scanned_imei_list }}
-            </div>
+            <div style="display: flex; align-items: center; gap: 14px;">
+                <button type="button" class="btn-dual-imei" onclick="openDualImeiModal('__prefix__')">
+                    <i class="fa-solid fa-barcode"></i> Dual-IMEIs (<span id="imei-count-tag-__prefix__">0 Units</span>)
+                </button>
 
-            <!-- NON-IMEI BULK ACCESSORY NOTICE BANNER -->
-            <div class="col-12">
-                <div class="non-imei-notice-box d-none" id="nonImeiNoticeRow___prefix__">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="badge bg-secondary bg-opacity-10 text-secondary p-2 rounded-circle">
-                                <i class="fas fa-boxes-stacked"></i>
-                            </span>
-                            <div>
-                                <strong class="text-dark fs-xs d-block">Standard Non-Serialized Accessory / Item</strong>
-                                <small class="text-muted fs-2xs">Stock will be received directly as quantity count. No individual IMEI scanning required.</small>
-                            </div>
-                        </div>
-                        <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-3 py-2 rounded-pill">
-                            <i class="fas fa-check-circle me-1"></i> Bulk Count Mode Active
-                        </span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- DEDICATED DUAL-IMEI SCANNING WORKSPACE -->
-            <div class="col-12">
-                <div class="imei-scan-active-box d-none" id="imeiWorkspaceRow___prefix__">
-                    <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-2 pb-2 border-bottom border-info border-opacity-25">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="scan-indicator-badge bg-primary text-white">
-                                <i class="fas fa-barcode"></i> Dual-SIM Phone Scanner
-                            </span>
-                            <span class="fs-xs fw-bold text-dark" id="imeiProgressText___prefix__">
-                                Scanned: 0 / 0 Units
-                            </span>
-                        </div>
-                        
-                        <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-1 fs-2xs fw-bold row-camera-scan-btn shadow-xs" 
-                                data-row-index="__prefix__" 
-                                title="Scan Mobile Phone Box via Device Camera or Pick Picture">
-                            <i class="fas fa-camera me-1"></i> Scan Phone Box (Camera / Image)
-                        </button>
-                    </div>
-
-                    <div class="row g-2 align-items-center">
-                        <div class="col-12 col-md-5">
-                            <div class="input-group input-group-sm">
-                                <span class="input-group-text bg-primary text-white border-0 fw-bold fs-xs">IMEI 1</span>
-                                <input type="text" class="form-control font-monospace fw-bold imei-input-field imei1-box" 
-                                       id="inputImei1___prefix__" 
-                                       placeholder="Scan / Enter 15-digit Primary IMEI 1..." 
-                                       maxlength="18" autocomplete="off">
-                                <button type="button" class="btn btn-outline-primary btn-sm camera-single-scan-btn" 
-                                        data-row-index="__prefix__" 
-                                        data-target-slot="imei1" 
-                                        title="Scan IMEI 1 with Camera">
-                                    <i class="fas fa-camera"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="col-12 col-md-5">
-                            <div class="input-group input-group-sm">
-                                <span class="input-group-text bg-info text-white border-0 fw-bold fs-xs">IMEI 2</span>
-                                <input type="text" class="form-control font-monospace fw-bold imei-input-field imei2-box" 
-                                       id="inputImei2___prefix__" 
-                                       placeholder="Scan / Enter 15-digit Secondary IMEI 2..." 
-                                       maxlength="18" autocomplete="off">
-                                <button type="button" class="btn btn-outline-info btn-sm camera-single-scan-btn" 
-                                        data-row-index="__prefix__" 
-                                        data-target-slot="imei2" 
-                                        title="Scan IMEI 2 with Camera">
-                                    <i class="fas fa-camera"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="col-6 col-md-1">
-                            <button type="button" class="btn btn-outline-secondary btn-sm w-100 rounded-2 fs-2xs skip-imei2-btn" 
-                                    id="skipImei2Btn___prefix__" title="Skip IMEI 2 for Single SIM phones">
-                                Skip 2
-                            </button>
-                        </div>
-                        <div class="col-6 col-md-1">
-                            <button type="button" class="btn btn-primary btn-sm w-100 rounded-2 fs-2xs fw-bold add-imei-pair-btn" 
-                                    id="addPairBtn___prefix__" title="Add Device Pair">
-                                <i class="fas fa-plus"></i> Add
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="table-responsive mt-3" style="max-height: 180px; overflow-y: auto;">
-                        <table class="table table-sm table-bordered bg-white mb-0 fs-xs" id="imeiTable___prefix__">
-                            <thead class="bg-light text-muted text-uppercase fs-2xs">
-                                <tr>
-                                    <th style="width: 40px;" class="text-center">#</th>
-                                    <th>IMEI 1 (Primary SIM)</th>
-                                    <th>IMEI 2 (Secondary SIM)</th>
-                                    <th style="width: 50px;" class="text-center">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="imeiTableBody___prefix__">
-                                <tr>
-                                    <td colspan="4" class="text-center py-2 text-muted">
-                                        No IMEIs scanned yet. Ready for barcode scanner, camera, or picture file.
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="cogs-landed-badge">
+                    <span class="label">Unit Landed COGS:</span>
+                    <span class="price" id="metric-cogs-__prefix__">Rs. 0.00</span>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<script src="{% static 'js/camera_barcode_scanner.js' %}"></script>
+<!-- ==========================================================================
+     REACTIVE MATHEMATICAL JAVASCRIPT ENGINE
+     ========================================================================== -->
 <script>
-/**
- * Interactive Dual-IMEI Inward Scanner & Proportional Overhead Controller
- * OPTIMIZED: Uses on-demand async metadata fetching with client-side caching.
- */
-class GRNDualIMEIController {
-    constructor() {
-        this.deviceStore = {};
-        this.productMetaCache = {};
-        
-        // Camera Session State
-        this.activeCameraRow = null;
-        this.activeCameraSlot = 'dual_sequential';
-        this.tempImei1 = '';
-
-        this.cameraScanner = new CameraBarcodeScanner({
-            facingMode: 'environment',
-            cooldown: 1100
-        });
-
-        this.cameraModalEl = document.getElementById('grnCameraScannerModal');
-        this.cameraModal = this.cameraModalEl ? new bootstrap.Modal(this.cameraModalEl) : null;
-        this.cameraVideoEl = document.getElementById('grnCameraFeedVideo');
-
-        this.initRows();
-        this.bindEvents();
-        this.bindCameraEvents();
-        this.recalculateAllFinancials();
-    }
-
-    initRows() {
-        document.querySelectorAll('.grn-line-item-row').forEach(row => {
-            const idx = row.dataset.rowIndex;
-            if (idx !== '__prefix__') {
-                this.initRowState(idx);
-            }
-        });
-    }
-
-    initRowState(idx) {
-        this.deviceStore[idx] = [];
-
-        const hiddenField = document.querySelector(`[name="items-${idx}-scanned_imei_list"]`);
-        if (hiddenField && hiddenField.value.trim() !== '') {
-            const lines = hiddenField.value.trim().split(/[\n,;]+/);
-            lines.forEach(line => {
-                const parts = line.split('|');
-                const im1 = parts[0] ? parts[0].trim() : '';
-                const im2 = parts[1] ? parts[1].trim() : '';
-                if (im1 || im2) {
-                    this.deviceStore[idx].push({ imei1: im1, imei2: im2 });
-                }
-            });
-        }
-
-        this.updateRowTrackingMode(idx);
-    }
-
-    /**
-     * Asynchronously resolves product tracking metadata without bloating HTML payload.
-     */
-    async fetchProductMeta(productId) {
-        if (!productId) return null;
-        if (this.productMetaCache[productId]) {
-            return this.productMetaCache[productId];
-        }
-
-        try {
-            const resp = await fetch(`/products/api/search/?id=${encodeURIComponent(productId)}`);
-            if (resp.ok) {
-                const data = await resp.json();
-                const prod = Array.isArray(data) ? data[0] : (data.results ? data.results[0] : data);
-                if (prod) {
-                    const resolved = {
-                        requires_imei: Boolean(prod.requires_imei || prod.requires_imei_tracking || prod.track_imei),
-                        requires_serial: Boolean(prod.requires_serial || prod.requires_serial_tracking),
-                        sim_config: prod.sim_configuration || prod.sim_config || 'DUAL_SIM',
-                        purchase_price: prod.purchase_price || 0
-                    };
-                    this.productMetaCache[productId] = resolved;
-                    return resolved;
-                }
-            }
-        } catch (e) {
-            console.warn('[GRN] On-demand product lookup failed, using heuristic fallback:', e);
-        }
-
-        // Heuristic fallback based on select option label
-        const opt = document.querySelector(`select[name$="-product"] option[value="${productId}"]`);
-        const text = opt ? opt.text.toLowerCase() : '';
-        const fallback = {
-            requires_imei: text.includes('phone') || text.includes('mobile') || text.includes('smartphone') || text.includes('iphone') || text.includes('galaxy') || text.includes('redmi'),
-            requires_serial: false,
-            sim_config: 'DUAL_SIM',
-            purchase_price: 0
-        };
-        this.productMetaCache[productId] = fallback;
-        return fallback;
-    }
-
-    async isProductTracked(productId) {
-        if (!productId) return false;
-        const meta = await this.fetchProductMeta(productId);
-        return Boolean(meta && (meta.requires_imei || meta.requires_serial));
-    }
-
-    async updateRowTrackingMode(idx) {
-        const row = document.querySelector(`.grn-line-item-row[data-row-index="${idx}"]`);
-        if (!row) return;
-
-        const prodSelect = row.querySelector('select[name$="-product"]');
-        const prodId = prodSelect ? prodSelect.value : '';
-        const imeiWorkspace = document.getElementById(`imeiWorkspaceRow_${idx}`);
-        const nonImeiNotice = document.getElementById(`nonImeiNoticeRow_${idx}`);
-
-        if (!prodId) {
-            if (imeiWorkspace) imeiWorkspace.classList.add('d-none');
-            if (nonImeiNotice) nonImeiNotice.classList.add('d-none');
-            return;
-        }
-
-        const isTracked = await this.isProductTracked(prodId);
-
-        if (isTracked) {
-            if (imeiWorkspace) imeiWorkspace.classList.remove('d-none');
-            if (nonImeiNotice) nonImeiNotice.classList.add('d-none');
-            this.renderRowTable(idx);
-        } else {
-            if (imeiWorkspace) imeiWorkspace.classList.add('d-none');
-            if (nonImeiNotice) nonImeiNotice.classList.remove('d-none');
-            this.deviceStore[idx] = [];
-            this.syncHiddenPayload(idx);
-        }
-    }
-
-    renderRowTable(idx) {
-        const tableBody = document.getElementById(`imeiTableBody_${idx}`);
-        const progressText = document.getElementById(`imeiProgressText_${idx}`);
-        const qtyInput = document.querySelector(`[name="items-${idx}-purchased_quantity"]`);
-        const targetQty = parseInt(qtyInput?.value || 0, 10);
-        const devices = this.deviceStore[idx] || [];
-
-        if (progressText) {
-            progressText.innerText = `Scanned: ${devices.length} / ${targetQty} Units`;
-            if (targetQty > 0 && devices.length === targetQty) {
-                progressText.className = 'fs-xs fw-bold text-success';
-                progressText.innerHTML = `<i class="fas fa-check-circle me-1"></i> All ${targetQty} Units Complete`;
-            } else if (devices.length > targetQty) {
-                progressText.className = 'fs-xs fw-bold text-danger';
-                progressText.innerHTML = `<i class="fas fa-triangle-exclamation me-1"></i> Over-scanned: ${devices.length} / ${targetQty}`;
-            } else {
-                progressText.className = 'fs-xs fw-bold text-dark';
-            }
-        }
-
-        if (!tableBody) return;
-
-        if (devices.length === 0) {
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="4" class="text-center py-2 text-muted">
-                        No IMEIs scanned yet. Ready for barcode scanner, camera, or picture file.
-                    </td>
-                </tr>
-            `;
-        } else {
-            tableBody.innerHTML = devices.map((dev, i) => `
-                <tr>
-                    <td class="text-center fw-bold font-monospace">${i + 1}</td>
-                    <td>
-                        <span class="imei-badge-pill bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">
-                            ${dev.imei1 || '<em class="text-muted">None</em>'}
-                        </span>
-                    </td>
-                    <td>
-                        ${dev.imei2 ? `
-                            <span class="imei-badge-pill bg-info bg-opacity-10 text-info border border-info border-opacity-25">
-                                ${dev.imei2}
-                            </span>
-                        ` : '<span class="text-muted fs-2xs font-monospace">Single SIM / N/A</span>'}
-                    </td>
-                    <td class="text-center">
-                        <button type="button" class="btn btn-link text-danger p-0 border-0 remove-device-btn" 
-                                data-row="${idx}" data-device-index="${i}" title="Remove device">
-                            <i class="fas fa-trash-can"></i>
-                        </button>
-                    </td>
-                </tr>
-            `).join('');
-        }
-
-        this.syncHiddenPayload(idx);
-    }
-
-    syncHiddenPayload(idx) {
-        const hiddenField = document.querySelector(`[name="items-${idx}-scanned_imei_list"]`);
-        if (!hiddenField) return;
-
-        const devices = this.deviceStore[idx] || [];
-        hiddenField.value = devices.map(d => {
-            if (d.imei2) return `${d.imei1}|${d.imei2}`;
-            return d.imei1;
-        }).join('\n');
-    }
-
-    addDevicePair(idx, imei1Val = null, imei2Val = null) {
-        const imei1Input = document.getElementById(`inputImei1_${idx}`);
-        const imei2Input = document.getElementById(`inputImei2_${idx}`);
-
-        const imei1 = (imei1Val !== null ? imei1Val : (imei1Input ? imei1Input.value : '')).trim();
-        const imei2 = (imei2Val !== null ? imei2Val : (imei2Input ? imei2Input.value : '')).trim();
-
-        if (!imei1 && !imei2) {
-            alert('Please scan or enter at least IMEI 1.');
-            if (imei1Input) imei1Input.focus();
-            return false;
-        }
-
-        if (imei1 && imei2 && imei1 === imei2) {
-            alert('Error: IMEI 1 and IMEI 2 cannot be identical.');
-            if (imei2Input) {
-                imei2Input.value = '';
-                imei2Input.focus();
-            }
-            return false;
-        }
-
-        const existsInRow = (this.deviceStore[idx] || []).some(d => 
-            (imei1 && (d.imei1 === imei1 || d.imei2 === imei1)) ||
-            (imei2 && (d.imei1 === imei2 || d.imei2 === imei2))
-        );
-
-        if (existsInRow) {
-            alert(`Warning: IMEI ${imei1 || imei2} has already been scanned in this consignment.`);
-            return false;
-        }
-
-        if (!this.deviceStore[idx]) this.deviceStore[idx] = [];
-        this.deviceStore[idx].push({ imei1: imei1, imei2: imei2 });
-
-        if (imei1Input) imei1Input.value = '';
-        if (imei2Input) imei2Input.value = '';
-
-        this.renderRowTable(idx);
-
-        if (imei1Input) imei1Input.focus();
-        return true;
-    }
-
-    removeDevice(idx, deviceIdx) {
-        if (this.deviceStore[idx] && this.deviceStore[idx][deviceIdx] !== undefined) {
-            this.deviceStore[idx].splice(deviceIdx, 1);
-            this.renderRowTable(idx);
-        }
-    }
-
-    // =========================================================================
-    // VALUE-BASED OVERHEAD DISTRIBUTION & REAL-TIME FINANCIALS
-    // =========================================================================
-    recalculateAllFinancials() {
-        const freight = parseFloat(document.querySelector('[name="extra_freight_charge"]')?.value || 0) || 0;
-        const customs = parseFloat(document.querySelector('[name="customs_import_charge"]')?.value || 0) || 0;
-        const handling = parseFloat(document.querySelector('[name="other_handling_charge"]')?.value || 0) || 0;
-        const totalOverheads = freight + customs + handling;
-
-        const paid = parseFloat(document.querySelector('[name="paid_amount"]')?.value || 0) || 0;
-
-        let totalMerchandiseValue = 0;
-        const lineValues = {};
-
-        document.querySelectorAll('.grn-line-item-row').forEach(row => {
-            const idx = row.dataset.rowIndex;
-            if (idx === '__prefix__') return;
-
-            const deleteCheck = row.querySelector(`[name="items-${idx}-DELETE"]`);
-            if (deleteCheck && deleteCheck.checked) return;
-
-            const qty = parseFloat(row.querySelector(`[name="items-${idx}-purchased_quantity"]`)?.value || 0) || 0;
-            const rate = parseFloat(row.querySelector(`[name="items-${idx}-purchase_rate"]`)?.value || 0) || 0;
-            const discPct = parseFloat(row.querySelector(`[name="items-${idx}-discount_percent"]`)?.value || 0) || 0;
-
-            const lineGross = qty * rate;
-            const lineDiscount = lineGross * (discPct / 100);
-            const lineNetValue = Math.max(0, lineGross - lineDiscount);
-
-            lineValues[idx] = { qty, lineNetValue };
-            totalMerchandiseValue += lineNetValue;
-        });
-
-        const overheadRate = totalMerchandiseValue > 0 ? (totalOverheads / totalMerchandiseValue) : 0;
-
-        document.querySelectorAll('.grn-line-item-row').forEach(row => {
-            const idx = row.dataset.rowIndex;
-            if (idx === '__prefix__') return;
-
-            const lineValText = document.getElementById(`lineValueText_${idx}`);
-            const lineOverheadText = document.getElementById(`lineOverheadText_${idx}`);
-            const unitLandedText = document.getElementById(`unitLandedCostText_${idx}`);
-
-            if (lineValues[idx]) {
-                const { qty, lineNetValue } = lineValues[idx];
-                const allocatedLineOverhead = lineNetValue * overheadRate;
-                const totalLineLanded = lineNetValue + allocatedLineOverhead;
-                const unitLanded = qty > 0 ? (totalLineLanded / qty) : 0;
-
-                if (lineValText) lineValText.innerText = `Rs. ${lineNetValue.toFixed(2)}`;
-                if (lineOverheadText) lineOverheadText.innerText = `+Rs. ${allocatedLineOverhead.toFixed(2)}`;
-                if (unitLandedText) unitLandedText.innerText = `Rs. ${unitLanded.toFixed(2)}`;
-            }
-        });
-
-        const totalLanded = totalMerchandiseValue + totalOverheads;
-        const due = Math.max(0, totalLanded - paid);
-
-        const grossSummaryEl = document.getElementById('grnSummaryGrossText');
-        const overheadSummaryEl = document.getElementById('grnSummaryOverheadText');
-        const landedSummaryEl = document.getElementById('grnSummaryLandedText');
-        const dueSummaryEl = document.getElementById('grnSummaryDueText');
-
-        if (grossSummaryEl) grossSummaryEl.innerText = `Rs. ${totalMerchandiseValue.toFixed(2)}`;
-        if (overheadSummaryEl) overheadSummaryEl.innerText = `Rs. ${totalOverheads.toFixed(2)}`;
-        if (landedSummaryEl) landedSummaryEl.innerText = `Rs. ${totalLanded.toFixed(2)}`;
-        if (dueSummaryEl) dueSummaryEl.innerText = `Rs. ${due.toFixed(2)}`;
-    }
-
-    // =========================================================================
-    // CAMERA & IMAGE SCANNING WORKFLOW
-    // =========================================================================
-    openCameraForDualSequential(rowIdx) {
-        this.activeCameraRow = rowIdx;
-        this.activeCameraSlot = 'dual_sequential';
-        this.tempImei1 = '';
-        this.updateCameraModalState('STEP 1: SCAN IMEI 1', 'Align IMEI 1 barcode inside frame or click <strong>Pick Box Picture</strong>.');
-
-        const skipBtn = document.getElementById('grnModalSkipImei2Btn');
-        if (skipBtn) skipBtn.style.display = 'none';
-
-        if (this.cameraModal) this.cameraModal.show();
-    }
-
-    openCameraForSingleSlot(rowIdx, slot) {
-        this.activeCameraRow = rowIdx;
-        this.activeCameraSlot = slot;
-        this.tempImei1 = '';
-        
-        const label = slot === 'imei1' ? 'SCAN IMEI 1 ONLY' : 'SCAN IMEI 2 ONLY';
-        this.updateCameraModalState(label, `Align ${slot.toUpperCase()} barcode inside aiming frame or pick image.`);
-        
-        const skipBtn = document.getElementById('grnModalSkipImei2Btn');
-        if (skipBtn) skipBtn.style.display = 'none';
-
-        if (this.cameraModal) this.cameraModal.show();
-    }
-
-    updateCameraModalState(stepBadge, instruction) {
-        const badgeEl = document.getElementById('grnModalCurrentStepBadge');
-        const instEl = document.getElementById('grnModalStepInstruction');
-        const prodTitle = document.getElementById('grnModalProductTitle');
-        const progCount = document.getElementById('grnModalProgressCount');
-
-        const prodSelect = document.querySelector(`select[name="items-${this.activeCameraRow}-product"]`);
-        const prodName = prodSelect && prodSelect.selectedIndex >= 0 ? prodSelect.options[prodSelect.selectedIndex].text : 'Phone Model';
-        
-        const qtyInput = document.querySelector(`[name="items-${this.activeCameraRow}-purchased_quantity"]`);
-        const targetQty = parseInt(qtyInput?.value || 0, 10);
-        const currentCount = (this.deviceStore[this.activeCameraRow] || []).length;
-
-        if (badgeEl) badgeEl.innerText = stepBadge;
-        if (instEl) instEl.innerHTML = instruction;
-        if (prodTitle) prodTitle.innerText = prodName;
-        if (progCount) progCount.innerText = `${currentCount} / ${targetQty} Units Scanned`;
-    }
-
-    handleCameraScanResult(scannedCode) {
-        const cleanCode = scannedCode.trim();
-        const rowIdx = this.activeCameraRow;
-        if (rowIdx === null) return;
-
-        const qtyInput = document.querySelector(`[name="items-${rowIdx}-purchased_quantity"]`);
-        const targetQty = parseInt(qtyInput?.value || 0, 10);
-
-        if (this.activeCameraSlot === 'imei1') {
-            const input1 = document.getElementById(`inputImei1_${rowIdx}`);
-            if (input1) input1.value = cleanCode;
-            this.cameraModal.hide();
-            return;
-        }
-        if (this.activeCameraSlot === 'imei2') {
-            const input2 = document.getElementById(`inputImei2_${rowIdx}`);
-            if (input2) input2.value = cleanCode;
-            this.cameraModal.hide();
-            return;
-        }
-
-        if (this.activeCameraSlot === 'dual_sequential') {
-            if (!this.tempImei1) {
-                this.tempImei1 = cleanCode;
-                this.updateCameraModalState(
-                    'STEP 2: SCAN IMEI 2 (SAME BOX)',
-                    `Captured IMEI 1: <strong class="text-warning">${cleanCode}</strong>. Now scan <strong>IMEI 2</strong> or pick image again.`
-                );
-
-                const skipBtn = document.getElementById('grnModalSkipImei2Btn');
-                if (skipBtn) skipBtn.style.display = 'inline-flex';
-
-            } else {
-                const imei2 = cleanCode;
-                if (imei2 === this.tempImei1) {
-                    alert('IMEI 2 cannot be identical to IMEI 1.');
-                    return;
-                }
-
-                const added = this.addDevicePair(rowIdx, this.tempImei1, imei2);
-                this.tempImei1 = '';
-
-                if (added) {
-                    const updatedCount = (this.deviceStore[rowIdx] || []).length;
-                    if (targetQty > 0 && updatedCount >= targetQty) {
-                        this.cameraModal.hide();
-                    } else {
-                        this.updateCameraModalState(
-                            `STEP 1: SCAN NEXT UNIT (${updatedCount + 1}/${targetQty})`,
-                            'Device paired! Scan <strong>IMEI 1</strong> for the next phone box.'
-                        );
-                        const skipBtn = document.getElementById('grnModalSkipImei2Btn');
-                        if (skipBtn) skipBtn.style.display = 'none';
-                    }
-                }
-            }
-        }
-    }
-
-    skipCameraImei2() {
-        if (!this.tempImei1 || this.activeCameraRow === null) return;
-        
-        const rowIdx = this.activeCameraRow;
-        const qtyInput = document.querySelector(`[name="items-${rowIdx}-purchased_quantity"]`);
-        const targetQty = parseInt(qtyInput?.value || 0, 10);
-
-        const added = this.addDevicePair(rowIdx, this.tempImei1, '');
-        this.tempImei1 = '';
-
-        const skipBtn = document.getElementById('grnModalSkipImei2Btn');
-        if (skipBtn) skipBtn.style.display = 'none';
-
-        if (added) {
-            const updatedCount = (this.deviceStore[rowIdx] || []).length;
-            if (targetQty > 0 && updatedCount >= targetQty) {
-                this.cameraModal.hide();
-            } else {
-                this.updateCameraModalState(
-                    `STEP 1: SCAN NEXT UNIT (${updatedCount + 1}/${targetQty})`,
-                    'Single-SIM unit added! Scan <strong>IMEI 1</strong> for the next phone box.'
-                );
-            }
-        }
-    }
-
-    bindCameraEvents() {
-        if (this.cameraModalEl && this.cameraVideoEl) {
-            this.cameraModalEl.addEventListener('shown.bs.modal', async () => {
-                await this.cameraScanner.start(
-                    this.cameraVideoEl,
-                    (code) => this.handleCameraScanResult(code),
-                    (err) => {
-                        const statusEl = document.getElementById('grnCameraStatusText');
-                        if (statusEl) statusEl.innerHTML = `<i class="fas fa-triangle-exclamation text-danger"></i> ${err.message}`;
-                    }
-                );
-
-                const torchBtn = document.getElementById('grnTorchToggleBtn');
-                if (torchBtn) {
-                    torchBtn.style.display = this.cameraScanner.hasTorch ? 'inline-flex' : 'none';
-                }
-            });
-
-            this.cameraModalEl.addEventListener('hidden.bs.modal', () => {
-                this.cameraScanner.stop();
-                this.tempImei1 = '';
-                this.activeCameraRow = null;
-            });
-
-            const fileInput = document.getElementById('grnModalImageFileInput');
-            if (fileInput) {
-                fileInput.addEventListener('change', async (e) => {
-                    if (e.target.files && e.target.files[0]) {
-                        const file = e.target.files[0];
-                        const statusEl = document.getElementById('grnCameraStatusText');
-                        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin me-1 text-warning"></i> Reading image...';
-                        
-                        try {
-                            const code = await this.cameraScanner.decodeFromImageFile(file);
-                            if (statusEl) statusEl.innerHTML = `<i class="fas fa-check-circle text-success"></i> Decoded: <strong>${code}</strong>`;
-                        } catch (err) {
-                            alert(err.message);
-                            if (statusEl) statusEl.innerHTML = `<i class="fas fa-triangle-exclamation text-danger me-1"></i> ${err.message}`;
-                        }
-                        fileInput.value = '';
-                    }
-                });
-            }
-
-            const skipBtn = document.getElementById('grnModalSkipImei2Btn');
-            if (skipBtn) {
-                skipBtn.addEventListener('click', () => this.skipCameraImei2());
-            }
-
-            const torchBtn = document.getElementById('grnTorchToggleBtn');
-            if (torchBtn) {
-                torchBtn.addEventListener('click', async () => {
-                    const state = await this.cameraScanner.toggleTorch();
-                    torchBtn.classList.toggle('btn-warning', state);
-                    torchBtn.classList.toggle('btn-dark', !state);
-                });
-            }
-
-            const flipBtn = document.getElementById('grnSwitchLensBtn');
-            if (flipBtn) {
-                flipBtn.addEventListener('click', async () => {
-                    await this.cameraScanner.switchCamera();
-                });
-            }
-        }
-    }
-
-    bindEvents() {
-        const container = document.getElementById('grnFormsetContainer');
-        const masterForm = document.getElementById('grnMasterForm');
-
-        container.addEventListener('change', (e) => {
-            if (e.target.name && e.target.name.endsWith('-product')) {
-                const row = e.target.closest('.grn-line-item-row');
-                if (row) {
-                    this.updateRowTrackingMode(row.dataset.rowIndex);
-                }
-            }
-            this.recalculateAllFinancials();
-        });
-
-        document.querySelectorAll('input[name="extra_freight_charge"], input[name="customs_import_charge"], input[name="other_handling_charge"], input[name="paid_amount"]').forEach(inp => {
-            inp.addEventListener('input', () => this.recalculateAllFinancials());
-        });
-
-        container.addEventListener('click', (e) => {
-            const rowCamBtn = e.target.closest('.row-camera-scan-btn');
-            if (rowCamBtn) {
-                const rowIdx = rowCamBtn.dataset.rowIndex;
-                this.openCameraForDualSequential(rowIdx);
-                return;
-            }
-
-            const singleCamBtn = e.target.closest('.camera-single-scan-btn');
-            if (singleCamBtn) {
-                const rowIdx = singleCamBtn.dataset.rowIndex;
-                const slot = singleCamBtn.dataset.targetSlot;
-                this.openCameraForSingleSlot(rowIdx, slot);
-                return;
-            }
-
-            const addBtn = e.target.closest('.add-imei-pair-btn');
-            if (addBtn) {
-                const row = addBtn.closest('.grn-line-item-row');
-                if (row) this.addDevicePair(row.dataset.rowIndex);
-                return;
-            }
-
-            const skipBtn = e.target.closest('.skip-imei2-btn');
-            if (skipBtn) {
-                const row = skipBtn.closest('.grn-line-item-row');
-                if (row) {
-                    const idx = row.dataset.rowIndex;
-                    const imei1Input = document.getElementById(`inputImei1_${idx}`);
-                    if (imei1Input && imei1Input.value.trim() !== '') {
-                        this.addDevicePair(idx, imei1Input.value.trim(), '');
-                    } else {
-                        alert('Please scan or enter IMEI 1 first.');
-                        if (imei1Input) imei1Input.focus();
-                    }
-                }
-                return;
-            }
-
-            const removeBtn = e.target.closest('.remove-device-btn');
-            if (removeBtn) {
-                const rowIdx = removeBtn.dataset.row;
-                const devIdx = parseInt(removeBtn.dataset.deviceIndex, 10);
-                this.removeDevice(rowIdx, devIdx);
-                return;
-            }
-        });
-
-        container.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const target = e.target;
-                
-                if (target.classList.contains('imei1-box')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const row = target.closest('.grn-line-item-row');
-                    if (row) {
-                        const idx = row.dataset.rowIndex;
-                        const imei2Input = document.getElementById(`inputImei2_${idx}`);
-                        if (target.value.trim() !== '' && imei2Input) {
-                            imei2Input.focus();
-                            imei2Input.select();
-                        }
-                    }
-                    return;
-                }
-
-                if (target.classList.contains('imei2-box')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const row = target.closest('.grn-line-item-row');
-                    if (row) {
-                        const idx = row.dataset.rowIndex;
-                        this.addDevicePair(idx);
-                    }
-                    return;
-                }
-            }
-        });
-
-        container.addEventListener('input', (e) => {
-            if (e.target.name && e.target.name.includes('purchased_quantity')) {
-                const row = e.target.closest('.grn-line-item-row');
-                if (row) this.renderRowTable(row.dataset.rowIndex);
-            }
-            this.recalculateAllFinancials();
-        });
-
-        const addLineBtn = document.getElementById('addNewLineItemBtn');
-        const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
-
-        if (addLineBtn && totalFormsInput) {
-            addLineBtn.addEventListener('click', () => {
-                const currentCount = parseInt(totalFormsInput.value, 10);
-                const template = document.getElementById('emptyFormTemplate').innerHTML;
-                const newRowHtml = template.replace(/__prefix__/g, currentCount);
-
-                const div = document.createElement('div');
-                div.innerHTML = newRowHtml;
-                const newRow = div.firstElementChild;
-                container.appendChild(newRow);
-
-                totalFormsInput.value = currentCount + 1;
-                this.initRowState(currentCount);
-
-                const newSelect = newRow.querySelector('select[name$="-product"]');
-                if (newSelect) newSelect.focus();
-                this.recalculateAllFinancials();
-            });
-        }
-
-        if (masterForm) {
-            masterForm.addEventListener('submit', async (e) => {
-                let hasValidationErr = false;
-
-                for (const row of document.querySelectorAll('.grn-line-item-row')) {
-                    const idx = row.dataset.rowIndex;
-                    if (idx === '__prefix__') continue;
-
-                    const deleteCheck = row.querySelector(`[name="items-${idx}-DELETE"]`);
-                    if (deleteCheck && deleteCheck.checked) continue;
-
-                    const prodSelect = row.querySelector('select[name$="-product"]');
-                    const prodId = prodSelect ? prodSelect.value : '';
-                    if (!prodId) continue;
-
-                    const isTracked = await this.isProductTracked(prodId);
-                    if (isTracked) {
-                        const qtyInput = row.querySelector(`[name="items-${idx}-purchased_quantity"]`);
-                        const targetQty = parseInt(qtyInput?.value || 0, 10);
-                        const scannedCount = (this.deviceStore[idx] || []).length;
-
-                        if (scannedCount !== targetQty) {
-                            hasValidationErr = true;
-                            alert(`IMEI Count Incomplete on Line ${parseInt(idx, 10) + 1}: Required quantity is ${targetQty} unit(s), but exactly ${scannedCount} IMEI pair(s) were scanned.`);
-                            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            break;
-                        }
-                    }
-                }
-
-                if (hasValidationErr) {
-                    e.preventDefault();
-                }
-            });
-        }
-    }
+let currentEditingModalRowIdx = null;
+
+// Currency Formatter
+function formatNPR(num) {
+    return 'Rs. ' + (Number(num) || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
 }
 
+// --------------------------------------------------------------------------
+// 1. Line Discount Mode Controller
+// --------------------------------------------------------------------------
+function setRowDiscType(idx, mode) {
+    const card = document.getElementById(`line-disc-card-${idx}`);
+    const select = document.getElementById(`id_items-${idx}-discount_type`);
+    const input = document.getElementById(`id_items-${idx}-discount_input_value`);
+    const sym = document.getElementById(`ld-sym-${idx}`);
+
+    if (select) select.value = mode;
+
+    if (card) {
+        card.querySelectorAll('.ld-mode-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === mode);
+        });
+        card.classList.toggle('is-active', mode !== 'NONE');
+    }
+
+    if (input) {
+        if (mode === 'NONE') {
+            input.value = '0.00';
+            input.disabled = true;
+            input.placeholder = 'No discount';
+            if (sym) sym.textContent = '';
+        } else if (mode === 'PERCENTAGE') {
+            input.disabled = false;
+            if (sym) sym.textContent = '%';
+            if (Number(input.value) > 100) input.value = '5.0';
+        } else if (mode === 'AMOUNT') {
+            input.disabled = false;
+            if (sym) sym.textContent = 'Rs.';
+        }
+    }
+
+    recalculateFinancials();
+}
+
+// --------------------------------------------------------------------------
+// 2. Whole-Bill Consignment Discount Controller
+// --------------------------------------------------------------------------
+function initWholeBillDiscountControls() {
+    const group = document.getElementById('whole-disc-type-group');
+    const typeSelect = document.getElementById('id_bill_discount_type');
+    const inputVal = document.getElementById('whole-disc-val');
+    const sym = document.getElementById('whole-disc-prefix');
+
+    if (!group) return;
+
+    const initialMode = typeSelect?.value || 'NONE';
+    if (initialMode === 'NONE' && inputVal) {
+        inputVal.disabled = true;
+    } else if (initialMode === 'PERCENTAGE' && sym) {
+        sym.textContent = '%';
+    }
+
+    group.querySelectorAll('.seg-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            group.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const mode = btn.dataset.mode;
+            if (typeSelect) typeSelect.value = mode;
+
+            if (mode === 'NONE') {
+                inputVal.value = '0.00';
+                inputVal.disabled = true;
+                if (sym) sym.textContent = 'Rs.';
+            } else if (mode === 'PERCENTAGE') {
+                inputVal.disabled = false;
+                if (sym) sym.textContent = '%';
+                if (Number(inputVal.value) > 100) inputVal.value = '2.0';
+            } else {
+                inputVal.disabled = false;
+                if (sym) sym.textContent = 'Rs.';
+            }
+            recalculateFinancials();
+        });
+    });
+}
+
+// --------------------------------------------------------------------------
+// 3. Mathematical Recalculation Engine
+// --------------------------------------------------------------------------
+function recalculateFinancials() {
+    const freight = Math.max(0, Number(document.getElementById('overhead-freight')?.value) || 0);
+    const customs = Math.max(0, Number(document.getElementById('overhead-customs')?.value) || 0);
+    const handling = Math.max(0, Number(document.getElementById('overhead-handling')?.value) || 0);
+    const spotPaid = Math.max(0, Number(document.getElementById('overhead-spotpaid')?.value) || 0);
+    const isVatActive = document.getElementById('tax-vat-toggle')?.checked || false;
+
+    const totalOverheads = freight + customs + handling;
+
+    let totalGrossMerchandise = 0;
+    let totalLineDiscounts = 0;
+    const lineComputations = [];
+
+    const activeRows = document.querySelectorAll('#lines-container .line-item-card');
+
+    activeRows.forEach(row => {
+        if (row.style.display === 'none') return;
+        const deleteCheck = row.querySelector('input[name$="-DELETE"]');
+        if (deleteCheck && deleteCheck.checked) return;
+
+        const idx = row.dataset.rowIndex;
+        const qty = Math.max(0, Number(row.querySelector('.line-qty-input')?.value) || 0);
+        const rate = Math.max(0, Number(row.querySelector('.line-rate-input')?.value) || 0);
+        const discType = row.querySelector('.line-disc-type-select')?.value || 'NONE';
+        const discInputVal = Math.max(0, Number(row.querySelector('.line-disc-val-input')?.value) || 0);
+
+        const lineGross = qty * rate;
+        let lineDiscAmount = 0;
+
+        if (discType === 'PERCENTAGE') {
+            lineDiscAmount = lineGross * (Math.min(discInputVal, 100) / 100);
+        } else if (discType === 'AMOUNT') {
+            lineDiscAmount = Math.min(discInputVal, lineGross);
+        }
+
+        const netPreVatBase = Math.max(0, lineGross - lineDiscAmount);
+        totalGrossMerchandise += lineGross;
+        totalLineDiscounts += lineDiscAmount;
+
+        lineComputations.push({
+            idx: idx,
+            qty: qty,
+            gross: lineGross,
+            discAmount: lineDiscAmount,
+            netBase: netPreVatBase
+        });
+
+        // Update row preview tags
+        const rowBadge = document.getElementById(`ld-badge-${idx}`);
+        const mGross = document.getElementById(`metric-gross-${idx}`);
+        const mNet = document.getElementById(`metric-net-${idx}`);
+
+        if (rowBadge) rowBadge.textContent = `-${formatNPR(lineDiscAmount)}`;
+        if (mGross) mGross.textContent = formatNPR(lineGross);
+        if (mNet) mNet.textContent = formatNPR(netPreVatBase);
+    });
+
+    const netLinesSubtotal = Math.max(0, totalGrossMerchandise - totalLineDiscounts);
+
+    // Whole-Bill Discount Calculation
+    const billDiscType = document.getElementById('id_bill_discount_type')?.value || 'NONE';
+    const billDiscVal = Math.max(0, Number(document.getElementById('whole-disc-val')?.value) || 0);
+    let billDiscountTotal = 0;
+
+    if (billDiscType === 'PERCENTAGE') {
+        billDiscountTotal = netLinesSubtotal * (Math.min(billDiscVal, 100) / 100);
+    } else if (billDiscType === 'AMOUNT') {
+        billDiscountTotal = Math.min(billDiscVal, netLinesSubtotal);
+    }
+
+    const wholeDiscTag = document.getElementById('whole-disc-saved-tag');
+    if (wholeDiscTag) wholeDiscTag.textContent = `-${formatNPR(billDiscountTotal)}`;
+
+    const finalTaxableBase = Math.max(0, netLinesSubtotal - billDiscountTotal);
+
+    // Proportional Landed Overhead Allocation per row
+    lineComputations.forEach(item => {
+        const ratio = netLinesSubtotal > 0 ? (item.netBase / netLinesSubtotal) : (1 / (lineComputations.length || 1));
+        const allocatedBillDisc = billDiscountTotal * ratio;
+        const allocatedOverhead = totalOverheads * ratio;
+
+        const lineFinalLanded = Math.max(0, (item.netBase - allocatedBillDisc) + allocatedOverhead);
+        const unitLanded = item.qty > 0 ? (lineFinalLanded / item.qty) : 0;
+
+        const mOverhead = document.getElementById(`metric-overhead-${item.idx}`);
+        const mCogs = document.getElementById(`metric-cogs-${item.idx}`);
+
+        if (mOverhead) mOverhead.textContent = `+${formatNPR(allocatedOverhead)}`;
+        if (mCogs) mCogs.textContent = `${formatNPR(unitLanded)} / unit`;
+    });
+
+    // Taxes and Payable Liabilities
+    const vatAmount = isVatActive ? (finalTaxableBase * 0.13) : 0;
+    const totalLandedCogs = finalTaxableBase + totalOverheads;
+    const invoiceGrossTotal = finalTaxableBase + vatAmount + totalOverheads;
+    const netDueDebt = Math.max(0, invoiceGrossTotal - spotPaid);
+
+    // Update Section 3 KPI Summary Cards
+    const sPreVat = document.getElementById('sum-pre-vat');
+    const sGross = document.getElementById('sum-gross-val');
+    const sDisc = document.getElementById('sum-disc-val');
+    const sVatAmt = document.getElementById('sum-vat-amt');
+    const sVatStatus = document.getElementById('vat-status-tag');
+    const sVatRate = document.getElementById('vat-rate-tag');
+    const sOverheads = document.getElementById('sum-overheads');
+    const sOverheadCnt = document.getElementById('sum-overhead-cnt');
+    const sTotalCogs = document.getElementById('sum-total-cogs');
+    const sNetDue = document.getElementById('sum-net-due');
+    const sBillTotal = document.getElementById('sum-bill-total');
+    const sPaidSpot = document.getElementById('sum-paid-spot');
+
+    if (sPreVat) sPreVat.textContent = formatNPR(finalTaxableBase);
+    if (sGross) sGross.textContent = formatNPR(totalGrossMerchandise);
+    if (sDisc) sDisc.textContent = `-${formatNPR(totalLineDiscounts + billDiscountTotal)}`;
+
+    if (sVatAmt) sVatAmt.textContent = formatNPR(vatAmount);
+    if (sVatStatus) sVatStatus.textContent = isVatActive ? "Annex 7 Taxable" : "Non-VAT / Exempt";
+    if (sVatRate) sVatRate.textContent = isVatActive ? "Rate: 13.0%" : "Rate: 0.0%";
+
+    if (sOverheads) sOverheads.textContent = formatNPR(totalOverheads);
+    if (sOverheadCnt) sOverheadCnt.textContent = `${lineComputations.length} Products Shared`;
+
+    if (sTotalCogs) sTotalCogs.textContent = formatNPR(totalLandedCogs);
+
+    if (sNetDue) sNetDue.textContent = formatNPR(netDueDebt);
+    if (sBillTotal) sBillTotal.textContent = formatNPR(invoiceGrossTotal);
+    if (sPaidSpot) sPaidSpot.textContent = formatNPR(spotPaid);
+}
+
+// --------------------------------------------------------------------------
+// 4. Dynamic Row Insertion & Deletion
+// --------------------------------------------------------------------------
+document.getElementById('btn-add-line').addEventListener('click', () => {
+    const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+    const container = document.getElementById('lines-container');
+    const templateHtml = document.getElementById('empty-row-template').innerHTML;
+
+    const currentCount = parseInt(totalFormsInput.value, 10);
+    const newRowHtml = templateHtml.replace(/__prefix__/g, currentCount);
+
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = newRowHtml;
+    const newRow = tempDiv.firstElementChild;
+    container.appendChild(newRow);
+
+    totalFormsInput.value = currentCount + 1;
+
+    renumberRows();
+
+    if (typeof window.initContextualSearch === 'function') {
+        window.initContextualSearch(newRow);
+    }
+
+    attachRowCalculationTriggers(newRow);
+    recalculateFinancials();
+});
+
+function deleteLineRow(idx) {
+    const row = document.getElementById(`line-item-${idx}`);
+    if (!row) return;
+
+    const deleteCheck = row.querySelector('input[name$="-DELETE"]');
+    if (deleteCheck) {
+        deleteCheck.checked = true;
+        row.style.display = 'none';
+    } else {
+        row.remove();
+    }
+
+    renumberRows();
+    recalculateFinancials();
+}
+
+function renumberRows() {
+    const visibleCards = Array.from(document.querySelectorAll('#lines-container .line-item-card')).filter(card => card.style.display !== 'none');
+    visibleCards.forEach((card, i) => {
+        const dot = card.querySelector('.counter-dot');
+        const badgeSpan = card.querySelector('.item-counter-badge span:last-child');
+        const removeBtn = card.querySelector('.btn-remove-row');
+        if (dot) dot.textContent = i + 1;
+        if (badgeSpan) badgeSpan.textContent = `Line Item Reference #${i + 1}`;
+        if (removeBtn) {
+            removeBtn.style.display = visibleCards.length === 1 ? 'none' : 'flex';
+        }
+    });
+}
+
+function attachRowCalculationTriggers(containerEl) {
+    containerEl.querySelectorAll('.calc-trigger').forEach(el => {
+        el.addEventListener('input', recalculateFinancials);
+        el.addEventListener('change', recalculateFinancials);
+    });
+
+    containerEl.addEventListener('item-selected', (e) => {
+        const item = e.detail;
+        if (!item) return;
+
+        const row = e.target.closest('.line-item-card');
+        if (!row) return;
+
+        const rateInput = row.querySelector('.line-rate-input');
+        const mrpInput = row.querySelector('input[name$="-new_selling_price"]');
+
+        const cost = item.purchase_price || item.cost_price || (item.extra_data && item.extra_data.cost_price);
+        const price = item.selling_price || item.price || (item.extra_data && item.extra_data.selling_price);
+
+        if (rateInput && (!rateInput.value || Number(rateInput.value) === 0) && cost) {
+            rateInput.value = parseFloat(cost).toFixed(2);
+        }
+        if (mrpInput && (!mrpInput.value || Number(mrpInput.value) === 0) && price) {
+            mrpInput.value = parseFloat(price).toFixed(2);
+        }
+
+        recalculateFinancials();
+    });
+}
+
+// --------------------------------------------------------------------------
+// 5. Dual IMEI Modal Management
+// --------------------------------------------------------------------------
+function openDualImeiModal(rowIdx) {
+    currentEditingModalRowIdx = rowIdx;
+    const row = document.getElementById(`line-item-${rowIdx}`);
+    if (!row) return;
+
+    const prodSearchInput = row.querySelector('.grn-product-search-input');
+    const prodName = prodSearchInput ? prodSearchInput.value : 'Device Handset';
+    const qty = Math.max(1, parseInt(row.querySelector('.line-qty-input')?.value, 10) || 1);
+
+    document.getElementById('imeiModalProductTitle').textContent = `Product: ${prodName} | Required: ${qty} Pair(s)`;
+
+    const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
+    const existingLines = hiddenImeiField ? hiddenImeiField.value.trim().split('\n').filter(Boolean) : [];
+
+    const tbody = document.getElementById('imeiModalTableBody');
+    tbody.innerHTML = '';
+
+    for (let i = 0; i < qty; i++) {
+        let im1 = '';
+        let im2 = '';
+        if (existingLines[i]) {
+            const parts = existingLines[i].split('|');
+            im1 = parts[0] ? parts[0].trim() : '';
+            im2 = parts[1] ? parts[1].trim() : '';
+        }
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td class="text-center font-monospace fw-bold text-muted">${i + 1}</td>
+            <td>
+                <input type="text" maxlength="16" class="form-control form-control-sm font-mono-val modal-imei-1" placeholder="Primary IMEI 1 (e.g. 867543058...)" value="${im1}">
+            </td>
+            <td>
+                <input type="text" maxlength="16" class="form-control form-control-sm font-mono-val modal-imei-2" placeholder="Secondary IMEI 2 (e.g. 867543059...)" value="${im2}">
+            </td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('imeiModal')).show();
+}
+
+function saveDualImeisFromModal() {
+    if (currentEditingModalRowIdx === null) return;
+
+    const row = document.getElementById(`line-item-${currentEditingModalRowIdx}`);
+    if (!row) return;
+
+    const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
+    const rows = document.querySelectorAll('#imeiModalTableBody tr');
+    const imeiTokens = [];
+    let filledCount = 0;
+
+    rows.forEach(r => {
+        const im1 = r.querySelector('.modal-imei-1').value.trim();
+        const im2 = r.querySelector('.modal-imei-2').value.trim();
+        if (im1 || im2) {
+            imeiTokens.push(`${im1}|${im2}`);
+            filledCount++;
+        }
+    });
+
+    if (hiddenImeiField) {
+        hiddenImeiField.value = imeiTokens.join('\n');
+    }
+
+    const tag = document.getElementById(`imei-count-tag-${currentEditingModalRowIdx}`);
+    if (tag) tag.textContent = `${filledCount} Units`;
+
+    bootstrap.Modal.getInstance(document.getElementById('imeiModal'))?.hide();
+}
+
+function initImeiBadges() {
+    document.querySelectorAll('#lines-container .line-item-card').forEach(row => {
+        const idx = row.dataset.rowIndex;
+        const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
+        if (hiddenImeiField && hiddenImeiField.value.trim()) {
+            const count = hiddenImeiField.value.trim().split('\n').filter(Boolean).length;
+            const tag = document.getElementById(`imei-count-tag-${idx}`);
+            if (tag) tag.textContent = `${count} Units`;
+        }
+    });
+}
+
+// --------------------------------------------------------------------------
+// 6. Form Submission Validation Guard
+// --------------------------------------------------------------------------
+document.getElementById('grnMasterForm').addEventListener('submit', function(e) {
+    let hasError = false;
+
+    // Enable disabled inputs so default 0.00 discount values are included in POST
+    document.querySelectorAll('#grnMasterForm :disabled').forEach(el => {
+        el.disabled = false;
+    });
+
+    document.querySelectorAll('#lines-container .line-item-card').forEach(row => {
+        if (row.style.display === 'none') return;
+        const deleteCheck = row.querySelector('input[name$="-DELETE"]');
+        if (deleteCheck && deleteCheck.checked) return;
+
+        const prodId = row.querySelector('.grn-product-id-input')?.value;
+        const qty = parseInt(row.querySelector('.line-qty-input')?.value, 10) || 0;
+        const imeiVal = row.querySelector('.scanned-imei-hidden-input')?.value.trim();
+        const imeiLines = imeiVal ? imeiVal.split('\n').filter(Boolean) : [];
+
+        if (prodId && imeiLines.length > 0 && imeiLines.length !== qty) {
+            hasError = true;
+            const rowNumber = row.querySelector('.counter-dot')?.textContent || '';
+            alert(`IMEI Count Incomplete on Row #${rowNumber}: Quantity is ${qty}, but exactly ${imeiLines.length} IMEI pair(s) were entered.`);
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+    });
+
+    if (hasError) {
+        e.preventDefault();
+    }
+});
+
+// Initialize on Document Load
 document.addEventListener('DOMContentLoaded', () => {
-    window.grnDualImeiController = new GRNDualIMEIController();
+    initWholeBillDiscountControls();
+    initImeiBadges();
+    attachRowCalculationTriggers(document);
+    recalculateFinancials();
 });
 </script>
 {% endblock %}

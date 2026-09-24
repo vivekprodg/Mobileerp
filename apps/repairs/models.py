@@ -65,7 +65,7 @@ class RepairTicket(TimeStampedModel):
     claim_type = models.CharField(max_length=30, choices=CLAIM_TYPE_CHOICES, default='PAID_OUT_OF_WARRANTY', db_index=True)
     claimed_component = models.CharField(max_length=30, default='DEVICE', verbose_name=_("Claimed Component"))
     service_status = models.CharField(max_length=30, choices=SERVICE_STATUS_CHOICES, default='RECEIVED', db_index=True)
-    
+
     technician = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_repair_tickets'
     )
@@ -79,7 +79,7 @@ class RepairTicket(TimeStampedModel):
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     final_total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
-    
+
     # Dates & Timestamps
     expected_delivery_date = models.DateField(blank=True, null=True)
     delivered_date = models.DateTimeField(blank=True, null=True)
@@ -90,9 +90,22 @@ class RepairTicket(TimeStampedModel):
         ordering = ['-created_at']
         verbose_name = _('Repair Ticket')
         verbose_name_plural = _('Repair Tickets')
+        indexes = [
+            models.Index(fields=['customer_phone_manual'], name='rep_tkt_cust_phone_idx'),
+            models.Index(fields=['ticket_number'], name='rep_tkt_num_idx'),
+            models.Index(fields=['imei_or_serial'], name='rep_tkt_imei_idx'),
+            models.Index(fields=['customer_name_manual'], name='rep_tkt_cust_name_idx'),
+            models.Index(fields=['service_status', 'branch'], name='rep_tkt_stat_br_idx'),
+            models.Index(fields=['branch', 'created_at'], name='rep_tkt_br_created_idx'),
+        ]
 
     def __str__(self):
         return f"{self.ticket_number} - {self.product.name} ({self.customer_name_manual}) [{self.service_status}]"
+
+    @property
+    def balance_amount(self):
+        """Calculates the remaining balance due from the customer."""
+        return max(Decimal('0.00'), self.final_total_amount - self.paid_amount)
 
     def recalculate_totals(self):
         self.final_total_amount = max(Decimal('0.00'), (self.labor_charge + self.parts_cost) - self.discount_amount)
@@ -148,6 +161,9 @@ class DeviceIntakeChecklist(TimeStampedModel):
         verbose_name = _('Intake Physical Checklist')
         verbose_name_plural = _('Intake Physical Checklists')
 
+    def __str__(self):
+        return f"Checklist for {self.ticket.ticket_number} ({self.get_power_status_display()})"
+
 class DefectClassificationVerdict(TimeStampedModel):
     """
     Formal diagnostic decision determining if the repair is a genuine factory defect,
@@ -174,6 +190,9 @@ class DefectClassificationVerdict(TimeStampedModel):
         verbose_name = _('Defect Classification Verdict')
         verbose_name_plural = _('Defect Classification Verdicts')
 
+    def __str__(self):
+        return f"Verdict: {self.get_verdict_display()} ({self.ticket.ticket_number})"
+
 class RepairDiagnosticEvidence(TimeStampedModel):
     """
     Immutable photo vault capturing microscopic motherboard burns, LDI stickers,
@@ -190,15 +209,18 @@ class RepairDiagnosticEvidence(TimeStampedModel):
 
     ticket = models.ForeignKey(RepairTicket, on_delete=models.CASCADE, related_name='evidence_photos')
     evidence_type = models.CharField(max_length=30, choices=EVIDENCE_TYPES, default='OTHER')
-    image = models.ImageField(upload_to=settings.REPAIR_EVIDENCE_UPLOAD_DIR)
+    image = models.ImageField(upload_to=getattr(settings, 'REPAIR_EVIDENCE_UPLOAD_DIR', 'repair_evidence/'))
     caption = models.CharField(max_length=255, blank=True, null=True)
-    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
         db_table = 'rep_diagnostic_evidences'
         ordering = ['-created_at']
         verbose_name = _('Repair Diagnostic Evidence Photo')
         verbose_name_plural = _('Repair Diagnostic Evidence Photos')
+
+    def __str__(self):
+        return f"{self.get_evidence_type_display()} - Ticket #{self.ticket.ticket_number}"
 
 class RepairReplacedPart(TimeStampedModel):
     """
@@ -237,6 +259,9 @@ class RepairReplacedPart(TimeStampedModel):
         verbose_name = _('Repair Replaced Part')
         verbose_name_plural = _('Repair Replaced Parts')
 
+    def __str__(self):
+        return f"{self.spare_part_product.name} (Qty: {self.quantity}) on Ticket {self.ticket.ticket_number}"
+
     def save(self, *args, **kwargs):
         if not self.warranty_end_date and self.replacement_warranty_months > 0:
             self.warranty_end_date = self.warranty_start_date + timedelta(days=self.replacement_warranty_months * 30)
@@ -266,6 +291,9 @@ class CustomerQuotation(TimeStampedModel):
         db_table = 'rep_customer_quotations'
         verbose_name = _('Customer Repair Quotation')
         verbose_name_plural = _('Customer Repair Quotations')
+
+    def __str__(self):
+        return f"Quote #{self.quote_token[:8]} - Ticket {self.ticket.ticket_number} (NPR {self.total_quoted_amount})"
 
     def save(self, *args, **kwargs):
         if not self.quote_token:
@@ -310,6 +338,9 @@ class OpticalServiceTicket(TimeStampedModel):
         verbose_name = _('Optical Eyewear Service Record')
         verbose_name_plural = _('Optical Eyewear Service Records')
 
+    def __str__(self):
+        return f"Optical {self.get_service_type_display()} for Ticket {self.ticket.ticket_number}"
+
 class TechnicianCommissionLog(TimeStampedModel):
     """
     Tracks technician productivity, turnaround time (TAT), and labor commission splits.
@@ -328,6 +359,9 @@ class TechnicianCommissionLog(TimeStampedModel):
         ordering = ['-created_at']
         verbose_name = _('Technician Commission Log')
         verbose_name_plural = _('Technician Commission Logs')
+
+    def __str__(self):
+        return f"{self.technician.username} - Ticket {self.ticket.ticket_number} (Earned: NPR {self.commission_earned})"
 
     def save(self, *args, **kwargs):
         self.commission_earned = (self.labor_amount_collected * (self.commission_percentage / Decimal('100.00'))).quantize(Decimal('0.01'))

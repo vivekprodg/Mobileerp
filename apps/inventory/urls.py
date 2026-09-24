@@ -2,9 +2,10 @@ from django.urls import path
 from apps.inventory.views import (
     ProductListView, ProductDetailView, ProductCreateView, ProductUpdateView,
     ProductStockAdjustmentView, CategoryListView, CategoryCreateView,
-    CategoryUpdateView, CategoryQuickCreateAPIView, SubCategoryQuickCreateAPIView,
-    BrandListView, BrandCreateView, BrandUpdateView, BrandQuickCreateAPIView,
-    UnitListView, UnitCreateView, UnitUpdateView, UnitQuickCreateAPIView,
+    CategoryUpdateView, CategoryQuickCreateAPIView, CategorySearchAPIView,
+    SubCategoryQuickCreateAPIView, SubCategorySearchAPIView,
+    BrandListView, BrandCreateView, BrandUpdateView, BrandQuickCreateAPIView, BrandSearchAPIView,
+    UnitListView, UnitCreateView, UnitUpdateView, UnitQuickCreateAPIView, UnitSearchAPIView,
     ItemInstanceListView,
     VendorRMAListView, VendorRMACreateView, VendorRMADetailView,
     ProductExcelUploadView, ProductExcelMappingView, ProductExcelProcessAPIView
@@ -28,19 +29,23 @@ urlpatterns = [
     path('units/create/', UnitCreateView.as_view(), name='unit_create'),
     path('units/<int:pk>/edit/', UnitUpdateView.as_view(), name='unit_edit'),
     path('api/units/quick-create/', UnitQuickCreateAPIView.as_view(), name='unit_quick_create_api'),
+    path('api/units/search/', UnitSearchAPIView.as_view(), name='unit_search_api'),
 
     # Category & SubCategory Management
     path('categories/', CategoryListView.as_view(), name='category_list'),
     path('categories/create/', CategoryCreateView.as_view(), name='category_create'),
     path('categories/<int:pk>/edit/', CategoryUpdateView.as_view(), name='category_edit'),
     path('api/categories/quick-create/', CategoryQuickCreateAPIView.as_view(), name='category_quick_create_api'),
+    path('api/categories/search/', CategorySearchAPIView.as_view(), name='category_search_api'),
     path('api/subcategories/quick-create/', SubCategoryQuickCreateAPIView.as_view(), name='subcategory_quick_create_api'),
+    path('api/subcategories/search/', SubCategorySearchAPIView.as_view(), name='subcategory_search_api'),
 
-    # Brand Management & Quick Create API
+    # Brand Management & Quick Create / Search APIs
     path('brands/', BrandListView.as_view(), name='brand_list'),
     path('brands/create/', BrandCreateView.as_view(), name='brand_create'),
     path('brands/<int:pk>/edit/', BrandUpdateView.as_view(), name='brand_edit'),
     path('api/brands/quick-create/', BrandQuickCreateAPIView.as_view(), name='brand_quick_create_api'),
+    path('api/brands/search/', BrandSearchAPIView.as_view(), name='brand_search_api'),
 
     # Vendor RMA Claims
     path('rma/', VendorRMAListView.as_view(), name='vendor_rma_list'),

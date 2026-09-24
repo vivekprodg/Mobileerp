@@ -48,19 +48,62 @@
     text-align: center;
 }
 
-.rx-num-input {
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-    font-size: 0.9rem;
-    text-align: center;
-}
-
 .optical-kpi-card {
     background: #ffffff;
     border: 1px solid var(--erp-slate-200);
     border-radius: 14px;
     padding: 16px 20px;
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+/* Asynchronous Autocomplete Dropdown Styling */
+.async-autocomplete-container {
+    position: relative;
+}
+
+.async-results-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+    max-height: 280px;
+    overflow-y: auto;
+    margin-top: 4px;
+    display: none;
+}
+
+.async-results-dropdown.show {
+    display: block;
+}
+
+.async-result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.15s ease;
+}
+
+.async-result-item:last-child {
+    border-bottom: none;
+}
+
+.async-result-item:hover, .async-result-item.active {
+    background-color: #f8fafc;
+}
+
+.async-selected-card {
+    background: #ffffff;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 </style>
 {% endblock %}
@@ -164,14 +207,24 @@
                         </h6>
 
                         <div class="row g-3">
+                            <!-- ASYNC CUSTOMER NAME AUTOCOMPLETE -->
                             <div class="col-12 col-md-6">
                                 <label class="form-label fw-bold text-dark fs-xs">Customer Name <span class="text-danger">*</span></label>
-                                <input type="text" name="customer_name_manual" class="form-control" placeholder="e.g. Anil Shrestha" required>
+                                <div class="async-autocomplete-container">
+                                    <input type="text" name="customer_name_manual" id="opticalCustomerNameInput" class="form-control" placeholder="Search or enter customer..." autocomplete="off" required>
+                                    <div id="opticalCustomerNameResults" class="async-results-dropdown shadow-lg"></div>
+                                </div>
                             </div>
+
+                            <!-- ASYNC CUSTOMER MOBILE AUTOCOMPLETE -->
                             <div class="col-12 col-md-6">
                                 <label class="form-label fw-bold text-dark fs-xs">Mobile Number <span class="text-danger">*</span></label>
-                                <input type="text" name="customer_phone_manual" class="form-control font-monospace" placeholder="98XXXXXXXX" required>
+                                <div class="async-autocomplete-container">
+                                    <input type="text" name="customer_phone_manual" id="opticalCustomerPhoneInput" class="form-control font-monospace" placeholder="98XXXXXXXX" autocomplete="off" required>
+                                    <div id="opticalCustomerPhoneResults" class="async-results-dropdown shadow-lg"></div>
+                                </div>
                             </div>
+
                             <div class="col-12">
                                 <label class="form-label fw-bold text-dark fs-xs">Eyewear Service Type <span class="text-danger">*</span></label>
                                 {{ form.service_type }}
@@ -192,15 +245,33 @@
                                 <label class="form-label fw-bold text-dark fs-xs">Frame Brand &amp; Model</label>
                                 {{ form.frame_brand_and_model }}
                             </div>
+
+                            <!-- ASYNC OPTICAL FRAME PRODUCT SEARCH (FROM STOCK) -->
                             <div class="col-12 col-md-6">
                                 <label class="form-label fw-bold text-dark fs-xs">Or Select Frame from Stock</label>
-                                <select name="frame_product_id" class="form-select">
-                                    <option value="">-- Customer Provided Frame --</option>
-                                    {% for opt_prod in optical_products %}
-                                        <option value="{{ opt_prod.id }}">{{ opt_prod.name }} (Rs. {{ opt_prod.selling_price }})</option>
-                                    {% endfor %}
-                                </select>
+                                <input type="hidden" name="frame_product_id" id="id_frame_product_id" value="">
+                                
+                                <div class="async-autocomplete-container">
+                                    <div id="frameSelectedCard" class="async-selected-card d-none">
+                                        <div>
+                                            <div class="fw-bold text-primary fs-xs" id="frameSelectedName">Selected Frame</div>
+                                            <small class="text-muted fs-2xs" id="frameSelectedDetails">Stock Frame</small>
+                                        </div>
+                                        <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-2xs" id="clearSelectedFrameBtn">
+                                            <i class="fas fa-times me-1"></i> Custom
+                                        </button>
+                                    </div>
+
+                                    <div id="frameSearchInputWrapper">
+                                        <div class="input-group">
+                                            <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted fs-xs"></i></span>
+                                            <input type="text" id="frameSearchInput" class="form-control border-start-0" placeholder="Search optical frames..." autocomplete="off">
+                                        </div>
+                                        <div id="frameSearchResults" class="async-results-dropdown shadow-lg"></div>
+                                    </div>
+                                </div>
                             </div>
+
                             <div class="col-12">
                                 <label class="form-label fw-bold text-dark fs-xs">Lens Coating / Material Description</label>
                                 {{ form.lens_type_description }}
@@ -282,15 +353,33 @@
                     <label class="form-label fw-bold text-dark fs-xs">Expected Delivery Date</label>
                     <input type="date" name="expected_delivery_date" class="form-control">
                 </div>
+
+                <!-- ASYNC OPTICIAN / TECHNICIAN SELECTOR -->
                 <div class="col-12 col-md-3">
                     <label class="form-label fw-bold text-dark fs-xs">Assigned Optometrist / Technician</label>
-                    <select name="technician_id" class="form-select">
-                        <option value="">-- Assign Technician --</option>
-                        {% for tech in technicians %}
-                            <option value="{{ tech.id }}">{{ tech.get_full_name|default:tech.username }} ({{ tech.get_role_display }})</option>
-                        {% endfor %}
-                    </select>
+                    <input type="hidden" name="technician_id" id="id_technician_id" value="">
+                    
+                    <div class="async-autocomplete-container">
+                        <div id="opticianSelectedCard" class="async-selected-card d-none">
+                            <div>
+                                <div class="fw-bold text-dark fs-xs" id="opticianSelectedName">Assigned Optometrist</div>
+                                <small class="text-muted fs-2xs" id="opticianSelectedRole">Lab Tech</small>
+                            </div>
+                            <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-2xs" id="clearSelectedOpticianBtn">
+                                <i class="fas fa-times me-1"></i> Change
+                            </button>
+                        </div>
+
+                        <div id="opticianSearchInputWrapper">
+                            <div class="input-group">
+                                <span class="input-group-text bg-white border-end-0"><i class="fas fa-user-gear text-muted fs-xs"></i></span>
+                                <input type="text" id="opticianSearchInput" class="form-control border-start-0" placeholder="Search optician..." autocomplete="off">
+                            </div>
+                            <div id="opticianSearchResults" class="async-results-dropdown shadow-lg"></div>
+                        </div>
+                    </div>
                 </div>
+
                 <div class="col-12">
                     <label class="form-label fw-bold text-dark fs-xs">Additional Service Remarks / Customer Notes</label>
                     <textarea name="reported_fault" class="form-control" rows="2" placeholder="Frame fitting adjustments, bridge tightening, or specific coating instructions..."></textarea>
@@ -408,4 +497,276 @@
     </div>
 
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Utility: Debounce for keystrokes
+    function debounce(func, wait = 250) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    // Utility: HTML escape
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // =========================================================================
+    // 1. ASYNC CUSTOMER PROFILE LOOKUP (/customers/api/search/)
+    // =========================================================================
+    const custNameInput = document.getElementById('opticalCustomerNameInput');
+    const custPhoneInput = document.getElementById('opticalCustomerPhoneInput');
+    const custNameResults = document.getElementById('opticalCustomerNameResults');
+    const custPhoneResults = document.getElementById('opticalCustomerPhoneResults');
+
+    function selectCustomer(cust) {
+        if (custNameInput) custNameInput.value = cust.name || cust.full_name || '';
+        if (custPhoneInput) custPhoneInput.value = cust.phone || cust.mobile || '';
+        if (custNameResults) custNameResults.classList.remove('show');
+        if (custPhoneResults) custPhoneResults.classList.remove('show');
+    }
+
+    function setupCustomerSearch(inputEl, resultsEl) {
+        if (!inputEl || !resultsEl) return;
+
+        const handleSearch = debounce(async (query) => {
+            if (!query || query.length < 2) {
+                resultsEl.classList.remove('show');
+                return;
+            }
+
+            try {
+                resultsEl.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching customers...</div>';
+                resultsEl.classList.add('show');
+
+                const resp = await fetch(`/customers/api/search/?q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Failed to query customers');
+                const data = await resp.json();
+                const customers = data.results || data || [];
+
+                if (!customers.length) {
+                    resultsEl.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No registered customer found.</div>';
+                    return;
+                }
+
+                let html = '';
+                customers.forEach(c => {
+                    const name = c.name || c.full_name || '';
+                    const phone = c.phone || c.mobile || '';
+                    const address = c.city || c.address || '';
+                    html += `
+                        <div class="async-result-item customer-item" data-cust='${JSON.stringify(c).replace(/'/g, "&apos;")}'>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-bold text-dark fs-xs">${escapeHtml(name)}</span>
+                                <span class="badge bg-light text-primary border font-monospace fs-2xs">${escapeHtml(phone)}</span>
+                            </div>
+                            ${address ? `<div class="text-muted fs-2xs"><i class="fas fa-location-dot me-1"></i>${escapeHtml(address)}</div>` : ''}
+                        </div>
+                    `;
+                });
+                resultsEl.innerHTML = html;
+
+                resultsEl.querySelectorAll('.customer-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const custData = JSON.parse(el.dataset.cust);
+                        selectCustomer(custData);
+                    });
+                });
+            } catch (err) {
+                resultsEl.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying customers.</div>';
+            }
+        }, 250);
+
+        inputEl.addEventListener('input', (e) => handleSearch(e.target.value.trim()));
+    }
+
+    setupCustomerSearch(custNameInput, custNameResults);
+    setupCustomerSearch(custPhoneInput, custPhoneResults);
+
+    // =========================================================================
+    // 2. ASYNC OPTICAL FRAME PRODUCT SEARCH (/products/api/search/?category=OPTICAL)
+    // =========================================================================
+    const frameProductIdInput = document.getElementById('id_frame_product_id');
+    const frameSearchInput = document.getElementById('frameSearchInput');
+    const frameSearchWrapper = document.getElementById('frameSearchInputWrapper');
+    const frameSearchResults = document.getElementById('frameSearchResults');
+    const frameSelectedCard = document.getElementById('frameSelectedCard');
+    const frameSelectedName = document.getElementById('frameSelectedName');
+    const frameSelectedDetails = document.getElementById('frameSelectedDetails');
+    const clearSelectedFrameBtn = document.getElementById('clearSelectedFrameBtn');
+    const frameBrandInput = document.querySelector('[name="frame_brand_and_model"]');
+
+    function selectFrameProduct(product) {
+        frameProductIdInput.value = product.id;
+        frameSelectedName.innerText = product.name;
+        frameSelectedDetails.innerText = `Rs. ${product.selling_price || product.retail_price || '0.00'} | Stock: ${product.stock_quantity ?? 'Available'}`;
+        
+        frameSelectedCard.classList.remove('d-none');
+        frameSearchWrapper.classList.add('d-none');
+        frameSearchResults.classList.remove('show');
+        frameSearchInput.value = '';
+
+        // Auto-fill frame brand/model if currently empty
+        if (frameBrandInput && !frameBrandInput.value.trim()) {
+            frameBrandInput.value = product.name;
+        }
+    }
+
+    if (clearSelectedFrameBtn) {
+        clearSelectedFrameBtn.addEventListener('click', () => {
+            frameProductIdInput.value = '';
+            frameSelectedCard.classList.add('d-none');
+            frameSearchWrapper.classList.remove('d-none');
+            frameSearchInput.value = '';
+            frameSearchInput.focus();
+        });
+    }
+
+    if (frameSearchInput) {
+        const handleFrameSearch = debounce(async (query) => {
+            try {
+                frameSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching frames...</div>';
+                frameSearchResults.classList.add('show');
+
+                const resp = await fetch(`/products/api/search/?category=OPTICAL&q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Frame search failed');
+                const data = await resp.json();
+                const frames = data.results || data || [];
+
+                if (!frames.length) {
+                    frameSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No optical frames found in stock.</div>';
+                    return;
+                }
+
+                let html = '';
+                frames.forEach(f => {
+                    const price = f.selling_price || f.retail_price || '0.00';
+                    const stock = f.stock_quantity ?? 'In Stock';
+                    html += `
+                        <div class="async-result-item frame-item" data-frame='${JSON.stringify(f).replace(/'/g, "&apos;")}'>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-bold text-dark fs-xs">${escapeHtml(f.name)}</span>
+                                <span class="badge bg-light text-success border font-monospace fs-2xs">Rs. ${price}</span>
+                            </div>
+                            <div class="text-muted fs-2xs">SKU: ${escapeHtml(f.sku || 'N/A')} &bull; Stock: ${stock}</div>
+                        </div>
+                    `;
+                });
+                frameSearchResults.innerHTML = html;
+
+                frameSearchResults.querySelectorAll('.frame-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const product = JSON.parse(el.dataset.frame);
+                        selectFrameProduct(product);
+                    });
+                });
+            } catch (err) {
+                frameSearchResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying optical products.</div>';
+            }
+        }, 250);
+
+        frameSearchInput.addEventListener('input', (e) => handleFrameSearch(e.target.value.trim()));
+        frameSearchInput.addEventListener('focus', (e) => handleFrameSearch(e.target.value.trim()));
+    }
+
+    // =========================================================================
+    // 3. ASYNC OPTICIAN / TECHNICIAN SELECTOR (/users/api/search/?role=TECHNICIAN)
+    // =========================================================================
+    const opticianIdInput = document.getElementById('id_technician_id');
+    const opticianSearchInput = document.getElementById('opticianSearchInput');
+    const opticianSearchWrapper = document.getElementById('opticianSearchInputWrapper');
+    const opticianSearchResults = document.getElementById('opticianSearchResults');
+    const opticianSelectedCard = document.getElementById('opticianSelectedCard');
+    const opticianSelectedName = document.getElementById('opticianSelectedName');
+    const opticianSelectedRole = document.getElementById('opticianSelectedRole');
+    const clearSelectedOpticianBtn = document.getElementById('clearSelectedOpticianBtn');
+
+    function selectOptician(id, name, role) {
+        opticianIdInput.value = id;
+        opticianSelectedName.innerText = name;
+        opticianSelectedRole.innerText = role || 'Optometrist';
+        opticianSelectedCard.classList.remove('d-none');
+        opticianSearchWrapper.classList.add('d-none');
+        opticianSearchResults.classList.remove('show');
+        opticianSearchInput.value = '';
+    }
+
+    if (clearSelectedOpticianBtn) {
+        clearSelectedOpticianBtn.addEventListener('click', () => {
+            opticianIdInput.value = '';
+            opticianSelectedCard.classList.add('d-none');
+            opticianSearchWrapper.classList.remove('d-none');
+            opticianSearchInput.value = '';
+            opticianSearchInput.focus();
+        });
+    }
+
+    if (opticianSearchInput) {
+        const handleOpticianSearch = debounce(async (query) => {
+            try {
+                opticianSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching staff...</div>';
+                opticianSearchResults.classList.add('show');
+
+                const resp = await fetch(`/users/api/search/?role=TECHNICIAN&q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Staff search failed');
+                const data = await resp.json();
+                const techList = data.results || data || [];
+
+                if (!techList.length) {
+                    opticianSearchResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No technician or optometrist found.</div>';
+                    return;
+                }
+
+                let html = '';
+                techList.forEach(t => {
+                    const id = t.id;
+                    const name = t.full_name || t.name || t.username;
+                    const role = t.role_display || t.role || 'Technician';
+                    html += `
+                        <div class="async-result-item" data-id="${id}" data-name="${escapeHtml(name)}" data-role="${escapeHtml(role)}">
+                            <div class="fw-bold text-dark fs-xs">${escapeHtml(name)}</div>
+                            <div class="text-muted fs-2xs"><i class="fas fa-user-check me-1 text-primary"></i>${escapeHtml(role)}</div>
+                        </div>
+                    `;
+                });
+                opticianSearchResults.innerHTML = html;
+
+                opticianSearchResults.querySelectorAll('.async-result-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        selectOptician(el.dataset.id, el.dataset.name, el.dataset.role);
+                    });
+                });
+            } catch (err) {
+                opticianSearchResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying technicians.</div>';
+            }
+        }, 200);
+
+        opticianSearchInput.addEventListener('input', (e) => handleOpticianSearch(e.target.value.trim()));
+        opticianSearchInput.addEventListener('focus', (e) => handleOpticianSearch(e.target.value.trim()));
+    }
+
+    // Dismiss dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+        if (custNameResults && !custNameResults.contains(e.target) && e.target !== custNameInput) {
+            custNameResults.classList.remove('show');
+        }
+        if (custPhoneResults && !custPhoneResults.contains(e.target) && e.target !== custPhoneInput) {
+            custPhoneResults.classList.remove('show');
+        }
+        if (frameSearchResults && !frameSearchResults.contains(e.target) && e.target !== frameSearchInput) {
+            frameSearchResults.classList.remove('show');
+        }
+        if (opticianSearchResults && !opticianSearchResults.contains(e.target) && e.target !== opticianSearchInput) {
+            opticianSearchResults.classList.remove('show');
+        }
+    });
+});
+</script>
 {% endblock %}
