@@ -9,14 +9,18 @@ Capabilities:
 3. Operating Expense Vouchers: Cashier/Accountant daily operational expense recorder with
    multi-wallet support and select_related optimizations.
 4. General Ledger Statement: Account ledger with Opening Balance, running balance math, and reference links.
-5. Trial Balance: Multi-column statement verifying Sum(Debits) == Sum(Credits).
-6. Profit & Loss (Income Statement): Operating Revenue, COGS, Gross Profit, and Net Operating Profit.
-7. Balance Sheet: Statement of Financial Position enforcing Assets == Liabilities + Equity.
-8. Cash Flow Statement: Counter-account based operating, investing, financing, and contra movement analysis.
-9. Upgraded Bank Reconciliation: Cleared item checkoffs, BankStatementLine matching, and zero-variance enforcement.
-10. Accounting Integrity Check Dashboard: Automated 6-point sub-ledger and control audit engine.
-11. Gateway Settlement Engine: Daily digital clearing settlement with MDR commission calculation.
-12. Account Search API: High-speed, indexed autocomplete for instant lookup by code, name, Devanagari, or tag.
+5. Party-Wise Confirmation Ledger & Audit Statement: Sub-ledger statement tracking individual Customer
+   (Debtor) or Supplier (Creditor) balances across old migrated data and new fiscal year periods.
+6. Formal Printable A4 Party Confirmation: Official balance confirmation statement with legal text,
+   words conversion, and bilateral signature/stamp blocks.
+7. Trial Balance: Multi-column statement verifying Sum(Debits) == Sum(Credits).
+8. Profit & Loss (Income Statement): Operating Revenue, COGS, Gross Profit, and Net Operating Profit.
+9. Balance Sheet: Statement of Financial Position enforcing Assets == Liabilities + Equity.
+10. Cash Flow Statement: Counter-account based operating, investing, financing, and contra movement analysis.
+11. Upgraded Bank Reconciliation: Cleared item checkoffs, BankStatementLine matching, and zero-variance enforcement.
+12. Accounting Integrity Check Dashboard: Automated 6-point sub-ledger and control audit engine.
+13. Gateway Settlement Engine: Daily digital clearing settlement with MDR commission calculation.
+14. Fast Account Search API: High-speed, indexed autocomplete for instant lookup by code, name, Devanagari, or tag.
 """
 
 import uuid
@@ -47,7 +51,11 @@ from apps.accounting.forms import (
 )
 from apps.accounting.services.auto_posting import AutoPostingService, JournalEngine
 from apps.accounting.services.financial_statements import FinancialStatementService
+from apps.accounting.services.party_ledger_service import PartyLedgerService, number_to_words_nepali_format
+from apps.customers.models import Customer
+from apps.purchases.models import Supplier
 from apps.branches.models import Branch
+from apps.core.models import SystemConfiguration
 from apps.core.nepali_calendar import NepaliCalendar
 
 # =============================================================================
@@ -56,21 +64,7 @@ from apps.core.nepali_calendar import NepaliCalendar
 class AccountSearchAPIView(LoginRequiredMixin, View):
     """
     High-Performance Search API for General Ledger Accounts.
-
-    Query Parameters:
-      - q: Search string (partial code prefix e.g. '11', name 'cash', Devanagari 'नगद', or system tag).
-      - category: Filter category scope:
-          * 'EXPENSE'  -> DIRECT_EXPENSE, INDIRECT_EXPENSE
-          * 'BANK'     -> system_tag == 'BANK'
-          * 'CASH'     -> system_tag == 'CASH'
-          * 'PAYMENT'  -> CASH, BANK, FONEPAY, ESEWA, KHALTI, CARD_CLEARING
-          * 'REVENUE'  -> Operating Revenue / Sales
-          * 'ASSET', 'LIABILITY', 'EQUITY', 'DIRECT_EXPENSE', 'INDIRECT_EXPENSE'
-      - system_tag: Filter by exact system automation tag.
-      - branch: Target branch ID (defaults to active branch / organization-wide HQ).
-      - limit: Maximum results returned (default: 30, max: 100).
     """
-
     def get(self, request, *args, **kwargs):
         q = request.GET.get('q', '').strip()
         category = request.GET.get('category', '').strip().upper()
@@ -82,21 +76,17 @@ class AccountSearchAPIView(LoginRequiredMixin, View):
         except (ValueError, TypeError):
             limit = 30
 
-        # Determine target branch scope
         active_branch = getattr(request, 'active_branch', None)
         target_branch = branch_id or active_branch
 
         qs = Account.objects.select_related('group', 'branch')
 
-        # Scope by branch: include branch-specific accounts and organization-wide (HQ) accounts
         if target_branch:
             qs = qs.filter(Q(branch=target_branch) | Q(branch__isnull=True))
 
-        # Filter by specific system automation tag
         if system_tag:
             qs = qs.filter(system_tag=system_tag)
 
-        # Filter by category / group role
         if category:
             if category in ['EXPENSE', 'EXPENSES']:
                 qs = qs.filter(group__category__in=['DIRECT_EXPENSE', 'INDIRECT_EXPENSE'])
@@ -111,9 +101,6 @@ class AccountSearchAPIView(LoginRequiredMixin, View):
             elif category in ['ASSET', 'LIABILITY', 'EQUITY', 'DIRECT_EXPENSE', 'INDIRECT_EXPENSE']:
                 qs = qs.filter(group__category=category)
 
-        # ---------------------------------------------------------------------
-        # Empty query: return primary control / active operational accounts
-        # ---------------------------------------------------------------------
         if not q:
             if not category and not system_tag:
                 primary_tags = [
@@ -127,10 +114,6 @@ class AccountSearchAPIView(LoginRequiredMixin, View):
                     qs = primary_qs
 
             qs = qs.order_by('code')[:limit]
-
-        # ---------------------------------------------------------------------
-        # Non-empty query: search by code, name, Devanagari name, or system tag
-        # ---------------------------------------------------------------------
         else:
             qs = qs.filter(
                 Q(code__icontains=q) |
@@ -147,7 +130,6 @@ class AccountSearchAPIView(LoginRequiredMixin, View):
                 'code'
             )[:limit]
 
-        # Build optimized JSON response
         results = []
         for acc in qs:
             bal = acc.current_balance or Decimal('0.00')
@@ -184,11 +166,6 @@ class AccountSearchAPIView(LoginRequiredMixin, View):
 # 1. CHART OF ACCOUNTS (COA) VIEW
 # =============================================================================
 class ChartOfAccountsView(LoginRequiredMixin, View):
-    """
-    Hierarchical view of all Account Groups and individual General Ledger accounts
-    with current debit/credit balances, deletion protection, and system locks.
-    Optimized: Uses PostgreSQL conditional aggregations and pre-annotated existence queries.
-    """
     template_name = 'accounting/coa.html'
 
     def get(self, request):
@@ -295,7 +272,6 @@ class ChartOfAccountsView(LoginRequiredMixin, View):
 # 2. JOURNAL ENTRY MANAGEMENT
 # =============================================================================
 class JournalEntryListView(LoginRequiredMixin, ListView):
-    """Browsing, filtering, and searching double-entry journal vouchers."""
     model = JournalEntry
     template_name = 'accounting/journal_list.html'
     context_object_name = 'journals'
@@ -340,7 +316,6 @@ class JournalEntryListView(LoginRequiredMixin, ListView):
         return ctx
 
 class JournalEntryCreateView(LoginRequiredMixin, View):
-    """Intake form for manual double-entry adjustments and Contra transfers."""
     template_name = 'accounting/journal_form.html'
 
     def get(self, request):
@@ -417,7 +392,6 @@ class JournalEntryCreateView(LoginRequiredMixin, View):
 # 3. OPERATING EXPENSE VOUCHER MANAGEMENT
 # =============================================================================
 class ExpenseVoucherListView(LoginRequiredMixin, ListView):
-    """Daily shop expense vouchers."""
     model = ExpenseVoucher
     template_name = 'accounting/expense_list.html'
     context_object_name = 'expenses'
@@ -456,7 +430,6 @@ class ExpenseVoucherListView(LoginRequiredMixin, ListView):
         return ctx
 
 class ExpenseVoucherCreateView(LoginRequiredMixin, View):
-    """Quick counter expense logger with automatic balanced double-entry posting."""
     template_name = 'accounting/expense_form.html'
 
     def get(self, request):
@@ -517,7 +490,6 @@ class ExpenseVoucherCreateView(LoginRequiredMixin, View):
 # 4. GENERAL LEDGER (ACCOUNT STATEMENT)
 # =============================================================================
 class GeneralLedgerView(LoginRequiredMixin, View):
-    """Detailed ledger statement with opening balance, running balance math, and reference links."""
     template_name = 'accounting/general_ledger.html'
 
     def get(self, request, account_id=None):
@@ -637,10 +609,125 @@ class GeneralLedgerView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 # =============================================================================
-# 5. TRIAL BALANCE REPORT
+# 5. PARTY-WISE CONFIRMATION LEDGER STATEMENT & AUDIT VIEW
+# =============================================================================
+class PartyLedgerView(LoginRequiredMixin, View):
+    """
+    Sub-Ledger Confirmation & Transaction Statement View.
+    Enables viewing and filtering party-wise ledgers (Debtors / Creditors)
+    across historical migrated periods and current fiscal years.
+    """
+    template_name = 'accounting/party_ledger.html'
+
+    def get(self, request):
+        branch = getattr(request, 'active_branch', None)
+        party_type = request.GET.get('party_type', 'CUSTOMER').strip().upper()
+        if party_type not in ['CUSTOMER', 'SUPPLIER']:
+            party_type = 'CUSTOMER'
+
+        party_id_str = request.GET.get('party_id') or request.GET.get('customer_id') or request.GET.get('supplier_id')
+        fiscal_year = request.GET.get('fiscal_year', '')
+        start_date = request.GET.get('start_date', '')
+        end_date = request.GET.get('end_date', '')
+
+        # Resolve party candidates for dropdown selectors
+        all_customers = Customer.objects.filter(is_active=True).order_by('name')
+        all_suppliers = Supplier.objects.filter(status='ACTIVE').order_by('company_name') if hasattr(Supplier, 'status') else Supplier.objects.filter(is_active=True).order_by('company_name')
+
+        selected_party_id = None
+        if party_id_str:
+            try:
+                selected_party_id = int(party_id_str)
+            except (ValueError, TypeError):
+                selected_party_id = None
+
+        if not selected_party_id:
+            if party_type == 'CUSTOMER' and all_customers.exists():
+                selected_party_id = all_customers.first().id
+            elif party_type == 'SUPPLIER' and all_suppliers.exists():
+                selected_party_id = all_suppliers.first().id
+
+        statement = None
+        if selected_party_id:
+            params = {
+                'fiscal_year': fiscal_year,
+                'start_date': start_date,
+                'end_date': end_date,
+            }
+            statement = PartyLedgerService.get_party_ledger_statement(
+                party_type=party_type,
+                party_id=selected_party_id,
+                params=params,
+                branch=branch
+            )
+
+        context = {
+            'party_type': party_type,
+            'selected_party_id': selected_party_id,
+            'statement': statement,
+            'all_customers': all_customers,
+            'all_suppliers': all_suppliers,
+            'available_fiscal_years': PartyLedgerService.get_available_fiscal_years(),
+            'active_tab': 'party_ledger'
+        }
+        return render(request, self.template_name, context)
+
+
+class PartyConfirmationStatementPrintView(LoginRequiredMixin, View):
+    """
+    Formal Printable A4 Balance Confirmation Statement & Audit Letter.
+    Formatted for direct physical printing, signed audit confirmations,
+    and client reconciliation sign-offs.
+    """
+    template_name = 'accounting/party_confirmation_a4.html'
+
+    def get(self, request):
+        branch = getattr(request, 'active_branch', None)
+        party_type = request.GET.get('party_type', 'CUSTOMER').strip().upper()
+        party_id = request.GET.get('party_id') or request.GET.get('customer_id') or request.GET.get('supplier_id')
+
+        if not party_id:
+            messages.error(request, _("Please select a valid party to generate the confirmation statement."))
+            return redirect('accounting:party_ledger')
+
+        try:
+            party_id = int(party_id)
+        except (ValueError, TypeError):
+            messages.error(request, _("Invalid party identifier."))
+            return redirect('accounting:party_ledger')
+
+        params = {
+            'fiscal_year': request.GET.get('fiscal_year', ''),
+            'start_date': request.GET.get('start_date', ''),
+            'end_date': request.GET.get('end_date', ''),
+        }
+
+        statement = PartyLedgerService.get_party_ledger_statement(
+            party_type=party_type,
+            party_id=party_id,
+            params=params,
+            branch=branch
+        )
+
+        config = SystemConfiguration.get_solo() if hasattr(SystemConfiguration, 'get_solo') else None
+
+        context = {
+            'statement': statement,
+            'config': config,
+            'company_name': getattr(config, 'company_name', 'Mobile Shop Management System'),
+            'company_pan': getattr(config, 'pan_number', ''),
+            'company_phone': getattr(config, 'company_phone', ''),
+            'company_address': getattr(config, 'company_address', 'Kathmandu, Nepal'),
+            'company_email': getattr(config, 'company_email', ''),
+            'printed_by': request.user,
+            'printed_at': timezone.now()
+        }
+        return render(request, self.template_name, context)
+
+# =============================================================================
+# 6. TRIAL BALANCE REPORT
 # =============================================================================
 class TrialBalanceView(LoginRequiredMixin, View):
-    """Formal multi-column Trial Balance sheet with mathematical equality verification."""
     template_name = 'accounting/trial_balance.html'
 
     def get(self, request):
@@ -675,10 +762,9 @@ class TrialBalanceView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 # =============================================================================
-# 6. PROFIT & LOSS (INCOME STATEMENT)
+# 7. PROFIT & LOSS (INCOME STATEMENT)
 # =============================================================================
 class ProfitLossView(LoginRequiredMixin, View):
-    """Detailed Income Statement: Revenue, Cost of Goods Sold, and Operating Margins."""
     template_name = 'accounting/profit_loss.html'
 
     def get(self, request):
@@ -722,10 +808,9 @@ class ProfitLossView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 # =============================================================================
-# 7. BALANCE SHEET (STATEMENT OF FINANCIAL POSITION)
+# 8. BALANCE SHEET (STATEMENT OF FINANCIAL POSITION)
 # =============================================================================
 class BalanceSheetView(LoginRequiredMixin, View):
-    """Formal Balance Sheet: Assets = Liabilities + Owner Equity."""
     template_name = 'accounting/balance_sheet.html'
 
     def get(self, request):
@@ -760,10 +845,9 @@ class BalanceSheetView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 # =============================================================================
-# 8. CASH FLOW STATEMENT VIEW
+# 9. CASH FLOW STATEMENT VIEW
 # =============================================================================
 class CashFlowView(LoginRequiredMixin, View):
-    """Cash Flow Statement powered by counter-account inspection."""
     template_name = 'accounting/cash_flow.html'
 
     def get(self, request):
@@ -807,16 +891,9 @@ class CashFlowView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 # =============================================================================
-# 9. UPGRADED BANK RECONCILIATION VIEW
+# 10. UPGRADED BANK RECONCILIATION VIEW
 # =============================================================================
 class BankReconciliationView(LoginRequiredMixin, View):
-    """
-    Cheque and digital settlement audit:
-    - Lists unreconciled journal items for bank accounts.
-    - Check off cleared transactions.
-    - Matches with BankStatementLine records.
-    - Enforces zero-variance restriction before marking RECONCILED.
-    """
     template_name = 'accounting/bank_reconciliation.html'
 
     def get(self, request):
@@ -917,14 +994,9 @@ class BankReconciliationView(LoginRequiredMixin, View):
         return redirect('accounting:reconciliation')
 
 # =============================================================================
-# 10. AUTOMATED ACCOUNTING INTEGRITY DIAGNOSTIC DASHBOARD
+# 11. AUTOMATED ACCOUNTING INTEGRITY DIAGNOSTIC DASHBOARD
 # =============================================================================
 class AccountingIntegrityCheckView(LoginRequiredMixin, View):
-    """
-    Automated health diagnostic engine:
-    Verifies Trial Balance, Customer Udhaari Subledgers, Supplier Payables,
-    Inventory Valuation, 7-Day Clearing, and Closed Fiscal Year Locks.
-    """
     template_name = 'accounting/integrity_check.html'
 
     def get(self, request):
@@ -959,14 +1031,9 @@ class AccountingIntegrityCheckView(LoginRequiredMixin, View):
         return render(request, self.template_name, context)
 
 # =============================================================================
-# 11. DIGITAL GATEWAY BATCH SETTLEMENT ENGINE
+# 12. DIGITAL GATEWAY BATCH SETTLEMENT ENGINE
 # =============================================================================
 class GatewaySettlementView(LoginRequiredMixin, View):
-    """
-    Interactive Digital Gateway Settlement view:
-    Transfers accumulated digital clearing balances (FonePay, eSewa, Khalti, Card POS)
-    into the Primary Commercial Bank Account, accounting for gateway commission/MDR fees.
-    """
     template_name = 'accounting/gateway_settlement.html'
 
     def get(self, request):

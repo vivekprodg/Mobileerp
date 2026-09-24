@@ -4,6 +4,7 @@ Customer Management, Directory & Credit (Udhaari) Ledger Views.
 Capabilities:
 1. Customer Directory: Search and filter by name, phone number, PAN, customer type, or debt status.
 2. Customer Profile & Sub-Ledger: Detailed breakdown of purchase history and Udhaari movements.
+   - Provides active Nepali Fiscal Year in context to seamlessly link to Party Confirmation Statements.
 3. Customer Udhaari Payment Processing:
    - Row-level lock (`select_for_update`) on Customer within an atomic transaction.
    - Sub-ledger entry creation prior to balance adjustment.
@@ -31,6 +32,8 @@ from django.utils import timezone
 from apps.customers.models import Customer, CustomerUdhaariLedger
 from apps.customers.forms import CustomerForm, CustomerPaymentForm
 from apps.core.models import AuditLog
+from apps.core.nepali_calendar import NepaliCalendar
+from apps.accounting.models import AccountingFiscalYear
 
 logger = logging.getLogger(__name__)
 
@@ -112,11 +115,9 @@ try:
 except Exception:
     pass
 
-
 # =============================================================================
 # CUSTOMER DIRECTORY & CRUD VIEWS
 # =============================================================================
-
 class CustomerListView(LoginRequiredMixin, ListView):
     model = Customer
     template_name = 'customers/customer_list.html'
@@ -149,7 +150,6 @@ class CustomerListView(LoginRequiredMixin, ListView):
         context['total_page_debt'] = total_page_debt
         return context
 
-
 class CustomerDetailView(LoginRequiredMixin, DetailView):
     model = Customer
     template_name = 'customers/customer_detail.html'
@@ -159,8 +159,18 @@ class CustomerDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         context['ledger_entries'] = self.object.credit_ledger_entries.select_related('branch', 'recorded_by')[:50]
         context['payment_form'] = CustomerPaymentForm()
-        return context
 
+        # Resolve active Nepali Fiscal Year for statement link
+        today = timezone.now().date()
+        try:
+            bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(today)
+            current_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+        except Exception:
+            active_fy_obj = AccountingFiscalYear.objects.filter(is_closed=False).first()
+            current_fy = active_fy_obj.name if active_fy_obj else '2083/84'
+
+        context['active_fiscal_year'] = current_fy
+        return context
 
 class CustomerCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = Customer
@@ -184,7 +194,6 @@ class CustomerCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
         )
         messages.success(self.request, f"Customer '{self.object.name}' created successfully.")
         return response
-
 
 class CustomerUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Customer
@@ -211,19 +220,7 @@ class CustomerUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         messages.success(self.request, f"Customer '{self.object.name}' updated successfully.")
         return response
 
-
 class CustomerUdhaariPaymentView(LoginRequiredMixin, UserPassesTestMixin, View):
-    """
-    SEC-04 Compliance: Enforces role-based permissions on customer Udhaari balance alterations.
-    Only Superusers, Owners, Managers, and Accountants can record debt repayments.
-
-    Sub-Ledger & General Ledger Protection Protocol:
-    1. Locks the Customer row with `select_for_update()` inside an atomic transaction.
-    2. Appends the CustomerUdhaariLedger entry without upfront balance mutation.
-    3. Synchronously executes General Ledger double-entry posting without swallowing errors.
-    4. Updates and caches the Customer balance from the sub-ledger ONLY after GL posting succeeds.
-    """
-
     def test_func(self):
         user = self.request.user
         return user.is_authenticated and (
@@ -248,14 +245,12 @@ class CustomerUdhaariPaymentView(LoginRequiredMixin, UserPassesTestMixin, View):
 
             try:
                 with transaction.atomic():
-                    # 1. Acquire row-level lock on customer record
                     customer = Customer.objects.select_for_update().get(pk=pk)
                     prev_bal = customer.current_credit_balance
                     new_bal = (prev_bal - amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
                     active_branch = getattr(request, 'active_branch', None) or customer.preferred_branch
 
-                    # 2. Record CustomerUdhaariLedger sub-ledger entry FIRST (Do NOT mutate customer balance yet)
                     ledger_entry = CustomerUdhaariLedger.objects.create(
                         customer=customer,
                         branch=active_branch,
@@ -269,7 +264,6 @@ class CustomerUdhaariPaymentView(LoginRequiredMixin, UserPassesTestMixin, View):
                         recorded_by=request.user
                     )
 
-                    # 3. Synchronously post Double-Entry Journal to GL without swallowing errors
                     import apps.accounting.services.auto_posting as auto_posting_mod
                     voucher_ref = reference or f"UDH-CUST-{ledger_entry.id}"
                     auto_posting_mod.post_customer_repayment_journal(
@@ -281,10 +275,8 @@ class CustomerUdhaariPaymentView(LoginRequiredMixin, UserPassesTestMixin, View):
                         branch=active_branch
                     )
 
-                    # 4. Update the cached balance strictly from sub-ledger after GL entry succeeds
                     customer.recalculate_balance_from_ledger(save=True)
 
-                    # 5. Record immutable audit log
                     AuditLog.objects.create(
                         user=request.user,
                         branch=active_branch,
@@ -316,19 +308,7 @@ class CustomerUdhaariPaymentView(LoginRequiredMixin, UserPassesTestMixin, View):
             messages.error(request, "Invalid payment submission. Please verify the amount.")
             return redirect('customers:customer_detail', pk=pk)
 
-
 class CustomerSearchAPIView(LoginRequiredMixin, View):
-    """
-    Unified Customer Search API endpoint.
-    Serves both fast POS auto-completion and B2B Tax Invoicing Lookups.
-
-    Capabilities:
-    1. If `q` is empty: Returns the top 15 most recently active customers or those with outstanding Udhaari.
-    2. If `q` is provided: Searches across name, phone number, and PAN using partial matching.
-    3. Conforms to the Unified Search Contract (id, title, subtitle, badge, extra_data).
-    4. Maintains full backward compatibility with legacy POS JavaScript endpoints.
-    """
-
     def get(self, request, *args, **kwargs):
         q = request.GET.get('q', '').strip()
         customer_type = request.GET.get('type', '').strip()
@@ -343,7 +323,6 @@ class CustomerSearchAPIView(LoginRequiredMixin, View):
             qs = qs.filter(current_credit_balance__gt=Decimal('0.00'))
 
         if q:
-            # Partial search across name, phone, and PAN
             cust_filter = (
                 Q(name__icontains=q) |
                 Q(phone_number__icontains=q)
@@ -355,7 +334,6 @@ class CustomerSearchAPIView(LoginRequiredMixin, View):
 
             qs = qs.filter(cust_filter).order_by('-current_credit_balance', 'name')[:25]
         else:
-            # When empty query: Return the 15 most recently active customers or those with outstanding Udhaari
             qs = qs.order_by('-current_credit_balance', '-updated_at')[:15]
 
         results = []
@@ -369,7 +347,6 @@ class CustomerSearchAPIView(LoginRequiredMixin, View):
             bal = getattr(c, 'current_credit_balance', Decimal('0.00'))
             limit = getattr(c, 'credit_limit', Decimal('0.00'))
 
-            # Badge determination
             if bal > Decimal('0.00'):
                 badge = f"Due: Rs. {bal:,.2f}"
                 badge_color = 'danger'
@@ -380,7 +357,6 @@ class CustomerSearchAPIView(LoginRequiredMixin, View):
                 badge = c_type_display
                 badge_color = 'secondary'
 
-            # Subtitle construction
             subtitle_parts = [f"Ph: {phone}"]
             if pan:
                 subtitle_parts.append(f"PAN: {pan}")
@@ -405,18 +381,13 @@ class CustomerSearchAPIView(LoginRequiredMixin, View):
             }
 
             results.append({
-                # Unified Search Contract
                 'id': c.id,
                 'title': c.name,
                 'subtitle': subtitle,
                 'badge': badge,
                 'badge_color': badge_color,
                 'extra_data': extra_data,
-
-                # Select2 / Autocomplete Compatibility
                 'text': f"{c.name} ({phone})" if phone else c.name,
-
-                # POS Form Backwards Compatibility
                 'name': c.name,
                 'phone': phone,
                 'pan': pan,

@@ -3,6 +3,54 @@
 
 {% block title %}Customers &amp; Udhaari Directory | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
+{% block extra_head %}
+<style>
+/* Floating Live Suggestion Dropdown */
+.customer-live-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    max-height: 360px;
+    overflow-y: auto;
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+}
+
+.live-search-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    cursor: pointer;
+    transition: background-color 0.15s ease-in-out;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-decoration: none;
+    color: inherit;
+}
+
+.live-search-item:last-child {
+    border-bottom: none;
+}
+
+.live-search-item:hover,
+.live-search-item.active {
+    background-color: #f8fafc;
+}
+
+.live-search-item:hover .customer-name-text {
+    color: var(--erp-primary, #0d6efd) !important;
+}
+
+.font-mono {
+    font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid px-4 py-4">
     <!-- Header Actions -->
@@ -23,18 +71,29 @@
         </div>
     </div>
 
-    <!-- Search & Filter Bar with Keyboard Shortcut Cue -->
+    <!-- Search & Filter Bar with Keyboard Shortcut Cue & Live Dynamic Autocomplete -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-center">
+        <form method="get" class="row g-2 align-items-center" id="customerFilterForm">
+            <!-- Live Search Input with Suggestions Container -->
             <div class="col-12 col-md-5 position-relative">
                 <div class="input-group input-group-sm">
                     <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
-                    <input type="text" name="q" id="customerSearchInput" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search Customer Name, Mobile 98XXXXXXXX, or PAN...">
+                    <input type="text" 
+                           name="q" 
+                           id="customerSearchInput" 
+                           value="{{ request.GET.q|default:'' }}" 
+                           class="form-control bg-light border-0" 
+                           placeholder="Type name (e.g. v, vi, viv), phone, or PAN..." 
+                           autocomplete="off">
                     <span class="input-group-text bg-light border-0 py-0 pe-2" title="Keyboard Shortcut: Press '/' or 'Alt+S' to search">
                         <kbd class="bg-white text-muted border shadow-xs fs-2xs px-1 py-0.5 rounded">Alt+S</kbd>
                     </span>
                 </div>
+
+                <!-- Live Dynamic Suggestions Popup Dropdown -->
+                <div id="customerLiveDropdown" class="customer-live-dropdown d-none"></div>
             </div>
+
             <div class="col-6 col-md-3">
                 <select name="type" class="form-select form-select-sm bg-light border-0">
                     <option value="">All Customer Types</option>
@@ -130,16 +189,155 @@
     {% include "includes/_pagination.html" %}
 </div>
 
+<!-- Live Typeahead & Keyboard Navigation Engine -->
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // Dedicated page-level shortcut listener that PRESERVES Ctrl+K for Global Command Palette
+    const searchInput = document.getElementById('customerSearchInput');
+    const liveDropdown = document.getElementById('customerLiveDropdown');
+    let debounceTimer = null;
+    let activeIndex = -1;
+
+    // Helper: Escape raw HTML to prevent XSS
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // Live search query dispatcher (150ms debounce)
+    async function performLiveSearch(query) {
+        if (!query || query.length === 0) {
+            liveDropdown.innerHTML = '';
+            liveDropdown.classList.add('d-none');
+            activeIndex = -1;
+            return;
+        }
+
+        try {
+            liveDropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching customers...</div>';
+            liveDropdown.classList.remove('d-none');
+
+            const resp = await fetch(`/customers/api/search/?q=${encodeURIComponent(query)}`);
+            if (!resp.ok) throw new Error('Search failed');
+
+            const data = await resp.json();
+            const results = data.results || [];
+
+            if (results.length === 0) {
+                liveDropdown.innerHTML = `
+                    <div class="p-3 text-center text-muted fs-xs">
+                        <i class="fas fa-user-slash text-secondary opacity-50 d-block mb-1"></i>
+                        No customer found matching "<strong>${escapeHtml(query)}</strong>"
+                    </div>`;
+                return;
+            }
+
+            let html = '';
+            results.forEach((c, idx) => {
+                const dueBalance = parseFloat(c.credit_balance || (c.extra_data && c.extra_data.credit_balance) || 0);
+                const hasDebt = dueBalance > 0;
+                const badgeHtml = hasDebt
+                    ? `<span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 font-mono fs-2xs px-2 py-1">Due: Rs. ${dueBalance.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>`
+                    : `<span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 font-mono fs-2xs px-2 py-1">Clear (Rs. 0.00)</span>`;
+
+                const panText = c.pan ? ` &bull; PAN: ${escapeHtml(c.pan)}` : '';
+                const phoneText = c.phone ? `Ph: ${escapeHtml(c.phone)}` : 'No Phone';
+                const cType = c.customer_type_display || c.customer_type || 'Retail';
+
+                html += `
+                    <a href="/customers/${c.id}/" class="live-search-item" data-index="${idx}">
+                        <div>
+                            <div class="fw-bold text-dark fs-sm customer-name-text">
+                                ${escapeHtml(c.name)}
+                                <span class="badge bg-light text-muted border font-mono fs-2xs ms-1">${escapeHtml(cType)}</span>
+                            </div>
+                            <div class="text-muted fs-2xs mt-0.5">
+                                <span class="font-mono">${phoneText}</span>${panText}
+                            </div>
+                        </div>
+                        <div class="text-end ps-3">
+                            ${badgeHtml}
+                            <div class="text-primary fs-2xs fw-semibold mt-1">Open Profile &rarr;</div>
+                        </div>
+                    </a>
+                `;
+            });
+
+            liveDropdown.innerHTML = html;
+            activeIndex = -1;
+
+        } catch (err) {
+            liveDropdown.innerHTML = '<div class="p-3 text-center text-danger fs-xs"><i class="fas fa-triangle-exclamation me-1"></i> Search service unavailable</div>';
+        }
+    }
+
+    // Keystroke typing listener
+    if (searchInput && liveDropdown) {
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            const val = e.target.value.trim();
+            debounceTimer = setTimeout(() => {
+                performLiveSearch(val);
+            }, 150);
+        });
+
+        // Re-open suggestions on click/focus if there is text
+        searchInput.addEventListener('focus', () => {
+            const val = searchInput.value.trim();
+            if (val.length > 0 && liveDropdown.classList.contains('d-none')) {
+                performLiveSearch(val);
+            }
+        });
+
+        // Keyboard navigation (Arrow Down, Arrow Up, Enter, Escape)
+        searchInput.addEventListener('keydown', (e) => {
+            const items = liveDropdown.querySelectorAll('.live-search-item');
+            if (items.length === 0 || liveDropdown.classList.contains('d-none')) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIndex = (activeIndex + 1) % items.length;
+                updateActiveItem(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIndex = (activeIndex - 1 + items.length) % items.length;
+                updateActiveItem(items);
+            } else if (e.key === 'Enter' && activeIndex >= 0) {
+                e.preventDefault();
+                items[activeIndex].click();
+            } else if (e.key === 'Escape') {
+                liveDropdown.classList.add('d-none');
+                activeIndex = -1;
+            }
+        });
+
+        function updateActiveItem(items) {
+            items.forEach((item, idx) => {
+                if (idx === activeIndex) {
+                    item.classList.add('active');
+                    item.scrollIntoView({ block: 'nearest' });
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
+    }
+
+    // Close live dropdown on outside click
+    document.addEventListener('click', (e) => {
+        if (liveDropdown && !liveDropdown.contains(e.target) && e.target !== searchInput) {
+            liveDropdown.classList.add('d-none');
+            activeIndex = -1;
+        }
+    });
+
+    // Dedicated page-level shortcut listener (Preserves Ctrl+K for Global Command Palette)
     document.addEventListener('keydown', (e) => {
         const isInputFocused = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
         
         // Single '/' key when not actively typing in an input
         if (e.key === '/' && !isInputFocused) {
             e.preventDefault();
-            const searchInput = document.getElementById('customerSearchInput');
             if (searchInput) {
                 searchInput.focus();
                 searchInput.select();
@@ -148,7 +346,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Alt + S shortcut accessible from anywhere on the page
         else if (e.altKey && (e.key.toLowerCase() === 's' || e.code === 'KeyS')) {
             e.preventDefault();
-            const searchInput = document.getElementById('customerSearchInput');
             if (searchInput) {
                 searchInput.focus();
                 searchInput.select();

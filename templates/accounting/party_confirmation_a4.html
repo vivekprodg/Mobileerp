@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Confirmation of Account: {{ statement.party_name }} (FY {{ statement.fiscal_year }})</title>
+    <style>
+        @page {
+            size: A4 portrait;
+            margin: 10mm 12mm 12mm 12mm;
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #111827;
+            background: #ffffff;
+            margin: 0;
+            padding: 0;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+
+        .no-print-toolbar {
+            background: #1e293b;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #ffffff;
+            font-size: 13px;
+        }
+
+        .btn-print {
+            background: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .btn-close-window {
+            background: #475569;
+            color: #ffffff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        @media print {
+            .no-print-toolbar {
+                display: none !important;
+            }
+            body {
+                padding: 0;
+            }
+        }
+
+        .header-table {
+            width: 100%;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+        }
+
+        .company-title {
+            font-size: 18px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: #0f172a;
+            margin: 0 0 2px 0;
+        }
+
+        .doc-title-badge {
+            font-size: 13px;
+            font-weight: bold;
+            text-align: right;
+            text-transform: uppercase;
+            color: #1e293b;
+            letter-spacing: 0.5px;
+        }
+
+        .meta-box-table {
+            width: 100%;
+            margin-bottom: 12px;
+            border-collapse: collapse;
+        }
+
+        .meta-card {
+            border: 1px solid #cbd5e1;
+            padding: 8px 10px;
+            vertical-align: top;
+            background: #fafafa;
+        }
+
+        .confirmation-letter-text {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            font-size: 10.5px;
+            text-align: justify;
+        }
+
+        .confirmation-letter-text p {
+            margin: 0 0 4px 0;
+        }
+
+        .statement-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 14px;
+        }
+
+        .statement-table th {
+            background: #0f172a;
+            color: #ffffff;
+            font-weight: bold;
+            font-size: 9.5px;
+            text-transform: uppercase;
+            padding: 6px 6px;
+            border: 1px solid #0f172a;
+        }
+
+        .statement-table td {
+            border: 1px solid #cbd5e1;
+            padding: 5px 6px;
+            font-size: 10px;
+        }
+
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .font-mono { font-family: monospace; font-size: 10.5px; }
+        .fw-bold { font-weight: bold; }
+
+        .total-row {
+            background: #f1f5f9;
+            font-weight: bold;
+        }
+
+        .final-balance-banner {
+            border: 1.5px solid #0f172a;
+            padding: 8px 12px;
+            margin-bottom: 25px;
+            background: #ffffff;
+        }
+
+        .sign-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        .sign-box {
+            width: 48%;
+            border: 1px solid #94a3b8;
+            padding: 10px 12px;
+            vertical-align: top;
+            height: 110px;
+        }
+
+        .stamp-box {
+            height: 45px;
+            border-bottom: 1px dashed #cbd5e1;
+            margin-bottom: 6px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Non-printable top action bar -->
+    <div class="no-print-toolbar">
+        <div>
+            <strong>Confirmation of Account Statement</strong> &bull; {{ statement.party_name }} ({{ statement.fiscal_year }})
+        </div>
+        <div>
+            <button class="btn-print" onclick="window.print();">&#128438; Print Statement (A4)</button>
+            <a href="{% url 'accounting:party_ledger' %}?party_type={{ statement.party_type }}&party_id={{ statement.party_id }}" class="btn-close-window">&larr; Back to Screen</a>
+        </div>
+    </div>
+
+    <div style="padding: 10px 15px;">
+
+        <!-- Header -->
+        <table class="header-table">
+            <tr>
+                <td style="width: 60%; vertical-align: top;">
+                    <div class="company-title">{{ company_name }}</div>
+                    <div>{{ company_address }}</div>
+                    <div>Phone: {{ company_phone }} {% if company_email %}| Email: {{ company_email }}{% endif %}</div>
+                    <div><strong>PAN/VAT No: {{ company_pan }}</strong></div>
+                </td>
+                <td style="width: 40%; text-align: right; vertical-align: top;">
+                    <div class="doc-title-badge">Statement of Account &amp;<br>Balance Confirmation</div>
+                    <div style="margin-top: 4px; font-size: 10px;">
+                        Date: <strong>{{ statement.statement_generated_at|date:"Y-m-d" }}</strong><br>
+                        Fiscal Year: <strong>{{ statement.fiscal_year }}</strong>
+                    </div>
+                </td>
+            </tr>
+        </table>
+
+        <!-- Party & Statement Meta Info -->
+        <table class="meta-box-table">
+            <tr>
+                <td class="meta-card" style="width: 55%;">
+                    <div style="font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: bold; margin-bottom: 2px;">
+                        Party Details ({{ statement.party_type }}):
+                    </div>
+                    <div style="font-size: 13px; font-weight: bold; color: #0f172a;">{{ statement.party_name }}</div>
+                    <div>Contact: {{ statement.party_phone }}</div>
+                    <div>Address: {{ statement.party_address }}</div>
+                    <div><strong>PAN / VAT No: {{ statement.party_pan }}</strong> &bull; Code: {{ statement.party_code }}</div>
+                </td>
+                <td style="width: 2%;"></td>
+                <td class="meta-card" style="width: 43%;">
+                    <div style="font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: bold; margin-bottom: 2px;">
+                        Period Boundaries:
+                    </div>
+                    <div>Bikram Sambat (BS): <strong>{{ statement.start_date_bs }} to {{ statement.end_date_bs }}</strong></div>
+                    <div>Gregorian (AD): {{ statement.start_date_ad|date:"Y-m-d" }} to {{ statement.end_date_ad|date:"Y-m-d" }}</div>
+                    <div>Account Classification: <strong>{% if statement.is_debtor %}Sundry Debtors (Receivable){% else %}Sundry Creditors (Payable){% endif %}</strong></div>
+                </td>
+            </tr>
+        </table>
+
+        <!-- Formal Audit Confirmation Declaration Text -->
+        <div class="confirmation-letter-text">
+            <p><strong>To Whom It May Concern / Dear Sir/Madam,</strong></p>
+            <p>
+                Please find below the itemized statement of your account as recorded in our books of accounts for the period ending <strong>{{ statement.end_date_bs }}</strong> ({{ statement.end_date_ad|date:"Y-m-d" }}).
+                The net outstanding balance standing in your account as of this date is <strong>Rs. {{ statement.closing_balance|floatformat:2 }} ({{ statement.closing_nature }})</strong>
+                &mdash; <em>{{ statement.closing_amount_words }}</em> (<strong>{{ statement.closing_status_text }}</strong>).
+            </p>
+            <p style="margin-bottom: 0;">
+                Kindly examine this statement against your ledger records. If correct, please sign, stamp, and return the confirmation section below. In case of any discrepancies, please notify our accounts department within 7 business days.
+            </p>
+        </div>
+
+        <!-- Ledger Table -->
+        <table class="statement-table">
+            <thead>
+                <tr>
+                    <th style="width: 13%;">Date (BS / AD)</th>
+                    <th style="width: 14%;">Voucher No.</th>
+                    <th style="width: 12%;">Type</th>
+                    <th style="width: 13%;">Ref / Bill No.</th>
+                    <th>Particulars / Narration</th>
+                    <th style="width: 12%; text-align: right;">Debit (Rs.)</th>
+                    <th style="width: 12%; text-align: right;">Credit (Rs.)</th>
+                    <th style="width: 14%; text-align: right;">Balance (Rs.)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Opening Balance -->
+                <tr class="total-row">
+                    <td class="font-mono">{{ statement.start_date_bs }}</td>
+                    <td colspan="4"><strong>BALANCE BROUGHT FORWARD (B/F)</strong></td>
+                    <td class="text-right font-mono">
+                        {% if statement.opening_nature == 'Dr' and statement.opening_balance > 0 %}
+                            {{ statement.opening_balance|floatformat:2 }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td class="text-right font-mono">
+                        {% if statement.opening_nature == 'Cr' and statement.opening_balance > 0 %}
+                            {{ statement.opening_balance|floatformat:2 }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td class="text-right font-mono fw-bold">
+                        {{ statement.opening_balance|floatformat:2 }} {{ statement.opening_nature }}
+                    </td>
+                </tr>
+
+                <!-- Transaction Rows -->
+                {% for line in statement.ledger_lines %}
+                <tr>
+                    <td class="font-mono">
+                        {{ line.date_bs }}<br>
+                        <span style="color: #64748b; font-size: 8.5px;">{{ line.date_ad|date:"Y-m-d" }}</span>
+                    </td>
+                    <td class="font-mono fw-bold">{{ line.voucher_no }}</td>
+                    <td>{{ line.voucher_type }}</td>
+                    <td class="font-mono">{{ line.reference }}</td>
+                    <td>{{ line.narration }}</td>
+                    <td class="text-right font-mono">{% if line.debit > 0 %}{{ line.debit|floatformat:2 }}{% else %}-{% endif %}</td>
+                    <td class="text-right font-mono">{% if line.credit > 0 %}{{ line.credit|floatformat:2 }}{% else %}-{% endif %}</td>
+                    <td class="text-right font-mono fw-bold">{{ line.running_balance|floatformat:2 }} {{ line.nature }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" class="text-center" style="padding: 15px; color: #64748b;">
+                        No posted transactions recorded during this period.
+                    </td>
+                </tr>
+                {% endfor %}
+
+                <!-- Grand Totals -->
+                <tr class="total-row" style="border-top: 2px solid #0f172a;">
+                    <td colspan="5" class="text-right"><strong>PERIOD TOTAL TURNOVER:</strong></td>
+                    <td class="text-right font-mono fw-bold">{{ statement.total_debit|floatformat:2 }}</td>
+                    <td class="text-right font-mono fw-bold">{{ statement.total_credit|floatformat:2 }}</td>
+                    <td class="text-right font-mono fw-bold">{{ statement.closing_balance|floatformat:2 }} {{ statement.closing_nature }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- Final Statement Banner -->
+        <div class="final-balance-banner">
+            <table style="width: 100%;">
+                <tr>
+                    <td style="width: 70%;">
+                        <div style="font-size: 9.5px; text-transform: uppercase; color: #475569; font-weight: bold;">Amount in Words:</div>
+                        <div style="font-size: 11px; font-weight: bold; color: #0f172a;">{{ statement.closing_amount_words }}</div>
+                    </td>
+                    <td style="width: 30%; text-align: right;">
+                        <div style="font-size: 9.5px; text-transform: uppercase; color: #475569; font-weight: bold;">Net Balance Due:</div>
+                        <div style="font-size: 15px; font-weight: 800; color: #0f172a;" class="font-mono">
+                            Rs. {{ statement.closing_balance|floatformat:2 }} ({{ statement.closing_nature }})
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Bilateral Sign-Off & Audit Confirmation Boxes -->
+        <table class="sign-table">
+            <tr>
+                <!-- Sender Shop Authorization -->
+                <td class="sign-box">
+                    <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">
+                        For: {{ company_name }}
+                    </div>
+                    <div class="stamp-box"></div>
+                    <table style="width: 100%; font-size: 9.5px;">
+                        <tr>
+                            <td>Authorized Signature: __________________</td>
+                        </tr>
+                        <tr>
+                            <td style="padding-top: 4px;">Date: ________________________</td>
+                        </tr>
+                    </table>
+                </td>
+
+                <td style="width: 4%;"></td>
+
+                <!-- Party Confirmation Section -->
+                <td class="sign-box">
+                    <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">
+                        Confirmed &amp; Accepted by: {{ statement.party_name }}
+                    </div>
+                    <div style="font-size: 9px; color: #475569;">
+                        [&nbsp;&nbsp;] We confirm the above balance of Rs. {{ statement.closing_balance|floatformat:2 }} is correct.
+                    </div>
+                    <div class="stamp-box" style="height: 30px;"></div>
+                    <table style="width: 100%; font-size: 9.5px;">
+                        <tr>
+                            <td>Authorized Signature / Stamp: __________________</td>
+                        </tr>
+                        <tr>
+                            <td style="padding-top: 4px;">Date: ____________________ Phone: ____________</td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+
+    </div>
+
+</body>
+</html>

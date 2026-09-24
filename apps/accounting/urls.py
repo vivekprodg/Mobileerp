@@ -1,6 +1,5 @@
 """
 Accounting URL Configuration.
-File Path: apps/accounting/urls.py
 Namespace: accounting
 
 Includes routing for:
@@ -8,6 +7,8 @@ Includes routing for:
 - Double-Entry Journal Entries
 - Operating Expense Vouchers
 - General Ledger Statements
+- Party-Wise Confirmation Ledger & Audit Statements (Customers & Suppliers)
+- Formal Printable A4 Balance Confirmation Letters
 - Financial Statements (Trial Balance, P&L, Balance Sheet, Cash Flow)
 - Upgraded Bank Reconciliation & Cheque Audit
 - Automated Accounting Integrity Diagnostic Dashboard
@@ -35,6 +36,10 @@ urlpatterns = [
     # General Ledger Statements
     path('ledger/', views.GeneralLedgerView.as_view(), name='general_ledger'),
     path('ledger/<int:account_id>/', views.GeneralLedgerView.as_view(), name='general_ledger_account'),
+
+    # Party-Wise Subledger Confirmation & Audit Statements
+    path('party-ledger/', views.PartyLedgerView.as_view(), name='party_ledger'),
+    path('party-ledger/print/', views.PartyConfirmationStatementPrintView.as_view(), name='party_confirmation_print'),
 
     # Financial Statements & Analytical Reports
     path('trial-balance/', views.TrialBalanceView.as_view(), name='trial_balance'),

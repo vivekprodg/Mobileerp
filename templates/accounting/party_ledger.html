@@ -1,0 +1,1557 @@
+{% extends "base.html" %}
+{% load static humanize %}
+
+{% block title %}Party Confirmation Ledger: {{ statement.party_name|default:"Party Statement" }} | {{ statement.fiscal_year }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ==========================================================================
+   ULTRA-PREMIUM PARTY CONFIRMATION LEDGER - DESIGN SYSTEM
+   ========================================================================== */
+:root {
+    --ledger-primary: #2563eb;
+    --ledger-primary-hover: #1d4ed8;
+    --ledger-primary-soft: #eff6ff;
+    --ledger-primary-border: #bfdbfe;
+
+    --ledger-slate-50: #f8fafc;
+    --ledger-slate-100: #f1f5f9;
+    --ledger-slate-200: #e2e8f0;
+    --ledger-slate-300: #cbd5e1;
+    --ledger-slate-400: #94a3b8;
+    --ledger-slate-500: #64748b;
+    --ledger-slate-600: #475569;
+    --ledger-slate-700: #334155;
+    --ledger-slate-800: #1e293b;
+    --ledger-slate-900: #0f172a;
+
+    --ledger-success: #059669;
+    --ledger-success-soft: #ecfdf5;
+    --ledger-success-border: #a7f3d0;
+
+    --ledger-danger: #dc2626;
+    --ledger-danger-soft: #fef2f2;
+    --ledger-danger-border: #fecaca;
+
+    --ledger-warning: #d97706;
+    --ledger-warning-soft: #fffbeb;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-pill: 9999px;
+
+    --shadow-card: 0 4px 16px -2px rgba(15, 23, 42, 0.04), 0 2px 6px -1px rgba(15, 23, 42, 0.02);
+    --shadow-dropdown: 0 14px 35px -5px rgba(15, 23, 42, 0.15), 0 8px 16px -6px rgba(15, 23, 42, 0.06);
+}
+
+.font-mono {
+    font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* -------------------------------------------------------------
+   PAGE HEADER & ACTION BUTTONS
+------------------------------------------------------------- */
+.ledger-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.header-titles-group {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.header-icon-box {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 18px -4px rgba(37, 99, 235, 0.35);
+    flex-shrink: 0;
+    font-size: 20px;
+}
+
+.title-text-wrap h2 {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--ledger-slate-900);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    line-height: 1.2;
+    margin-bottom: 4px;
+}
+
+.title-nepali-pill {
+    font-size: 13px;
+    font-weight: 600;
+    background: #eef2ff;
+    color: #4338ca;
+    padding: 3px 12px;
+    border-radius: var(--radius-pill);
+    border: 1px solid #c7d2fe;
+}
+
+.title-subtext {
+    font-size: 13.5px;
+    color: var(--ledger-slate-500);
+    margin-bottom: 0;
+}
+
+/* Header Buttons */
+.header-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.btn-ledger-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 18px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    text-decoration: none !important;
+    border: 1px solid transparent;
+    outline: none;
+    white-space: nowrap;
+}
+
+.btn-action-primary {
+    background: #2563eb;
+    color: #ffffff !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+}
+.btn-action-primary:hover {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+}
+
+.btn-action-success {
+    background: #ffffff;
+    color: #059669 !important;
+    border-color: #a7f3d0;
+}
+.btn-action-success:hover {
+    background: #ecfdf5;
+    border-color: #34d399;
+    transform: translateY(-1px);
+}
+
+.btn-action-outline {
+    background: #ffffff;
+    color: var(--ledger-slate-600) !important;
+    border-color: var(--ledger-slate-200);
+}
+.btn-action-outline:hover {
+    background: #f8fafc;
+    color: var(--ledger-slate-900) !important;
+    border-color: #cbd5e1;
+    transform: translateY(-1px);
+}
+
+/* -------------------------------------------------------------
+   SECTION 1: FILTER COCKPIT CONSOLE (NO OVERLAPPING!)
+------------------------------------------------------------- */
+.filter-cockpit-card {
+    background: #ffffff;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--ledger-slate-200);
+    box-shadow: var(--shadow-card);
+    padding: 22px 24px;
+    margin-bottom: 24px;
+    position: relative;
+}
+
+.filter-grid {
+    display: grid;
+    grid-template-columns: 260px 1.5fr 160px 140px 140px auto;
+    gap: 18px;
+    align-items: flex-end;
+}
+
+.control-step-unit {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: relative;
+}
+
+.step-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--ledger-slate-600);
+    margin-bottom: 0;
+}
+
+.step-label .step-num {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    color: #334155;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.step-label .nepali-hint {
+    color: #64748b;
+    font-weight: 500;
+    text-transform: none;
+    font-size: 11px;
+}
+
+/* Modern Segmented Controller */
+.segmented-control-container {
+    background: #f1f5f9;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 4px;
+    display: flex;
+    user-select: none;
+    gap: 4px;
+}
+
+.segment-tab {
+    flex: 1 1 50%;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    border-radius: 7px;
+    cursor: pointer;
+    color: #64748b;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border: none;
+    background: transparent;
+    outline: none;
+    white-space: nowrap;
+}
+
+.segment-tab.active {
+    background: #2563eb;
+    color: #ffffff;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+/* LIVE AUTOCOMPLETE SEARCH COMBOBOX */
+.search-combobox-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.search-input-icon {
+    position: absolute;
+    left: 12px;
+    color: #64748b;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+}
+
+.party-search-input {
+    width: 100%;
+    height: 44px;
+    background: #f8fafc;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 0 78px 0 36px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ledger-slate-900);
+    outline: none;
+    transition: all 0.15s ease;
+}
+
+.party-search-input:focus {
+    background: #ffffff;
+    border-color: var(--ledger-primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.search-input-cues {
+    position: absolute;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.clear-search-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+}
+.clear-search-btn:hover {
+    color: #334155;
+}
+
+.kbd-shortcut {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    user-select: none;
+}
+
+/* FLOATING LIVE SUGGESTION DROPDOWN */
+.party-live-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 12px;
+    max-height: 380px;
+    overflow-y: auto;
+    box-shadow: var(--shadow-dropdown);
+    display: none;
+}
+
+.party-live-dropdown.show {
+    display: block;
+    animation: dropdownFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dropdownFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.live-search-item {
+    padding: 11px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-decoration: none;
+    color: inherit;
+}
+.live-search-item:last-child {
+    border-bottom: none;
+}
+.live-search-item:hover,
+.live-search-item.active {
+    background-color: #f1f5f9;
+}
+.live-search-item.active {
+    border-left: 3px solid var(--ledger-primary);
+    padding-left: 13px;
+}
+
+.item-party-name {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--ledger-slate-900);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.live-search-item:hover .item-party-name {
+    color: var(--ledger-primary);
+}
+
+.badge-party-type {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+}
+
+.item-party-meta {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.item-balance-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: var(--radius-pill);
+    white-space: nowrap;
+}
+.badge-balance-danger {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+}
+.badge-balance-clear {
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #a7f3d0;
+}
+
+.dropdown-helper-footer {
+    padding: 8px 14px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    font-size: 11px;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Cockpit Inputs */
+.cockpit-select,
+.cockpit-input {
+    width: 100%;
+    height: 44px;
+    background: #f8fafc;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ledger-slate-900);
+    outline: none;
+    transition: all 0.15s ease;
+}
+.cockpit-select:focus,
+.cockpit-input:focus {
+    border-color: var(--ledger-primary);
+    background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.btn-cockpit-view {
+    height: 44px;
+    background: #0f172a;
+    color: #ffffff !important;
+    border: none;
+    border-radius: 10px;
+    padding: 0 24px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+    white-space: nowrap;
+}
+.btn-cockpit-view:hover {
+    background: #1e293b;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.2);
+}
+
+/* -------------------------------------------------------------
+   SECTION 2: PROPORTIONAL 5-COLUMN DASHBOARD RIBBON (NO TRUNCATION!)
+------------------------------------------------------------- */
+.metrics-ribbon-grid {
+    display: grid;
+    grid-template-columns: 1.45fr 1fr 1fr 1fr 1.35fr;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.metric-card-box {
+    background: #ffffff;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--ledger-slate-200);
+    box-shadow: var(--shadow-card);
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.metric-card-box:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.08);
+}
+
+/* Card 1: Party Primary Profile */
+.party-profile-card {
+    background: linear-gradient(145deg, #ffffff, #f8fafc);
+    border-left: 4px solid #2563eb;
+}
+
+.profile-badge-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.party-type-chip {
+    background: #dbeafe;
+    color: #1e40af;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    letter-spacing: 0.4px;
+}
+
+.fiscal-year-chip {
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.party-name-title {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--ledger-slate-900);
+    margin-bottom: 6px;
+    letter-spacing: -0.3px;
+    line-height: 1.2;
+}
+
+.party-identifiers-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.party-info-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--ledger-slate-600);
+    font-weight: 500;
+}
+.party-info-item i {
+    color: #64748b;
+    font-size: 12px;
+    width: 14px;
+    text-align: center;
+}
+.party-info-item strong {
+    color: var(--ledger-slate-900);
+    font-weight: 700;
+}
+
+/* Common Metric Elements */
+.metric-top-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.metric-caption {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--ledger-slate-600);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metric-icon-bubble {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 13px;
+}
+
+.metric-figure {
+    font-size: 26px;
+    font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+    line-height: 1.1;
+}
+
+.currency-symbol {
+    font-size: 16px;
+    font-weight: 600;
+    color: #64748b;
+    margin-right: 4px;
+}
+
+/* Opening Balance Card */
+.card-opening {
+    border-left: 3px solid #64748b;
+}
+.card-opening .metric-icon-bubble {
+    background: #f1f5f9;
+    color: #475569;
+}
+.card-opening .metric-figure {
+    color: #1e293b;
+}
+
+.badge-b-f {
+    display: inline-flex;
+    align-items: center;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: var(--radius-pill);
+    border: 1px solid #fee2e2;
+    width: fit-content;
+}
+
+/* Period Debits (Dr) */
+.card-debits {
+    border-left: 3px solid var(--ledger-danger);
+}
+.card-debits .metric-icon-bubble {
+    background: var(--ledger-danger-soft);
+    color: var(--ledger-danger);
+}
+.card-debits .metric-figure {
+    color: var(--ledger-danger);
+}
+.metric-note {
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748b;
+}
+
+/* Period Credits (Cr) */
+.card-credits {
+    border-left: 3px solid var(--ledger-success);
+}
+.card-credits .metric-icon-bubble {
+    background: var(--ledger-success-soft);
+    color: var(--ledger-success);
+}
+.card-credits .metric-figure {
+    color: var(--ledger-success);
+}
+
+/* Closing Net Balance (Hero Card) */
+.card-closing-hero {
+    background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
+    border: 1.5px solid #bfdbfe;
+    box-shadow: 0 8px 24px -4px rgba(37, 99, 235, 0.12);
+}
+.card-closing-hero .metric-icon-bubble {
+    background: #dbeafe;
+    color: #2563eb;
+}
+.card-closing-hero .metric-figure {
+    color: #1d4ed8;
+    font-size: 26px;
+}
+
+.badge-closing-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: var(--radius-pill);
+    white-space: nowrap;
+}
+.status-receivable {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+.status-payable {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+.status-clear {
+    background: #ecfdf5;
+    color: #047857;
+    border: 1px solid #a7f3d0;
+}
+
+.pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+/* -------------------------------------------------------------
+   SECTION 3: AUDITED LEDGER DATA TABLE
+------------------------------------------------------------- */
+.statement-table-wrapper {
+    background: #ffffff;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--ledger-slate-200);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    margin-bottom: 24px;
+}
+
+.table-top-bar {
+    padding: 16px 24px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--ledger-slate-200);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.table-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.table-title-group i {
+    color: #f59e0b;
+    font-size: 16px;
+}
+.table-title-group h3 {
+    font-size: 13px;
+    font-weight: 800;
+    color: #1e293b;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 0;
+}
+
+.tx-count-pill {
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    border: 1px solid #e2e8f0;
+}
+
+.ledger-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+}
+
+.ledger-table thead {
+    background: #0f172a;
+    color: #ffffff;
+}
+
+.ledger-table th {
+    padding: 13px 16px;
+    font-size: 11px;
+    font-weight: 800;
+    color: #ffffff;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    border: none;
+}
+
+.ledger-table th.align-right,
+.ledger-table td.align-right {
+    text-align: right;
+}
+
+.ledger-table tbody tr {
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.1s ease;
+}
+.ledger-table tbody tr:hover {
+    background-color: #f8fafc;
+}
+
+.ledger-table td {
+    padding: 14px 16px;
+    font-size: 13px;
+    color: var(--ledger-slate-600);
+    font-weight: 500;
+}
+
+.table-empty-audit {
+    padding: 68px 24px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.empty-illustration-ring {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: #f1f5f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    color: #94a3b8;
+    font-size: 32px;
+}
+
+.table-empty-audit h4 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #334155;
+    margin-bottom: 4px;
+}
+
+.table-empty-audit p {
+    font-size: 13px;
+    color: #64748b;
+    max-width: 440px;
+    margin-bottom: 0;
+}
+
+/* Responsive Rules */
+@media (max-width: 1280px) {
+    .filter-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    .metrics-ribbon-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    .party-profile-card {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 768px) {
+    .filter-grid {
+        grid-template-columns: 1fr;
+    }
+    .metrics-ribbon-grid {
+        grid-template-columns: 1fr;
+    }
+    .party-profile-card {
+        grid-column: span 1;
+    }
+    .ledger-header-row {
+        flex-direction: column;
+    }
+    .header-actions-group {
+        width: 100%;
+    }
+    .header-actions-group .btn-ledger-action {
+        flex: 1;
+        justify-content: center;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 px-md-4 py-3">
+
+    <!-- Breadcrumbs Trail -->
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb mb-1 fs-xs">
+            <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
+            <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">Party Confirmation Ledger</li>
+        </ol>
+    </nav>
+
+    <!-- Page Header & Action Controls -->
+    <div class="ledger-header-row">
+        <div class="header-titles-group">
+            <div class="header-icon-box">
+                <i class="fas fa-file-invoice-dollar"></i>
+            </div>
+            <div class="title-text-wrap">
+                <h2>
+                    Party Confirmation Ledger
+                    <span class="title-nepali-pill">पार्टी हिसाब पुष्टि तथा विस्तृत लेजर</span>
+                </h2>
+                <p class="title-subtext">Unified sub-ledger tracking debtors and creditors across old migrated data and live fiscal years</p>
+            </div>
+        </div>
+
+        <div class="header-actions-group">
+            {% if statement and selected_party_id %}
+            <a href="{% url 'accounting:party_confirmation_print' %}?party_type={{ party_type }}&party_id={{ selected_party_id }}&fiscal_year={{ statement.fiscal_year }}&start_date={{ statement.start_date_ad|date:'Y-m-d' }}&end_date={{ statement.end_date_ad|date:'Y-m-d' }}" 
+               target="_blank" 
+               class="btn-ledger-action btn-action-primary">
+                <i class="fas fa-print"></i> Print Confirmation Letter (A4)
+            </a>
+            <button type="button" class="btn-ledger-action btn-action-success" onclick="exportPartyLedgerToCSV()">
+                <i class="fas fa-file-excel"></i> Export CSV
+            </button>
+            {% endif %}
+            <a href="{% url 'accounting:general_ledger' %}" class="btn-ledger-action btn-action-outline">
+                <i class="fas fa-book"></i> General Ledger
+            </a>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         SECTION 1: FILTER COCKPIT CONSOLE (NO OVERLAPPING + LIVE AUTOCOMPLETE)
+         ========================================================================= -->
+    <div class="filter-cockpit-card">
+        <form method="get" id="partyFilterForm">
+            <!-- Hidden State Inputs -->
+            <input type="hidden" name="party_type" id="selectedPartyType" value="{{ party_type|default:'CUSTOMER' }}">
+            <input type="hidden" name="party_id" id="selectedPartyId" value="{{ selected_party_id|default:'' }}">
+
+            <div class="filter-grid">
+
+                <!-- 1. Party Classification (Segmented Switch: Zero Text Overlap) -->
+                <div class="control-step-unit">
+                    <label class="step-label">
+                        <span class="step-num">1</span>
+                        Party Classification
+                    </label>
+                    <div class="segmented-control-container">
+                        <button type="button" 
+                                class="segment-tab {% if party_type == 'CUSTOMER' or not party_type %}active{% endif %}" 
+                                id="tabCustomer" 
+                                onclick="switchPartyClassification('CUSTOMER')">
+                            Customer (Debtor)
+                        </button>
+                        <button type="button" 
+                                class="segment-tab {% if party_type == 'SUPPLIER' %}active{% endif %}" 
+                                id="tabSupplier" 
+                                onclick="switchPartyClassification('SUPPLIER')">
+                            Supplier (Creditor)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 2. Select Customer / Supplier Live Autocomplete Search Input -->
+                <div class="control-step-unit">
+                    <label class="step-label">
+                        <span class="step-num">2</span>
+                        <span id="partySearchLabel">{% if party_type == 'SUPPLIER' %}Select Supplier{% else %}Select Customer{% endif %}</span>
+                        <span class="nepali-hint" id="partyNepaliHint">{% if party_type == 'SUPPLIER' %}(आपूर्तिकर्ता छान्नुहोस्){% else %}(ग्राहक छान्नुहोस्){% endif %}</span>
+                    </label>
+
+                    <div class="search-combobox-wrapper">
+                        <span class="search-input-icon">
+                            <i class="fas fa-search"></i>
+                        </span>
+
+                        <input type="text" 
+                               id="partySearchInput" 
+                               class="party-search-input font-mono" 
+                               value="{% if statement.party_name %}{{ statement.party_name }}{% if statement.party_phone %} ({{ statement.party_phone }}){% endif %}{% if statement.party_pan %} [PAN: {{ statement.party_pan }}]{% endif %}{% endif %}" 
+                               placeholder="{% if party_type == 'SUPPLIER' %}Type supplier company, phone, or PAN...{% else %}Type customer name, phone, or PAN...{% endif %}" 
+                               autocomplete="off">
+
+                        <div class="search-input-cues">
+                            <button type="button" class="clear-search-btn" id="clearPartySearchBtn" title="Clear selection">✕</button>
+                            <kbd class="kbd-shortcut" title="Press Alt+S or '/' to search">Alt+S</kbd>
+                        </div>
+
+                        <!-- Floating Live Search Suggestion Menu -->
+                        <div id="partyLiveDropdown" class="party-live-dropdown"></div>
+                    </div>
+                </div>
+
+                <!-- 3. Fiscal Year Dropdown -->
+                <div class="control-step-unit">
+                    <label class="step-label">
+                        Fiscal Year
+                        <span class="nepali-hint">(आर्थिक वर्ष)</span>
+                    </label>
+                    <select name="fiscal_year" class="cockpit-select font-mono">
+                        <option value="">-- Select FY --</option>
+                        {% for fy in available_fiscal_years %}
+                        <option value="{{ fy }}" {% if statement.fiscal_year == fy %}selected{% endif %}>FY {{ fy }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- 4. From Date (B.S.) -->
+                <div class="control-step-unit">
+                    <label class="step-label">From Date (BS)</label>
+                    <input type="text" 
+                           name="start_date" 
+                           id="startDateInput" 
+                           value="{{ statement.start_date_bs|default:'' }}" 
+                           placeholder="YYYY-MM-DD" 
+                           class="cockpit-input font-mono nepali-datepicker">
+                </div>
+
+                <!-- 5. To Date (B.S.) -->
+                <div class="control-step-unit">
+                    <label class="step-label">To Date (BS)</label>
+                    <input type="text" 
+                           name="end_date" 
+                           id="endDateInput" 
+                           value="{{ statement.end_date_bs|default:'' }}" 
+                           placeholder="YYYY-MM-DD" 
+                           class="cockpit-input font-mono nepali-datepicker">
+                </div>
+
+                <!-- 6. Submit View Button -->
+                <div class="control-step-unit">
+                    <button type="submit" class="btn-cockpit-view" id="btnApplyFilter">
+                        <i class="fas fa-filter"></i> View Statement
+                    </button>
+                </div>
+
+            </div>
+        </form>
+    </div>
+
+    <!-- =========================================================================
+         SECTION 2: CUSTOMER IDENTITY & 5-COLUMN FINANCIAL KPI RIBBON
+         ========================================================================= -->
+    {% if statement %}
+    <div class="metrics-ribbon-grid">
+
+        <!-- Card 1: Party Primary Profile (Wide Column) -->
+        <div class="metric-card-box party-profile-card">
+            <div class="profile-badge-row">
+                <span class="party-type-chip" id="profileBadge">
+                    {{ statement.party_type }} &bull; {{ statement.party_code }}
+                </span>
+                <span class="fiscal-year-chip">FY {{ statement.fiscal_year }}</span>
+            </div>
+            <div class="party-name-title" id="profilePartyName">{{ statement.party_name }}</div>
+            <div class="party-identifiers-stack">
+                <div class="party-info-item">
+                    <i class="fas fa-phone"></i>
+                    <span>{{ statement.party_phone|default:"No Phone" }}</span>
+                    <span style="opacity: 0.4">&bull;</span>
+                    <span>PAN: <strong>{{ statement.party_pan|default:"N/A" }}</strong></span>
+                </div>
+                <div class="party-info-item">
+                    <i class="fas fa-map-marker-alt"></i>
+                    <span>{{ statement.party_address|default:"Nepal" }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 2: Opening Balance (B/F) -->
+        <div class="metric-card-box card-opening">
+            <div class="metric-top-header">
+                <span class="metric-caption">Opening Bal (B/F)</span>
+                <div class="metric-icon-bubble">
+                    <i class="fas fa-arrow-turn-down"></i>
+                </div>
+            </div>
+            <div>
+                <div class="metric-figure">
+                    <span class="currency-symbol">Rs.</span>{{ statement.opening_balance|floatformat:2|intcomma }}
+                </div>
+                <div class="badge-b-f">
+                    {{ statement.opening_nature }} ({{ statement.start_date_bs }})
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 3: Period Debits (DR) -->
+        <div class="metric-card-box card-debits">
+            <div class="metric-top-header">
+                <span class="metric-caption">Period Debits (DR)</span>
+                <div class="metric-icon-bubble">
+                    <i class="fas fa-plus-circle"></i>
+                </div>
+            </div>
+            <div>
+                <div class="metric-figure">
+                    <span class="currency-symbol">Rs.</span>{{ statement.total_debit|floatformat:2|intcomma }}
+                </div>
+                <div class="metric-note">
+                    {% if statement.is_debtor %}Sales &amp; Invoices{% else %}Payments &amp; Returns{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 4: Period Credits (CR) -->
+        <div class="metric-card-box card-credits">
+            <div class="metric-top-header">
+                <span class="metric-caption">Period Credits (CR)</span>
+                <div class="metric-icon-bubble">
+                    <i class="fas fa-minus-circle"></i>
+                </div>
+            </div>
+            <div>
+                <div class="metric-figure">
+                    <span class="currency-symbol">Rs.</span>{{ statement.total_credit|floatformat:2|intcomma }}
+                </div>
+                <div class="metric-note">
+                    {% if statement.is_debtor %}Repayments Received{% else %}Inward Consignments{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 5: Net Closing Balance Hero Card (Ample Width: Zero Status Truncation) -->
+        <div class="metric-card-box card-closing-hero">
+            <div class="metric-top-header">
+                <span class="metric-caption" style="color: #1e40af;">Net Closing Balance</span>
+                <div class="metric-icon-bubble">
+                    <i class="fas fa-scale-balanced"></i>
+                </div>
+            </div>
+            <div>
+                <div class="metric-figure">
+                    <span class="currency-symbol">Rs.</span>{{ statement.closing_balance|floatformat:2|intcomma }}
+                </div>
+                <div class="badge-closing-status {% if statement.closing_nature == 'Dr' %}status-receivable{% elif statement.closing_nature == 'Cr' %}status-payable{% else %}status-clear{% endif %}">
+                    <span class="pulse-dot"></span>
+                    {{ statement.closing_nature }} &bull; {{ statement.closing_status_text }}
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- =========================================================================
+         SECTION 3: AUDITED LEDGER TRANSACTION TABLE
+         ========================================================================= -->
+    <div class="statement-table-wrapper">
+        <div class="table-top-bar">
+            <div class="table-title-group">
+                <i class="fas fa-list-check"></i>
+                <h3>Statement of Account: {{ statement.start_date_bs }} To {{ statement.end_date_bs }}</h3>
+            </div>
+            <span class="tx-count-pill">{{ statement.lines_count }} Journal Transactions</span>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table class="ledger-table" id="partyLedgerTable">
+                <thead>
+                    <tr>
+                        <th style="width: 140px;">Date (BS / AD)</th>
+                        <th style="width: 140px;">Voucher No.</th>
+                        <th style="width: 130px;">Voucher Type</th>
+                        <th style="width: 130px;">Ref Doc No.</th>
+                        <th>Particulars / Narration</th>
+                        <th class="align-right" style="width: 140px;">Debit (DR)</th>
+                        <th class="align-right" style="width: 140px;">Credit (CR)</th>
+                        <th class="align-right" style="width: 160px;">Running Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Balance Brought Forward (Opening) -->
+                    <tr style="background-color: #f8fafc; font-weight: 700;">
+                        <td class="font-mono text-dark">{{ statement.start_date_bs }}</td>
+                        <td colspan="4" class="text-uppercase text-muted" style="letter-spacing: 0.5px;">
+                            <i class="fas fa-arrow-turn-down text-primary me-1"></i> Balance Brought Forward (B/F)
+                        </td>
+                        <td class="align-right font-mono">
+                            {% if statement.opening_nature == 'Dr' and statement.opening_balance > 0 %}
+                                Rs. {{ statement.opening_balance|floatformat:2|intcomma }}
+                            {% else %}-{% endif %}
+                        </td>
+                        <td class="align-right font-mono">
+                            {% if statement.opening_nature == 'Cr' and statement.opening_balance > 0 %}
+                                Rs. {{ statement.opening_balance|floatformat:2|intcomma }}
+                            {% else %}-{% endif %}
+                        </td>
+                        <td class="align-right font-mono text-primary fw-bold">
+                            Rs. {{ statement.opening_balance|floatformat:2|intcomma }}
+                            <span class="badge {% if statement.opening_nature == 'Dr' %}bg-danger{% else %}bg-success{% endif %} bg-opacity-10 text-{% if statement.opening_nature == 'Dr' %}danger{% else %}success{% endif %} border fs-2xs ms-1">{{ statement.opening_nature }}</span>
+                        </td>
+                    </tr>
+
+                    <!-- Transaction Lines -->
+                    {% for row in statement.ledger_lines %}
+                    <tr>
+                        <td>
+                            <div class="font-mono fw-bold text-dark">{{ row.date_bs }}</div>
+                            <small class="text-muted fs-2xs font-mono">{{ row.date_ad|date:"Y-m-d" }}</small>
+                        </td>
+                        <td>
+                            <span class="font-mono fw-bold text-primary">{{ row.voucher_no }}</span>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border font-mono fs-2xs">{{ row.voucher_type }}</span>
+                        </td>
+                        <td>
+                            <span class="font-mono fs-xs text-muted">{{ row.reference|default:"-" }}</span>
+                        </td>
+                        <td>
+                            <div class="text-dark fw-semibold text-truncate" style="max-width: 380px;" title="{{ row.narration }}">
+                                {{ row.narration }}
+                            </div>
+                            {% if row.account_code %}
+                            <small class="text-muted fs-2xs font-mono">{{ row.account_code }} - {{ row.account_name }}</small>
+                            {% endif %}
+                        </td>
+                        <td class="align-right font-mono fw-bold text-danger">
+                            {% if row.debit > 0 %}
+                                Rs. {{ row.debit|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="align-right font-mono fw-bold text-success">
+                            {% if row.credit > 0 %}
+                                Rs. {{ row.credit|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="align-right font-mono fw-bold text-primary">
+                            Rs. {{ row.running_balance|floatformat:2|intcomma }}
+                            <span class="badge {% if row.nature == 'Dr' %}bg-danger{% else %}bg-success{% endif %} bg-opacity-10 text-{% if row.nature == 'Dr' %}danger{% else %}success{% endif %} border fs-2xs ms-1">{{ row.nature }}</span>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8">
+                            <div class="table-empty-audit">
+                                <div class="empty-illustration-ring">
+                                    <i class="fas fa-inbox"></i>
+                                </div>
+                                <h4>No Journal Entries in this Period</h4>
+                                <p>There are no debit or credit transactions recorded for <strong>{{ statement.party_name }}</strong> between {{ statement.start_date_bs }} and {{ statement.end_date_bs }}.</p>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                <!-- Totals Summary Footer -->
+                <tfoot style="background: #0f172a; color: #ffffff; font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 13px;">
+                    <tr>
+                        <td colspan="5" class="align-right text-uppercase" style="letter-spacing: 0.5px; padding: 14px 16px;">Period Grand Totals:</td>
+                        <td class="align-right text-info" style="padding: 14px 16px;">Rs. {{ statement.total_debit|floatformat:2|intcomma }}</td>
+                        <td class="align-right text-warning" style="padding: 14px 16px;">Rs. {{ statement.total_credit|floatformat:2|intcomma }}</td>
+                        <td class="align-right text-white" style="padding: 14px 16px;">
+                            Rs. {{ statement.closing_balance|floatformat:2|intcomma }} ({{ statement.closing_nature }})
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <!-- Initial Prompt to Pick Party -->
+    <div class="card border-0 shadow-sm rounded-4 p-5 bg-white text-center">
+        <i class="fas fa-users-viewfinder text-primary opacity-25 fs-1 mb-3"></i>
+        <h5 class="fw-bold text-dark mb-1">Select a Party to Generate Confirmation Statement</h5>
+        <p class="text-muted fs-xs mb-0">Use the live search bar above to type any customer or supplier name, phone, or PAN.</p>
+    </div>
+    {% endif %}
+
+</div>
+
+<!-- =========================================================================
+     IN-PAGE JAVASCRIPT: LIVE AUTOCOMPLETE, KEYBOARD NAVIGATION & CSV EXPORT
+     ========================================================================= -->
+<script>
+let currentPartyType = "{{ party_type|default:'CUSTOMER' }}";
+let activeIndex = -1;
+let debounceTimer = null;
+
+const searchInput = document.getElementById('partySearchInput');
+const liveDropdown = document.getElementById('partyLiveDropdown');
+const clearSearchBtn = document.getElementById('clearPartySearchBtn');
+const partyIdHidden = document.getElementById('selectedPartyId');
+const partyTypeHidden = document.getElementById('selectedPartyType');
+const partySearchLabel = document.getElementById('partySearchLabel');
+const partyNepaliHint = document.getElementById('partyNepaliHint');
+const partyFilterForm = document.getElementById('partyFilterForm');
+
+// Helper: Escape HTML string to avoid XSS
+function escapeHtml(text) {
+    if (!text) return '';
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
+// -------------------------------------------------------------
+// 1. Classification Switcher (Customer vs Supplier)
+// -------------------------------------------------------------
+function switchPartyClassification(type) {
+    currentPartyType = type;
+    partyTypeHidden.value = type;
+
+    const tabCust = document.getElementById('tabCustomer');
+    const tabSupp = document.getElementById('tabSupplier');
+
+    if (type === 'CUSTOMER') {
+        tabCust.classList.add('active');
+        tabSupp.classList.remove('active');
+        partySearchLabel.textContent = "Select Customer";
+        partyNepaliHint.textContent = "(ग्राहक छान्नुहोस्)";
+        searchInput.placeholder = "Type customer name, phone, or PAN...";
+    } else {
+        tabSupp.classList.add('active');
+        tabCust.classList.remove('active');
+        partySearchLabel.textContent = "Select Supplier";
+        partyNepaliHint.textContent = "(आपूर्तिकर्ता छान्नुहोस्)";
+        searchInput.placeholder = "Type supplier company, phone, or PAN...";
+    }
+
+    partyIdHidden.value = '';
+    searchInput.value = '';
+    liveDropdown.innerHTML = '';
+    liveDropdown.classList.remove('show');
+    searchInput.focus();
+}
+
+// -------------------------------------------------------------
+// 2. Live Autocomplete Query Dispatcher
+// -------------------------------------------------------------
+async function performLivePartySearch(query) {
+    if (!query || query.length === 0) {
+        liveDropdown.innerHTML = '';
+        liveDropdown.classList.remove('show');
+        activeIndex = -1;
+        return;
+    }
+
+    const endpoint = currentPartyType === 'CUSTOMER' 
+        ? `/customers/api/search/?q=${encodeURIComponent(query)}` 
+        : `/purchases/suppliers/api/search/?q=${encodeURIComponent(query)}`;
+
+    liveDropdown.innerHTML = `
+        <div class="p-3 text-center text-muted fs-xs">
+            <i class="fas fa-spinner fa-spin me-1 text-primary"></i> Searching ${currentPartyType === 'CUSTOMER' ? 'customers' : 'suppliers'}...
+        </div>
+    `;
+    liveDropdown.classList.add('show');
+
+    try {
+        const resp = await fetch(endpoint);
+        if (!resp.ok) throw new Error('Search failed');
+        const data = await resp.json();
+        const results = data.results || (Array.isArray(data) ? data : []);
+
+        if (results.length === 0) {
+            liveDropdown.innerHTML = `
+                <div class="p-3 text-center text-muted fs-xs">
+                    <i class="fas fa-user-slash opacity-50 d-block mb-1"></i>
+                    No ${currentPartyType.toLowerCase()} found matching "<strong>${escapeHtml(query)}</strong>"
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+        results.forEach((item, idx) => {
+            const id = item.id || item.pk;
+            const extra = item.extra_data || {};
+            const name = item.company_name || item.name || item.title || 'Record';
+            const phone = item.phone || item.phone_number || extra.phone || 'No phone';
+            const pan = item.pan || item.pan_number || extra.pan || '';
+            const type = item.customer_type_display || item.customer_type || item.supplier_type || (currentPartyType === 'CUSTOMER' ? 'Retail' : 'Distributor');
+            
+            const dueBalance = parseFloat(item.credit_balance || item.current_balance || extra.credit_balance || 0);
+            const hasDebt = dueBalance > 0;
+            const balanceBadge = hasDebt
+                ? `<span class="item-balance-badge badge-balance-danger font-mono">Due: Rs. ${dueBalance.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>`
+                : `<span class="item-balance-badge badge-balance-clear font-mono">Clear (Rs. 0.00)</span>`;
+
+            html += `
+                <div class="live-search-item" data-index="${idx}" data-id="${id}" data-name="${escapeHtml(name)}" data-phone="${escapeHtml(phone)}" data-pan="${escapeHtml(pan)}">
+                    <div>
+                        <div class="item-party-name">
+                            ${escapeHtml(name)}
+                            <span class="badge-party-type">${escapeHtml(type)}</span>
+                        </div>
+                        <div class="item-party-meta font-mono">
+                            <span>Ph: ${escapeHtml(phone)}</span>
+                            ${pan ? `<span>&bull;</span><span>PAN: ${escapeHtml(pan)}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="text-end ps-3">
+                        ${balanceBadge}
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `
+            <div class="dropdown-helper-footer">
+                <span>Navigate with <strong>↑</strong> <strong>↓</strong> and press <strong>Enter</strong></span>
+                <span>ESC to close</span>
+            </div>
+        `;
+
+        liveDropdown.innerHTML = html;
+        activeIndex = -1;
+
+        liveDropdown.querySelectorAll('.live-search-item').forEach(el => {
+            el.addEventListener('click', () => {
+                selectPartyFromItem(el.dataset.id, el.dataset.name, el.dataset.phone, el.dataset.pan);
+            });
+        });
+
+    } catch (err) {
+        liveDropdown.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Search service currently unavailable.</div>';
+    }
+}
+
+// Select Item Hook
+function selectPartyFromItem(id, name, phone, pan) {
+    partyIdHidden.value = id;
+    let displayText = name;
+    if (phone && phone !== 'No phone') displayText += ` (${phone})`;
+    if (pan) displayText += ` [PAN: ${pan}]`;
+    searchInput.value = displayText;
+    liveDropdown.classList.remove('show');
+    activeIndex = -1;
+
+    partyFilterForm.submit();
+}
+
+// -------------------------------------------------------------
+// 3. Keystroke & Keyboard Listeners
+// -------------------------------------------------------------
+if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+        clearTimeout(debounceTimer);
+        const val = e.target.value.trim();
+        debounceTimer = setTimeout(() => {
+            performLivePartySearch(val);
+        }, 150);
+    });
+
+    searchInput.addEventListener('focus', () => {
+        const val = searchInput.value.split('(')[0].trim();
+        if (val.length >= 1) {
+            performLivePartySearch(val);
+        }
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+        const items = liveDropdown.querySelectorAll('.live-search-item');
+        if (items.length === 0 || !liveDropdown.classList.contains('show')) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeIndex = (activeIndex + 1) % items.length;
+            updateActiveItem(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIndex = (activeIndex - 1 + items.length) % items.length;
+            updateActiveItem(items);
+        } else if (e.key === 'Enter' && activeIndex >= 0) {
+            e.preventDefault();
+            items[activeIndex].click();
+        } else if (e.key === 'Escape') {
+            liveDropdown.classList.remove('show');
+            activeIndex = -1;
+        }
+    });
+
+    function updateActiveItem(items) {
+        items.forEach((item, idx) => {
+            if (idx === activeIndex) {
+                item.classList.add('active');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('active');
+            }
+        });
+    }
+}
+
+// Clear Search Input Button
+if (clearSearchBtn) {
+    clearSearchBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        partyIdHidden.value = '';
+        liveDropdown.innerHTML = '';
+        liveDropdown.classList.remove('show');
+        searchInput.focus();
+    });
+}
+
+// Dismiss dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    if (liveDropdown && !liveDropdown.contains(e.target) && e.target !== searchInput) {
+        liveDropdown.classList.remove('show');
+        activeIndex = -1;
+    }
+});
+
+// Global Shortcuts (Alt + S or single '/')
+document.addEventListener('keydown', (e) => {
+    const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
+    if (e.key === '/' && !isInput) {
+        e.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+    } else if (e.altKey && (e.key.toLowerCase() === 's' || e.code === 'KeyS')) {
+        e.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+    }
+});
+
+// -------------------------------------------------------------
+// 4. Client-side CSV Exporter
+// -------------------------------------------------------------
+function exportPartyLedgerToCSV() {
+    const table = document.getElementById('partyLedgerTable');
+    if (!table) return;
+    let csv = [];
+    for (let row of table.rows) {
+        let cols = [];
+        for (let cell of row.cells) {
+            let text = cell.innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+            text = `"${text.replace(/"/g, '""')}"`;
+            cols.push(text);
+        }
+        csv.push(cols.join(","));
+    }
+    const csvFile = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const downloadLink = document.createElement("a");
+    downloadLink.download = `Party_Ledger_{{ statement.party_code|default:'Statement' }}_{{ statement.fiscal_year|slugify }}.csv`;
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+    downloadLink.style.display = "none";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+}
+</script>
+{% endblock %}

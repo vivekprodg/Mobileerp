@@ -12,7 +12,13 @@
             </div>
             <p class="text-muted fs-xs mb-0">Phone: <strong>{{ customer.phone_number }}</strong> | PAN: <strong>{{ customer.pan_number|default:"N/A" }}</strong></p>
         </div>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
+            <!-- 1-Click Link to Full Party Confirmation Ledger -->
+            <a href="{% url 'accounting:party_ledger' %}?party_type=CUSTOMER&party_id={{ customer.id }}&fiscal_year={{ active_fiscal_year|default:'2083/84' }}" 
+               class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-invoice-dollar me-1"></i> Statement / Balance Confirmation
+            </a>
+
             <!-- Gated: Only Store Owners, Managers, or Accountants can record Udhaari repayments -->
             {% if IS_OWNER or IS_MANAGER or IS_ACCOUNTANT or user.is_superuser %}
             <button type="button" class="btn btn-success btn-sm rounded-pill px-3 fw-bold shadow-xs" data-bs-toggle="modal" data-bs-target="#repayModal">
@@ -48,8 +54,11 @@
 
     <!-- Ledger Entries -->
     <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
-        <div class="p-3 border-bottom bg-light">
-            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-book-open text-primary me-2"></i> Account Udhaari Statement</h6>
+        <div class="p-3 border-bottom bg-light d-flex align-items-center justify-content-between">
+            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-book-open text-primary me-2"></i> Account Udhaari Statement (Recent Transactions)</h6>
+            <a href="{% url 'accounting:party_ledger' %}?party_type=CUSTOMER&party_id={{ customer.id }}&fiscal_year={{ active_fiscal_year|default:'2083/84' }}" class="btn btn-link btn-sm text-decoration-none p-0 fw-bold fs-xs">
+                View Full Multi-Year Ledger &rarr;
+            </a>
         </div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 fs-sm">
@@ -155,7 +164,6 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // Automatically synchronize payment mode dropdown when account is chosen in universal search
     const repayWrapper = document.getElementById('repayDestinationAccountWrapper');
     const paymentModeSelect = document.querySelector('[name="payment_mode"]');
 

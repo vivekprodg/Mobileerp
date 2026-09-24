@@ -3,12 +3,14 @@ Purchases, Suppliers, GRN & Commercial Purchase Return (Debit Note) Views.
 
 Key Capabilities:
 1. Supplier Directory & Sub-Ledger: Full accounts payable lifecycle with credit limits and settlement histories.
-2. Supplier Search API: High-performance endpoint for autocomplete/typeahead in PO, GRN, and return forms.
-3. Supplier Payouts:
+2. Supplier Confirmation Statement Linkage: Exposes active Nepali Fiscal Year in context to directly
+   launch the official multi-year Party Confirmation Ledger & audit sign-off letters.
+3. Supplier Search API: High-performance endpoint for autocomplete/typeahead in PO, GRN, and return forms.
+4. Supplier Payouts:
    - Atomically updates supplier debt balance strictly through sub-ledger records with row-level locking.
    - Automatically posts double-entry General Ledger payment vouchers without swallowing errors.
-4. Purchase Orders (PO): Requisitions with approval workflows, line item formsets, and delivery tracking.
-5. Goods Received Notes (GRN):
+5. Purchase Orders (PO): Requisitions with approval workflows, line item formsets, and delivery tracking.
+6. Goods Received Notes (GRN):
    - Removed manual view calculations; delegates complete mathematical valuation to PurchaseService.
    - Supports two-way line discounts (Amount vs. %) and whole-bill discount parameters.
    - Calculates dedicated 13% VAT strictly on top of the Pre-VAT Taxable Base.
@@ -19,7 +21,7 @@ Key Capabilities:
    - Dedicated manager cancellation workflow (cancel_grn_view / GRNCancelView) that safely
      reverses warehouse stock, archives unsold handset IMEIs, clears supplier AP balance,
      and writes an immutable forensic AuditLog record.
-6. Commercial Purchase Returns (Debit Notes):
+7. Commercial Purchase Returns (Debit Notes):
    - Stock deduction, IMEI de-registration, supplier balance adjustments.
    - Automatic GL double-entry reversal vouchers.
 """
@@ -59,6 +61,8 @@ from apps.inventory.models import Product, ItemInstance, ProductBatch, StockMove
 from apps.inventory.services import InventoryService
 from apps.reports.exports import sanitize_csv_row
 from apps.core.models import SystemConfiguration, AuditLog
+from apps.core.nepali_calendar import NepaliCalendar
+from apps.accounting.models import AccountingFiscalYear
 
 logger = logging.getLogger(__name__)
 
@@ -321,6 +325,17 @@ class SupplierDetailView(PurchaseModuleAccessMixin, DetailView):
         context['recent_returns'] = self.object.purchase_returns.select_related('branch')[:10]
         context['ledger_entries'] = self.object.ledger_entries.select_related('branch', 'recorded_by')[:30]
         context['payment_form'] = SupplierPaymentForm()
+
+        # Resolve active Nepali Fiscal Year for party confirmation link
+        today = timezone.now().date()
+        try:
+            bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(today)
+            current_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+        except Exception:
+            active_fy_obj = AccountingFiscalYear.objects.filter(is_closed=False).first()
+            current_fy = active_fy_obj.name if active_fy_obj else '2083/84'
+
+        context['active_fiscal_year'] = current_fy
         return context
 
 class SupplierCreateView(PurchaseModuleAccessMixin, CreateView):
