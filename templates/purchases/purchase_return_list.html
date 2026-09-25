@@ -4,130 +4,601 @@
 {% block title %}Purchase Returns &amp; Debit Notes | {{ COMPANY_NAME }}{% endblock %}
 
 {% block extra_head %}
+<!-- Google Fonts: JetBrains Mono for Strict Financial Tabular Digits -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
-.purchase-nav-pill {
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    border: 1px solid var(--erp-slate-200);
+/* ==========================================================================
+   ULTRA-PREMIUM PURCHASE RETURN & DEBIT NOTE DESIGN SYSTEM
+   ========================================================================== */
+:root {
+    --pr-font-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+    --pr-primary: #dc2626;          /* Debit Note Crimson */
+    --pr-primary-subtle: #fef2f2;
+    --pr-primary-border: #fecaca;
+    --pr-brand-blue: #1e40af;
+    --pr-brand-subtle: #eff6ff;
+    --pr-brand-border: #bfdbfe;
+    --pr-success: #059669;
+    --pr-success-subtle: #ecfdf5;
+    --pr-warning: #d97706;
+    --pr-warning-subtle: #fffbeb;
+    --pr-slate-50: #f8fafc;
+    --pr-slate-100: #f1f5f9;
+    --pr-slate-200: #e2e8f0;
+    --pr-slate-300: #cbd5e1;
+    --pr-slate-400: #94a3b8;
+    --pr-slate-500: #64748b;
+    --pr-slate-600: #475569;
+    --pr-slate-700: #334155;
+    --pr-slate-800: #1e293b;
+    --pr-slate-900: #0f172a;
+}
+
+.font-mono {
+    font-family: var(--pr-font-mono) !important;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}
+
+.fs-2xs { font-size: 0.70rem !important; }
+.fs-xs  { font-size: 0.79rem !important; }
+.fs-sm  { font-size: 0.865rem !important; }
+
+/* -------------------------------------------------------------
+   1. SUITE NAVIGATION PILLS
+------------------------------------------------------------- */
+.suite-tabs-wrapper {
     background: #ffffff;
-    color: var(--erp-slate-600);
+    border: 1px solid var(--pr-slate-200);
+    border-radius: 9999px;
+    padding: 5px;
+    display: inline-flex;
+    gap: 4px;
+    overflow-x: auto;
+    max-width: 100%;
+}
+
+.suite-tab-link {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--pr-slate-600);
     text-decoration: none;
-    transition: all 0.15s ease;
+    padding: 6px 14px;
+    border-radius: 9999px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    transition: all 0.15s ease;
+    white-space: nowrap;
 }
-.purchase-nav-pill:hover, .purchase-nav-pill.active {
-    background-color: var(--erp-primary) !important;
-    color: #ffffff !important;
-    border-color: var(--erp-primary) !important;
-    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+
+.suite-tab-link:hover {
+    color: #1e40af;
+    background-color: var(--pr-slate-100);
+}
+
+.suite-tab-link.active {
+    background-color: #1e40af;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(30, 64, 175, 0.25);
+}
+
+/* -------------------------------------------------------------
+   2. BALANCED 4-TIER EXECUTIVE KPI TILES
+------------------------------------------------------------- */
+.pr-kpi-box {
+    background: #ffffff;
+    border: 1px solid var(--pr-slate-200);
+    border-radius: 0.875rem;
+    padding: 1rem 1.15rem;
+    height: 100%;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.pr-kpi-box:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 18px -4px rgba(15, 23, 42, 0.08);
+}
+
+.pr-kpi-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3.5px;
+}
+
+.pr-kpi-box.kpi-vouchers::before { background: var(--pr-primary); }
+.pr-kpi-box.kpi-refund::before   { background: #1e40af; }
+.pr-kpi-box.kpi-debt::before     { background: var(--pr-success); }
+.pr-kpi-box.kpi-cash::before     { background: var(--pr-warning); }
+
+/* -------------------------------------------------------------
+   3. LIVE AUTOCOMPLETE SUGGESTIONS POPUP (TYPEAHEAD ENGINE)
+------------------------------------------------------------- */
+.async-search-container {
+    position: relative;
+    width: 100%;
+}
+
+.return-live-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 1060;
+    background: #ffffff;
+    border: 1px solid var(--pr-slate-300);
+    border-radius: 12px;
+    box-shadow: 0 14px 30px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
+    max-height: 320px;
+    overflow-y: auto;
+    margin-top: 2px;
+    display: none;
+}
+
+.return-live-dropdown.show {
+    display: block;
+}
+
+.live-suggestion-item {
+    padding: 9px 13px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--pr-slate-100);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-decoration: none;
+    color: inherit;
+    transition: background-color 0.12s ease;
+}
+
+.live-suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.live-suggestion-item:hover,
+.live-suggestion-item.active {
+    background-color: var(--pr-slate-50);
+}
+
+.live-suggestion-item.active {
+    border-left: 3px solid var(--pr-primary);
+    padding-left: 10px;
+}
+
+.suggestion-title {
+    font-size: 0.81rem;
+    font-weight: 700;
+    color: var(--pr-slate-900);
+}
+
+.suggestion-meta {
+    font-size: 0.72rem;
+    color: var(--pr-slate-500);
+    margin-top: 1px;
+}
+
+.suggestion-chip {
+    font-family: var(--pr-font-mono);
+    font-size: 0.65rem;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+/* -------------------------------------------------------------
+   4. CONSTANT-WIDTH TABLE ARCHITECTURE
+------------------------------------------------------------- */
+.table-return-container {
+    max-height: calc(100vh - 360px);
+    min-height: 460px;
+    overflow-y: auto;
+    overflow-x: auto;
+    position: relative;
+    background: #ffffff;
+}
+
+.table-return {
+    table-layout: fixed !important;
+    width: 100%;
+    min-width: 1360px;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin-bottom: 0;
+}
+
+.table-return thead th {
+    font-size: 0.71rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pr-slate-500);
+    background-color: #f8fafc;
+    border-top: none;
+    border-bottom: 2px solid var(--pr-slate-200);
+    padding: 11px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.table-return tbody td {
+    padding: 11px 12px;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--pr-slate-100);
+    color: var(--pr-slate-800);
+    font-size: 0.835rem;
+}
+
+.table-return tbody tr {
+    transition: background-color 0.12s ease;
+}
+
+.table-return tbody tr:hover {
+    background-color: #fafcff;
+}
+
+/* Rigid Column Width Constants */
+.col-w-voucher   { width: 195px; }
+.col-w-date      { width: 145px; }
+.col-w-supplier  { width: 230px; }
+.col-w-grn       { width: 140px; }
+.col-w-items     { width: auto; }
+.col-w-mode      { width: 160px; }
+.col-w-amount    { width: 155px; }
+.col-w-staff     { width: 125px; }
+.col-w-actions   { width: 95px; }
+
+.text-truncate-custom {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+/* -------------------------------------------------------------
+   5. PILLS, BADGES & CHIPS
+------------------------------------------------------------- */
+.voucher-pill-red {
+    font-family: var(--pr-font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #dc2626;
+    background-color: #fef2f2;
+    border: 1px solid #fecaca;
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-decoration: none !important;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+}
+
+.voucher-pill-red:hover {
+    background-color: #fee2e2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+}
+
+.grn-pill-blue {
+    font-family: var(--pr-font-mono);
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #0369a1;
+    background-color: #f0f9ff;
+    border: 1px solid #bae6fd;
+    padding: 2.5px 7px;
+    border-radius: 5px;
+    display: inline-block;
+    text-decoration: none !important;
+    transition: all 0.15s ease;
+}
+
+.grn-pill-blue:hover {
+    background-color: #e0f2fe;
+    color: #0284c7;
+}
+
+.settlement-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.settlement-pill-cash {
+    background-color: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+
+.settlement-pill-debt {
+    background-color: #eff6ff;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+}
+
+.settlement-pill-replace {
+    background-color: #fffbeb;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.items-count-chip {
+    font-family: var(--pr-font-mono);
+    font-size: 0.69rem;
+    font-weight: 800;
+    color: var(--pr-slate-700);
+    background: var(--pr-slate-100);
+    border: 1px solid var(--pr-slate-200);
+    padding: 2px 6px;
+    border-radius: 5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.staff-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.81rem;
+    font-weight: 600;
+    color: var(--pr-slate-700);
+}
+
+.staff-avatar-circle {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--pr-slate-200);
+    color: var(--pr-slate-700);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.68rem;
+    font-weight: 800;
+}
+
+/* Toast Copy Notification */
+.toast-copy-notify {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #1e293b;
+    color: #ffffff;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    animation: fadeInToast 0.2s ease;
+}
+
+@keyframes fadeInToast {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Print Rules */
+@media print {
+    .no-print, .suite-tabs-wrapper, form, .btn, .col-w-actions { display: none !important; }
+    body { background: #ffffff !important; font-size: 11px !important; }
+    .card { box-shadow: none !important; border: 1px solid #ccc !important; }
+    .table-return-container { max-height: none !important; overflow: visible !important; }
+    .table-return { min-width: 100% !important; }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1720px;">
+<div class="container-fluid px-3 px-md-4 py-3">
 
-    <!-- Suite Navigation Ribbon -->
-    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
-        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Purchase Suite:</span>
-        <a href="{% url 'taxation:purchase_register' %}" class="purchase-nav-pill text-nowrap">
-            <i class="fas fa-book-open text-secondary"></i> Purchase Register
-        </a>
-        <a href="{% url 'reports:supplier_purchases' %}" class="purchase-nav-pill text-nowrap">
-            <i class="fas fa-building-user text-secondary"></i> Supplier Purchases
-        </a>
-        <a href="{% url 'reports:product_purchases' %}" class="purchase-nav-pill text-nowrap">
-            <i class="fas fa-boxes-stacked text-secondary"></i> Product Purchases
-        </a>
-        <a href="{% url 'purchases:purchase_return_list' %}" class="purchase-nav-pill active text-nowrap">
-            <i class="fas fa-arrow-rotate-left text-white"></i> Purchase Returns (Debit Notes)
-        </a>
-        <a href="{% url 'reports:supplier_outstanding' %}" class="purchase-nav-pill text-nowrap">
-            <i class="fas fa-hand-holding-dollar text-warning"></i> Supplier Udhaari (Payables)
-        </a>
-        <a href="{% url 'reports:price_history' %}" class="purchase-nav-pill text-nowrap">
-            <i class="fas fa-timeline text-info"></i> Purchase Price History
-        </a>
+    <!-- 1. SUITE NAVIGATION PILLS -->
+    <div class="mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2 no-print">
+        <div class="suite-tabs-wrapper shadow-xs">
+            <span class="px-2 text-muted fw-bold fs-2xs text-uppercase d-flex align-items-center gap-1">
+                <i class="fas fa-layer-group text-primary"></i> Purchase Suite:
+            </span>
+            <a href="{% url 'taxation:purchase_register' %}" class="suite-tab-link">
+                <i class="fas fa-book-open"></i> Purchase Register
+            </a>
+            <a href="{% url 'reports:supplier_purchases' %}" class="suite-tab-link">
+                <i class="fas fa-truck-field"></i> Supplier Purchases
+            </a>
+            <a href="{% url 'reports:product_purchases' %}" class="suite-tab-link">
+                <i class="fas fa-boxes-stacked"></i> Product Purchases
+            </a>
+            <a href="{% url 'purchases:purchase_return_list' %}" class="suite-tab-link active">
+                <i class="fas fa-arrow-rotate-left"></i> Purchase Returns (Debit Notes)
+            </a>
+            <a href="{% url 'reports:supplier_outstanding' %}" class="suite-tab-link">
+                <i class="fas fa-hand-holding-dollar"></i> Supplier Udhaari
+            </a>
+            <a href="{% url 'reports:price_history' %}" class="suite-tab-link">
+                <i class="fas fa-timeline"></i> Price History
+            </a>
+        </div>
     </div>
 
-    <!-- Page Header & Action Controls -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+    <!-- 2. BREADCRUMBS & SECTION HERO HEADER -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-3">
         <div>
-            <h4 class="fw-bold text-dark mb-0">
-                <i class="fas fa-arrow-rotate-left text-danger me-2"></i> Purchase Return Report &amp; Debit Notes (खरिद फिर्ता)
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 fs-2xs text-muted">
+                    <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'purchases:grn_list' %}" class="text-decoration-none text-muted">Purchases</a></li>
+                    <li class="breadcrumb-item active text-danger fw-semibold" aria-current="page">Purchase Returns</li>
+                </ol>
+            </nav>
+            <h4 class="fw-extrabold text-dark mb-0 d-flex align-items-center gap-2">
+                <i class="fas fa-arrow-rotate-left text-danger"></i>
+                <span>Purchase Return Report &amp; Debit Notes</span>
+                <span class="fs-xs fw-normal text-muted font-nepali">(खरिद फिर्ता तथा डेबिट नोट)</span>
             </h4>
-            <p class="text-muted fs-xs mb-0">
-                Audit supplier debit notes, returned smartphones and accessories, stock deductions, and supplier ledger debt adjustments
-            </p>
+            <p class="text-muted fs-2xs mb-0">Audit supplier debit notes, returned smartphones and accessories, stock deductions, and supplier ledger debt adjustments</p>
         </div>
-        <div class="d-flex flex-wrap gap-2 align-items-center">
-            <!-- Export to CSV Button -->
-            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
-                <i class="fas fa-file-csv me-1"></i> Export to CSV
+
+        <div class="d-flex align-items-center gap-2 flex-wrap no-print">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-semibold shadow-xs" 
+               onclick="exportDebitNotesCSV(event)">
+                <i class="fas fa-file-csv me-1.5 text-success"></i> Export to CSV
             </a>
-            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
-                <i class="fas fa-print me-1"></i> Print Sheet
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-semibold shadow-xs" onclick="window.print()">
+                <i class="fas fa-print me-1.5 text-muted"></i> Print Sheet
             </button>
-            <a href="{% url 'purchases:purchase_return_create' %}" class="btn btn-danger btn-sm rounded-pill px-4 fw-bold shadow-sm">
-                <i class="fas fa-plus-circle me-1"></i> New Purchase Return (Debit Note)
+            <a href="{% url 'purchases:purchase_return_create' %}" class="btn btn-danger btn-sm rounded-pill px-4 fw-bold shadow-xs">
+                <i class="fas fa-plus-circle me-1.5"></i> New Purchase Return (Debit Note)
             </a>
-            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
-                <i class="fas fa-truck-ramp-box me-1"></i> Inward GRN List
+            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-semibold shadow-xs">
+                <i class="fas fa-truck-ramp-box me-1.5"></i> Inward GRN List
             </a>
         </div>
     </div>
 
-    <!-- 4 High-Priority Financial KPI Cards -->
-    <div class="row g-3 mb-4">
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-danger border-4 h-100">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Return Vouchers</span>
-                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">{{ total_returns_count }}</h3>
-                <small class="text-muted fs-2xs">Debit note vouchers issued</small>
+    <!-- 3. BALANCED 4-TIER EXECUTIVE METRIC HUB -->
+    <div class="row g-2 mb-3">
+        <!-- Tile 1: Total Return Vouchers -->
+        <div class="col-6 col-sm-3">
+            <div class="pr-kpi-box kpi-vouchers">
+                <div>
+                    <span class="text-muted text-uppercase fs-2xs fw-bold d-block">Total Return Vouchers</span>
+                    <small class="text-muted fs-2xs d-block">Debit note vouchers issued</small>
+                </div>
+                <div class="my-auto py-1">
+                    <div class="font-mono fw-extrabold text-danger fs-4" id="kpiTotalVouchersCount">
+                        {{ total_returns_count|default:returns|length }}
+                    </div>
+                </div>
+                <div>
+                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 font-mono fs-2xs px-2 py-0.5">
+                        <i class="fas fa-file-invoice me-1"></i> Active Vouchers
+                    </span>
+                </div>
             </div>
         </div>
 
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Refund Value</span>
-                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">Rs. {{ total_refund_amount|floatformat:2|intcomma }}</h3>
-                <small class="text-muted fs-2xs">Total returned goods valuation</small>
+        <!-- Tile 2: Total Refund Value -->
+        <div class="col-6 col-sm-3">
+            <div class="pr-kpi-box kpi-refund">
+                <div>
+                    <span class="text-primary text-uppercase fs-2xs fw-bold d-block" style="color: #1e40af !important;">
+                        Total Refund Value
+                    </span>
+                    <small class="text-muted fs-2xs d-block">Total returned goods valuation</small>
+                </div>
+                <div class="my-auto py-1">
+                    <div class="font-mono fw-bold fs-5" style="color: #1e40af !important;" id="kpiTotalRefundValue">
+                        Rs. {{ total_refund_amount|floatformat:2|intcomma }}
+                    </div>
+                </div>
+                <div>
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 font-mono fs-2xs px-2 py-0.5">
+                        100% Settled
+                    </span>
+                </div>
             </div>
         </div>
 
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-success border-4 h-100">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Deducted from Supplier Debt</span>
-                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">Rs. {{ total_deducted_balance|floatformat:2|intcomma }}</h3>
-                <small class="text-success fs-2xs fw-bold">Udhaari balance reduced</small>
+        <!-- Tile 3: Deducted from Supplier Debt -->
+        <div class="col-6 col-sm-3">
+            <div class="pr-kpi-box kpi-debt">
+                <div>
+                    <span class="text-success text-uppercase fs-2xs fw-bold d-block">
+                        <i class="fas fa-arrow-down me-1"></i> Deducted from Debt
+                    </span>
+                    <small class="text-muted fs-2xs d-block">Udhaari balance reduced</small>
+                </div>
+                <div class="my-auto py-1">
+                    <div class="font-mono fw-bold text-success fs-5">
+                        Rs. {{ total_deducted_balance|floatformat:2|intcomma }}
+                    </div>
+                </div>
+                <div>
+                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 font-mono fs-2xs px-2 py-0.5">
+                        Ledger Offset
+                    </span>
+                </div>
             </div>
         </div>
 
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-warning border-4 h-100">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Cash / Bank Refund Received</span>
-                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">Rs. {{ total_cash_refunded|floatformat:2|intcomma }}</h3>
-                <small class="text-muted fs-2xs">Collected directly from suppliers</small>
+        <!-- Tile 4: Cash / Bank Refund Received -->
+        <div class="col-6 col-sm-3">
+            <div class="pr-kpi-box kpi-cash">
+                <div>
+                    <span class="text-warning text-uppercase fs-2xs fw-bold d-block" style="color: #b45309 !important;">
+                        <i class="fas fa-money-bill-wave me-1"></i> Cash / Bank Inflow
+                    </span>
+                    <small class="text-muted fs-2xs d-block">Collected from suppliers</small>
+                </div>
+                <div class="my-auto py-1">
+                    <div class="font-mono fw-bold fs-5" style="color: #b45309 !important;">
+                        Rs. {{ total_cash_refunded|floatformat:2|intcomma }}
+                    </div>
+                </div>
+                <div>
+                    <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 font-mono fs-2xs px-2 py-0.5" style="color: #b45309 !important;">
+                        Direct Inflow
+                    </span>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Multi-Parameter Search & Filter Toolbar -->
-    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-center">
+    <!-- 4. STANDARDIZED SEARCH & FILTER CONSOLE WITH INSTANT LIVE TYPEAHEAD DROPDOWN -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3 no-print">
+        <form method="get" class="row g-2 align-items-center" id="purchaseReturnFilterForm">
+            <!-- Global Keyword Search with Instant Suggestion Dropdown -->
             <div class="col-12 col-md-3">
-                <div class="input-group input-group-sm">
-                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
-                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search Voucher, Bill Ref, Supplier, IMEI...">
+                <div class="async-search-container">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light border-0 text-muted ps-2.5">
+                            <i class="fas fa-magnifying-glass"></i>
+                        </span>
+                        <input type="text" 
+                               name="q" 
+                               id="globalReturnFilterInput" 
+                               value="{{ request.GET.q|default:'' }}" 
+                               class="form-control bg-light border-0 fw-semibold" 
+                               placeholder="Type voucher, supplier, phone (e.g. v, vi, 00)..." 
+                               autocomplete="off">
+                        <button type="button" class="btn btn-light border-0 text-muted px-2" id="clearSearchInputBtn" style="display: none;" title="Clear input">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+
+                    <!-- Instant Suggestion Floating Dropdown Menu -->
+                    <div id="returnSearchDropdown" class="return-live-dropdown shadow-lg"></div>
                 </div>
             </div>
 
+            <!-- Supplier / Distributor Dropdown -->
             <div class="col-6 col-md-3">
-                <select name="supplier" class="form-select form-select-sm bg-light border-0">
+                <select name="supplier" id="supplierFilterSelect" class="form-select form-select-sm bg-light border-0 fw-semibold text-secondary">
                     <option value="">All Suppliers / Distributors</option>
                     {% for sup in suppliers %}
                         <option value="{{ sup.id }}" {% if request.GET.supplier == sup.id|stringformat:"s" %}selected{% endif %}>
@@ -137,162 +608,673 @@
                 </select>
             </div>
 
+            <!-- Settlement / Refund Mode Dropdown -->
             <div class="col-6 col-md-2">
-                <select name="refund_mode" class="form-select form-select-sm bg-light border-0">
+                <select name="refund_mode" id="refundModeFilterSelect" class="form-select form-select-sm bg-light border-0 fw-semibold text-secondary">
                     <option value="">All Refund Modes</option>
+                    <option value="CASH_REFUND" {% if request.GET.refund_mode == 'CASH_REFUND' %}selected{% endif %}>Cash Refund (नगद फिर्ता)</option>
                     <option value="DEDUCT_FROM_BALANCE" {% if request.GET.refund_mode == 'DEDUCT_FROM_BALANCE' %}selected{% endif %}>Deduct from Udhaari Balance</option>
-                    <option value="CASH_REFUND" {% if request.GET.refund_mode == 'CASH_REFUND' %}selected{% endif %}>Cash / Bank Refund</option>
                     <option value="REPLACEMENT" {% if request.GET.refund_mode == 'REPLACEMENT' %}selected{% endif %}>Replacement Expected</option>
                 </select>
             </div>
 
-            <div class="col-6 col-md-2">
-                <div class="input-group input-group-sm">
-                    <input type="date" name="start_date" value="{{ request.GET.start_date|default:'' }}" class="form-control bg-light border-0" title="Start Date">
-                    <span class="input-group-text bg-light border-0">&rarr;</span>
-                    <input type="date" name="end_date" value="{{ request.GET.end_date|default:'' }}" class="form-control bg-light border-0" title="End Date">
+            <!-- Date Range Selector -->
+            <div class="col-12 col-md-3">
+                <div class="d-flex align-items-center gap-1">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light border-0 text-muted"><i class="far fa-calendar-alt"></i></span>
+                        <input type="date" name="start_date" id="dateStartInput" value="{{ request.GET.start_date|default:'' }}" class="form-control bg-light border-0 font-mono fs-2xs" title="Start Date">
+                    </div>
+                    <span class="text-muted fw-bold">&rarr;</span>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light border-0 text-muted"><i class="far fa-calendar-check"></i></span>
+                        <input type="date" name="end_date" id="dateEndInput" value="{{ request.GET.end_date|default:'' }}" class="form-control bg-light border-0 font-mono fs-2xs" title="End Date">
+                    </div>
                 </div>
             </div>
 
-            <div class="col-6 col-md-2 d-flex gap-1">
-                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+            <!-- Action Buttons -->
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold py-1.5 shadow-xs">
+                    <i class="fas fa-filter me-1"></i> Filter
+                </button>
                 {% if request.GET.q or request.GET.supplier or request.GET.refund_mode or request.GET.start_date or request.GET.end_date %}
-                <a href="{% url 'purchases:purchase_return_list' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                <a href="{% url 'purchases:purchase_return_list' %}" class="btn btn-outline-secondary btn-sm rounded-3 px-2 py-1.5" title="Reset Filters">
+                    <i class="fas fa-rotate-left"></i>
+                </a>
                 {% endif %}
             </div>
         </form>
     </div>
 
-    <!-- Purchase Returns Table -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
-        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-            <h6 class="fw-bold text-dark mb-0">
-                <i class="fas fa-list-check text-secondary me-2"></i> Issued Debit Note Vouchers
-            </h6>
-            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:returns|length }} Vouchers</span>
+    <!-- 5. CONSTANT-WIDTH TABLE WITH STICKY HEADERS & IN-TABLE INSTANT FILTER -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        
+        <!-- Table Topbar -->
+        <div class="px-3 py-2.5 border-bottom bg-white d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-2">
+            <div class="d-flex align-items-center gap-2">
+                <!-- ACCURATE COUNT BADGE: Dynamically updated on every keystroke -->
+                <span class="badge bg-dark text-white rounded-pill px-2.5 py-1 fs-2xs font-mono" id="tableVouchersCountBadge">
+                    {% if page_obj.paginator.count %}{{ page_obj.paginator.count }}{% else %}{{ returns|length }}{% endif %} Vouchers
+                </span>
+                <h6 class="fw-bold text-dark mb-0 fs-xs">
+                    Issued Debit Note Vouchers <span class="text-muted fw-normal font-mono">(खरिद फिर्ता सूची)</span>
+                </h6>
+            </div>
+
+            <!-- Instant In-Table Quick Filter (Zero-Reload Search) -->
+            <div class="d-flex align-items-center gap-2 no-print">
+                <div class="input-group input-group-sm" style="max-width: 280px;">
+                    <span class="input-group-text bg-light border-0 text-muted"><i class="fas fa-filter fs-2xs"></i></span>
+                    <input type="text" id="tableQuickFilterInput" class="form-control bg-light border-0 fs-2xs" placeholder="Quick find voucher, supplier, bill...">
+                </div>
+            </div>
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 fs-sm">
-                <thead class="bg-light text-muted text-uppercase fs-2xs">
+        <!-- Scrollable Table Wrapper with Rigid Constant Columns -->
+        <div class="table-return-container">
+            <table class="table table-hover table-return align-middle mb-0" id="purchaseReturnsTable">
+                <thead>
                     <tr>
-                        <th class="ps-4">Debit Note No</th>
-                        <th>Return Date (AD/BS)</th>
-                        <th>Supplier / Distributor</th>
-                        <th>Original Bill / GRN Ref</th>
-                        <th>Returned Items &amp; IMEIs</th>
-                        <th>Settlement Mode</th>
-                        <th>Net Debit Amount</th>
-                        <th>Processed By</th>
-                        <th class="text-end pe-4">Actions</th>
+                        <th class="col-w-voucher ps-3">Debit Note No</th>
+                        <th class="col-w-date">Return Date (AD/BS)</th>
+                        <th class="col-w-supplier">Supplier / Distributor</th>
+                        <th class="col-w-grn">Original Bill / GRN Ref</th>
+                        <th class="col-w-items">Returned Items &amp; IMEIs</th>
+                        <th class="col-w-mode">Settlement Mode</th>
+                        <th class="col-w-amount text-end">Net Debit Amount</th>
+                        <th class="col-w-staff text-center">Processed By</th>
+                        <th class="col-w-actions text-end pe-3 no-print">Actions</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="returnsTableBody">
                     {% for r in returns %}
-                    <tr>
-                        <td class="ps-4 font-monospace fw-bold">
-                            <a href="{% url 'purchases:purchase_return_detail' r.pk %}" class="text-decoration-none text-danger">
-                                {{ r.return_number }}
+                    <tr class="return-data-row" 
+                        data-voucher="{{ r.return_number|default:'' }}"
+                        data-supplier="{{ r.supplier.company_name|default:'' }}"
+                        data-phone="{{ r.supplier.phone_number|default:'' }}"
+                        data-grn="{{ r.original_grn.grn_number|default:'' }}"
+                        data-bill="{{ r.original_bill_reference|default:'' }}"
+                        data-mode="{{ r.get_refund_mode_display|default:'' }}"
+                        data-amount="{{ r.net_refund_amount|default:0 }}"
+                        data-staff="{{ r.processed_by.get_full_name|default:r.processed_by.username|default:'System' }}">
+                        
+                        <!-- 1. Debit Note No with 1-Click Clipboard Copy -->
+                        <td class="ps-3 font-mono">
+                            <a href="javascript:void(0)" 
+                               class="voucher-pill-red" 
+                               onclick="copyVoucherToClipboard('{{ r.return_number }}')" 
+                               title="Click to copy voucher number">
+                                <span>{{ r.return_number }}</span>
+                                <i class="far fa-copy opacity-50 fs-2xs"></i>
                             </a>
                         </td>
 
+                        <!-- 2. Return Date (Dual AD / BS) -->
                         <td>
-                            <span class="text-dark fw-semibold">{{ r.return_date }}</span>
+                            <div class="font-mono fw-semibold text-dark fs-xs">{{ r.return_date }}</div>
                             {% if r.return_date_bs %}
-                                <small class="text-muted d-block font-monospace fs-2xs">{{ r.return_date_bs }} BS</small>
+                                <div class="text-muted fs-2xs font-mono font-nepali">
+                                    <i class="far fa-calendar-check me-1 text-primary"></i>{{ r.return_date_bs }} BS
+                                </div>
                             {% endif %}
                         </td>
 
+                        <!-- 3. Supplier / Distributor -->
                         <td>
-                            <strong>{{ r.supplier.company_name }}</strong>
-                            <small class="text-muted d-block font-monospace"><i class="fas fa-phone fs-2xs me-1 text-success"></i>{{ r.supplier.phone_number }}</small>
+                            <div class="fw-bold text-dark text-truncate-custom" title="{{ r.supplier.company_name }}">
+                                {{ r.supplier.company_name }}
+                            </div>
+                            {% if r.supplier.phone_number %}
+                            <div class="text-muted fs-2xs font-mono mt-0.5 d-flex align-items-center gap-1">
+                                <i class="fas fa-phone-volume text-success"></i>
+                                <a href="tel:{{ r.supplier.phone_number }}" class="text-decoration-none text-muted">
+                                    {{ r.supplier.phone_number }}
+                                </a>
+                            </div>
+                            {% endif %}
                         </td>
 
+                        <!-- 4. Original Bill / GRN Ref -->
                         <td>
                             {% if r.original_grn %}
-                                <a href="{% url 'purchases:grn_detail' r.original_grn.pk %}" class="text-decoration-none font-monospace text-primary">
+                                <a href="{% url 'purchases:grn_detail' r.original_grn.pk %}" class="grn-pill-blue" title="View Linked GRN">
                                     {{ r.original_grn.grn_number }}
                                 </a>
                                 {% if r.original_bill_reference %}
-                                    <small class="text-muted d-block font-monospace">Bill: {{ r.original_bill_reference }}</small>
+                                    <div class="text-muted fs-2xs font-mono mt-0.5">Bill: {{ r.original_bill_reference }}</div>
                                 {% endif %}
                             {% elif r.original_bill_reference %}
-                                <span class="font-monospace text-muted">{{ r.original_bill_reference }}</span>
+                                <span class="font-mono fs-2xs text-muted">Bill: {{ r.original_bill_reference }}</span>
                             {% else %}
-                                <span class="text-muted fs-xs">-</span>
+                                <span class="text-muted font-mono fs-2xs">-</span>
                             {% endif %}
                         </td>
 
-                        <!-- Detailed Line Items & Scanned IMEIs Preview -->
+                        <!-- 5. Returned Items & IMEIs -->
                         <td>
-                            <span class="badge bg-light text-dark border mb-1">
-                                <i class="fas fa-boxes-stacked me-1"></i> {{ r.items.count }} Line(s)
-                            </span>
+                            <div class="d-flex align-items-center gap-1 mb-1">
+                                <span class="items-count-chip">
+                                    <i class="fas fa-box-open text-muted"></i> {{ r.items.count }} Line(s)
+                                </span>
+                            </div>
                             {% for itm in r.items.all %}
-                                <div class="text-truncate" style="max-width: 250px; font-size: 11px;">
+                                <div class="text-truncate-custom fs-2xs text-secondary" title="{{ itm.product.name }} (x{{ itm.returned_quantity|floatformat:0 }}){% if itm.return_reason %} [{{ itm.return_reason }}]{% endif %}">
                                     &bull; <strong>{{ itm.product.name }}</strong> (x{{ itm.returned_quantity|floatformat:0 }})
-                                    {% if itm.return_reason %}<small class="text-danger">[{{ itm.return_reason|truncatechars:20 }}]</small>{% endif %}
-                                    {% if itm.returned_imei_list %}
-                                        <small class="text-muted font-monospace d-block">IMEIs: {{ itm.returned_imei_list|truncatechars:35 }}</small>
+                                    {% if itm.return_reason %}
+                                        <span class="text-danger">[{{ itm.return_reason|truncatechars:22 }}]</span>
                                     {% endif %}
                                 </div>
+                                {% if itm.returned_imei_list %}
+                                    <div class="text-muted fs-2xs font-mono text-truncate-custom" title="IMEIs: {{ itm.returned_imei_list }}">
+                                        IMEIs: {{ itm.returned_imei_list|truncatechars:35 }}
+                                    </div>
+                                {% endif %}
                             {% endfor %}
                         </td>
 
+                        <!-- 6. Settlement Mode -->
                         <td>
-                            {% if r.refund_mode == 'DEDUCT_FROM_BALANCE' %}
-                                <span class="badge bg-primary bg-opacity-10 text-primary fw-bold fs-2xs px-2 py-1">
-                                    <i class="fas fa-wallet me-1"></i> Deduct from Debt
+                            {% if r.refund_mode == 'CASH_REFUND' or r.refund_mode == 'CASH' %}
+                                <span class="settlement-pill settlement-pill-cash">
+                                    <i class="fas fa-money-bill-wave"></i> Cash Refund
                                 </span>
-                            {% elif r.refund_mode == 'CASH_REFUND' %}
-                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">
-                                    <i class="fas fa-money-bill-wave me-1"></i> Cash Refund
+                            {% elif r.refund_mode == 'DEDUCT_FROM_BALANCE' or r.refund_mode == 'STORE_CREDIT' %}
+                                <span class="settlement-pill settlement-pill-debt">
+                                    <i class="fas fa-wallet"></i> Deduct from Debt
                                 </span>
                             {% else %}
-                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-2xs px-2 py-1">
-                                    <i class="fas fa-repeat me-1"></i> Replacement
+                                <span class="settlement-pill settlement-pill-replace">
+                                    <i class="fas fa-rotate"></i> Replacement
                                 </span>
                             {% endif %}
                         </td>
 
-                        <td class="fw-bold font-monospace text-danger">
-                            Rs. {{ r.net_refund_amount|floatformat:2|intcomma }}
+                        <!-- 7. Net Debit Amount -->
+                        <td class="col-w-amount text-end font-mono">
+                            <span class="fw-bold text-danger fs-sm">
+                                Rs. {{ r.net_refund_amount|floatformat:2|intcomma }}
+                            </span>
                         </td>
 
-                        <td>
-                            {% if r.processed_by %}
-                                {{ r.processed_by.get_full_name|default:r.processed_by.username }}
-                            {% else %}
-                                <span class="text-muted">System</span>
-                            {% endif %}
+                        <!-- 8. Processed By -->
+                        <td class="text-center">
+                            <div class="staff-chip">
+                                <span class="staff-avatar-circle">
+                                    {{ r.processed_by.username|slice:":1"|upper|default:"S" }}
+                                </span>
+                                <span>{{ r.processed_by.get_full_name|default:r.processed_by.username|default:"System" }}</span>
+                            </div>
                         </td>
 
-                        <td class="text-end pe-4">
-                            <div class="d-inline-flex gap-2">
-                                <a href="{% url 'purchases:purchase_return_detail' r.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
-                                    Details
+                        <!-- 9. Actions -->
+                        <td class="text-end pe-3 no-print">
+                            <div class="btn-group btn-group-sm">
+                                <a href="{% url 'purchases:purchase_return_detail' r.pk %}" class="btn btn-light border btn-sm text-secondary px-2" title="View Details">
+                                    <i class="far fa-eye"></i>
                                 </a>
-                                <a href="{% url 'purchases:purchase_return_detail' r.pk %}" target="_blank" class="btn btn-outline-dark btn-sm rounded-circle p-2" title="Print Debit Note Slip">
+                                <a href="{% url 'purchases:purchase_return_detail' r.pk %}" target="_blank" class="btn btn-light border btn-sm text-secondary px-2" title="Print Debit Note Voucher">
                                     <i class="fas fa-print"></i>
                                 </a>
                             </div>
                         </td>
                     </tr>
                     {% empty %}
-                    <tr>
+                    <tr id="emptyReturnsRow">
                         <td colspan="9" class="text-center py-5 text-muted">
-                            <i class="fas fa-arrow-rotate-left fs-1 text-secondary opacity-25 d-block mb-2"></i>
-                            No commercial purchase return vouchers recorded yet.
+                            <i class="fas fa-arrow-rotate-left fs-2 opacity-25 d-block mb-2"></i>
+                            <div class="fw-bold fs-sm text-dark mb-1">No Purchase Return Vouchers Found</div>
+                            <div class="fs-xs">No commercial debit notes have been issued matching the current filter parameters.</div>
                         </td>
                     </tr>
                     {% endfor %}
+                    
+                    <!-- Dynamic No-Search Results Row (Hidden by Default) -->
+                    <tr id="noSearchResultsRow" style="display: none;">
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-folder-open fs-2 opacity-25 d-block mb-2"></i>
+                            <div class="fw-bold fs-sm text-dark mb-1">No Matching Debit Notes Found</div>
+                            <div class="fs-xs">No records matched your search query.</div>
+                        </td>
+                    </tr>
                 </tbody>
+
+                <!-- Reconciled Summary Audit Footer -->
+                <tfoot class="border-top-2 border-slate-300">
+                    <tr class="bg-light fw-bold">
+                        <td colspan="6" class="ps-3 text-end text-uppercase fs-2xs text-muted">
+                            Grand Total Purchase Return Value (कुल फिर्ता रकम):
+                        </td>
+                        <td class="col-w-amount text-end font-mono text-danger fs-sm" id="tableGrandTotalAmount">
+                            Rs. {{ total_refund_amount|floatformat:2|intcomma }}
+                        </td>
+                        <td colspan="2" class="text-end pe-3 font-mono text-muted fs-2xs">
+                            <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25">
+                                <i class="fas fa-shield-check me-1"></i> 100% Reconciled
+                            </span>
+                        </td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
 
-        <div class="p-3 border-top bg-light">
+        {% if is_paginated %}
+        <div class="p-3 border-top bg-light no-print">
             {% include "includes/_pagination.html" %}
         </div>
+        {% endif %}
     </div>
+
 </div>
+
+<!-- Copy Feedback Toast Notification -->
+<div id="copyToast" class="toast-copy-notify">
+    <i class="fas fa-check-circle text-success"></i>
+    <span id="copyToastText">Voucher code copied to clipboard!</span>
+</div>
+
+<!-- =========================================================================
+     INTERACTIVE JAVASCRIPT: INSTANT TYPEAHEAD DROPDOWN, TABLE FILTER, CLIPBOARD, CSV EXPORT
+     ========================================================================= -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const globalInput = document.getElementById('globalReturnFilterInput');
+    const clearBtn = document.getElementById('clearSearchInputBtn');
+    const dropdownMenu = document.getElementById('returnSearchDropdown');
+    const tableBody = document.getElementById('returnsTableBody');
+    const noResultsRow = document.getElementById('noSearchResultsRow');
+    const countBadge = document.getElementById('tableVouchersCountBadge');
+    const grandTotalEl = document.getElementById('tableGrandTotalAmount');
+    const supplierSelect = document.getElementById('supplierFilterSelect');
+    const modeSelect = document.getElementById('refundModeFilterSelect');
+    const quickTableInput = document.getElementById('tableQuickFilterInput');
+
+    let activeSuggestionIndex = -1;
+
+    // -------------------------------------------------------------
+    // Helper: Escape Special Characters
+    // -------------------------------------------------------------
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function escapeRegex(text) {
+        return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+    }
+
+    // -------------------------------------------------------------
+    // 1. Build Client-Side Search Index from Rendered Table Rows
+    // -------------------------------------------------------------
+    function buildIndex() {
+        const rows = tableBody.querySelectorAll('.return-data-row');
+        const items = [];
+
+        rows.forEach(row => {
+            const voucher = row.dataset.voucher || '';
+            const supplier = row.dataset.supplier || '';
+            const phone = row.dataset.phone || '';
+            const grn = row.dataset.grn || '';
+            const bill = row.dataset.bill || '';
+            const mode = row.dataset.mode || '';
+            const amount = parseFloat(row.dataset.amount || 0);
+            const staff = row.dataset.staff || '';
+            const fullText = row.textContent.toLowerCase();
+
+            items.push({
+                element: row,
+                voucher,
+                supplier,
+                phone,
+                grn,
+                bill,
+                mode,
+                amount,
+                staff,
+                fullText
+            });
+        });
+        return items;
+    }
+
+    const indexedRows = buildIndex();
+
+    // -------------------------------------------------------------
+    // 2. Perform Real-Time In-Table Row Filtering
+    // -------------------------------------------------------------
+    function filterTableRows(query) {
+        const cleanQuery = (query || '').toLowerCase().trim();
+        const selectedSupplier = supplierSelect ? supplierSelect.options[supplierSelect.selectedIndex].text.toLowerCase().trim() : '';
+        const isSupplierFiltered = supplierSelect && supplierSelect.value !== '';
+        const selectedMode = modeSelect ? modeSelect.options[modeSelect.selectedIndex].text.toLowerCase().trim() : '';
+        const isModeFiltered = modeSelect && modeSelect.value !== '';
+
+        let visibleCount = 0;
+        let runningTotal = 0;
+
+        indexedRows.forEach(item => {
+            const matchesQuery = !cleanQuery || item.fullText.includes(cleanQuery) || 
+                                 item.voucher.toLowerCase().includes(cleanQuery) || 
+                                 item.supplier.toLowerCase().includes(cleanQuery) ||
+                                 item.phone.includes(cleanQuery) ||
+                                 item.grn.toLowerCase().includes(cleanQuery) ||
+                                 item.bill.toLowerCase().includes(cleanQuery) ||
+                                 item.staff.toLowerCase().includes(cleanQuery);
+
+            const matchesSupplier = !isSupplierFiltered || item.supplier.toLowerCase().includes(selectedSupplier);
+            const matchesMode = !isModeFiltered || item.mode.toLowerCase().includes(selectedMode);
+
+            if (matchesQuery && matchesSupplier && matchesMode) {
+                item.element.style.display = '';
+                visibleCount++;
+                runningTotal += item.amount;
+            } else {
+                item.element.style.display = 'none';
+            }
+        });
+
+        if (noResultsRow) {
+            noResultsRow.style.display = (visibleCount === 0 && indexedRows.length > 0) ? '' : 'none';
+        }
+
+        if (countBadge) {
+            countBadge.innerText = `${visibleCount} Vouchers`;
+        }
+
+        if (grandTotalEl) {
+            grandTotalEl.innerText = `Rs. ${runningTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+    }
+
+    // -------------------------------------------------------------
+    // 3. Render Dynamic Progressive Typeahead Dropdown Suggestions
+    //    (Suppliers, Vouchers, Phones, GRNs, Staff - "v" -> "vi" -> "viv")
+    // -------------------------------------------------------------
+    function renderSuggestions(query) {
+        if (!dropdownMenu) return;
+
+        const clean = (query || '').toLowerCase().trim();
+        if (clean.length === 0) {
+            dropdownMenu.classList.remove('show');
+            dropdownMenu.innerHTML = '';
+            activeSuggestionIndex = -1;
+            return;
+        }
+
+        const suggestionsMap = new Map();
+        const regex = new RegExp(`(${escapeRegex(clean)})`, 'gi');
+
+        function highlight(text) {
+            return escapeHtml(text).replace(regex, '<strong class="text-danger">$1</strong>');
+        }
+
+        indexedRows.forEach(item => {
+            // Check Supplier Name
+            if (item.supplier && item.supplier.toLowerCase().includes(clean)) {
+                const key = `sup_${item.supplier}`;
+                if (!suggestionsMap.has(key)) {
+                    suggestionsMap.set(key, {
+                        type: 'Supplier',
+                        chipClass: 'bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25',
+                        displayTitle: highlight(item.supplier),
+                        subtitle: item.phone ? `Phone: ${escapeHtml(item.phone)}` : 'Registered Supplier',
+                        fillValue: item.supplier
+                    });
+                }
+            }
+
+            // Check Voucher Number
+            if (item.voucher && item.voucher.toLowerCase().includes(clean)) {
+                const key = `vouch_${item.voucher}`;
+                if (!suggestionsMap.has(key)) {
+                    suggestionsMap.set(key, {
+                        type: 'Debit Note',
+                        chipClass: 'bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25',
+                        displayTitle: highlight(item.voucher),
+                        subtitle: `Rs. ${item.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} &bull; ${escapeHtml(item.supplier)}`,
+                        fillValue: item.voucher
+                    });
+                }
+            }
+
+            // Check Phone Number
+            if (item.phone && item.phone.includes(clean)) {
+                const key = `ph_${item.phone}`;
+                if (!suggestionsMap.has(key)) {
+                    suggestionsMap.set(key, {
+                        type: 'Phone',
+                        chipClass: 'bg-success bg-opacity-10 text-success border border-success border-opacity-25',
+                        displayTitle: highlight(item.phone),
+                        subtitle: `${escapeHtml(item.supplier)}`,
+                        fillValue: item.phone
+                    });
+                }
+            }
+
+            // Check GRN / Bill Reference
+            if ((item.grn && item.grn.toLowerCase().includes(clean)) || (item.bill && item.bill.toLowerCase().includes(clean))) {
+                const grnVal = item.grn || item.bill;
+                const key = `grn_${grnVal}`;
+                if (!suggestionsMap.has(key)) {
+                    suggestionsMap.set(key, {
+                        type: 'GRN Ref',
+                        chipClass: 'bg-info bg-opacity-10 text-info border border-info border-opacity-25',
+                        displayTitle: highlight(grnVal),
+                        subtitle: `Bill: ${escapeHtml(item.bill || '-')} &bull; ${escapeHtml(item.supplier)}`,
+                        fillValue: grnVal
+                    });
+                }
+            }
+
+            // Check Staff Member
+            if (item.staff && item.staff.toLowerCase().includes(clean)) {
+                const key = `stf_${item.staff}`;
+                if (!suggestionsMap.has(key)) {
+                    suggestionsMap.set(key, {
+                        type: 'Staff',
+                        chipClass: 'bg-secondary bg-opacity-10 text-secondary border',
+                        displayTitle: highlight(item.staff),
+                        subtitle: `Cashier / Sales Staff`,
+                        fillValue: item.staff
+                    });
+                }
+            }
+        });
+
+        const results = Array.from(suggestionsMap.values()).slice(0, 8);
+
+        if (results.length === 0) {
+            dropdownMenu.innerHTML = `
+                <div class="p-3 text-center text-muted fs-xs">
+                    <i class="fas fa-folder-open opacity-50 d-block mb-1"></i>
+                    No matches found for "<strong>${escapeHtml(query)}</strong>"
+                </div>
+            `;
+            dropdownMenu.classList.add('show');
+            return;
+        }
+
+        let html = '';
+        results.forEach((sug, idx) => {
+            html += `
+                <div class="live-suggestion-item" data-index="${idx}" data-fill="${escapeHtml(sug.fillValue)}">
+                    <div>
+                        <div class="suggestion-title">${sug.displayTitle}</div>
+                        <div class="suggestion-meta">${sug.subtitle}</div>
+                    </div>
+                    <span class="suggestion-chip ${sug.chipClass}">${sug.type}</span>
+                </div>
+            `;
+        });
+
+        dropdownMenu.innerHTML = html;
+        dropdownMenu.classList.add('show');
+        activeSuggestionIndex = -1;
+
+        dropdownMenu.querySelectorAll('.live-suggestion-item').forEach(itemEl => {
+            itemEl.addEventListener('click', () => {
+                selectSuggestion(itemEl.dataset.fill);
+            });
+        });
+    }
+
+    function selectSuggestion(value) {
+        if (!globalInput) return;
+        globalInput.value = value;
+        if (clearBtn) clearBtn.style.display = 'block';
+        dropdownMenu.classList.remove('show');
+        activeSuggestionIndex = -1;
+        filterTableRows(value);
+        globalInput.focus();
+    }
+
+    // -------------------------------------------------------------
+    // 4. Input Listeners with Progressive Live Filtering
+    // -------------------------------------------------------------
+    if (globalInput) {
+        globalInput.addEventListener('input', (e) => {
+            const query = e.target.value;
+            if (clearBtn) clearBtn.style.display = query.trim() ? 'block' : 'none';
+
+            // Progressive Real-time Table Filter
+            filterTableRows(query);
+
+            // Progressive Live Suggestions Dropdown
+            renderSuggestions(query);
+        });
+
+        globalInput.addEventListener('focus', () => {
+            if (globalInput.value.trim().length > 0) {
+                renderSuggestions(globalInput.value.trim());
+            }
+        });
+
+        // Keyboard Navigation (Arrow Down, Arrow Up, Enter, Escape)
+        globalInput.addEventListener('keydown', (e) => {
+            const items = dropdownMenu.querySelectorAll('.live-suggestion-item');
+            if (!dropdownMenu.classList.contains('show') || items.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeSuggestionIndex = (activeSuggestionIndex + 1) >= items.length ? 0 : activeSuggestionIndex + 1;
+                updateActiveSuggestion(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeSuggestionIndex = (activeSuggestionIndex - 1) < 0 ? items.length - 1 : activeSuggestionIndex - 1;
+                updateActiveSuggestion(items);
+            } else if (e.key === 'Enter') {
+                if (activeSuggestionIndex >= 0 && items[activeSuggestionIndex]) {
+                    e.preventDefault();
+                    selectSuggestion(items[activeSuggestionIndex].dataset.fill);
+                }
+            } else if (e.key === 'Escape') {
+                dropdownMenu.classList.remove('show');
+                activeSuggestionIndex = -1;
+            }
+        });
+
+        function updateActiveSuggestion(items) {
+            items.forEach((el, idx) => {
+                if (idx === activeSuggestionIndex) {
+                    el.classList.add('active');
+                    el.scrollIntoView({ block: 'nearest' });
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+        }
+    }
+
+    // Clear Search Input Button
+    if (clearBtn && globalInput) {
+        clearBtn.addEventListener('click', () => {
+            globalInput.value = '';
+            clearBtn.style.display = 'none';
+            dropdownMenu.classList.remove('show');
+            dropdownMenu.innerHTML = '';
+            activeSuggestionIndex = -1;
+            filterTableRows('');
+            globalInput.focus();
+        });
+    }
+
+    // Dismiss Dropdown on Outside Click
+    document.addEventListener('click', (e) => {
+        if (dropdownMenu && !dropdownMenu.contains(e.target) && e.target !== globalInput) {
+            dropdownMenu.classList.remove('show');
+            activeSuggestionIndex = -1;
+        }
+    });
+
+    // Synchronize Secondary Filters
+    if (supplierSelect) {
+        supplierSelect.addEventListener('change', () => filterTableRows(globalInput ? globalInput.value : ''));
+    }
+    if (modeSelect) {
+        modeSelect.addEventListener('change', () => filterTableRows(globalInput ? globalInput.value : ''));
+    }
+    if (quickTableInput) {
+        quickTableInput.addEventListener('input', (e) => filterTableRows(e.target.value));
+    }
+});
+
+// -------------------------------------------------------------
+// 5. 1-Click Copy Voucher Code to Clipboard with Toast Feedback
+// -------------------------------------------------------------
+function copyVoucherToClipboard(voucherCode) {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(voucherCode).then(() => {
+        const toast = document.getElementById('copyToast');
+        const toastText = document.getElementById('copyToastText');
+        if (toast && toastText) {
+            toastText.innerText = `Voucher ${voucherCode} copied to clipboard!`;
+            toast.style.display = 'flex';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 2200);
+        }
+    });
+}
+
+// -------------------------------------------------------------
+// 6. Client-Side High-Speed CSV Exporter
+// -------------------------------------------------------------
+function exportDebitNotesCSV(e) {
+    const table = document.getElementById('purchaseReturnsTable');
+    if (!table) return;
+
+    if (e) e.preventDefault();
+
+    let csv = [];
+    const rows = table.querySelectorAll('tr');
+
+    rows.forEach(row => {
+        if (row.style.display === 'none' || row.id === 'noSearchResultsRow' || row.id === 'emptyReturnsRow') return;
+
+        let cols = [];
+        const cells = row.querySelectorAll('th, td');
+        
+        // Exclude the last Actions column (index 8)
+        const limit = cells.length > 8 ? cells.length - 1 : cells.length;
+
+        for (let i = 0; i < limit; i++) {
+            let text = cells[i].innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+            text = `"${text.replace(/"/g, '""')}"`;
+            cols.push(text);
+        }
+        csv.push(cols.join(","));
+    });
+
+    const csvBlob = new Blob([csv.join("\n")], { type: 'text/csv;charset=utf-8;' });
+    const downloadLink = document.createElement("a");
+    const today = new Date().toISOString().slice(0, 10);
+    downloadLink.download = `Purchase_Returns_Debit_Notes_${today}.csv`;
+    downloadLink.href = window.URL.createObjectURL(csvBlob);
+    downloadLink.style.display = "none";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+}
+</script>
 {% endblock %}

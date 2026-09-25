@@ -8,22 +8,20 @@
  *    - Direct Inputs: Decorated <input data-autocomplete-url="..."> or .async-search-input.
  *    - Container Wrappers: Containers such as <div class="async-search-group"> or
  *      <div class="contextual-search-wrapper"> that contain only a hidden input. Automatically
- *      generates the visible text search input, loading indicators, clear buttons, and dropdown boxes.
+ *      generates visible text search input, loading indicators, clear buttons, and dropdown boxes.
  * 2. Zero-Query Instant Population:
- *    - Focusing or clicking an empty input triggers a fetch with q="" to display the top 15-20
+ *    - Focusing or clicking an empty input triggers a fetch with q="" to display top 15-20
  *      active, recent, or default records immediately without requiring typing.
  * 3. Dynamic Parameter & Chaining Support:
  *    - Supports dynamic query parameters (e.g. data-extra-params, category_id filtering, supplier scoping).
  *    - Exposes setUrl(newUrl) and setExtraParams(paramsObj) to dynamically re-chain dependent dropdowns.
- * 4. Form Value Synchronization & Chips:
- *    - Synchronizes the selected ID with the hidden input for clean Django form submissions.
- *    - Renders an interactive chip badge with a remove cross button.
- *    - Dispatches native 'change' and custom 'item-selected' / 'item-cleared' events containing item.extra_data.
- * 5. Robust Keyboard Navigation:
+ * 4. Template-Safe Isolation & Clean Re-initialization:
+ *    - Automatically ignores dormant template/blueprint elements during page-wide initialization scans.
+ *    - Inherits search URLs from parent wrappers to prevent "Endpoint URL is not configured" errors.
+ *    - Prevents duplicate initializations when an input sits inside an already-initialized search container.
+ * 5. Robust Keyboard Navigation & Form Sync:
  *    - ArrowDown, ArrowUp, Enter, and Escape support with auto-scrolling into view.
- * 6. Global Scope Protection:
- *    - Freezes window.initContextualSearch via Object.defineProperty to prevent legacy inline scripts
- *      from accidentally overriding or corrupting the global engine.
+ *    - Synchronizes selected ID with hidden inputs and dispatches native 'change' and custom 'item-selected' events.
  */
 
 (function () {
@@ -60,14 +58,22 @@
 
         resolveConfiguration() {
             const el = this.target;
-            this.url = el.dataset.searchUrl || el.dataset.autocompleteUrl || '';
-            this.minChars = parseInt(el.dataset.minChars || '0', 10);
-            this.debounceDelay = parseInt(el.dataset.debounce || '200', 10);
-            this.placeholder = el.dataset.placeholder || el.getAttribute('placeholder') || 'Type or click to search...';
+            const parentWrapper = el.closest ? el.closest('.contextual-search-wrapper, .async-search-group') : null;
 
-            if (el.dataset.extraParams) {
+            // Inherit endpoint URL from the element or its parent container
+            this.url = el.dataset.searchUrl || 
+                       el.dataset.autocompleteUrl || 
+                       (parentWrapper ? (parentWrapper.dataset.searchUrl || parentWrapper.dataset.autocompleteUrl) : '') || 
+                       '';
+
+            this.minChars = parseInt(el.dataset.minChars || (parentWrapper ? parentWrapper.dataset.minChars : '0') || '0', 10);
+            this.debounceDelay = parseInt(el.dataset.debounce || (parentWrapper ? parentWrapper.dataset.debounce : '200') || '200', 10);
+            this.placeholder = el.dataset.placeholder || el.getAttribute('placeholder') || (parentWrapper ? parentWrapper.dataset.placeholder : '') || 'Type or click to search...';
+
+            const rawExtraParams = el.dataset.extraParams || (parentWrapper ? parentWrapper.dataset.extraParams : null);
+            if (rawExtraParams) {
                 try {
-                    this.extraParams = JSON.parse(el.dataset.extraParams);
+                    this.extraParams = JSON.parse(rawExtraParams);
                 } catch (e) {
                     this.extraParams = {};
                 }
@@ -131,15 +137,21 @@
                 this.input.classList.add('async-search-input');
             }
 
-            // Inline action controls (Spinner & Clear)
-            let controlsWrap = this.wrapper.querySelector('.async-controls-wrap');
-            if (!controlsWrap) {
-                controlsWrap = document.createElement('div');
-                controlsWrap.className = 'async-controls-wrap position-absolute end-0 top-50 translate-middle-y me-2 d-flex align-items-center gap-1';
-                controlsWrap.style.zIndex = '5';
-                this.wrapper.style.position = 'relative';
-                this.wrapper.appendChild(controlsWrap);
+            // Sync URL attribute onto the input itself for direct reference
+            if (this.url && !this.input.dataset.searchUrl) {
+                this.input.dataset.searchUrl = this.url;
             }
+
+            // Inline action controls (Spinner & Clear) - Clean previous duplicate elements if re-initializing
+            let controlsWrap = this.wrapper.querySelector('.async-controls-wrap');
+            if (controlsWrap) {
+                controlsWrap.remove();
+            }
+            controlsWrap = document.createElement('div');
+            controlsWrap.className = 'async-controls-wrap position-absolute end-0 top-50 translate-middle-y me-2 d-flex align-items-center gap-1';
+            controlsWrap.style.zIndex = '5';
+            this.wrapper.style.position = 'relative';
+            this.wrapper.appendChild(controlsWrap);
 
             this.spinner = document.createElement('span');
             this.spinner.className = 'spinner-border spinner-border-sm text-primary d-none';
@@ -153,12 +165,20 @@
             this.clearBtn.title = 'Clear selection';
             controlsWrap.appendChild(this.clearBtn);
 
-            // Dropdown results list container
+            // Clean previous dropdown results container if re-initializing
+            let existingDropdown = this.wrapper.querySelector('.async-search-dropdown');
+            if (existingDropdown) {
+                existingDropdown.remove();
+            }
             this.dropdown = document.createElement('div');
             this.dropdown.className = 'async-search-dropdown shadow-lg';
             this.wrapper.appendChild(this.dropdown);
 
-            // Selected chip component
+            // Clean previous selected chip if re-initializing
+            let existingChip = this.wrapper.querySelector('.async-selected-chip');
+            if (existingChip) {
+                existingChip.remove();
+            }
             this.chip = document.createElement('div');
             this.chip.className = 'async-selected-chip d-none';
             this.chip.innerHTML = `
@@ -253,6 +273,9 @@
             this.url = newUrl;
             this.target.dataset.searchUrl = newUrl;
             this.target.dataset.autocompleteUrl = newUrl;
+            if (this.input) {
+                this.input.dataset.searchUrl = newUrl;
+            }
         }
 
         setExtraParams(paramsObj) {
@@ -493,11 +516,11 @@
         if (!container) return;
 
         const selectors = [
-            '.async-search-group:not([data-async-search-initialized="true"])',
-            '.contextual-search-wrapper:not([data-async-search-initialized="true"])',
-            'input[data-autocomplete-url]:not([data-async-search-initialized="true"])',
-            'input[data-search-url]:not([data-async-search-initialized="true"])',
-            '.async-search-input:not([data-async-search-initialized="true"])'
+            '.async-search-group',
+            '.contextual-search-wrapper',
+            'input[data-autocomplete-url]',
+            'input[data-search-url]',
+            '.async-search-input'
         ];
 
         let elements = [];
@@ -511,7 +534,21 @@
         }
 
         elements.forEach(el => {
-            if (el.dataset.asyncSearchInitialized === 'true') return;
+            // Guard 1: Never initialize blueprint templates or dormant prototype containers
+            if (el.closest('template, [id*="template" i], [id*="Template"], [data-template]')) {
+                return;
+            }
+
+            // Guard 2: If this element is an inner <input> inside an outer wrapper, skip the inner input to prevent duplicate overwrites
+            if (el.tagName === 'INPUT' && el.closest('.contextual-search-wrapper, .async-search-group')) {
+                return;
+            }
+
+            // Guard 3: Skip elements already successfully initialized on the live document
+            if (el.dataset.asyncSearchInitialized === 'true' && container === document) {
+                return;
+            }
+
             new ContextualSearchDropdown(el);
         });
     }

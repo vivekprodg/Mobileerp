@@ -1331,9 +1331,10 @@
                     </div>
                 </div>
 
+                <!-- DEFAULT UNCHECKED: PREVENTS ACCESSORIES (EARPHONES/CHARGERS) FROM BEING SAVED AS PHONES -->
                 <div class="inv-form-group full">
                     <label class="d-flex align-items-center gap-2 inv-form-label mt-1">
-                        <input type="checkbox" name="requires_imei_tracking" value="true" checked>
+                        <input type="checkbox" name="requires_imei_tracking" value="true">
                         <span>Track Unique 15-Digit IMEI Numbers (Smartphones/Tablets)</span>
                     </label>
                 </div>
@@ -2010,7 +2011,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const sku = p.sku || p.model || '';
                         const price = p.selling_price || p.price ? `Rs. ${parseFloat(p.selling_price || p.price).toFixed(2)}` : '';
                         const stock = p.stock ?? p.current_stock ?? null;
-                        const url = p.url || `/inventory/products/${p.id}/`;
+                        const url = p.url || `/inventory/${p.id}/`;
 
                         return `
                             <a href="${url}" class="inv-search-hint-item" data-index="${idx}">

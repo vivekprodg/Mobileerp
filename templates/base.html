@@ -43,6 +43,18 @@
             height: calc(100vh - var(--erp-header-total-height));
         }
 
+        /* Active highlight for Collapsed / Icon-Only Sidebar Mode */
+        .app-layout.sidebar-collapsed .sidebar-nav-item.active {
+            background-color: var(--erp-primary-light, #eff6ff) !important;
+            border-left: 3px solid var(--erp-primary, #2563eb) !important;
+            border-radius: 9px !important;
+        }
+        
+        .app-layout.sidebar-collapsed .sidebar-nav-item.active i {
+            color: var(--erp-primary, #2563eb) !important;
+            transform: scale(1.15) !important;
+        }
+
         /* ==========================================================================
            NEPALI DATEPICKER DESIGN SYSTEM & ELEVATION ALIGNMENT
            ========================================================================== */
@@ -289,8 +301,10 @@
         document.addEventListener('DOMContentLoaded', () => {
             const layout = document.getElementById('appLayout');
             const toggleBtn = document.getElementById('sidebarToggleBtn');
+            const desktopSidebar = document.getElementById('desktopSidebar');
+            const scrollContainer = desktopSidebar ? desktopSidebar.querySelector('.sidebar-scroll-viewport') : null;
 
-            // Restore Sidebar State from LocalStorage
+            // 1. Restore Sidebar State from LocalStorage (Auto-collapses if set)
             if (layout && localStorage.getItem('erp_sidebar_collapsed') === 'true') {
                 layout.classList.add('sidebar-collapsed');
             }
@@ -298,6 +312,41 @@
             if (toggleBtn) {
                 toggleBtn.addEventListener('click', toggleSidebarCollapse);
             }
+
+            // 2. Prevent Sidebar Rolling Up: Retain Position & Scroll Active Item Into View
+            if (scrollContainer) {
+                const savedScrollPos = sessionStorage.getItem('erp_sidebar_scroll_top');
+                if (savedScrollPos !== null) {
+                    scrollContainer.scrollTop = parseInt(savedScrollPos, 10);
+                }
+
+                // If an active item exists, ensure it stays smoothly in view
+                const activeItem = scrollContainer.querySelector('.sidebar-nav-item.active, .sidebar-subgroup-link.active');
+                if (activeItem) {
+                    setTimeout(() => {
+                        activeItem.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
+                    }, 50);
+                }
+
+                // Keep track of scroll movements
+                scrollContainer.addEventListener('scroll', () => {
+                    sessionStorage.setItem('erp_sidebar_scroll_top', scrollContainer.scrollTop);
+                });
+            }
+
+            // 3. Auto-Collapse on Menu Item Click & Save Scroll Position
+            const navLinks = document.querySelectorAll('.sidebar-nav-item:not(.sidebar-subgroup-toggle), .sidebar-subgroup-link');
+            navLinks.forEach(link => {
+                link.addEventListener('click', () => {
+                    // Auto-collapse sidebar on desktop upon selection
+                    if (window.innerWidth >= 992) {
+                        localStorage.setItem('erp_sidebar_collapsed', 'true');
+                    }
+                    if (scrollContainer) {
+                        sessionStorage.setItem('erp_sidebar_scroll_top', scrollContainer.scrollTop);
+                    }
+                });
+            });
 
             // Global Keyboard Shortcuts
             document.addEventListener('keydown', (e) => {

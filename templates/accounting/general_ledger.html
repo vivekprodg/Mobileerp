@@ -1,27 +1,122 @@
 {% extends "base.html" %}
 {% load static humanize %}
 
-{% block title %}General Ledger Statement: {{ account.name }} | {{ COMPANY_NAME }}{% endblock %}
+{% block title %}General Ledger Statement: {{ account.name }} ({{ account.code }}) | {{ COMPANY_NAME }}{% endblock %}
 
 {% block extra_head %}
+<!-- Google Fonts: JetBrains Mono for strict financial number alignment -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
+/* ==========================================================================
+   ULTRA-PREMIUM GENERAL LEDGER DESIGN SYSTEM
+   ========================================================================== */
+:root {
+    --gl-font-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+    --gl-primary: #1e40af;
+    --gl-primary-subtle: #eff6ff;
+    --gl-primary-border: #bfdbfe;
+    --gl-success: #059669;
+    --gl-success-subtle: #ecfdf5;
+    --gl-warning: #d97706;
+    --gl-warning-subtle: #fffbeb;
+    --gl-danger: #dc2626;
+    --gl-danger-subtle: #fef2f2;
+    --gl-slate-50: #f8fafc;
+    --gl-slate-100: #f1f5f9;
+    --gl-slate-200: #e2e8f0;
+    --gl-slate-300: #cbd5e1;
+    --gl-slate-400: #94a3b8;
+    --gl-slate-500: #64748b;
+    --gl-slate-600: #475569;
+    --gl-slate-700: #334155;
+    --gl-slate-800: #1e293b;
+    --gl-slate-900: #0f172a;
+}
+
+.font-mono {
+    font-family: var(--gl-font-mono) !important;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}
+
+.fs-2xs { font-size: 0.70rem !important; }
+.fs-xs  { font-size: 0.79rem !important; }
+.fs-sm  { font-size: 0.865rem !important; }
+
+/* -------------------------------------------------------------
+   1. EXECUTIVE ACCOUNT & BALANCED 4-KPI TILES
+------------------------------------------------------------- */
+.gl-account-tile {
+    background: #ffffff;
+    border: 1px solid var(--gl-slate-200);
+    border-radius: 1rem;
+    padding: 1.25rem 1.4rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.gl-kpi-box {
+    background: #ffffff;
+    border: 1px solid var(--gl-slate-200);
+    border-radius: 0.875rem;
+    padding: 1rem 1.15rem;
+    height: 100%;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.gl-kpi-box:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 18px -4px rgba(15, 23, 42, 0.08);
+}
+
+.gl-kpi-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3.5px;
+}
+
+.gl-kpi-box.kpi-opening::before { background: var(--gl-slate-500); }
+.gl-kpi-box.kpi-debit::before   { background: var(--gl-success); }
+.gl-kpi-box.kpi-credit::before  { background: var(--gl-warning); }
+.gl-kpi-box.kpi-closing::before { background: var(--gl-danger); }
+
+/* -------------------------------------------------------------
+   2. AUTOCOMPLETE DROPDOWN (ASYNC LOOKUP)
+------------------------------------------------------------- */
 .async-search-container {
     position: relative;
+    width: 100%;
 }
 
 .async-results-dropdown {
     position: absolute;
-    top: 100%;
+    top: calc(100% + 4px);
     left: 0;
     right: 0;
     z-index: 1060;
     background: #ffffff;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--gl-slate-300);
     border-radius: 12px;
-    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
-    max-height: 280px;
+    box-shadow: 0 14px 30px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
+    max-height: 320px;
     overflow-y: auto;
-    margin-top: 4px;
+    margin-top: 2px;
     display: none;
 }
 
@@ -32,16 +127,176 @@
 .async-result-item {
     padding: 10px 14px;
     cursor: pointer;
-    border-bottom: 1px solid #f1f5f9;
-    transition: background-color 0.15s ease;
+    border-bottom: 1px solid var(--gl-slate-100);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-decoration: none;
+    color: inherit;
+    transition: background-color 0.12s ease;
 }
 
 .async-result-item:last-child {
     border-bottom: none;
 }
 
-.async-result-item:hover {
+.async-result-item:hover,
+.async-result-item.active {
+    background-color: var(--gl-slate-50);
+}
+
+.async-result-item:hover .account-title {
+    color: var(--gl-primary) !important;
+}
+
+/* -------------------------------------------------------------
+   3. CONSTANT-WIDTH TABLE ARCHITECTURE
+------------------------------------------------------------- */
+.table-ledger-container {
+    max-height: calc(100vh - 360px);
+    min-height: 480px;
+    overflow-y: auto;
+    overflow-x: auto;
+    position: relative;
+    background: #ffffff;
+}
+
+.table-ledger {
+    table-layout: fixed !important;
+    width: 100%;
+    min-width: 1320px;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin-bottom: 0;
+}
+
+.table-ledger thead th {
+    font-size: 0.71rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gl-slate-500);
     background-color: #f8fafc;
+    border-top: none;
+    border-bottom: 2px solid var(--gl-slate-200);
+    padding: 11px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.table-ledger tbody td {
+    padding: 10px 12px;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--gl-slate-100);
+    color: var(--gl-slate-800);
+    font-size: 0.835rem;
+}
+
+.table-ledger tbody tr {
+    transition: background-color 0.12s ease;
+}
+
+.table-ledger tbody tr:hover {
+    background-color: #fafcff;
+}
+
+/* Rigid Column Width Constants */
+.col-w-date      { width: 135px; }
+.col-w-voucher   { width: 190px; }
+.col-w-type      { width: 180px; }
+.col-w-ref       { width: 140px; }
+.col-w-party     { width: 190px; }
+.col-w-narration { width: auto; }
+.col-w-amount    { width: 140px; }
+.col-w-balance   { width: 165px; }
+
+/* Tabular Financial Numbers */
+.num-debit {
+    font-family: var(--gl-font-mono);
+    font-weight: 700;
+    color: var(--gl-success);
+    text-align: right;
+}
+
+.num-credit {
+    font-family: var(--gl-font-mono);
+    font-weight: 700;
+    color: var(--gl-danger);
+    text-align: right;
+}
+
+.num-balance {
+    font-family: var(--gl-font-mono);
+    font-weight: 800;
+    text-align: right;
+    color: var(--gl-slate-900);
+}
+
+.text-truncate-custom {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+.voucher-pill {
+    font-family: var(--gl-font-mono);
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--gl-slate-800);
+    background-color: var(--gl-slate-100);
+    border: 1px solid var(--gl-slate-200);
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-decoration: none !important;
+    display: inline-block;
+    transition: all 0.15s ease;
+}
+
+.voucher-pill:hover {
+    background-color: var(--gl-primary-subtle);
+    border-color: var(--gl-primary-border);
+    color: var(--gl-primary);
+}
+
+.type-pill {
+    font-size: 0.70rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    display: inline-block;
+    border: 1px solid transparent;
+}
+.type-pill-pu { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+.type-pill-sv { background: #e0f2fe; color: #0369a1; border-color: #bae6fd; }
+.type-pill-jv { background: #f3e8ff; color: #6b21a8; border-color: #e9d5ff; }
+.type-pill-py { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+.type-pill-rc { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+.type-pill-gen{ background: #f1f5f9; color: #334155; border-color: #e2e8f0; }
+
+.nature-chip {
+    font-family: var(--gl-font-mono);
+    font-size: 0.68rem;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+.nature-chip-dr { background: var(--gl-success-subtle); color: var(--gl-success); border: 1px solid rgba(5, 150, 105, 0.25); }
+.nature-chip-cr { background: var(--gl-danger-subtle); color: var(--gl-danger); border: 1px solid rgba(220, 38, 38, 0.25); }
+
+/* -------------------------------------------------------------
+   4. PASSBOOK PRINT STYLING
+------------------------------------------------------------- */
+@media print {
+    .no-print, .btn, form, .input-group, header, aside, footer { display: none !important; }
+    body { background: #ffffff !important; font-size: 11px !important; }
+    .container-fluid { padding: 0 !important; }
+    .card { box-shadow: none !important; border: 1px solid #ccc !important; }
+    .table-ledger-container { max-height: none !important; overflow: visible !important; }
+    .table-ledger { min-width: 100% !important; }
 }
 </style>
 {% endblock %}
@@ -49,11 +304,11 @@
 {% block content %}
 <div class="container-fluid px-3 px-md-4 py-3">
 
-    <!-- Breadcrumb & Header -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+    <!-- 1. BREADCRUMBS & TOP HEADER ACTIONS -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-3">
         <div>
             <nav aria-label="breadcrumb">
-                <ol class="breadcrumb mb-1 fs-xs">
+                <ol class="breadcrumb mb-1 fs-2xs text-muted">
                     <li class="breadcrumb-item"><a href="{% url 'core:dashboard' %}" class="text-decoration-none text-muted">Dashboard</a></li>
                     <li class="breadcrumb-item"><a href="{% url 'accounting:coa' %}" class="text-decoration-none text-muted">Accounting</a></li>
                     <li class="breadcrumb-item active text-primary fw-semibold" aria-current="page">General Ledger</li>
@@ -64,226 +319,438 @@
                 <span>General Ledger Statement</span>
                 <span class="fs-xs fw-normal text-muted font-nepali">(खाताको विस्तृत विवरण तथा लेजर)</span>
             </h4>
-            <p class="text-muted fs-xs mb-0">Detailed transaction statement with opening balance, sequential running balance, and source voucher audit trails</p>
+            <p class="text-muted fs-2xs mb-0">Sequential audit trail with opening balance, chronologically verified running balances, and source voucher links</p>
         </div>
-        <div class="d-flex align-items-center gap-2 flex-wrap">
-            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3" onclick="window.print()">
-                <i class="fas fa-print me-1"></i> Print Statement
+
+        <div class="d-flex align-items-center gap-2 flex-wrap no-print">
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-semibold shadow-xs" onclick="window.print()">
+                <i class="fas fa-print me-1.5 text-muted"></i> Print Statement
             </button>
-            <button type="button" class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportLedgerToCSV()">
-                <i class="fas fa-file-excel me-1"></i> Export Excel (CSV)
+            <button type="button" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-semibold shadow-xs" onclick="exportLedgerToCSV()">
+                <i class="fas fa-file-excel me-1.5 text-success"></i> Export Excel (CSV)
             </button>
-            <a href="{% url 'accounting:coa' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
-                <i class="fas fa-sitemap me-1"></i> Chart of Accounts
+            <a href="{% url 'accounting:coa' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-semibold shadow-xs">
+                <i class="fas fa-sitemap me-1.5"></i> Chart of Accounts
             </a>
         </div>
     </div>
 
-    <!-- Asynchronous Account Selection & Date Range Filter Toolbar -->
-    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-center" id="glFilterForm">
-            <!-- Asynchronous Account Search Switcher -->
-            <div class="col-12 col-md-5">
-                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">Switch Ledger Account (खाता खोजी)</label>
+    <!-- 2. EXECUTIVE ACCOUNT PROFILE & 4-TIER BALANCED KPI HUB -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3">
+        <div class="row g-3 align-items-stretch">
+            
+            <!-- Left: Account Identity Tile -->
+            <div class="col-12 col-xl-5">
+                <div class="gl-account-tile bg-light bg-opacity-70">
+                    <div>
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 font-mono fs-xs px-2.5 py-1 fw-bold">
+                                {{ account.code }}
+                            </span>
+                            <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs px-2 py-0.5 fw-semibold">
+                                <i class="fas fa-circle-check me-1"></i> Active GL Account
+                            </span>
+                        </div>
+                        <h4 class="fw-bold text-dark mb-1">{{ account.name }}</h4>
+                        {% if account.name_np %}
+                            <div class="text-muted fs-xs font-nepali mb-2">{{ account.name_np }}</div>
+                        {% else %}
+                            <div class="text-muted fs-2xs mb-2">Detailed double-entry transactional account ledger</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="pt-2 border-top d-flex flex-wrap gap-1.5 fs-2xs">
+                        <span class="badge bg-white text-secondary border">
+                            <i class="fas fa-layer-group text-primary me-1"></i> Group: <strong>{{ account.group.name }}</strong>
+                        </span>
+                        <span class="badge bg-white text-secondary border">
+                            <i class="fas fa-store text-muted me-1"></i> Scope: <strong>{% if account.branch %}{{ account.branch.name }}{% else %}HQ / Consolidated{% endif %}</strong>
+                        </span>
+                        <span class="badge bg-white text-secondary border">
+                            <i class="fas fa-scale-balanced text-primary me-1"></i> Normal Nature: 
+                            <strong class="font-mono {% if account.is_debit_nature %}text-success{% else %}text-danger{% endif %}">
+                                {% if account.is_debit_nature %}DEBIT (Dr){% else %}CREDIT (Cr){% endif %}
+                            </strong>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: 4 Balanced Metric Tiles -->
+            <div class="col-12 col-xl-7">
+                <div class="row g-2 h-100">
+                    
+                    <!-- 1. Opening Balance -->
+                    <div class="col-6 col-sm-3">
+                        <div class="gl-kpi-box kpi-opening">
+                            <div>
+                                <span class="text-muted text-uppercase fs-2xs fw-bold d-block">Opening Bal</span>
+                                <small class="text-muted fs-2xs d-block">Brought Forward</small>
+                            </div>
+                            <div class="my-auto py-1">
+                                <div class="font-mono fw-bold fs-6 {% if opening_balance < 0 %}text-danger{% elif opening_balance > 0 %}text-dark{% else %}text-muted{% endif %}">
+                                    Rs. {{ opening_balance|floatformat:2|intcomma }}
+                                </div>
+                            </div>
+                            <div>
+                                <span class="badge bg-light text-muted border font-mono fs-2xs">
+                                    {% if account.is_debit_nature %}Dr. B/F{% else %}Cr. B/F{% endif %}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Period Inflow (Debit) -->
+                    <div class="col-6 col-sm-3">
+                        <div class="gl-kpi-box kpi-debit">
+                            <div>
+                                <span class="text-success text-uppercase fs-2xs fw-bold d-block">
+                                    <i class="fas fa-arrow-down-left me-1"></i> Turnover (Dr)
+                                </span>
+                                <small class="text-muted fs-2xs d-block">Total Debited</small>
+                            </div>
+                            <div class="my-auto py-1">
+                                <div class="font-mono fw-bold text-success fs-6">
+                                    Rs. {{ total_debit|floatformat:2|intcomma }}
+                                </div>
+                            </div>
+                            <div>
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 font-mono fs-2xs">
+                                    + Debit Activity
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Period Outflow (Credit) -->
+                    <div class="col-6 col-sm-3">
+                        <div class="gl-kpi-box kpi-credit">
+                            <div>
+                                <span class="text-warning text-uppercase fs-2xs fw-bold d-block" style="color: #b45309 !important;">
+                                    <i class="fas fa-arrow-up-right me-1"></i> Turnover (Cr)
+                                </span>
+                                <small class="text-muted fs-2xs d-block">Total Credited</small>
+                            </div>
+                            <div class="my-auto py-1">
+                                <div class="font-mono fw-bold fs-6" style="color: #b45309 !important;">
+                                    Rs. {{ total_credit|floatformat:2|intcomma }}
+                                </div>
+                            </div>
+                            <div>
+                                <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 font-mono fs-2xs" style="color: #b45309 !important;">
+                                    - Credit Activity
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Net Closing Balance Position -->
+                    <div class="col-6 col-sm-3">
+                        <div class="gl-kpi-box kpi-closing {% if account.is_debit_nature and closing_balance < 0 %}bg-danger bg-opacity-10 border-danger border-opacity-25{% endif %}">
+                            <div>
+                                <span class="text-danger text-uppercase fs-2xs fw-bold d-block">
+                                    <i class="fas fa-wallet me-1"></i> Net Closing Bal
+                                </span>
+                                <small class="text-muted fs-2xs d-block">Ending Position</small>
+                            </div>
+                            <div class="my-auto py-1">
+                                <div class="font-mono fw-bolder fs-6 {% if closing_balance < 0 %}text-danger{% else %}text-primary{% endif %}">
+                                    Rs. {{ closing_balance|floatformat:2|intcomma }}
+                                </div>
+                            </div>
+                            <div>
+                                {% if closing_balance < 0 %}
+                                    <span class="badge bg-danger text-white font-mono fs-2xs px-2 py-0.5">
+                                        Cr. (Overdrawn)
+                                    </span>
+                                {% elif closing_balance > 0 %}
+                                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 font-mono fs-2xs px-2 py-0.5">
+                                        Dr. (Positive Bal)
+                                    </span>
+                                {% else %}
+                                    <span class="badge bg-light text-muted border font-mono fs-2xs">
+                                        Clear (Rs. 0.00)
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 3. STANDARDIZED SEARCH & FILTER CONSOLE -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3 no-print">
+        <form method="get" class="row g-2 align-items-end" id="glFilterForm">
+            
+            <!-- Account Autocomplete Selector with Keyboard Cue -->
+            <div class="col-12 col-lg-5">
+                <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">
+                    <i class="fas fa-magnifying-glass text-primary me-1"></i> Switch Ledger Account (खाता खोजी)
+                </label>
                 <div class="async-search-container">
                     <div class="input-group input-group-sm">
-                        <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-muted fs-xs"></i></span>
-                        <input type="text" id="ledgerAccountSearchInput" class="form-control border-start-0 font-mono" 
+                        <span class="input-group-text bg-light border-0 text-muted">
+                            <i class="fas fa-search"></i>
+                        </span>
+                        <input type="text" 
+                               id="ledgerAccountSearchInput" 
+                               class="form-control bg-light border-0 fw-semibold font-mono" 
                                value="{{ account.code }} - {{ account.name }}" 
-                               placeholder="Type account code or title..." autocomplete="off">
+                               placeholder="Type account name or code (e.g. cash, bank, 1110)..." 
+                               autocomplete="off">
+                        <span class="input-group-text bg-light border-0 py-0 pe-2" title="Hotkey: Alt+S or '/'">
+                            <kbd class="bg-white text-muted border shadow-xs fs-2xs px-1.5 py-0.5 rounded">Alt+S</kbd>
+                        </span>
                     </div>
+                    <!-- Live dropdown results -->
                     <div id="ledgerAccountSearchResults" class="async-results-dropdown shadow-lg"></div>
                 </div>
             </div>
 
-            <!-- Start Date (AD & BS) -->
-            <div class="col-12 col-sm-6 col-md-2">
+            <!-- Start Date (AD) -->
+            <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">From Date (AD)</label>
-                <input type="date" name="start_date" id="glStartDate" value="{{ start_date|date:'Y-m-d' }}" 
-                       class="form-control form-control-sm font-mono">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0 text-muted"><i class="far fa-calendar-alt"></i></span>
+                    <input type="date" name="start_date" id="glStartDate" value="{{ start_date|date:'Y-m-d' }}" 
+                           class="form-control bg-light border-0 font-mono fs-xs">
+                </div>
             </div>
 
-            <!-- End Date (AD & BS) -->
-            <div class="col-12 col-sm-6 col-md-2">
+            <!-- End Date (AD) -->
+            <div class="col-6 col-md-3 col-lg-2">
                 <label class="form-label fs-2xs fw-bold text-muted text-uppercase mb-1">To Date (AD)</label>
-                <input type="date" name="end_date" id="glEndDate" value="{{ end_date|date:'Y-m-d' }}" 
-                       class="form-control form-control-sm font-mono">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0 text-muted"><i class="far fa-calendar-check"></i></span>
+                    <input type="date" name="end_date" id="glEndDate" value="{{ end_date|date:'Y-m-d' }}" 
+                           class="form-control bg-light border-0 font-mono fs-xs">
+                </div>
             </div>
 
-            <!-- Actions -->
-            <div class="col-12 col-md-3 d-flex align-items-end gap-2 pt-md-3">
-                <button type="submit" class="btn btn-primary btn-sm rounded-pill px-3 w-100 fw-bold">
-                    <i class="fas fa-sync-alt me-1"></i> Apply Filter
+            <!-- Action Buttons -->
+            <div class="col-12 col-md-6 col-lg-3 d-flex align-items-end gap-1 pt-2 pt-lg-0">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold py-1.5 shadow-xs">
+                    <i class="fas fa-filter me-1"></i> Apply Filter
                 </button>
-                <a href="{% url 'accounting:general_ledger_account' account.id %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
-                    Reset
+                <a href="{% url 'accounting:general_ledger_account' account.id %}" class="btn btn-outline-secondary btn-sm rounded-3 px-3 py-1.5" title="Reset date filters">
+                    <i class="fas fa-rotate-left"></i>
                 </a>
             </div>
+
         </form>
     </div>
 
-    <!-- Active Ledger Profile Header Card -->
-    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
-        <div class="row g-3 align-items-center">
-            <div class="col-12 col-lg-6">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="rounded-3 bg-primary bg-opacity-10 text-primary p-3 fs-3 font-mono fw-extrabold">
-                        {{ account.code }}
-                    </div>
-                    <div>
-                        <h4 class="fw-extrabold text-dark mb-1">{{ account.name }}</h4>
-                        {% if account.name_np %}
-                            <div class="text-muted fs-sm font-nepali mb-1">{{ account.name_np }}</div>
-                        {% endif %}
-                        <div class="d-flex align-items-center gap-2 flex-wrap">
-                            <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs font-mono">
-                                Group: {{ account.group.name }}
-                            </span>
-                            <span class="badge bg-light text-dark border fs-2xs font-mono">
-                                Scope: {% if account.branch %}{{ account.branch.name }} ({{ account.branch.code }}){% else %}Organization-Wide (HQ){% endif %}
-                            </span>
-                            <span class="badge {% if account.is_debit_nature %}bg-info bg-opacity-10 text-info{% else %}bg-warning bg-opacity-10 text-warning-emphasis{% endif %} fs-2xs font-mono">
-                                Normal Nature: {% if account.is_debit_nature %}DEBIT (Dr){% else %}CREDIT (Cr){% endif %}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Running Balance Financial Cards -->
-            <div class="col-12 col-lg-6">
-                <div class="row g-2">
-                    <div class="col-4">
-                        <div class="p-2 px-3 rounded-3 bg-light border text-center">
-                            <span class="fs-2xs fw-bold text-uppercase text-muted d-block">Opening Bal</span>
-                            <span class="font-mono fw-bold fs-sm {% if opening_balance < 0 %}text-danger{% elif opening_balance > 0 %}text-primary{% else %}text-muted{% endif %}">
-                                Rs. {{ opening_balance|floatformat:2|intcomma }}
-                            </span>
-                        </div>
-                    </div>
-                    <div class="col-4">
-                        <div class="p-2 px-3 rounded-3 bg-light border text-center">
-                            <span class="fs-2xs fw-bold text-uppercase text-muted d-block">Period Turnover</span>
-                            <span class="font-mono fw-bold fs-xs text-dark d-block">
-                                Dr: {{ total_debit|floatformat:2|intcomma }}
-                            </span>
-                            <span class="font-mono fw-bold fs-xs text-muted d-block">
-                                Cr: {{ total_credit|floatformat:2|intcomma }}
-                            </span>
-                        </div>
-                    </div>
-                    <div class="col-4">
-                        <div class="p-2 px-3 rounded-3 bg-primary bg-opacity-10 border border-primary border-opacity-25 text-center">
-                            <span class="fs-2xs fw-bold text-uppercase text-primary d-block">Net Closing Bal</span>
-                            <span class="font-mono fw-extrabold fs-sm text-primary">
-                                Rs. {{ closing_balance|floatformat:2|intcomma }}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Ledger Transaction Statement Table -->
-    <div class="card border-0 shadow-sm rounded-4 bg-white overflow-hidden mb-4">
-        <div class="card-header bg-slate-900 text-white px-4 py-3 d-flex align-items-center justify-content-between">
+    <!-- 4. TRANSACTION ENTRIES TABLE WITH CONSTANT FIELDS & IN-TABLE INSTANT FILTER -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        
+        <!-- Table Topbar with Lines Count & Quick In-Table Filter -->
+        <div class="px-3 py-2.5 border-bottom bg-white d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-2">
             <div class="d-flex align-items-center gap-2">
-                <i class="fas fa-list-check text-warning"></i>
-                <span class="fw-bold fs-sm text-uppercase tracking-wider">Statement of Entries ({{ start_date|date:"Y-m-d" }} to {{ end_date|date:"Y-m-d" }})</span>
+                <span class="badge bg-primary text-white rounded-pill px-2.5 py-1 fs-2xs font-mono fw-semibold">
+                    {{ ledger_lines|length }} Lines
+                </span>
+                <h6 class="fw-bold text-dark mb-0 fs-xs">
+                    Statement of Entries <span class="text-muted fw-normal font-mono">({{ start_date|date:"Y-m-d" }} to {{ end_date|date:"Y-m-d" }})</span>
+                </h6>
             </div>
-            <span class="badge bg-secondary bg-opacity-25 text-white fs-2xs font-mono">{{ ledger_lines|length }} Transaction Lines</span>
+
+            <!-- Instant In-Table Filter Input (Zero-Reload Search) -->
+            <div class="d-flex align-items-center gap-2 no-print">
+                <div class="input-group input-group-sm" style="max-width: 280px;">
+                    <span class="input-group-text bg-light border-0 text-muted"><i class="fas fa-filter fs-2xs"></i></span>
+                    <input type="text" id="tableQuickFilterInput" class="form-control bg-light border-0 fs-2xs" placeholder="Quick find voucher, party, or amount...">
+                </div>
+            </div>
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 fs-sm" id="generalLedgerTable">
-                <thead class="bg-light text-muted fs-2xs text-uppercase tracking-wider">
+        <!-- Scrollable Table Wrapper with Sticky Header & Constant Columns -->
+        <div class="table-ledger-container">
+            <table class="table table-hover table-ledger align-middle mb-0" id="generalLedgerTable">
+                <thead>
                     <tr>
-                        <th class="ps-3 py-3" style="width: 120px;">Date (AD/BS)</th>
-                        <th style="width: 140px;">Voucher No.</th>
-                        <th style="width: 130px;">Type</th>
-                        <th style="width: 120px;">Ref Doc</th>
-                        <th>Sub-Ledger Party / Entity</th>
-                        <th>Particulars / Narration</th>
-                        <th class="text-end" style="width: 130px;">Debit (Dr)</th>
-                        <th class="text-end" style="width: 130px;">Credit (Cr)</th>
-                        <th class="text-end pe-3" style="width: 150px;">Running Balance</th>
+                        <th class="col-w-date ps-3">Date (AD / BS)</th>
+                        <th class="col-w-voucher">Voucher No.</th>
+                        <th class="col-w-type">Type</th>
+                        <th class="col-w-ref">Ref Doc</th>
+                        <th class="col-w-party">Sub-Ledger Party</th>
+                        <th class="col-w-narration">Particulars / Narration</th>
+                        <th class="col-w-amount text-end">Debit (Dr)</th>
+                        <th class="col-w-amount text-end">Credit (Cr)</th>
+                        <th class="col-w-balance text-end pe-3">Running Balance</th>
                     </tr>
                 </thead>
-                <tbody>
-                    <!-- Opening Balance Row -->
-                    <tr class="table-light fw-bold">
-                        <td class="ps-3 font-mono fs-xs">{{ start_date|date:"Y-m-d" }}</td>
-                        <td colspan="5" class="text-uppercase text-muted tracking-wider fs-xs">
-                            <i class="fas fa-arrow-turn-down me-1"></i> Balance Brought Forward (B/F) / Opening Balance
+                <tbody id="ledgerTableBody">
+                    
+                    <!-- Row 0: Balance Brought Forward (Opening Balance) -->
+                    <tr class="table-light fw-bold" style="background-color: #f8fafc;" id="openingBalanceRow">
+                        <td class="ps-3">
+                            <span class="font-mono fw-bold text-dark">{{ start_date|date:"Y-m-d" }}</span>
+                            <div class="text-muted fs-2xs font-mono">Opening B/F</div>
                         </td>
-                        <td class="text-end font-mono">{% if account.is_debit_nature and opening_balance > 0 %}Rs. {{ opening_balance|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
-                        <td class="text-end font-mono">{% if not account.is_debit_nature and opening_balance > 0 %}Rs. {{ opening_balance|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
-                        <td class="text-end pe-3 font-mono text-primary">Rs. {{ opening_balance|floatformat:2|intcomma }}</td>
+                        <td colspan="5">
+                            <div class="d-flex align-items-center gap-2">
+                                <i class="fas fa-arrow-turn-down text-primary opacity-50 ms-1"></i>
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary border font-mono fs-2xs text-uppercase">
+                                    OPENING BALANCE
+                                </span>
+                                <span class="text-dark fw-bold fs-xs">BALANCE BROUGHT FORWARD (B/F)</span>
+                            </div>
+                        </td>
+                        <td class="col-w-amount text-end font-mono text-muted">-</td>
+                        <td class="col-w-amount text-end font-mono text-muted">-</td>
+                        <td class="col-w-balance text-end pe-3 font-mono">
+                            <span class="fw-bold text-dark">Rs. {{ opening_balance|floatformat:2|intcomma }}</span>
+                            <span class="nature-chip {% if account.is_debit_nature %}nature-chip-dr{% else %}nature-chip-cr{% endif %} ms-1">
+                                {% if account.is_debit_nature %}Dr{% else %}Cr{% endif %}
+                            </span>
+                        </td>
                     </tr>
 
+                    <!-- Transaction Lines Loop -->
                     {% for row in ledger_lines %}
-                    <tr>
+                    <tr class="ledger-data-row">
+                        <!-- 1. Date AD & BS -->
                         <td class="ps-3">
-                            <div class="font-mono fs-xs fw-semibold text-dark">{{ row.date|date:"Y-m-d" }}</div>
+                            <div class="font-mono fw-semibold text-dark">{{ row.date|date:"Y-m-d" }}</div>
                             {% if row.date_bs %}
-                                <small class="text-muted fs-2xs font-nepali">{{ row.date_bs }}</small>
+                                <div class="text-muted fs-2xs font-mono font-nepali">{{ row.date_bs }} BS</div>
                             {% endif %}
                         </td>
+
+                        <!-- 2. Voucher Number Badge -->
                         <td>
-                            <span class="font-mono fw-bold text-primary fs-xs">{{ row.voucher_no }}</span>
+                            <a href="#" class="voucher-pill" title="{{ row.voucher_no }}">
+                                {{ row.voucher_no }}
+                            </a>
                         </td>
+
+                        <!-- 3. Voucher Type Pill -->
                         <td>
-                            <span class="badge bg-light text-dark border fs-2xs font-mono">{{ row.voucher_type }}</span>
+                            {% if "Purchase" in row.voucher_type or "PUV" in row.voucher_type or "खरिद" in row.voucher_type %}
+                                <span class="type-pill type-pill-pu text-truncate-custom" title="{{ row.voucher_type }}">
+                                    {{ row.voucher_type }}
+                                </span>
+                            {% elif "Sales" in row.voucher_type or "SV" in row.voucher_type or "बिक्री" in row.voucher_type %}
+                                <span class="type-pill type-pill-sv text-truncate-custom" title="{{ row.voucher_type }}">
+                                    {{ row.voucher_type }}
+                                </span>
+                            {% elif "Payment" in row.voucher_type or "भुक्तानी" in row.voucher_type %}
+                                <span class="type-pill type-pill-py text-truncate-custom" title="{{ row.voucher_type }}">
+                                    {{ row.voucher_type }}
+                                </span>
+                            {% elif "Receipt" in row.voucher_type or "रसिद" in row.voucher_type %}
+                                <span class="type-pill type-pill-rc text-truncate-custom" title="{{ row.voucher_type }}">
+                                    {{ row.voucher_type }}
+                                </span>
+                            {% elif "Journal" in row.voucher_type or "JV" in row.voucher_type %}
+                                <span class="type-pill type-pill-jv text-truncate-custom" title="{{ row.voucher_type }}">
+                                    {{ row.voucher_type }}
+                                </span>
+                            {% else %}
+                                <span class="type-pill type-pill-gen text-truncate-custom" title="{{ row.voucher_type }}">
+                                    {{ row.voucher_type }}
+                                </span>
+                            {% endif %}
                         </td>
+
+                        <!-- 4. Reference Document -->
                         <td>
-                            <span class="font-mono fs-xs text-muted">{{ row.reference }}</span>
+                            <span class="font-mono fs-2xs text-muted text-truncate-custom" title="{{ row.reference }}">
+                                {{ row.reference|default:"-" }}
+                            </span>
                         </td>
+
+                        <!-- 5. Sub-Ledger Party -->
                         <td>
-                            {% if row.entity != '-' %}
-                                <span class="fw-semibold text-dark fs-xs">{{ row.entity }}</span>
+                            {% if row.entity and row.entity != '-' %}
+                                <div class="fw-bold text-dark text-truncate-custom" title="{{ row.entity }}">
+                                    <i class="far fa-user text-muted me-1 fs-2xs"></i>{{ row.entity }}
+                                </div>
                             {% else %}
                                 <span class="text-muted">-</span>
                             {% endif %}
                         </td>
+
+                        <!-- 6. Particulars / Narration -->
                         <td>
-                            <div class="text-dark fs-xs text-truncate" style="max-width: 280px;" title="{{ row.narration }}">
+                            <div class="text-dark fs-xs text-truncate-custom" title="{{ row.narration }}">
                                 {{ row.narration }}
                             </div>
                         </td>
-                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+
+                        <!-- 7. Debit (Dr) -->
+                        <td class="col-w-amount text-end font-mono">
                             {% if row.debit > 0 %}
-                                Rs. {{ row.debit|floatformat:2|intcomma }}
+                                <span class="num-debit">{{ row.debit|floatformat:2|intcomma }}</span>
                             {% else %}
-                                -
+                                <span class="text-muted">-</span>
                             {% endif %}
                         </td>
-                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+
+                        <!-- 8. Credit (Cr) -->
+                        <td class="col-w-amount text-end font-mono">
                             {% if row.credit > 0 %}
-                                Rs. {{ row.credit|floatformat:2|intcomma }}
+                                <span class="num-credit">{{ row.credit|floatformat:2|intcomma }}</span>
                             {% else %}
-                                -
+                                <span class="text-muted">-</span>
                             {% endif %}
                         </td>
-                        <td class="text-end pe-3 font-mono fw-extrabold fs-xs {% if row.running_balance < 0 %}text-danger{% else %}text-primary{% endif %}">
-                            Rs. {{ row.running_balance|floatformat:2|intcomma }}
+
+                        <!-- 9. Running Balance -->
+                        <td class="col-w-balance text-end pe-3 font-mono">
+                            <span class="num-balance {% if row.running_balance < 0 %}text-danger{% else %}text-primary{% endif %}">
+                                Rs. {{ row.running_balance|floatformat:2|intcomma }}
+                            </span>
+                            {% if row.running_balance < 0 %}
+                                <span class="nature-chip nature-chip-cr ms-1">Cr</span>
+                            {% else %}
+                                <span class="nature-chip nature-chip-dr ms-1">Dr</span>
+                            {% endif %}
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center py-4 text-muted">
-                            <i class="fas fa-inbox fs-2 opacity-25 d-block mb-2"></i>
-                            No posted transactions found for this account within the selected date range.
+                        <td colspan="9" class="text-center py-5 text-muted">
+                            <i class="fas fa-book-open fs-2 opacity-25 d-block mb-2"></i>
+                            <div class="fw-bold fs-sm text-dark mb-1">No Transactions Found in this Period</div>
+                            <div class="fs-xs">No posted journal vouchers were recorded for this ledger between {{ start_date|date:"Y-m-d" }} and {{ end_date|date:"Y-m-d" }}.</div>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
-                <tfoot class="bg-slate-900 text-white font-mono fw-extrabold fs-xs">
-                    <tr>
-                        <td colspan="6" class="text-end text-uppercase tracking-wider pe-3">Period Grand Totals:</td>
-                        <td class="text-end text-info">Rs. {{ total_debit|floatformat:2|intcomma }}</td>
-                        <td class="text-end text-warning">Rs. {{ total_credit|floatformat:2|intcomma }}</td>
-                        <td class="text-end pe-3 text-white">Rs. {{ closing_balance|floatformat:2|intcomma }}</td>
+
+                <!-- Table Footer Audit Summary -->
+                <tfoot class="border-top-2 border-slate-300">
+                    <tr class="bg-light fw-bold">
+                        <td colspan="6" class="ps-3 text-end text-uppercase fs-2xs text-muted">
+                            Total Period Activity Turnover (कुल कारोबार):
+                        </td>
+                        <td class="col-w-amount text-end font-mono text-success fs-xs">
+                            Rs. {{ total_debit|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-w-amount text-end font-mono text-danger fs-xs">
+                            Rs. {{ total_credit|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-w-balance text-end pe-3 font-mono text-muted fs-2xs">
+                            Activity Verified
+                        </td>
+                    </tr>
+                    <tr class="bg-white fw-bold">
+                        <td colspan="6" class="ps-3 text-end text-uppercase fs-xs fw-bold text-dark">
+                            Net Closing Position (अन्तिम मौज्दात):
+                        </td>
+                        <td colspan="3" class="col-w-balance text-end pe-3 font-mono fs-6 {% if closing_balance < 0 %}text-danger{% else %}text-primary{% endif %} fw-bolder">
+                            Rs. {{ closing_balance|floatformat:2|intcomma }}
+                            {% if closing_balance < 0 %}
+                                <span class="nature-chip nature-chip-cr fs-2xs ms-1">Cr. (Overdrawn)</span>
+                            {% else %}
+                                <span class="nature-chip nature-chip-dr fs-2xs ms-1">Dr. (Positive)</span>
+                            {% endif %}
+                        </td>
                     </tr>
                 </tfoot>
             </table>
@@ -292,108 +759,176 @@
 
 </div>
 
-<!-- Scripts for CSV Export & Instant Account Navigation -->
+<!-- =========================================================================
+     INTERACTIVE ENGINE: LIVE ACCOUNT SWITCHER, IN-TABLE SEARCH, EXPORT, HOTKEYS
+     ========================================================================= -->
 <script>
-    function exportLedgerToCSV() {
-        const table = document.getElementById('generalLedgerTable');
-        let csv = [];
-        for (let row of table.rows) {
-            let cols = [];
-            for (let cell of row.cells) {
-                let text = cell.innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
-                text = `"${text.replace(/"/g, '""')}"`;
-                cols.push(text);
-            }
-            csv.push(cols.join(","));
-        }
-        const csvFile = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
-        const downloadLink = document.createElement("a");
-        downloadLink.download = `General_Ledger_{{ account.code }}_{{ start_date }}_to_{{ end_date }}.csv`;
-        downloadLink.href = window.URL.createObjectURL(csvFile);
-        downloadLink.style.display = "none";
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
+document.addEventListener('DOMContentLoaded', () => {
+    // -------------------------------------------------------------
+    // 1. Asynchronous Account Switcher with Alt+S / '/' Shortcuts
+    // -------------------------------------------------------------
+    function debounce(func, wait = 200) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
     }
 
-    // Asynchronous Account Search and Instant Redirection
-    document.addEventListener('DOMContentLoaded', () => {
-        function debounce(func, wait = 200) {
-            let timeout;
-            return function(...args) {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => func.apply(this, args), wait);
-            };
-        }
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
 
-        function escapeHtml(text) {
-            if (!text) return '';
-            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-            return String(text).replace(/[&<>"']/g, m => map[m]);
-        }
+    const accountSearchInput = document.getElementById('ledgerAccountSearchInput');
+    const accountResults = document.getElementById('ledgerAccountSearchResults');
+    const startDate = document.getElementById('glStartDate')?.value || '';
+    const endDate = document.getElementById('glEndDate')?.value || '';
 
-        const accountSearchInput = document.getElementById('ledgerAccountSearchInput');
-        const accountResults = document.getElementById('ledgerAccountSearchResults');
-        const startDate = document.getElementById('glStartDate').value;
-        const endDate = document.getElementById('glEndDate').value;
+    if (accountSearchInput && accountResults) {
+        const handleAccountSearch = debounce(async (query) => {
+            try {
+                accountResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1 text-primary"></i> Searching accounts...</div>';
+                accountResults.classList.add('show');
 
-        if (accountSearchInput) {
-            const handleSearch = debounce(async (query) => {
-                try {
-                    accountResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1"></i> Searching accounts...</div>';
-                    accountResults.classList.add('show');
+                const resp = await fetch(`/accounting/api/accounts/search/?q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error('Search failed');
+                const data = await resp.json();
+                const accounts = data.results || data || [];
 
-                    const resp = await fetch(`/accounting/api/accounts/search/?q=${encodeURIComponent(query)}`);
-                    if (!resp.ok) throw new Error('Search failed');
-                    const data = await resp.json();
-                    const accounts = data.results || data || [];
-
-                    if (!accounts.length) {
-                        accountResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No matching ledger account found.</div>';
-                        return;
-                    }
-
-                    let html = '';
-                    accounts.forEach(a => {
-                        const code = a.code || '';
-                        const name = a.name || a.text || '';
-                        const branch = a.branch_code ? `[${a.branch_code}]` : '[HQ]';
-                        html += `
-                            <div class="async-result-item" data-id="${a.id}">
-                                <div class="fw-bold text-dark font-mono fs-xs">${escapeHtml(code)} &bull; ${escapeHtml(name)} <span class="badge bg-light text-secondary border font-mono fs-2xs ms-1">${escapeHtml(branch)}</span></div>
-                                <div class="text-muted fs-2xs">${escapeHtml(a.group_name || a.category || '')}</div>
-                            </div>
-                        `;
-                    });
-                    accountResults.innerHTML = html;
-
-                    accountResults.querySelectorAll('.async-result-item').forEach(item => {
-                        item.addEventListener('click', () => {
-                            const accId = item.dataset.id;
-                            let targetUrl = `/accounting/general-ledger/${accId}/`;
-                            if (startDate || endDate) {
-                                targetUrl += `?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
-                            }
-                            window.location.href = targetUrl;
-                        });
-                    });
-                } catch (err) {
-                    accountResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs">Error querying accounts.</div>';
+                if (!accounts.length) {
+                    accountResults.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-folder-open opacity-50 d-block mb-1"></i> No matching ledger account found.</div>';
+                    return;
                 }
-            }, 200);
 
-            accountSearchInput.addEventListener('input', (e) => handleSearch(e.target.value.trim()));
-            accountSearchInput.addEventListener('focus', () => {
-                accountSearchInput.select();
-                handleSearch(accountSearchInput.value.trim());
-            });
-        }
+                let html = '';
+                accounts.forEach(a => {
+                    const code = a.code || '';
+                    const name = a.name || a.text || '';
+                    const branch = a.branch_code ? `[${a.branch_code}]` : '[HQ]';
+                    const nature = a.nature || (a.is_debit_nature ? 'DEBIT' : 'CREDIT') || '';
+                    const balance = a.balance ? `Rs. ${a.balance}` : '';
+
+                    html += `
+                        <div class="async-result-item" data-id="${a.id}">
+                            <div>
+                                <div class="fw-bold text-dark font-mono fs-xs account-title">
+                                    ${escapeHtml(code)} &bull; ${escapeHtml(name)} 
+                                    <span class="badge bg-light text-secondary border font-mono fs-2xs ms-1">${escapeHtml(branch)}</span>
+                                </div>
+                                <div class="text-muted fs-2xs mt-0.5">
+                                    <i class="fas fa-layer-group me-1"></i>${escapeHtml(a.group_name || a.category || 'General')}
+                                    ${nature ? `&bull; Nature: <span class="font-mono text-dark">${escapeHtml(nature)}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                ${balance ? `<span class="badge bg-light text-dark border font-mono fs-2xs">${escapeHtml(balance)}</span>` : ''}
+                                <div class="text-primary fs-2xs fw-semibold mt-1">Switch View &rarr;</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                accountResults.innerHTML = html;
+
+                accountResults.querySelectorAll('.async-result-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const accId = item.dataset.id;
+                        let targetUrl = `/accounting/general-ledger/${accId}/`;
+                        if (startDate || endDate) {
+                            targetUrl += `?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+                        }
+                        window.location.href = targetUrl;
+                    });
+                });
+            } catch (err) {
+                accountResults.innerHTML = '<div class="p-3 text-center text-danger fs-xs"><i class="fas fa-triangle-exclamation me-1"></i> Error querying ledger accounts.</div>';
+            }
+        }, 180);
+
+        accountSearchInput.addEventListener('input', (e) => handleAccountSearch(e.target.value.trim()));
+        accountSearchInput.addEventListener('focus', () => {
+            accountSearchInput.select();
+            handleAccountSearch(accountSearchInput.value.trim());
+        });
 
         document.addEventListener('click', (e) => {
-            if (accountResults && !accountResults.contains(e.target) && e.target !== accountSearchInput) {
+            if (!accountResults.contains(e.target) && e.target !== accountSearchInput) {
                 accountResults.classList.remove('show');
             }
         });
+    }
+
+    // Keyboard Shortcuts: '/' or 'Alt+S' to jump to account search
+    document.addEventListener('keydown', (e) => {
+        const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
+        if (e.key === '/' && !isInput) {
+            e.preventDefault();
+            if (accountSearchInput) {
+                accountSearchInput.focus();
+                accountSearchInput.select();
+            }
+        } else if (e.altKey && (e.key.toLowerCase() === 's' || e.code === 'KeyS')) {
+            e.preventDefault();
+            if (accountSearchInput) {
+                accountSearchInput.focus();
+                accountSearchInput.select();
+            }
+        }
     });
+
+    // -------------------------------------------------------------
+    // 2. Instant In-Table Quick Filter (Zero-Reload Search)
+    // -------------------------------------------------------------
+    const tableQuickFilter = document.getElementById('tableQuickFilterInput');
+    const ledgerTableBody = document.getElementById('ledgerTableBody');
+
+    if (tableQuickFilter && ledgerTableBody) {
+        tableQuickFilter.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            const rows = ledgerTableBody.querySelectorAll('.ledger-data-row');
+
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(query)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    }
+});
+
+// -------------------------------------------------------------
+// 3. Client-Side CSV Exporter Engine
+// -------------------------------------------------------------
+function exportLedgerToCSV() {
+    const table = document.getElementById('generalLedgerTable');
+    if (!table) return;
+
+    let csv = [];
+    for (let row of table.rows) {
+        // Skip hidden rows when in-table filter is active
+        if (row.style.display === 'none') continue;
+
+        let cols = [];
+        for (let cell of row.cells) {
+            let text = cell.innerText.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, " ").trim();
+            text = `"${text.replace(/"/g, '""')}"`;
+            cols.push(text);
+        }
+        csv.push(cols.join(","));
+    }
+
+    const csvFile = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const downloadLink = document.createElement("a");
+    downloadLink.download = `General_Ledger_{{ account.code }}_{{ start_date|date:'Ymd' }}_to_{{ end_date|date:'Ymd' }}.csv`;
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+    downloadLink.style.display = "none";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+}
 </script>
 {% endblock %}

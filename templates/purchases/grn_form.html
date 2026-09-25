@@ -648,6 +648,33 @@ input[type="checkbox"]:checked + .custom-switch::after {
     background: #dbeafe;
 }
 
+/* User Toggle: Phone vs Accessory */
+.imei-requirement-toggle {
+    display: inline-flex;
+    background: #e2e8f0;
+    padding: 2px;
+    border-radius: 8px;
+    gap: 2px;
+}
+
+.imei-toggle-btn {
+    border: none;
+    background: transparent;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #475569;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.imei-toggle-btn.active {
+    background: #0f172a;
+    color: #ffffff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
 /* ==========================================================================
    SECTION 3: 5 AUDITED KPI VALUATION SUMMARY CARDS
    ========================================================================== */
@@ -824,7 +851,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
                 Goods Received Note (GRN) Inward
             </h1>
             <p>
-                Stock physical intake with Pre-VAT rate valuation, dual-mode discounts (Amount vs. %), dedicated 13% VAT, value-weighted shipping overhead distribution &amp; mandatory Dual-IMEI verification.
+                Stock physical intake with Pre-VAT rate valuation, dual-mode discounts (Amount vs. %), dedicated 13% VAT, value-weighted shipping overhead distribution &amp; smart Dual-IMEI verification.
             </p>
         </div>
         <div>
@@ -836,6 +863,40 @@ input[type="checkbox"]:checked + .custom-switch::after {
 
     <form method="post" id="grnMasterForm" novalidate>
         {% csrf_token %}
+
+        <!-- DETAILED ERROR SUMMARY BOX -->
+        {% if form.errors or formset.errors %}
+        <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="badge bg-danger text-white rounded-pill px-2 py-1 fs-2xs">Validation Error</span>
+                <h6 class="fw-bold text-danger mb-0">Please resolve the following submission errors:</h6>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <ul class="mb-0 fs-xs ps-3">
+                {% for field in form %}
+                    {% for err in field.errors %}
+                        <li><strong>{{ field.label }}:</strong> {{ err }}</li>
+                    {% endfor %}
+                {% endfor %}
+                {% for err in form.non_field_errors %}
+                    <li><strong>General Form Error:</strong> {{ err }}</li>
+                {% endfor %}
+                {% for f in formset %}
+                    {% for field in f %}
+                        {% for err in field.errors %}
+                            <li><strong>Line Item {{ forloop.parentloop.counter }} ({{ field.label }}):</strong> {{ err }}</li>
+                        {% endfor %}
+                    {% endfor %}
+                    {% for err in f.non_field_errors %}
+                        <li><strong>Line Item {{ forloop.counter }}:</strong> {{ err }}</li>
+                    {% endfor %}
+                {% endfor %}
+                {% for err in formset.non_form_errors %}
+                    <li><strong>Items List:</strong> {{ err }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
 
         <!-- SECTION 1: SUPPLIER & CONSIGNMENT INFORMATION -->
         <section class="erp-card">
@@ -871,6 +932,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
                             <input type="hidden" name="supplier" id="id_supplier" value="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}" required>
                             <input type="text" class="form-control contextual-search-input async-search-input" 
                                    id="grn_supplier_search_display"
+                                   data-search-url="/purchases/suppliers/api/search/"
                                    placeholder="Search supplier by name, company, phone, PAN..." 
                                    value="{% if form.instance.supplier %}{{ form.instance.supplier.company_name }}{% endif %}" 
                                    autocomplete="off">
@@ -899,7 +961,8 @@ input[type="checkbox"]:checked + .custom-switch::after {
                         </label>
                         <div class="input-wrap">
                             <span class="input-prefix"><i class="fa-regular fa-calendar"></i></span>
-                            <input type="date" name="bill_date" id="id_bill_date" class="form-control has-prefix" value="{{ form.bill_date.value|date:'Y-m-d'|default:'' }}" required>
+                            <input type="date" name="bill_date" id="id_bill_date" class="form-control has-prefix font-mono-val" 
+                                   value="{% if form.bill_date.value %}{% if form.bill_date.value.isoformat %}{{ form.bill_date.value|date:'Y-m-d' }}{% else %}{{ form.bill_date.value }}{% endif %}{% endif %}" required>
                         </div>
                         {% if form.bill_date.errors %}
                             <div class="text-danger fs-2xs mt-1">{{ form.bill_date.errors|striptags }}</div>
@@ -1020,7 +1083,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
         </section>
 
         <!-- ==========================================================================
-             SECTION 2: VERTICAL LINE ITEMS, PRICING & MANDATORY IMEIs
+             SECTION 2: VERTICAL LINE ITEMS, PRICING & SMART IMEI ROUTING
              ========================================================================== -->
         <section class="erp-card">
             <div class="erp-card-header">
@@ -1030,7 +1093,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
                         2. Inward Line Items, Pricing &amp; Mandatory IMEIs
                     </div>
                     <div class="erp-card-subtitle">
-                        Spacious vertical line manifests. Discounts support flat reductions and percentages with full typing room.
+                        Spacious vertical line manifests. Smartphones prompt for IMEIs; earphones and accessories can be set to Non-IMEI without errors.
                     </div>
                 </div>
                 <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold" id="btn-add-line">
@@ -1073,10 +1136,14 @@ input[type="checkbox"]:checked + .custom-switch::after {
                                  data-initial-subtitle="{% if item_form.instance.product.sku %}SKU: {{ item_form.instance.product.sku }}{% endif %}">
                                 <input type="hidden" name="items-{{ forloop.counter0 }}-product" id="id_items-{{ forloop.counter0 }}-product" value="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}" class="grn-product-id-input" required>
                                 <input type="text" class="form-control contextual-search-input async-search-input grn-product-search-input" 
+                                       data-search-url="/products/api/search/?mode=simple"
                                        placeholder="Scan barcode or type model/brand..." 
                                        value="{% if item_form.instance.product %}{{ item_form.instance.product.name }}{% endif %}" 
                                        autocomplete="off">
                             </div>
+                            {% if item_form.product.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ item_form.product.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
                         <!-- VERTICAL TIER 2: QUANTITY, PRE-VAT RATE & TARGET MRP (3 EQUAL COLUMNS) -->
@@ -1088,6 +1155,9 @@ input[type="checkbox"]:checked + .custom-switch::after {
                                        id="id_items-{{ forloop.counter0 }}-purchased_quantity" 
                                        class="form-control font-mono-val line-qty-input calc-trigger" 
                                        value="{{ item_form.purchased_quantity.value|default:'1' }}" required>
+                                {% if item_form.purchased_quantity.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ item_form.purchased_quantity.errors|striptags }}</div>
+                                {% endif %}
                             </div>
 
                             <div class="form-group">
@@ -1100,6 +1170,9 @@ input[type="checkbox"]:checked + .custom-switch::after {
                                            class="form-control has-prefix font-mono-val line-rate-input calc-trigger" 
                                            value="{{ item_form.purchase_rate.value|default:'0.00' }}" required>
                                 </div>
+                                {% if item_form.purchase_rate.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ item_form.purchase_rate.errors|striptags }}</div>
+                                {% endif %}
                             </div>
 
                             <div class="form-group">
@@ -1113,6 +1186,9 @@ input[type="checkbox"]:checked + .custom-switch::after {
                                            value="{{ item_form.new_selling_price.value|default:'' }}" 
                                            placeholder="Retail Price">
                                 </div>
+                                {% if item_form.new_selling_price.errors %}
+                                    <div class="text-danger fs-2xs mt-1">{{ item_form.new_selling_price.errors|striptags }}</div>
+                                {% endif %}
                             </div>
                         </div>
 
@@ -1138,7 +1214,6 @@ input[type="checkbox"]:checked + .custom-switch::after {
                                     <button type="button" class="ld-mode-btn {% if item_form.discount_type.value == 'AMOUNT' %}active{% endif %}" data-mode="AMOUNT" onclick="setRowDiscType('{{ forloop.counter0 }}', 'AMOUNT')">Rs. Flat</button>
                                 </div>
 
-                                <!-- Roomy Input Field (No more tiny 15px box!) -->
                                 <div class="ld-input-box">
                                     <span class="ld-prefix-sym" id="ld-sym-{{ forloop.counter0 }}">
                                         {% if item_form.discount_type.value == 'PERCENTAGE' %}%{% elif item_form.discount_type.value == 'AMOUNT' %}Rs.{% endif %}
@@ -1153,12 +1228,13 @@ input[type="checkbox"]:checked + .custom-switch::after {
                             </div>
                         </div>
 
-                        <!-- Hidden Scanned IMEI Storage Synced to Django Backend -->
+                        <!-- Hidden Scanned IMEI Storage & Indicator Flag -->
+                        <input type="hidden" class="row-requires-imei-flag" value="false">
                         <div style="display: none;">
                             <textarea name="items-{{ forloop.counter0 }}-scanned_imei_list" id="id_items-{{ forloop.counter0 }}-scanned_imei_list" class="scanned-imei-hidden-input">{{ item_form.scanned_imei_list.value|default:'' }}</textarea>
                         </div>
 
-                        <!-- VERTICAL TIER 4: METRICS FOOTER STRIP & DUAL-IMEIS -->
+                        <!-- VERTICAL TIER 4: METRICS FOOTER STRIP & SMART DUAL-IMEIS -->
                         <div class="line-footer-strip">
                             <div class="metrics-pills-group">
                                 <div class="metric-item">
@@ -1172,8 +1248,19 @@ input[type="checkbox"]:checked + .custom-switch::after {
                                 </div>
                             </div>
 
-                            <div style="display: flex; align-items: center; gap: 14px;">
-                                <button type="button" class="btn-dual-imei" onclick="openDualImeiModal('{{ forloop.counter0 }}')">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <!-- Dynamic Mode Toggle Button: Phone IMEI vs Accessory Non-IMEI -->
+                                <div class="imei-requirement-toggle">
+                                    <button type="button" class="imei-toggle-btn active" id="toggle-imei-yes-{{ forloop.counter0 }}" onclick="setRowImeiRequirement('{{ forloop.counter0 }}', true)">
+                                        <i class="fa-solid fa-mobile-screen"></i> Phone (IMEI)
+                                    </button>
+                                    <button type="button" class="imei-toggle-btn" id="toggle-imei-no-{{ forloop.counter0 }}" onclick="setRowImeiRequirement('{{ forloop.counter0 }}', false)">
+                                        <i class="fa-solid fa-box"></i> Non-IMEI
+                                    </button>
+                                </div>
+
+                                <!-- Dual IMEI Button -->
+                                <button type="button" class="btn-dual-imei" id="btn-dual-imei-{{ forloop.counter0 }}" onclick="openDualImeiModal('{{ forloop.counter0 }}')">
                                     <i class="fa-solid fa-barcode"></i> Dual-IMEIs (<span id="imei-count-tag-{{ forloop.counter0 }}">0 Units</span>)
                                 </button>
 
@@ -1359,9 +1446,9 @@ input[type="checkbox"]:checked + .custom-switch::after {
 </div>
 
 <!-- ==========================================================================
-     DYNAMIC ROW TEMPLATE FOR CLIENT-SIDE ADD LINE (MATCHES VERTICAL TIERS)
+     NATIVE HTML5 ROW TEMPLATE (INERT & NEVER PRE-INITIALIZED BY SCRIPTS)
      ========================================================================== -->
-<div id="empty-row-template" style="display: none;">
+<template id="empty-row-template">
     <div class="line-item-card" data-row-index="__prefix__" id="line-item-__prefix__">
         <div class="line-item-topbar">
             <div class="item-counter-badge">
@@ -1384,6 +1471,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
                  data-placeholder="Scan barcode or type model/brand...">
                 <input type="hidden" name="items-__prefix__-product" id="id_items-__prefix__-product" class="grn-product-id-input" required>
                 <input type="text" class="form-control contextual-search-input async-search-input grn-product-search-input" 
+                       data-search-url="/products/api/search/?mode=simple"
                        placeholder="Scan barcode or type model/brand..." 
                        autocomplete="off">
             </div>
@@ -1456,6 +1544,8 @@ input[type="checkbox"]:checked + .custom-switch::after {
             </div>
         </div>
 
+        <!-- Hidden Scanned IMEI Storage & Indicator Flag -->
+        <input type="hidden" class="row-requires-imei-flag" value="false">
         <div style="display: none;">
             <textarea name="items-__prefix__-scanned_imei_list" id="id_items-__prefix__-scanned_imei_list" class="scanned-imei-hidden-input"></textarea>
         </div>
@@ -1473,8 +1563,19 @@ input[type="checkbox"]:checked + .custom-switch::after {
                 </div>
             </div>
 
-            <div style="display: flex; align-items: center; gap: 14px;">
-                <button type="button" class="btn-dual-imei" onclick="openDualImeiModal('__prefix__')">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <!-- Dynamic Mode Toggle Button: Phone IMEI vs Accessory Non-IMEI -->
+                <div class="imei-requirement-toggle">
+                    <button type="button" class="imei-toggle-btn active" id="toggle-imei-yes-__prefix__" onclick="setRowImeiRequirement('__prefix__', true)">
+                        <i class="fa-solid fa-mobile-screen"></i> Phone (IMEI)
+                    </button>
+                    <button type="button" class="imei-toggle-btn" id="toggle-imei-no-__prefix__" onclick="setRowImeiRequirement('__prefix__', false)">
+                        <i class="fa-solid fa-box"></i> Non-IMEI
+                    </button>
+                </div>
+
+                <!-- Dual IMEI Button -->
+                <button type="button" class="btn-dual-imei" id="btn-dual-imei-__prefix__" onclick="openDualImeiModal('__prefix__')">
                     <i class="fa-solid fa-barcode"></i> Dual-IMEIs (<span id="imei-count-tag-__prefix__">0 Units</span>)
                 </button>
 
@@ -1485,7 +1586,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
             </div>
         </div>
     </div>
-</div>
+</template>
 
 <!-- ==========================================================================
      REACTIVE MATHEMATICAL JAVASCRIPT ENGINE
@@ -1581,7 +1682,48 @@ function initWholeBillDiscountControls() {
 }
 
 // --------------------------------------------------------------------------
-// 3. Mathematical Recalculation Engine
+// 3. User Toggle: Set Line Requirement (Phone vs Accessory)
+// --------------------------------------------------------------------------
+function setRowImeiRequirement(idx, isRequired) {
+    const row = document.getElementById(`line-item-${idx}`);
+    if (!row) return;
+
+    const flagInput = row.querySelector('.row-requires-imei-flag');
+    if (flagInput) flagInput.value = isRequired ? 'true' : 'false';
+
+    const btnYes = row.querySelector(`#toggle-imei-yes-${idx}`);
+    const btnNo = row.querySelector(`#toggle-imei-no-${idx}`);
+    const imeiBtn = row.querySelector(`#btn-dual-imei-${idx}`);
+
+    if (btnYes) btnYes.classList.toggle('active', isRequired);
+    if (btnNo) btnNo.classList.toggle('active', !isRequired);
+
+    if (imeiBtn) {
+        imeiBtn.style.display = isRequired ? 'inline-flex' : 'none';
+    }
+
+    if (!isRequired) {
+        // Clear IMEIs if marked as non-IMEI
+        const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
+        if (hiddenImeiField) hiddenImeiField.value = '';
+        const tag = row.querySelector(`#imei-count-tag-${idx}`);
+        if (tag) tag.textContent = '0 Units';
+    }
+}
+
+// Helper: Smart check if product is an accessory (earphones, chargers, cables, glass, cases)
+function isAccessoryByName(name = '') {
+    const text = (name || '').toLowerCase();
+    const accessoryWords = [
+        'earbud', 'earbuds', 'earphone', 'earphones', 'headphone', 'headphones',
+        'charger', 'chargers', 'cable', 'cables', 'cover', 'covers', 'case', 'cases',
+        'glass', 'tempered', 'protector', 'adapter', 'powerbank', 'battery', 'part', 'strap'
+    ];
+    return accessoryWords.some(word => text.includes(word));
+}
+
+// --------------------------------------------------------------------------
+// 4. Mathematical Recalculation Engine
 // --------------------------------------------------------------------------
 function recalculateFinancials() {
     const freight = Math.max(0, Number(document.getElementById('overhead-freight')?.value) || 0);
@@ -1713,25 +1855,42 @@ function recalculateFinancials() {
 }
 
 // --------------------------------------------------------------------------
-// 4. Dynamic Row Insertion & Deletion
+// 5. Dynamic Row Insertion & Deletion
 // --------------------------------------------------------------------------
 document.getElementById('btn-add-line').addEventListener('click', () => {
     const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
     const container = document.getElementById('lines-container');
-    const templateHtml = document.getElementById('empty-row-template').innerHTML;
+    const templateEl = document.getElementById('empty-row-template');
+
+    if (!totalFormsInput || !container || !templateEl) return;
 
     const currentCount = parseInt(totalFormsInput.value, 10);
+    const templateHtml = templateEl.innerHTML;
     const newRowHtml = templateHtml.replace(/__prefix__/g, currentCount);
 
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = newRowHtml;
     const newRow = tempDiv.firstElementChild;
-    container.appendChild(newRow);
 
+    // Sanitize the new row: Strip any stale initialization flags and clean UI wrappers
+    newRow.querySelectorAll('[data-async-search-initialized]').forEach(el => {
+        delete el.dataset.asyncSearchInitialized;
+    });
+    newRow.querySelectorAll('.async-controls-wrap, .async-search-dropdown, .async-selected-chip').forEach(el => {
+        el.remove();
+    });
+    newRow.querySelectorAll('.async-search-input').forEach(input => {
+        input.classList.remove('d-none');
+        input.value = '';
+        delete input.dataset.asyncSearchInitialized;
+    });
+
+    container.appendChild(newRow);
     totalFormsInput.value = currentCount + 1;
 
     renumberRows();
 
+    // Freshly initialize contextual search on the new row
     if (typeof window.initContextualSearch === 'function') {
         window.initContextualSearch(newRow);
     }
@@ -1783,6 +1942,7 @@ function attachRowCalculationTriggers(containerEl) {
         const row = e.target.closest('.line-item-card');
         if (!row) return;
 
+        const idx = row.dataset.rowIndex;
         const rateInput = row.querySelector('.line-rate-input');
         const mrpInput = row.querySelector('input[name$="-new_selling_price"]');
 
@@ -1796,12 +1956,40 @@ function attachRowCalculationTriggers(containerEl) {
             mrpInput.value = parseFloat(price).toFixed(2);
         }
 
+        // Smart Detection: If it's an earbud/charger/case, automatically set it to Non-IMEI
+        const prodName = item.name || item.title || '';
+        const isAccessory = isAccessoryByName(prodName);
+
+        if (isAccessory) {
+            setRowImeiRequirement(idx, false);
+        } else {
+            // Check if phone
+            const extra = item.extra_data || {};
+            const isExplicitPhone = Boolean(
+                item.requires_imei || 
+                item.requires_imei_tracking || 
+                extra.requires_imei || 
+                extra.requires_imei_tracking || 
+                item.is_serialized
+            );
+            setRowImeiRequirement(idx, isExplicitPhone);
+        }
+
         recalculateFinancials();
+    });
+
+    containerEl.addEventListener('item-cleared', (e) => {
+        const row = e.target.closest('.line-item-card');
+        if (row) {
+            const idx = row.dataset.rowIndex;
+            setRowImeiRequirement(idx, false);
+            recalculateFinancials();
+        }
     });
 }
 
 // --------------------------------------------------------------------------
-// 5. Dual IMEI Modal Management
+// 6. Dual IMEI Modal Management
 // --------------------------------------------------------------------------
 function openDualImeiModal(rowIdx) {
     currentEditingModalRowIdx = rowIdx;
@@ -1888,7 +2076,7 @@ function initImeiBadges() {
 }
 
 // --------------------------------------------------------------------------
-// 6. Form Submission Validation Guard
+// 7. Form Submission Validation Guard (Only Phones Enforce IMEIs)
 // --------------------------------------------------------------------------
 document.getElementById('grnMasterForm').addEventListener('submit', function(e) {
     let hasError = false;
@@ -1907,11 +2095,13 @@ document.getElementById('grnMasterForm').addEventListener('submit', function(e) 
         const qty = parseInt(row.querySelector('.line-qty-input')?.value, 10) || 0;
         const imeiVal = row.querySelector('.scanned-imei-hidden-input')?.value.trim();
         const imeiLines = imeiVal ? imeiVal.split('\n').filter(Boolean) : [];
+        const isImeiRequired = row.querySelector('.row-requires-imei-flag')?.value === 'true';
 
-        if (prodId && imeiLines.length > 0 && imeiLines.length !== qty) {
+        // ONLY validate IMEI count if the user or system set it to "Phone (IMEI)"
+        if (prodId && isImeiRequired && imeiLines.length !== qty) {
             hasError = true;
             const rowNumber = row.querySelector('.counter-dot')?.textContent || '';
-            alert(`IMEI Count Incomplete on Row #${rowNumber}: Quantity is ${qty}, but exactly ${imeiLines.length} IMEI pair(s) were entered.`);
+            alert(`IMEI Count Incomplete on Row #${rowNumber}: This handset requires exactly ${qty} IMEI pair(s), but ${imeiLines.length} were entered.\n\nTip: If this is an accessory (earphones, charger, cover), click the 'Non-IMEI' button on this line to bypass.`);
             row.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
         }
