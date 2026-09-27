@@ -1,15 +1,17 @@
 import logging
 from datetime import date, datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.views.generic import TemplateView, View, ListView
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.contrib import messages
 from django.http import JsonResponse
 from django.urls import reverse, NoReverseMatch
 from django.db.models import Sum, F, Q, Count, DecimalField, Value, Case, When, ExpressionWrapper
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from django.core.cache import cache
 
 from apps.sales.models import SalesEstimate, SalesEstimateItem, SalesPaymentTransaction
@@ -43,6 +45,89 @@ def safe_url(view_candidates, pk=None, default_path='#', **kwargs):
         except NoReverseMatch:
             continue
     return default_path
+
+class SystemSettingsView(LoginRequiredMixin, UserPassesTestMixin, View):
+    """
+    System & Hardware Configuration Controller.
+    Allows Store Owners and Superusers to update shop branding, tax parameters,
+    thermal printer width, and the master IMEI enforcement policy switch.
+    Atomically writes immutable AuditLog records upon policy transitions.
+    """
+    template_name = 'core/settings.html'
+
+    def test_func(self):
+        user = self.request.user
+        return user.is_authenticated and (user.is_superuser or getattr(user, 'role', '') in ['OWNER', 'MANAGER'])
+
+    def handle_no_permission(self):
+        messages.error(self.request, _("Access Restricted: Only Store Owners and Managers can access system settings."))
+        return redirect('core:dashboard')
+
+    def get(self, request, *args, **kwargs):
+        config = SystemConfiguration.get_solo()
+        return render(request, self.template_name, {
+            'config': config,
+            'SYS_CONFIG': config
+        })
+
+    def post(self, request, *args, **kwargs):
+        config = SystemConfiguration.get_solo()
+        post_data = request.POST
+
+        company_name_en = post_data.get('company_name_en', '').strip()
+        company_name_np = post_data.get('company_name_np', '').strip()
+        pan_number = post_data.get('pan_number', '').strip()
+        raw_vat_rate = post_data.get('default_vat_rate', '0.00').strip()
+        printer_width = post_data.get('thermal_printer_paper_width', '80mm').strip()
+        bill_title = post_data.get('bill_header_title', '').strip()
+        bill_disclaimer = post_data.get('bill_estimate_disclaimer', '').strip()
+
+        # Parse enforce_imei_tracking boolean checkbox
+        new_enforce_imei = post_data.get('enforce_imei_tracking') in ['true', 'on', '1', True]
+        prev_enforce_imei = config.enforce_imei_tracking
+
+        if not company_name_en:
+            messages.error(request, _("Company Name (English) is required."))
+            return self.get(request, *args, **kwargs)
+
+        try:
+            default_vat_rate = Decimal(raw_vat_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        except (InvalidOperation, ValueError, TypeError):
+            default_vat_rate = Decimal('0.00')
+
+        # Detect and audit IMEI Policy Change
+        if prev_enforce_imei != new_enforce_imei:
+            policy_state_str = "Strict / Mandatory" if new_enforce_imei else "Relaxed / Backlog Mode"
+            active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+
+            AuditLog.objects.create(
+                user=request.user,
+                branch=active_branch,
+                action_type='UPDATE',
+                module='SystemConfiguration',
+                object_repr="IMEI Enforcement Policy",
+                ip_address=request.META.get('REMOTE_ADDR'),
+                details={
+                    'previous_enforce_imei': prev_enforce_imei,
+                    'new_enforce_imei': new_enforce_imei,
+                    'policy_state': policy_state_str,
+                    'summary': f"Store owner changed IMEI requirement policy to [{policy_state_str}]."
+                }
+            )
+
+        # Update and save configuration
+        config.company_name_en = company_name_en
+        config.company_name_np = company_name_np
+        config.pan_number = pan_number or None
+        config.default_vat_rate = default_vat_rate
+        config.thermal_printer_paper_width = printer_width
+        config.bill_header_title = bill_title or "SALES ESTIMATE SLIP"
+        config.bill_estimate_disclaimer = bill_disclaimer
+        config.enforce_imei_tracking = new_enforce_imei
+        config.save()
+
+        messages.success(request, _("System configuration and IMEI tracking policies updated successfully."))
+        return redirect('core:settings')
 
 class DashboardHomeView(LoginRequiredMixin, TemplateView):
     """

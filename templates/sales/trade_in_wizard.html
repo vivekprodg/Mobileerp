@@ -231,7 +231,7 @@
 
             <div class="d-flex align-items-center gap-3">
                 <div class="wizard-step-indicator text-primary">
-                    <span class="wizard-step-circle bg-primary text-white">1</span> Handset
+                    <span class="wizard-step-circle bg-primary text-white">1</span> Handset &amp; Customer
                 </div>
                 <span class="text-muted">&rarr;</span>
                 <div class="wizard-step-indicator text-warning-emphasis">
@@ -261,18 +261,34 @@
             <!-- Left 8 Cols: The 3 Wizard Steps -->
             <div class="col-12 col-lg-8">
                 
-                <!-- STEP 1: Device Profile & NTA MDMS Verification -->
+                <!-- STEP 1: Customer Intake & Device Profile -->
                 <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4" id="step1Card">
                     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
                         <h6 class="fw-bold text-dark mb-0">
-                            <span class="badge bg-primary me-2">Step 1</span> Device Profile &amp; Live NTA MDMS Verification
+                            <span class="badge bg-primary me-2">Step 1</span> Customer Identification, Device Profile &amp; Live NTA MDMS
                         </h6>
-                        <span class="badge bg-primary bg-opacity-10 text-primary fs-xs">Hardware Specs</span>
+                        <span class="badge bg-primary bg-opacity-10 text-primary fs-xs">Intake Registration</span>
                     </div>
 
                     <div class="row g-3">
+                        <!-- Walk-in Customer Contact Information (Required by Backend Model) -->
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">
+                                Customer Full Name (ग्राहकको नाम) <span class="text-danger">*</span>
+                            </label>
+                            {{ intake_form.customer_name_manual }}
+                            <small class="text-muted fs-2xs mt-1 d-block">Full legal name of the walk-in customer selling the device.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">
+                                Customer Mobile Number (सम्पर्क मोबाइल नं.) <span class="text-danger">*</span>
+                            </label>
+                            {{ intake_form.customer_phone_manual }}
+                            <small class="text-muted fs-2xs mt-1 d-block">10-digit primary mobile number for OTP/SMS audit.</small>
+                        </div>
+
                         <!-- Benchmark Phone Model Fast Autocomplete Lookup -->
-                        <div class="col-12">
+                        <div class="col-12 mt-3">
                             <div class="p-3 bg-primary bg-opacity-10 border border-primary border-opacity-25 rounded-3">
                                 <div class="d-flex justify-content-between align-items-center mb-1">
                                     <label class="form-label fw-bold text-primary fs-xs mb-0">
@@ -333,7 +349,7 @@
 
                         <!-- Secondary IMEI 2 with Camera Scan & Hardware Focus -->
                         <div class="col-md-6">
-                            <label class="form-label fw-bold text-dark fs-xs">Secondary IMEI 2</label>
+                            <label class="form-label fw-bold text-dark fs-xs">Secondary IMEI 2 (SIM 2 / eSIM)</label>
                             <div class="input-group">
                                 {{ intake_form.imei_2 }}
                                 <button type="button" class="btn btn-outline-secondary btn-sm fw-bold px-2" id="scanTradeInImei2Btn" title="Focus &amp; Scan Secondary IMEI 2 via USB gun">
@@ -345,14 +361,22 @@
                             </div>
                         </div>
                         <div class="col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">Serial Number (Optional)</label>
+                            {{ intake_form.serial_number }}
+                        </div>
+
+                        <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">NTA MDMS Status Classification</label>
                             {{ intake_form.mdms_status }}
                         </div>
-
-                        <div class="col-12">
+                        <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Benchmark Market Value (Pristine Condition) (NPR) <span class="text-danger">*</span></label>
                             {{ intake_form.market_base_value }}
-                            <small class="text-muted fs-2xs mt-1 d-block">Benchmark market valuation for a 100% flawless device of this model.</small>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label fw-bold text-dark fs-xs">Intake Diagnostic Notes / External Cosmetic Observations</label>
+                            {{ intake_form.evaluation_notes }}
                         </div>
                     </div>
                 </div>
@@ -459,7 +483,7 @@
                                     </div>
                                     <div id="customerKycSearchResults" class="list-group position-absolute w-100 shadow-lg mt-1 rounded-3 border-0 overflow-hidden" style="z-index: 1050; max-height: 250px; overflow-y: auto; display: none;"></div>
                                 </div>
-                                <small class="text-muted fs-2xs mt-1 d-block">Selecting an existing customer will prefill full name, citizenship details, issued district, and address.</small>
+                                <small class="text-muted fs-2xs mt-1 d-block">Selecting an existing customer will prefill both Step 1 and Step 3 details automatically.</small>
                             </div>
                         </div>
 
@@ -823,19 +847,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 2. CUSTOMER KYC PROFILE LOOKUP (STANDARDIZED API CONTRACT)
+    // 2. CUSTOMER KYC PROFILE LOOKUP & BIDIRECTIONAL STEP 1/3 SYNC
     // =========================================================================
     const kycInput = document.getElementById('customerKycSearchInput');
     const clearKycBtn = document.getElementById('clearCustomerKycSearchBtn');
     const kycResults = document.getElementById('customerKycSearchResults');
 
-    const customerNameInput = document.querySelector('[name="customer_full_name"]');
+    const intakeCustomerName = document.querySelector('[name="customer_name_manual"]');
+    const intakeCustomerPhone = document.querySelector('[name="customer_phone_manual"]');
+
+    const undertakingCustomerName = document.querySelector('[name="customer_full_name"]');
     const fatherSpouseInput = document.querySelector('[name="customer_father_or_spouse_name"]');
     const idTypeSelect = document.querySelector('[name="id_type"]');
     const idNumberInput = document.querySelector('[name="id_number"]');
     const idDistrictInput = document.querySelector('[name="id_issued_district"]');
     const permAddressInput = document.querySelector('[name="permanent_address"]');
     const currAddressInput = document.querySelector('[name="current_address"]');
+
+    // Real-time synchronization between Step 1 and Step 3 Customer Name inputs
+    if (intakeCustomerName && undertakingCustomerName) {
+        intakeCustomerName.addEventListener('input', () => {
+            if (!undertakingCustomerName.value || undertakingCustomerName.value === intakeCustomerName.dataset.prevVal) {
+                undertakingCustomerName.value = intakeCustomerName.value;
+            }
+            intakeCustomerName.dataset.prevVal = intakeCustomerName.value;
+        });
+
+        undertakingCustomerName.addEventListener('input', () => {
+            if (!intakeCustomerName.value || intakeCustomerName.value === undertakingCustomerName.dataset.prevVal) {
+                intakeCustomerName.value = undertakingCustomerName.value;
+            }
+            undertakingCustomerName.dataset.prevVal = undertakingCustomerName.value;
+        });
+    }
 
     if (kycInput) {
         let kycDebounce = null;
@@ -888,6 +932,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         return `
                             <button type="button" class="list-group-item list-group-item-action py-2 px-3 border-bottom d-flex justify-content-between align-items-center kyc-option-btn"
                                 data-name="${escapeHtml(name)}"
+                                data-phone="${escapeHtml(phone)}"
                                 data-father="${escapeHtml(father)}"
                                 data-id-type="${escapeHtml(idType)}"
                                 data-id-num="${escapeHtml(idNum)}"
@@ -908,7 +953,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     kycResults.querySelectorAll('.kyc-option-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
-                            if (customerNameInput && btn.dataset.name) customerNameInput.value = btn.dataset.name;
+                            const nameVal = btn.dataset.name;
+                            const phoneVal = btn.dataset.phone;
+
+                            // Populate Step 1 (Intake Form)
+                            if (intakeCustomerName && nameVal) intakeCustomerName.value = nameVal;
+                            if (intakeCustomerPhone && phoneVal) intakeCustomerPhone.value = phoneVal;
+
+                            // Populate Step 3 (Undertaking Form)
+                            if (undertakingCustomerName && nameVal) undertakingCustomerName.value = nameVal;
                             if (fatherSpouseInput && btn.dataset.father) fatherSpouseInput.value = btn.dataset.father;
                             if (idTypeSelect && btn.dataset.idType) idTypeSelect.value = btn.dataset.idType;
                             if (idNumberInput && btn.dataset.idNum) idNumberInput.value = btn.dataset.idNum;
@@ -916,14 +969,20 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (permAddressInput && btn.dataset.permAddr) permAddressInput.value = btn.dataset.permAddr;
                             if (currAddressInput && btn.dataset.currAddr) currAddressInput.value = btn.dataset.currAddr;
 
-                            [customerNameInput, fatherSpouseInput, idTypeSelect, idNumberInput, idDistrictInput, permAddressInput, currAddressInput].forEach(el => {
+                            const fieldsToAnimate = [
+                                intakeCustomerName, intakeCustomerPhone, undertakingCustomerName,
+                                fatherSpouseInput, idTypeSelect, idNumberInput, idDistrictInput,
+                                permAddressInput, currAddressInput
+                            ];
+
+                            fieldsToAnimate.forEach(el => {
                                 if (el) {
                                     el.classList.add('flash-autofill-active');
                                     setTimeout(() => el.classList.remove('flash-autofill-active'), 1500);
                                 }
                             });
 
-                            kycInput.value = btn.dataset.name;
+                            kycInput.value = nameVal;
                             kycResults.style.display = 'none';
                         });
                     });

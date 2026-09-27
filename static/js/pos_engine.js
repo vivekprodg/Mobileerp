@@ -3,23 +3,29 @@
  * High-Performance Decoupled Architecture with Zero-Query Customer Lookup & Repair Bridge
  *
  * Core Capabilities:
- * 1. Zero-Query Customer Discovery (POSCustomerManager):
+ * 1. Master Configuration Toggle (`enforce_imei_tracking`):
+ *    - Respects `data-enforce-imei` from `#posTaxConfigMeta`.
+ *    - Backlog Mode (OFF): Phone cards add straight to the cart with editable quantities without forcing
+ *      the blocking IMEI modal; provides a "Skip / Sell without IMEI" option if modal is opened.
+ *    - Strict Mode (ON): Strictly mandates 1-to-1 IMEI selection, validates serial collisions, and locks quantity to 1.
+ * 2. Zero-Query Customer Discovery (POSCustomerManager):
  *    - Automatically shows top 15 recent customers and outstanding debtors on input focus/click.
  *    - Standardized JSON contract consumption: { title, subtitle, badge, badge_class, extra_data }.
- * 2. Decoupled Product Catalog Service (POSCatalogService):
+ * 3. Decoupled Product Catalog Service (POSCatalogService):
  *    - Isolated catalog state, debounced server querying, and multi-attribute classification.
- * 3. Quick Workshop Repair Ticket Bridge (POSRepairTicketManager):
- *    - Terminal search & 1-click attachment of ready-for-pickup repair tickets (Hotkey: F7).
- *    - Auto-syncs customer profile and inserts repair service charges into the cart.
- * 4. Explicit Item Discount Types:
+ *    - Provides allLoadedProducts and initialProducts pools for non-serialized service item resolution.
+ * 4. Unified Workshop Repair Ticket Handover Bridge (POSRepairTicketManager & POSCheckout):
+ *    - repair_ticket_id is an official, built-in first-class property of POSCheckout and SmartPOSEngine.
+ *    - Eliminates fragile monkey-patching of buildPayload across script execution timings.
+ *    - Non-serialized repair services explicitly flag requires_imei = false and bypass device serial prompts.
+ * 5. Authoritative Parked Bill API URL & Snapshot Persistence (POSHoldCartManager):
+ *    - Standardized API endpoint pointing strictly to /pos/api/hold-carts/ (matching apps/pos/urls.py).
+ *    - Preserves customer_pan, trade_in_voucher_id, trade_in_credit_amount, and repair_ticket_id across hold/recall cycles.
+ * 6. Explicit Item Discount Types:
  *    - Three discrete modes: NONE, PERCENTAGE (%), and AMOUNT (Rs.).
  *    - Real-time mathematical concession percentage against line gross with supervisor limit badges.
- * 5. Dual-Mode Bill-Level Discounts:
+ * 7. Dual-Mode Bill-Level Discounts:
  *    - Proportional allocation across discountable items (inclusive/exclusive VAT safe).
- * 6. Parked Bill State Preservation (F9 / F10):
- *    - Serializes and restores exact line discount types, values, reasons, and customer link.
- * 7. Hardware Scanner & Dual-IMEI Collision Guard:
- *    - Automatic SIM1/SIM2 pairing and duplicate IMEI cart prevention.
  * 8. Strict Walk-In Credit (Udhaari) Guard:
  *    - Enforces registered customer profile for any transaction with outstanding balance or credit.
  * 9. Salted Manager PIN Overrides & Emergency Offline Queue (IndexedDB `pending_sales`).
@@ -141,7 +147,6 @@ class POSCustomerManager {
 
     initEvents() {
         if (this.customerInput && this.customerInput.tagName !== 'SELECT') {
-            // Zero-query: Opening dropdown immediately on click or focus
             this.customerInput.addEventListener('focus', () => {
                 if (!this.selectedCustomer) {
                     const query = this.customerInput.value.trim();
@@ -237,10 +242,6 @@ class POSCustomerManager {
         }
     }
 
-    /**
-     * Standardized search routing.
-     * When isZeroQuery is true, fetches top 15 recent and indebted customers.
-     */
     async search(query = '', isZeroQuery = false) {
         try {
             let url = `${this.searchApiUrl}?`;
@@ -282,7 +283,6 @@ class POSCustomerManager {
         ` : '';
 
         const itemsHtml = this.searchResults.map((c, idx) => {
-            // Standardized JSON Contract: { title, subtitle, badge, badge_class, extra_data }
             const extra = c.extra_data || {};
             const name = c.title || extra.name || c.name || 'Unknown Customer';
             const subtitle = c.subtitle || `${extra.phone || c.phone || 'No phone'} ${extra.pan || c.pan ? '• PAN: ' + (extra.pan || c.pan) : ''}`;
@@ -355,7 +355,6 @@ class POSCustomerManager {
     }
 
     selectCustomer(rawItem) {
-        // Resolve customer object from standard contract or legacy payload
         const extra = rawItem.extra_data || {};
         const customer = {
             id: rawItem.id || extra.id,
@@ -442,19 +441,19 @@ class POSRepairTicketManager {
     constructor(engine) {
         this.engine = engine;
         this.searchApiUrl = '/repairs/api/search/';
-        this.modalEl = document.getElementById('posRepairLookupModal');
+        this.modalEl = document.getElementById('repairTicketSearchModal') || document.getElementById('posRepairLookupModal');
         this.ensureModalExists();
         this.initEvents();
     }
 
     ensureModalExists() {
-        if (document.getElementById('posRepairLookupModal')) {
-            this.modalEl = document.getElementById('posRepairLookupModal');
+        if (document.getElementById('repairTicketSearchModal') || document.getElementById('posRepairLookupModal')) {
+            this.modalEl = document.getElementById('repairTicketSearchModal') || document.getElementById('posRepairLookupModal');
             return;
         }
 
         const modalDiv = document.createElement('div');
-        modalDiv.id = 'posRepairLookupModal';
+        modalDiv.id = 'repairTicketSearchModal';
         modalDiv.className = 'modal fade';
         modalDiv.tabIndex = -1;
         modalDiv.setAttribute('data-bs-backdrop', 'static');
@@ -478,14 +477,6 @@ class POSRepairTicketManager {
                                    placeholder="Enter ticket #, customer name, phone, or IMEI..." autocomplete="off">
                             <button class="btn btn-primary px-3 fw-bold" type="button" id="posExecuteRepairSearchBtn">Search</button>
                         </div>
-
-                        <div class="d-flex align-items-center justify-content-between mb-2">
-                            <span class="fw-bold fs-xs text-secondary text-uppercase">Tickets Ready for Delivery</span>
-                            <button type="button" class="btn btn-link btn-sm p-0 fs-2xs text-decoration-none" id="posReloadReadyRepairsBtn">
-                                <i class="fas fa-sync-alt me-1"></i> Refresh Ready List
-                            </button>
-                        </div>
-
                         <div class="bg-white border rounded-3 p-1" style="max-height: 340px; overflow-y: auto;" id="posRepairTicketResultsContainer">
                             <div class="text-center py-4 text-muted fs-xs">
                                 <i class="fas fa-tools fs-2 d-block mb-2 opacity-25"></i>
@@ -501,166 +492,34 @@ class POSRepairTicketManager {
     }
 
     initEvents() {
-        const attachBtn = document.getElementById('posAttachRepairBtn') || document.getElementById('attachRepairPromptBtn');
+        const attachBtn = document.getElementById('attachRepairPromptBtn') || document.getElementById('posAttachRepairBtn');
         if (attachBtn) {
-            attachBtn.addEventListener('click', () => this.openModal());
-        }
-
-        const searchInput = document.getElementById('posRepairTicketSearchInput');
-        const searchBtn = document.getElementById('posExecuteRepairSearchBtn');
-        const refreshBtn = document.getElementById('posReloadReadyRepairsBtn');
-
-        if (searchInput) {
-            searchInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    this.searchTickets(searchInput.value.trim());
-                }
-            });
-        }
-
-        if (searchBtn && searchInput) {
-            searchBtn.addEventListener('click', () => this.searchTickets(searchInput.value.trim()));
-        }
-
-        if (refreshBtn) {
-            refreshBtn.addEventListener('click', () => this.searchTickets(''));
-        }
-
-        const resultsContainer = document.getElementById('posRepairTicketResultsContainer');
-        if (resultsContainer) {
-            resultsContainer.addEventListener('click', (e) => {
-                const selectBtn = e.target.closest('.select-repair-ticket-btn');
-                if (selectBtn) {
-                    const ticketDataRaw = selectBtn.dataset.ticketJson;
-                    if (ticketDataRaw) {
-                        try {
-                            const ticket = JSON.parse(decodeURIComponent(ticketDataRaw));
-                            this.attachTicketToCart(ticket);
-                        } catch (err) {
-                            console.error('[POSRepairTicketManager] Parse error:', err);
-                        }
-                    }
-                }
+            attachBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.openModal();
             });
         }
     }
 
     openModal() {
-        if (!this.modalEl) return;
-        const modal = bootstrap.Modal.getOrCreateInstance(this.modalEl);
+        const modalDom = document.getElementById('repairTicketSearchModal') || this.modalEl;
+        if (!modalDom) return;
+        const modal = bootstrap.Modal.getOrCreateInstance(modalDom);
         modal.show();
-        this.searchTickets('');
         setTimeout(() => {
-            const input = document.getElementById('posRepairTicketSearchInput');
+            const input = document.getElementById('repairTicketSearchInput') || document.getElementById('posRepairTicketSearchInput');
             if (input) input.focus();
         }, 250);
     }
 
-    async searchTickets(query = '') {
-        const container = document.getElementById('posRepairTicketResultsContainer');
-        if (!container) return;
-
-        container.innerHTML = `
-            <div class="text-center py-4 text-muted fs-xs">
-                <span class="spinner-border spinner-border-sm me-2 text-primary"></span>
-                Searching repair records...
-            </div>
-        `;
-
-        try {
-            let url = `${this.searchApiUrl}?`;
-            if (query) {
-                url += `q=${encodeURIComponent(query)}`;
-            } else {
-                url += 'status=READY_FOR_DELIVERY,COMPLETED&limit=20';
-            }
-
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error('Repair lookup failed');
-            const data = await resp.json();
-            const tickets = data.results || data.tickets || [];
-
-            this.renderResults(tickets);
-        } catch (err) {
-            container.innerHTML = `
-                <div class="text-center py-4 text-danger fs-xs">
-                    <i class="fas fa-exclamation-triangle me-1"></i> Failed to retrieve repair tickets.
-                </div>
-            `;
-        }
-    }
-
-    renderResults(tickets) {
-        const container = document.getElementById('posRepairTicketResultsContainer');
-        if (!container) return;
-
-        if (!tickets || tickets.length === 0) {
-            container.innerHTML = `
-                <div class="text-center py-4 text-muted fs-xs">
-                    <i class="fas fa-box-open fs-2 d-block mb-2 opacity-25"></i>
-                    No ready-for-delivery repair tickets found.
-                </div>
-            `;
-            return;
-        }
-
-        container.innerHTML = tickets.map(t => {
-            const ticketId = t.id || t.ticket_id;
-            const ticketNo = t.ticket_number || `#${ticketId}`;
-            const customerName = t.customer_name || 'Walk-in Customer';
-            const customerPhone = t.customer_phone || '';
-            const device = `${t.brand_name || ''} ${t.model_name || t.device_model || 'Device'}`.trim();
-            const totalPayable = parseFloat(t.payable_amount !== undefined ? t.payable_amount : (t.total_amount || t.cost || 0));
-            const status = t.status || 'READY';
-            const imei = t.imei || t.imei_1 || '';
-
-            const serialized = encodeURIComponent(JSON.stringify({
-                id: ticketId,
-                ticket_number: ticketNo,
-                customer_id: t.customer_id || null,
-                customer_name: customerName,
-                customer_phone: customerPhone,
-                customer_pan: t.customer_pan || '',
-                device_model: device,
-                imei: imei,
-                payable_amount: totalPayable,
-                problem_description: t.problem_description || t.fault || ''
-            }));
-
-            return `
-                <div class="d-flex align-items-center justify-content-between p-2 border-bottom hover-bg-light rounded-2">
-                    <div class="pe-2 text-truncate">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="badge bg-dark font-monospace fs-2xs">${escapeHtml(ticketNo)}</span>
-                            <span class="fw-bold fs-xs text-dark text-truncate">${escapeHtml(device)}</span>
-                            <span class="badge bg-success bg-opacity-10 text-success fs-3xs">${escapeHtml(status)}</span>
-                        </div>
-                        <div class="text-muted fs-2xs mt-1">
-                            <i class="fas fa-user me-1 text-secondary"></i>${escapeHtml(customerName)} 
-                            ${customerPhone ? `&bull; <i class="fas fa-phone me-1 text-secondary"></i>${escapeHtml(customerPhone)}` : ''}
-                            ${imei ? `&bull; <span class="font-monospace">IMEI: ${escapeHtml(imei)}</span>` : ''}
-                        </div>
-                    </div>
-                    <div class="d-flex align-items-center gap-3 flex-shrink-0">
-                        <div class="text-end">
-                            <span class="d-block text-muted fs-3xs">Payable</span>
-                            <span class="fw-bold font-monospace fs-xs text-primary">Rs. ${totalPayable.toFixed(2)}</span>
-                        </div>
-                        <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-1 fs-2xs fw-bold select-repair-ticket-btn" 
-                                data-ticket-json="${serialized}">
-                            <i class="fas fa-link me-1"></i> Attach
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join('');
-    }
-
     attachTicketToCart(ticket) {
         this.engine.repairTicketId = ticket.id;
+        if (this.engine.checkout) {
+            this.engine.checkout.repairTicketId = ticket.id;
+        }
+        window.activeRepairTicketId = ticket.id;
+        window.activeRepairTicket = ticket;
 
-        // 1. Auto-select customer if available
         if (ticket.customer_name) {
             this.engine.customerManager.selectCustomer({
                 id: ticket.customer_id || null,
@@ -672,24 +531,44 @@ class POSRepairTicketManager {
             });
         }
 
-        // 2. Add repair delivery service item to cart
+        let serviceProduct = null;
+        const catalogPool = this.engine.catalogService 
+            ? (this.engine.catalogService.allLoadedProducts || this.engine.catalogService.initialProducts || [])
+            : [];
+
+        if (Array.isArray(catalogPool) && catalogPool.length > 0) {
+            serviceProduct = catalogPool.find(p => 
+                p.sku === 'REPAIR-SERVICE' || 
+                p.is_service === true ||
+                (p.name && p.name.toLowerCase().includes('repair')) || 
+                (p.name && p.name.toLowerCase().includes('service'))
+            );
+            if (!serviceProduct) {
+                serviceProduct = catalogPool.find(p => !p.requires_imei && !p.requires_imei_tracking);
+            }
+        }
+
+        const resolvedProdId = serviceProduct ? (serviceProduct.id || serviceProduct.product_id) : null;
+
         this.engine.cart.addItem({
-            product_id: null,
+            product_id: resolvedProdId,
             category_name: 'REPAIR SERVICE',
-            name: `Workshop Repair: ${ticket.ticket_number} (${ticket.device_model})`,
-            unit_price: ticket.payable_amount,
-            price: ticket.payable_amount,
-            official_unit_price: ticket.payable_amount,
+            name: `Repair Service: ${ticket.device_name || ticket.device_model || 'Device'} (${ticket.ticket_number})`,
+            unit_price: ticket.payable_amount || ticket.total_amount || 0,
+            price: ticket.payable_amount || ticket.total_amount || 0,
+            official_unit_price: ticket.payable_amount || ticket.total_amount || 0,
             quantity: 1,
             discount_type: 'NONE',
             discount_value: 0,
-            is_discountable: true,
-            requires_imei: Boolean(ticket.imei),
-            imei_1: ticket.imei || '',
-            imei_number: ticket.imei || ''
+            is_discountable: false,
+            requires_imei: false,
+            requires_imei_tracking: false,
+            imei_1: '',
+            imei_number: '',
+            repair_ticket_id: ticket.id,
+            is_repair_service: true
         });
 
-        // 3. Render Top Banner
         const container = document.querySelector('.pos-workspace-container') || document.querySelector('.container-fluid');
         if (container) {
             const oldBanner = document.getElementById('linkedRepairBanner');
@@ -699,14 +578,17 @@ class POSRepairTicketManager {
             banner.id = 'linkedRepairBanner';
             banner.className = 'alert alert-info py-1 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs shadow-sm';
             banner.innerHTML = `
-                <span><i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>${escapeHtml(ticket.ticket_number)}</strong> (${escapeHtml(ticket.device_model)}) &bull; Rs. ${ticket.payable_amount.toFixed(2)}</span>
+                <span><i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>${escapeHtml(ticket.ticket_number)}</strong> (${escapeHtml(ticket.device_name || ticket.device_model || 'Device')}) &bull; Rs. ${(ticket.payable_amount || ticket.total_amount || 0).toFixed(2)}</span>
                 <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); window.smartPos.repairTicketId=null;"></button>
             `;
             container.prepend(banner);
         }
 
-        const modal = bootstrap.Modal.getInstance(this.modalEl);
-        if (modal) modal.hide();
+        const modalDom = document.getElementById('repairTicketSearchModal') || this.modalEl;
+        if (modalDom) {
+            const modal = bootstrap.Modal.getInstance(modalDom);
+            if (modal) modal.hide();
+        }
 
         this.engine.showNotification(`Repair Ticket ${ticket.ticket_number} attached to bill.`, 'success');
         POSAudioSynthesizer.play('second');
@@ -887,6 +769,7 @@ class POSCatalogService {
 
     isPhoneProduct(p) {
         if (!p) return false;
+        if (p.is_repair_service || p.repair_ticket_id) return false;
         if (p.category_key === 'PHONES') return true;
         if (p.requires_imei === true || p.match_type === 'IMEI') return true;
         if ((p.ram && String(p.ram).trim() !== '') || (p.storage && String(p.storage).trim() !== '')) return true;
@@ -989,6 +872,16 @@ class POSCatalogService {
 
             const displaySpecs = prod.specs || (prod.ram && prod.storage ? `${prod.ram}/${prod.storage}` : '');
 
+            // In Backlog Mode, phones display as standard non-blocking units
+            let badgeHtml = '';
+            if (isPhone) {
+                if (this.engine.enforceImei) {
+                    badgeHtml = '<span class="badge bg-primary bg-opacity-10 text-primary fs-2xs ms-1">IMEI</span>';
+                } else {
+                    badgeHtml = '<span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs ms-1">Handset</span>';
+                }
+            }
+
             card.innerHTML = `
                 <div>
                     <div class="d-flex align-items-center gap-2 mb-2">
@@ -997,7 +890,7 @@ class POSCatalogService {
                         </div>
                         <div class="text-truncate">
                             <span class="badge bg-light text-dark border fs-2xs">${escapeHtml(prod.brand_name || 'Generic')}</span>
-                            ${isPhone ? '<span class="badge bg-primary bg-opacity-10 text-primary fs-2xs ms-1">IMEI</span>' : ''}
+                            ${badgeHtml}
                         </div>
                     </div>
                     <div class="fw-bold text-dark fs-sm text-truncate" title="${escapeHtml(prod.name)}">${escapeHtml(prod.name)}</div>
@@ -1180,12 +1073,20 @@ class POSCart {
     addItem(product) {
         if (!product) return;
 
-        const isImei = Boolean(product.requires_imei || product.match_type === 'IMEI' || this.engine.catalogService.isPhoneProduct(product));
+        const enforceImei = this.engine ? this.engine.enforceImei : true;
+        const isRepair = Boolean(product.is_repair_service || product.repair_ticket_id);
+        const isPhone = !isRepair && Boolean(product.requires_imei || product.match_type === 'IMEI' || (this.engine.catalogService && this.engine.catalogService.isPhoneProduct(product)));
+
         const incomingImei1 = (product.imei_1 || product.imei1 || product.imei_number || '').trim();
         const incomingImei2 = (product.imei_2 || product.imei2 || product.secondary_imei || '').trim();
 
-        // 1. Dual-IMEI Collision Check
-        if (isImei && (incomingImei1 || incomingImei2)) {
+        // Serialized handset definition:
+        // In Strict Mode (enforceImei = true), all phones require 1-to-1 tracking and locks quantity.
+        // In Backlog Mode (enforceImei = false), an item is serialized ONLY if an actual IMEI was scanned/entered.
+        const isSerializedHandset = !isRepair && (enforceImei ? isPhone : Boolean(incomingImei1));
+
+        // 1. Dual-IMEI Collision Check (Guards unique physical serials in cart)
+        if (incomingImei1 || incomingImei2) {
             const duplicateItem = this.items.find(existingItem => {
                 const existingImei1 = (existingItem.imei_number || existingItem.imei_1 || existingItem.imei1 || '').trim();
                 const existingImei2 = (existingItem.secondary_imei || existingItem.imei_2 || existingItem.imei2 || '').trim();
@@ -1256,7 +1157,7 @@ class POSCart {
             discountType = 'PERCENTAGE';
         }
 
-        const isDiscountable = product.is_discountable !== undefined ? Boolean(product.is_discountable) : true;
+        const isDiscountable = isRepair ? false : (product.is_discountable !== undefined ? Boolean(product.is_discountable) : true);
         const maxDiscountPercent = product.max_discount_percent !== undefined ? parseFloat(product.max_discount_percent) : 10;
         const conversionId = product.package_conversion_id || product.conversion_id || product.unit_conversion_id || null;
 
@@ -1265,9 +1166,13 @@ class POSCart {
             discountValue = 0;
         }
 
-        // 4. Group Non-Serialized Accessories
-        const nonImeiMatch = !isImei
-            ? this.items.find(i => (i.product_id === (product.product_id || product.id)) && ((i.conversion_id || null) === conversionId))
+        // 4. Group Non-Serialized Items (Accessories or Backlog Phones without IMEIs)
+        const nonImeiMatch = (!isSerializedHandset && !isRepair)
+            ? this.items.find(i => 
+                (i.product_id === (product.product_id || product.id)) && 
+                ((i.conversion_id || null) === conversionId) &&
+                !i.imei_1 && !i.imei_number
+            )
             : null;
 
         if (nonImeiMatch) {
@@ -1284,7 +1189,7 @@ class POSCart {
             this.items.push({
                 product_id: product.product_id || product.id,
                 category_id: product.category_id || null,
-                category_name: product.category_name || '',
+                category_name: product.category_name || (isRepair ? 'REPAIR SERVICE' : ''),
                 item_instance_id: product.item_instance_id || null,
                 name: product.name,
                 unit_price: extractedPrice,
@@ -1301,7 +1206,8 @@ class POSCart {
                 max_discount_percent: maxDiscountPercent,
                 tax_pricing_type: taxMode,
                 vat_rate: vatRate,
-                requires_imei: isImei,
+                requires_imei: isSerializedHandset,
+                requires_imei_tracking: isSerializedHandset,
                 imei_1: incomingImei1,
                 imei1: incomingImei1,
                 imei_number: incomingImei1,
@@ -1309,9 +1215,11 @@ class POSCart {
                 imei2: incomingImei2,
                 secondary_imei: incomingImei2,
                 mdms_status: product.mdms_status || product.default_mdms_status || 'REGISTERED_OFFICIAL',
-                warranty_months: product.warranty_months || 12,
-                warranty_terms: warrantyTerms,
-                conversion_id: conversionId
+                warranty_months: isRepair ? 0 : (product.warranty_months || 12),
+                warranty_terms: isRepair ? 'Repair Service Labor / Parts' : warrantyTerms,
+                conversion_id: conversionId,
+                repair_ticket_id: product.repair_ticket_id || null,
+                is_repair_service: isRepair
             });
         }
 
@@ -1320,7 +1228,17 @@ class POSCart {
 
     removeItem(index) {
         if (index >= 0 && index < this.items.length) {
-            this.items.splice(index, 1);
+            const removed = this.items.splice(index, 1)[0];
+            if (removed && removed.is_repair_service) {
+                this.engine.repairTicketId = null;
+                if (this.engine.checkout) {
+                    this.engine.checkout.repairTicketId = null;
+                }
+                window.activeRepairTicketId = null;
+                window.activeRepairTicket = null;
+                const repairBanner = document.getElementById('linkedRepairBanner');
+                if (repairBanner) repairBanner.remove();
+            }
             this.render();
         }
     }
@@ -1674,6 +1592,9 @@ class POSCart {
                     const exceedsLimit = effectivePct > allowedLimit;
                     const perUnitDisc = item.quantity > 0 ? (lineDisc / item.quantity) : 0;
 
+                    // Quantity is readonly ONLY if the line has a specific IMEI or in strict mode
+                    const isQtyLocked = Boolean(item.requires_imei && (this.engine.enforceImei || primaryImei));
+
                     return `
                         <div class="cart-row p-2 border-bottom">
                             <div class="d-flex align-items-center justify-content-between mb-1">
@@ -1694,7 +1615,7 @@ class POSCart {
                                 </div>
                                 <div style="width: 15%;" class="text-center font-mono fs-xs">
                                     <input type="number" class="form-control form-control-sm text-center p-0 font-mono cart-qty-input fs-xs" 
-                                           data-cart-index="${idx}" value="${item.quantity}" min="1" ${item.requires_imei ? 'readonly' : ''}>
+                                           data-cart-index="${idx}" value="${item.quantity}" min="1" ${isQtyLocked ? 'readonly' : ''}>
                                 </div>
                                 <div style="width: 25%;" class="text-end font-mono fs-xs fw-bold text-dark" id="cartLineTotal_${idx}">
                                     Rs. ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1782,6 +1703,9 @@ class POSCart {
                     const exceedsLimit = effectivePct > allowedLimit;
                     const perUnitDisc = item.quantity > 0 ? (lineDisc / item.quantity) : 0;
 
+                    // Quantity is readonly ONLY if the line has a specific IMEI or in strict mode
+                    const isQtyLocked = Boolean(item.requires_imei && (this.engine.enforceImei || primaryImei));
+
                     return `
                         <tr class="scan-flash">
                             <td>
@@ -1834,7 +1758,7 @@ class POSCart {
                             <td class="text-center" style="width: 75px;">
                                 <input type="number" class="form-control form-control-sm text-center p-1 cart-qty-input font-monospace"
                                        data-cart-index="${idx}"
-                                       value="${item.quantity}" min="1" ${item.requires_imei ? 'readonly' : ''}>
+                                       value="${item.quantity}" min="1" ${isQtyLocked ? 'readonly' : ''}>
                             </td>
                             <td class="text-end" style="width: 105px;">
                                 <input type="number" step="0.01" class="form-control form-control-sm text-end p-1 cart-price-input font-monospace"
@@ -1936,7 +1860,7 @@ class POSTradeInManager {
 class POSHoldCartManager {
     constructor(engine) {
         this.engine = engine;
-        this.apiUrl = '/pos-session/api/hold-carts/';
+        this.apiUrl = '/pos/api/hold-carts/';
         this.holdBtn = document.getElementById('posHoldCartBtn');
         this.modalEl = document.getElementById('holdBillsModal');
         this.tableBody = document.getElementById('heldCartsTableBody');
@@ -1989,18 +1913,36 @@ class POSHoldCartManager {
             discount_type: item.discount_type || 'NONE',
             discount_value: item.discount_value !== undefined ? parseFloat(item.discount_value) : (item.discount_percent || 0),
             discount_percent: item.discount_percent || 0,
-            is_discountable: item.is_discountable !== false
+            is_discountable: item.is_discountable !== false,
+            requires_imei: Boolean(item.requires_imei && (this.engine.enforceImei || item.imei_1))
         }));
+
+        const activeRepairId = this.engine.repairTicketId || 
+                               (this.engine.checkout ? this.engine.checkout.repairTicketId : null) || 
+                               window.activeRepairTicketId || 
+                               null;
+        const activeTradeInId = this.engine.tradeInManager ? this.engine.tradeInManager.voucherId : null;
+        const activeTradeInNo = this.engine.tradeInManager ? this.engine.tradeInManager.voucherNumber : '';
+        const activeTradeInAmt = this.engine.tradeInManager ? this.engine.tradeInManager.creditAmount : 0;
+        const activePan = this.engine.cart.customerPan || 
+                          (this.engine.customerManager && this.engine.customerManager.selectedCustomer ? this.engine.customerManager.selectedCustomer.pan : '') || 
+                          document.getElementById('posCustomerPanInput')?.value.trim() || 
+                          '';
 
         const payload = {
             cart: serializedItems,
             subtotal: totals.subtotal,
             customer_name: customerName,
             customer_phone: customerPhone,
+            customer_pan: activePan,
             bill_discount_type: this.engine.cart.billDiscountType || 'PERCENTAGE',
             bill_discount_value: this.engine.cart.billDiscountValue || 0,
             bill_discount_percent: this.engine.cart.billDiscountPercent || 0,
             discount_reason: this.engine.cart.billDiscountReason || '',
+            trade_in_voucher_id: activeTradeInId,
+            trade_in_voucher_number: activeTradeInNo,
+            trade_in_credit_amount: activeTradeInAmt,
+            repair_ticket_id: activeRepairId ? parseInt(activeRepairId, 10) : null,
             notes: notes
         };
 
@@ -2020,6 +1962,12 @@ class POSHoldCartManager {
                 this.engine.cart.clear();
                 this.engine.customerManager.clearCustomer(true);
                 this.engine.tradeInManager.remove();
+                this.engine.repairTicketId = null;
+                if (this.engine.checkout) this.engine.checkout.repairTicketId = null;
+                window.activeRepairTicketId = null;
+                window.activeRepairTicket = null;
+                const repairBanner = document.getElementById('linkedRepairBanner');
+                if (repairBanner) repairBanner.remove();
             } else {
                 this.engine.showNotification(data.error || 'Failed to hold cart.', 'danger');
             }
@@ -2030,8 +1978,9 @@ class POSHoldCartManager {
     }
 
     async openRecallModal() {
-        if (!this.modalEl) return;
-        const modal = bootstrap.Modal.getOrCreateInstance(this.modalEl);
+        const modalDom = document.getElementById('holdBillsModal') || this.modalEl;
+        if (!modalDom) return;
+        const modal = bootstrap.Modal.getOrCreateInstance(modalDom);
         modal.show();
         await this.loadHeldCarts();
     }
@@ -2153,13 +2102,59 @@ class POSHoldCartManager {
                     if (data.customer_phone) this.engine.cart.customerPhone = data.customer_phone;
                 }
 
+                const repairId = (data.cart_payload && data.cart_payload.repair_ticket_id) || data.repair_ticket_id || null;
+                if (repairId) {
+                    const parsedRepairId = parseInt(repairId, 10);
+                    this.engine.repairTicketId = parsedRepairId;
+                    if (this.engine.checkout) {
+                        this.engine.checkout.repairTicketId = parsedRepairId;
+                    }
+                    window.activeRepairTicketId = parsedRepairId;
+
+                    const container = document.querySelector('.pos-workspace-container') || document.querySelector('.container-fluid');
+                    if (container) {
+                        const oldBanner = document.getElementById('linkedRepairBanner');
+                        if (oldBanner) oldBanner.remove();
+
+                        const banner = document.createElement('div');
+                        banner.id = 'linkedRepairBanner';
+                        banner.className = 'alert alert-info py-1 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs shadow-sm';
+                        banner.innerHTML = `
+                            <span><i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>#${parsedRepairId}</strong> (Restored from Parked Cart)</span>
+                            <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); window.smartPos.repairTicketId=null;"></button>
+                        `;
+                        container.prepend(banner);
+                    }
+                }
+
+                const tradeInId = (data.cart_payload && data.cart_payload.trade_in_voucher_id) || data.trade_in_voucher_id || null;
+                const tradeInNo = (data.cart_payload && data.cart_payload.trade_in_voucher_number) || '';
+                const tradeInAmt = parseFloat((data.cart_payload && data.cart_payload.trade_in_credit_amount) || 0) || 0;
+
+                if (tradeInId && this.engine.tradeInManager) {
+                    this.engine.tradeInManager.voucherId = parseInt(tradeInId, 10);
+                    this.engine.tradeInManager.voucherNumber = tradeInNo || `EXC-${tradeInId}`;
+                    this.engine.tradeInManager.creditAmount = tradeInAmt;
+                    this.engine.tradeInManager.updateUi(tradeInAmt);
+                }
+
+                const pan = (data.cart_payload && data.cart_payload.customer_pan) || data.customer_pan || '';
+                if (pan) {
+                    this.engine.cart.customerPan = pan;
+                    const panInp = document.getElementById('posCustomerPanInput');
+                    if (panInp) panInp.value = pan;
+                }
+
                 await fetch(`${this.apiUrl}${encodeURIComponent(reference)}/`, {
                     method: 'DELETE',
                     headers: { 'X-CSRFToken': getCsrfToken() }
                 });
 
-                const modal = bootstrap.Modal.getInstance(this.modalEl);
-                if (modal) modal.hide();
+                const modalDom = document.getElementById('holdBillsModal') || this.modalEl;
+                if (modalDom) {
+                    const modal = bootstrap.Modal.getInstance(modalDom);
+                    if (modal) modal.hide();
+                }
 
                 this.engine.cart.render();
                 this.engine.showNotification(`Restored held cart ${reference} with accurate pricing and discounts.`, 'success');
@@ -2196,6 +2191,7 @@ class POSCheckout {
         this.checkoutApiUrl = '/sales/api/checkout/';
         this.isProcessing = false;
         this.managerPin = null;
+        this.repairTicketId = null;
 
         this.ensurePinModalExists();
     }
@@ -2310,7 +2306,7 @@ class POSCheckout {
         if (cashBtn) {
             cashBtn.disabled = disabled;
             if (disabled) cashBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> PROCESSING...';
-            else cashBtn.innerHTML = '<i class="fas fa-money-bill-wave me-2"></i> CASH CHECKOUT [F4]';
+            else cashBtn.innerHTML = '<i class="fas fa-money-bill-wave me-2"></i> CASH PAYMENT [F4]';
         }
         if (splitConfirmBtn) {
             splitConfirmBtn.disabled = disabled;
@@ -2426,6 +2422,9 @@ class POSCheckout {
                 effectivePct = (Math.min(discVal, lineGross) / lineGross) * 100;
             }
 
+            const primaryImei = item.imei_number || item.imei_1 || item.imei1 || '';
+            const requiresImeiFlag = Boolean(item.requires_imei && (this.engine.enforceImei || primaryImei));
+
             return {
                 product_id: item.product_id,
                 item_instance_id: item.item_instance_id || null,
@@ -2441,13 +2440,15 @@ class POSCheckout {
                 is_discountable: item.is_discountable !== false,
                 tax_pricing_type: item.tax_pricing_type || 'EXEMPT',
                 vat_rate: item.vat_rate || 0,
-                requires_imei: Boolean(item.requires_imei),
-                imei_1: item.imei_number || item.imei_1 || item.imei1 || '',
-                imei_number: item.imei_number || item.imei_1 || item.imei1 || '',
+                requires_imei: requiresImeiFlag,
+                imei_1: primaryImei,
+                imei_number: primaryImei,
                 imei_2: item.secondary_imei || item.imei_2 || item.imei2 || '',
                 secondary_imei: item.secondary_imei || item.imei_2 || item.imei2 || '',
                 unit_conversion_id: item.conversion_id || null,
-                conversion_id: item.conversion_id || null
+                conversion_id: item.conversion_id || null,
+                repair_ticket_id: item.repair_ticket_id || null,
+                is_repair_service: Boolean(item.is_repair_service)
             };
         });
 
@@ -2475,6 +2476,11 @@ class POSCheckout {
             transaction_ref: (p.transaction_ref || p.reference || '').trim()
         }));
 
+        const activeRepairId = this.repairTicketId || 
+                               this.engine.repairTicketId || 
+                               window.activeRepairTicketId || 
+                               null;
+
         return {
             idempotency_key: this.engine.cart.activeCartIdempotencyKey,
             cart: packagedCartItems,
@@ -2491,7 +2497,7 @@ class POSCheckout {
             discount_reason: discountReason,
             trade_in_voucher_id: this.engine.tradeInManager.voucherId,
             manager_pin: this.managerPin || '',
-            repair_ticket_id: this.engine.repairTicketId || null,
+            repair_ticket_id: activeRepairId ? parseInt(activeRepairId, 10) : null,
             notes: document.getElementById('posBillNotesInput')?.value.trim() || 
                    (this.engine.tradeInManager.tradeInDetails ? `Exchange: ${this.engine.tradeInManager.tradeInDetails.model}` : '')
         };
@@ -2544,7 +2550,11 @@ class POSCheckout {
                 this.engine.cart.clear();
                 this.engine.tradeInManager.remove();
                 this.engine.customerManager.clearCustomer(true);
+                
                 this.engine.repairTicketId = null;
+                this.repairTicketId = null;
+                window.activeRepairTicketId = null;
+                window.activeRepairTicket = null;
 
                 const repairBanner = document.getElementById('linkedRepairBanner');
                 if (repairBanner) repairBanner.remove();
@@ -2587,6 +2597,9 @@ class POSCheckout {
                 this.engine.tradeInManager.remove();
                 this.engine.customerManager.clearCustomer(true);
                 this.engine.repairTicketId = null;
+                this.repairTicketId = null;
+                window.activeRepairTicketId = null;
+                window.activeRepairTicket = null;
             } else {
                 this.engine.showNotification('Network communication failure. Checkout not committed.', 'danger');
             }
@@ -2605,10 +2618,13 @@ class POSCheckout {
 class SmartPOSEngine {
     constructor() {
         const taxConfigEl = document.getElementById('posTaxConfigMeta');
-        this.shopTaxMode = taxConfigEl ? taxConfigEl.dataset.taxMode : 'PAN';
+        this.shopTaxMode = taxConfigEl ? (taxConfigEl.dataset.taxMode || 'PAN') : 'PAN';
         this.isVatMode = this.shopTaxMode === 'VAT';
         this.defaultVatRate = taxConfigEl ? parseFloat(taxConfigEl.dataset.defaultVatRate || 0) : 0;
         this.supervisorThreshold = taxConfigEl ? parseFloat(taxConfigEl.dataset.managerApprovalDiscount || 10) : 10;
+        
+        // Master Configuration Toggle: True = Strict Serialized Mode, False = Backlog / Catch-Up Mode
+        this.enforceImei = taxConfigEl ? (taxConfigEl.dataset.enforceImei !== 'false') : true;
 
         this.pendingPhoneProduct = null;
         this.repairTicketId = null;
@@ -2654,6 +2670,7 @@ class SmartPOSEngine {
         this.modalInputImei1 = document.getElementById('modalInputImei1');
         this.modalInputImei2 = document.getElementById('modalInputImei2');
         this.confirmImeiBtn = document.getElementById('confirmImeiModalBtn');
+        this.skipImeiBtn = document.getElementById('skipImeiModalBtn');
 
         this.exchangeModalEl = document.getElementById('exchangeModal');
         this.applyExchangeBtn = document.getElementById('applyExchangeBtn');
@@ -2673,6 +2690,10 @@ class SmartPOSEngine {
 
         if (this.confirmImeiBtn) {
             this.confirmImeiBtn.addEventListener('click', () => this.confirmImeiAddition());
+        }
+
+        if (this.skipImeiBtn) {
+            this.skipImeiBtn.addEventListener('click', () => this.skipImeiAddition());
         }
 
         if (this.applyExchangeBtn) {
@@ -2724,7 +2745,7 @@ class SmartPOSEngine {
                 this.checkout.processDirectCash();
             } else if (e.key === 'F7') {
                 e.preventDefault();
-                this.repairManager.openModal();
+                this.openRepairModal();
             } else if (e.key === 'F8') {
                 e.preventDefault();
                 this.openSplitPaymentModal();
@@ -2742,11 +2763,26 @@ class SmartPOSEngine {
         });
     }
 
+    openRepairModal() {
+        if (this.repairManager) {
+            this.repairManager.openModal();
+        } else {
+            const modal = document.getElementById('repairTicketSearchModal');
+            if (modal) bootstrap.Modal.getOrCreateInstance(modal).show();
+        }
+    }
+
     detectLinkedRepairTicket() {
         const urlParams = new URLSearchParams(window.location.search);
         const repairId = urlParams.get('repair_ticket');
         if (repairId) {
-            this.repairTicketId = parseInt(repairId, 10);
+            const parsedId = parseInt(repairId, 10);
+            this.repairTicketId = parsedId;
+            if (this.checkout) {
+                this.checkout.repairTicketId = parsedId;
+            }
+            window.activeRepairTicketId = parsedId;
+
             const container = document.querySelector('.pos-workspace-container') || document.querySelector('.container-fluid');
             if (container) {
                 const banner = document.createElement('div');
@@ -2835,34 +2871,66 @@ class SmartPOSEngine {
     }
 
     handleProductCardClick(product) {
-        if (this.catalogService.isPhoneProduct(product)) {
-            this.pendingPhoneProduct = product;
-            const titleEl = document.getElementById('imeiModalPhoneName');
-            if (titleEl) {
-                titleEl.innerText = `${product.name} (${product.specs || ''})`;
-            }
+        const isPhone = this.catalogService.isPhoneProduct(product);
 
-            if (this.modalInStockSelect) {
-                this.modalInStockSelect.innerHTML = '<option value="">-- Choose from In-Stock Phone Boxes --</option>';
-                if (product.in_stock_units && product.in_stock_units.length > 0) {
-                    product.in_stock_units.forEach((unit, idx) => {
-                        this.modalInStockSelect.innerHTML += `
-                            <option value="${escapeHtml(unit.imei_1)}">Box #${idx + 1}: IMEI 1: ${escapeHtml(unit.imei_1)} | IMEI 2: ${escapeHtml(unit.imei_2 || 'N/A')}</option>
-                        `;
-                    });
-                }
-            }
-
-            if (this.modalInputImei1) this.modalInputImei1.value = '';
-            if (this.modalInputImei2) this.modalInputImei2.value = '';
-
-            if (this.imeiModal) {
-                this.imeiModal.show();
-                setTimeout(() => this.modalInputImei1 && this.modalInputImei1.focus(), 300);
-            }
+        if (isPhone && this.enforceImei) {
+            // STRICT MODE: Mandate selecting or scanning an exact in-stock IMEI box
+            this.openImeiModalForProduct(product);
+        } else if (isPhone && !this.enforceImei) {
+            // BACKLOG MODE: Add directly to cart without opening blocking serial modal
+            this.cart.addItem({
+                ...product,
+                item_instance_id: null,
+                imei_1: '',
+                imei1: '',
+                imei_number: '',
+                imei_2: '',
+                imei2: '',
+                secondary_imei: '',
+                requires_imei: false,
+                requires_imei_tracking: false
+            });
+            POSAudioSynthesizer.play('success');
         } else {
+            // Standard non-serialized accessory
             this.cart.addItem(product);
             POSAudioSynthesizer.play('success');
+        }
+    }
+
+    openImeiModalForProduct(product) {
+        this.pendingPhoneProduct = product;
+        const titleEl = document.getElementById('imeiModalPhoneName');
+        if (titleEl) {
+            titleEl.innerText = `${product.name} (${product.specs || ''})`;
+        }
+
+        if (this.modalInStockSelect) {
+            this.modalInStockSelect.innerHTML = '<option value="">-- Choose from In-Stock Phone Boxes --</option>';
+            if (product.in_stock_units && product.in_stock_units.length > 0) {
+                product.in_stock_units.forEach((unit, idx) => {
+                    this.modalInStockSelect.innerHTML += `
+                        <option value="${escapeHtml(unit.imei_1)}">Box #${idx + 1}: IMEI 1: ${escapeHtml(unit.imei_1)} | IMEI 2: ${escapeHtml(unit.imei_2 || 'N/A')}</option>
+                    `;
+                });
+            }
+        }
+
+        if (this.modalInputImei1) this.modalInputImei1.value = '';
+        if (this.modalInputImei2) this.modalInputImei2.value = '';
+
+        // Unhide skip button ONLY if in Backlog Mode
+        if (this.skipImeiBtn) {
+            if (!this.enforceImei) {
+                this.skipImeiBtn.classList.remove('d-none');
+            } else {
+                this.skipImeiBtn.classList.add('d-none');
+            }
+        }
+
+        if (this.imeiModal) {
+            this.imeiModal.show();
+            setTimeout(() => this.modalInputImei1 && this.modalInputImei1.focus(), 300);
         }
     }
 
@@ -2893,8 +2961,14 @@ class SmartPOSEngine {
         const imei2 = this.modalInputImei2 ? this.modalInputImei2.value.trim() : '';
 
         if (!imei1) {
-            alert('Please enter or select Primary IMEI 1.');
-            return;
+            if (this.enforceImei) {
+                alert('Please enter or select Primary IMEI 1.');
+                return;
+            } else {
+                // In Backlog Mode, allow confirming without mandatory IMEI
+                this.skipImeiAddition();
+                return;
+            }
         }
 
         const matchedUnit = this.pendingPhoneProduct?.in_stock_units?.find(u => u.imei_1 === imei1);
@@ -2908,7 +2982,28 @@ class SmartPOSEngine {
             imei_2: imei2,
             imei2: imei2,
             secondary_imei: imei2,
-            requires_imei: true
+            requires_imei: this.enforceImei
+        });
+
+        if (this.imeiModal) this.imeiModal.hide();
+        this.pendingPhoneProduct = null;
+        POSAudioSynthesizer.play('success');
+    }
+
+    skipImeiAddition() {
+        if (!this.pendingPhoneProduct) return;
+
+        this.cart.addItem({
+            ...this.pendingPhoneProduct,
+            item_instance_id: null,
+            imei_1: '',
+            imei1: '',
+            imei_number: '',
+            imei_2: '',
+            imei2: '',
+            secondary_imei: '',
+            requires_imei: false,
+            requires_imei_tracking: false
         });
 
         if (this.imeiModal) this.imeiModal.hide();

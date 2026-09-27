@@ -843,12 +843,27 @@ input[type="checkbox"]:checked + .custom-switch::after {
 {% block content %}
 <div class="container-fluid px-4 py-4" style="max-width: 1480px;">
 
+    <!-- Hidden Configuration Meta Tag to Communicate Master Switch to Frontend Scripts -->
+    <div id="grnMasterConfigMeta"
+         data-enforce-imei="{{ SYS_CONFIG.enforce_imei_tracking|yesno:'true,false' }}"
+         style="display: none;">
+    </div>
+
     <!-- CLEAN PAGE HEADER -->
     <header class="grn-page-header">
         <div class="header-text">
             <h1>
                 <i class="fa-solid fa-boxes-packing" style="color: var(--grn-primary);"></i>
                 Goods Received Note (GRN) Inward
+                {% if not SYS_CONFIG.enforce_imei_tracking %}
+                <span class="badge bg-warning bg-opacity-10 text-dark border border-warning fs-xs ms-2">
+                    <i class="fa-solid fa-clock-rotate-left me-1"></i> Backlog Entry Mode: Phone IMEIs Optional
+                </span>
+                {% else %}
+                <span class="badge bg-success bg-opacity-10 text-success border border-success fs-xs ms-2">
+                    <i class="fa-solid fa-shield-check me-1"></i> Strict Mode: Mandatory IMEIs
+                </span>
+                {% endif %}
             </h1>
             <p>
                 Stock physical intake with Pre-VAT rate valuation, dual-mode discounts (Amount vs. %), dedicated 13% VAT, value-weighted shipping overhead distribution &amp; smart Dual-IMEI verification.
@@ -1228,8 +1243,8 @@ input[type="checkbox"]:checked + .custom-switch::after {
                             </div>
                         </div>
 
-                        <!-- Hidden Scanned IMEI Storage & Indicator Flag -->
-                        <input type="hidden" class="row-requires-imei-flag" value="false">
+                        <!-- Hidden Scanned IMEI Storage & Indicator Flag (Defaults according to master setting) -->
+                        <input type="hidden" class="row-requires-imei-flag" value="{% if SYS_CONFIG.enforce_imei_tracking %}true{% else %}false{% endif %}">
                         <div style="display: none;">
                             <textarea name="items-{{ forloop.counter0 }}-scanned_imei_list" id="id_items-{{ forloop.counter0 }}-scanned_imei_list" class="scanned-imei-hidden-input">{{ item_form.scanned_imei_list.value|default:'' }}</textarea>
                         </div>
@@ -1251,16 +1266,16 @@ input[type="checkbox"]:checked + .custom-switch::after {
                             <div style="display: flex; align-items: center; gap: 10px;">
                                 <!-- Dynamic Mode Toggle Button: Phone IMEI vs Accessory Non-IMEI -->
                                 <div class="imei-requirement-toggle">
-                                    <button type="button" class="imei-toggle-btn active" id="toggle-imei-yes-{{ forloop.counter0 }}" onclick="setRowImeiRequirement('{{ forloop.counter0 }}', true)">
+                                    <button type="button" class="imei-toggle-btn {% if SYS_CONFIG.enforce_imei_tracking %}active{% endif %}" id="toggle-imei-yes-{{ forloop.counter0 }}" onclick="setRowImeiRequirement('{{ forloop.counter0 }}', true)">
                                         <i class="fa-solid fa-mobile-screen"></i> Phone (IMEI)
                                     </button>
-                                    <button type="button" class="imei-toggle-btn" id="toggle-imei-no-{{ forloop.counter0 }}" onclick="setRowImeiRequirement('{{ forloop.counter0 }}', false)">
+                                    <button type="button" class="imei-toggle-btn {% if not SYS_CONFIG.enforce_imei_tracking %}active{% endif %}" id="toggle-imei-no-{{ forloop.counter0 }}" onclick="setRowImeiRequirement('{{ forloop.counter0 }}', false)">
                                         <i class="fa-solid fa-box"></i> Non-IMEI
                                     </button>
                                 </div>
 
                                 <!-- Dual IMEI Button -->
-                                <button type="button" class="btn-dual-imei" id="btn-dual-imei-{{ forloop.counter0 }}" onclick="openDualImeiModal('{{ forloop.counter0 }}')">
+                                <button type="button" class="btn-dual-imei" id="btn-dual-imei-{{ forloop.counter0 }}" onclick="openDualImeiModal('{{ forloop.counter0 }}')" {% if not SYS_CONFIG.enforce_imei_tracking %}style="display:none;"{% endif %}>
                                     <i class="fa-solid fa-barcode"></i> Dual-IMEIs (<span id="imei-count-tag-{{ forloop.counter0 }}">0 Units</span>)
                                 </button>
 
@@ -1392,7 +1407,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
         <div class="submit-dock-bar">
             <div class="audit-msg">
                 <i class="fa-solid fa-shield-halved"></i>
-                <span>Pre-VAT valuation, proportional overheads, and dual-IMEIs will be verified and posted atomically to warehouse stock and General Ledger.</span>
+                <span>Pre-VAT valuation, proportional overheads, and inventory counters will be verified and posted atomically to warehouse stock and General Ledger.</span>
             </div>
             <div style="display: flex; gap: 12px;">
                 <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary px-4 rounded-pill">
@@ -1545,7 +1560,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
         </div>
 
         <!-- Hidden Scanned IMEI Storage & Indicator Flag -->
-        <input type="hidden" class="row-requires-imei-flag" value="false">
+        <input type="hidden" class="row-requires-imei-flag" value="{% if SYS_CONFIG.enforce_imei_tracking %}true{% else %}false{% endif %}">
         <div style="display: none;">
             <textarea name="items-__prefix__-scanned_imei_list" id="id_items-__prefix__-scanned_imei_list" class="scanned-imei-hidden-input"></textarea>
         </div>
@@ -1566,16 +1581,16 @@ input[type="checkbox"]:checked + .custom-switch::after {
             <div style="display: flex; align-items: center; gap: 10px;">
                 <!-- Dynamic Mode Toggle Button: Phone IMEI vs Accessory Non-IMEI -->
                 <div class="imei-requirement-toggle">
-                    <button type="button" class="imei-toggle-btn active" id="toggle-imei-yes-__prefix__" onclick="setRowImeiRequirement('__prefix__', true)">
+                    <button type="button" class="imei-toggle-btn {% if SYS_CONFIG.enforce_imei_tracking %}active{% endif %}" id="toggle-imei-yes-__prefix__" onclick="setRowImeiRequirement('__prefix__', true)">
                         <i class="fa-solid fa-mobile-screen"></i> Phone (IMEI)
                     </button>
-                    <button type="button" class="imei-toggle-btn" id="toggle-imei-no-__prefix__" onclick="setRowImeiRequirement('__prefix__', false)">
+                    <button type="button" class="imei-toggle-btn {% if not SYS_CONFIG.enforce_imei_tracking %}active{% endif %}" id="toggle-imei-no-__prefix__" onclick="setRowImeiRequirement('__prefix__', false)">
                         <i class="fa-solid fa-box"></i> Non-IMEI
                     </button>
                 </div>
 
                 <!-- Dual IMEI Button -->
-                <button type="button" class="btn-dual-imei" id="btn-dual-imei-__prefix__" onclick="openDualImeiModal('__prefix__')">
+                <button type="button" class="btn-dual-imei" id="btn-dual-imei-__prefix__" onclick="openDualImeiModal('__prefix__')" {% if not SYS_CONFIG.enforce_imei_tracking %}style="display:none;"{% endif %}>
                     <i class="fa-solid fa-barcode"></i> Dual-IMEIs (<span id="imei-count-tag-__prefix__">0 Units</span>)
                 </button>
 
@@ -1593,6 +1608,10 @@ input[type="checkbox"]:checked + .custom-switch::after {
      ========================================================================== -->
 <script>
 let currentEditingModalRowIdx = null;
+
+// Read Master IMEI Policy Setting from Meta Element
+const configMetaEl = document.getElementById('grnMasterConfigMeta');
+const GLOBAL_ENFORCE_IMEI = configMetaEl ? (configMetaEl.dataset.enforceImei === 'true') : true;
 
 // Currency Formatter
 function formatNPR(num) {
@@ -1972,7 +1991,16 @@ function attachRowCalculationTriggers(containerEl) {
                 extra.requires_imei_tracking || 
                 item.is_serialized
             );
-            setRowImeiRequirement(idx, isExplicitPhone);
+
+            // DYNAMIC MASTER SETTING SENSITIVITY:
+            // If Backlog Mode is active (GLOBAL_ENFORCE_IMEI == false), default row to Non-IMEI mode
+            // so staff aren't blocked from saving backlog paper purchases.
+            // If Strict Mode is active, enforce IMEI requirement for phones.
+            if (!GLOBAL_ENFORCE_IMEI) {
+                setRowImeiRequirement(idx, false);
+            } else {
+                setRowImeiRequirement(idx, isExplicitPhone);
+            }
         }
 
         recalculateFinancials();
@@ -2076,7 +2104,7 @@ function initImeiBadges() {
 }
 
 // --------------------------------------------------------------------------
-// 7. Form Submission Validation Guard (Only Phones Enforce IMEIs)
+// 7. Form Submission Validation Guard (Respects Master Policy Switch)
 // --------------------------------------------------------------------------
 document.getElementById('grnMasterForm').addEventListener('submit', function(e) {
     let hasError = false;
@@ -2097,13 +2125,28 @@ document.getElementById('grnMasterForm').addEventListener('submit', function(e) 
         const imeiLines = imeiVal ? imeiVal.split('\n').filter(Boolean) : [];
         const isImeiRequired = row.querySelector('.row-requires-imei-flag')?.value === 'true';
 
-        // ONLY validate IMEI count if the user or system set it to "Phone (IMEI)"
-        if (prodId && isImeiRequired && imeiLines.length !== qty) {
-            hasError = true;
-            const rowNumber = row.querySelector('.counter-dot')?.textContent || '';
-            alert(`IMEI Count Incomplete on Row #${rowNumber}: This handset requires exactly ${qty} IMEI pair(s), but ${imeiLines.length} were entered.\n\nTip: If this is an accessory (earphones, charger, cover), click the 'Non-IMEI' button on this line to bypass.`);
-            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            return;
+        if (prodId) {
+            // STRICT MODE: Enforce exact 1-to-1 match for all rows flagged as requiring IMEIs
+            if (GLOBAL_ENFORCE_IMEI && isImeiRequired) {
+                if (imeiLines.length !== qty) {
+                    hasError = true;
+                    const rowNumber = row.querySelector('.counter-dot')?.textContent || '';
+                    alert(`IMEI Count Incomplete on Row #${rowNumber}: This handset requires exactly ${qty} IMEI pair(s), but ${imeiLines.length} were entered.\n\nTip: If entering old backlog bills, turn off 'Enforce Mandatory IMEI' in Settings.`);
+                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    return;
+                }
+            } 
+            // BACKLOG MODE: If IMEIs are completely empty, allow it! 
+            // Only alert if staff typed some partial IMEIs that don't match the quantity.
+            else if (!GLOBAL_ENFORCE_IMEI) {
+                if (imeiLines.length > 0 && imeiLines.length !== qty) {
+                    hasError = true;
+                    const rowNumber = row.querySelector('.counter-dot')?.textContent || '';
+                    alert(`IMEI Count Mismatch on Row #${rowNumber}: You entered ${imeiLines.length} IMEI(s) for ${qty} unit(s).\n\nIn Backlog Mode, please either leave the IMEI field completely empty or enter all ${qty} IMEI pair(s).`);
+                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    return;
+                }
+            }
         }
     });
 

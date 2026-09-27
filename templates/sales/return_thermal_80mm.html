@@ -1,0 +1,283 @@
+{% load humanize %}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Return_Slip_{{ sales_return.return_number }}</title>
+    <style>
+        @page { 
+            size: 80mm auto; 
+            margin: 0; 
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 74mm;
+            max-width: 74mm;
+            margin: 0 auto;
+            padding: 3mm;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            line-height: 1.25;
+            color: #000000;
+            background: #ffffff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .text-center { text-align: center; }
+        .text-end { text-align: right; }
+        .text-start { text-align: left; }
+        .fw-bold { font-weight: bold; }
+        
+        .divider { 
+            border-top: 1px dashed #000000; 
+            margin: 4px 0; 
+            width: 100%;
+        }
+        
+        .double-divider { 
+            border-top: 1px solid #000000; 
+            border-bottom: 1px solid #000000; 
+            padding: 3px 0; 
+            margin: 4px 0; 
+        }
+
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 10px; 
+        }
+        
+        th, td { 
+            padding: 2px 0; 
+            vertical-align: top; 
+        }
+
+        .thermal-logo-img {
+            max-height: 48px;
+            max-width: 160px;
+            object-fit: contain;
+            filter: grayscale(100%) contrast(150%);
+            display: block;
+            margin: 0 auto 4px auto;
+        }
+
+        .imei-line {
+            font-size: 9.5px;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            padding-left: 4px;
+            white-space: nowrap;
+        }
+
+        .status-pill {
+            display: inline-block;
+            font-size: 8.5px;
+            font-weight: bold;
+            border: 1px solid #000000;
+            padding: 1px 4px;
+            margin-top: 2px;
+            text-transform: uppercase;
+        }
+
+        .reason-box {
+            border: 1px dotted #000000;
+            padding: 4px;
+            margin: 4px 0;
+            font-size: 9px;
+            background-color: #fafafa;
+        }
+
+        .sig-container {
+            margin-top: 16px;
+            display: flex;
+            justify-content: space-between;
+            text-align: center;
+            font-size: 9px;
+        }
+
+        .sig-line {
+            width: 46%;
+            border-top: 1px solid #000000;
+            padding-top: 3px;
+        }
+
+        @media print {
+            .no-print { 
+                display: none !important; 
+            }
+            body {
+                padding: 1mm 0;
+            }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <!-- Top Action Toolbar (Hidden in Print View) -->
+    <div class="no-print" style="margin-bottom: 10px; text-align: center; background: #0f172a; padding: 8px; border-radius: 6px;">
+        <button onclick="window.print()" style="padding: 6px 16px; font-weight: bold; background: #dc2626; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;">
+            PRINT 80mm RETURN RECEIPT
+        </button>
+    </div>
+
+    <!-- 1. Store Header & Legal Identification -->
+    <div class="text-center">
+        {% if sales_return.branch.logo_url %}
+            <img src="{{ sales_return.branch.logo_url }}" alt="{{ sales_return.branch.display_company_name }}" class="thermal-logo-img">
+        {% elif COMPANY_LOGO_URL %}
+            <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="thermal-logo-img">
+        {% endif %}
+
+        <div class="fw-bold" style="font-size: 13px;">{{ sales_return.branch.display_company_name|default:COMPANY_NAME|upper }}</div>
+        {% if sales_return.branch.display_company_name_np or COMPANY_NAME_NP %}
+            <div style="font-size: 11px; font-weight: bold;">{{ sales_return.branch.display_company_name_np|default:COMPANY_NAME_NP }}</div>
+        {% endif %}
+        
+        <div>{{ sales_return.branch.address }}, {{ sales_return.branch.city }}</div>
+        <div>Phone: {{ sales_return.branch.phone_number }}</div>
+        
+        {% if config.pan_number %}
+            <div>PAN: {{ config.pan_number }}</div>
+        {% elif SYS_CONFIG.pan_number %}
+            <div>PAN: {{ SYS_CONFIG.pan_number }}</div>
+        {% endif %}
+        {% if config.vat_number and config.tax_system_mode == 'VAT' %}
+            <div>VAT No: {{ config.vat_number }}</div>
+        {% endif %}
+    </div>
+
+    <!-- 2. Document Title Banner -->
+    <div class="double-divider text-center fw-bold">
+        *** CREDIT NOTE / SALES RETURN ***<br>
+        <span style="font-size: 9px; font-weight: normal;">(सामान बिक्री फिर्ता पुर्जी)</span>
+    </div>
+
+    <!-- 3. Return & Invoice Metadata -->
+    <div>
+        Return Slip: <strong>{{ sales_return.return_number }}</strong><br>
+        Orig. Bill : <strong>{{ sales_return.original_estimate.estimate_number }}</strong><br>
+        Date (AD)  : {{ sales_return.return_date_ad }}<br>
+        Date (BS)  : {{ sales_return.return_date_bs|default:"-" }} BS (FY: {{ sales_return.fiscal_year|default:"-" }})<br>
+        Customer   : <strong>{{ sales_return.customer.name|default:sales_return.original_estimate.recipient_display_name }}</strong><br>
+        {% if sales_return.original_estimate.customer_phone_manual or sales_return.customer.phone_number %}
+        Phone      : {{ sales_return.customer.phone_number|default:sales_return.original_estimate.customer_phone_manual }}<br>
+        {% endif %}
+        {% if sales_return.original_estimate.customer_pan %}
+        Cust. PAN  : {{ sales_return.original_estimate.customer_pan }}<br>
+        {% endif %}
+        Refund Mode: <strong>{{ sales_return.get_refund_mode_display|upper }}</strong><br>
+        Issued By  : {{ sales_return.processed_by.get_full_name|default:sales_return.processed_by.username }}
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 4. Returned Line Items Table -->
+    <table>
+        <thead>
+            <tr>
+                <th align="left">Item Description</th>
+                <th align="center">Qty</th>
+                <th align="right">Rate</th>
+                <th align="right">Refund</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td colspan="4">
+                    <strong>{{ item.product.name }}</strong>
+                    {% if item.product.ram and item.product.internal_storage %}
+                        <span>({{ item.product.ram }}/{{ item.product.internal_storage }}{% if item.product.color_variant %} - {{ item.product.color_variant }}{% endif %})</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td></td>
+                <td align="center">{{ item.return_quantity|floatformat:0 }}</td>
+                <td align="right">Rs. {{ item.estimate_item.unit_price|floatformat:2 }}</td>
+                <td align="right" class="fw-bold">Rs. {{ item.refund_amount|floatformat:2 }}</td>
+            </tr>
+
+            <!-- IMEI Tracking Identification -->
+            {% if item.returned_imei %}
+            <tr>
+                <td colspan="4" class="imei-line">
+                    [IMEI: {{ item.returned_imei }}]
+                </td>
+            </tr>
+            {% endif %}
+
+            <!-- Inventory Routing & Condition -->
+            <tr>
+                <td colspan="4" style="padding-left: 4px;">
+                    {% if item.is_defective %}
+                        <span class="status-pill">* DEFECTIVE / QUARANTINED (RMA)</span>
+                        {% if item.defect_reason %}
+                            <div style="font-size: 8.5px; color: #333;">Fault: {{ item.defect_reason }}</div>
+                        {% endif %}
+                    {% else %}
+                        <span class="status-pill">* WORKING (RESTOCKED TO SHELF)</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="divider"></div>
+
+    <!-- 5. Financial Settlement Total -->
+    <table>
+        <tr class="fw-bold" style="font-size: 13px; border-top: 1px solid #000; border-bottom: 1px solid #000;">
+            <td>TOTAL REFUND:</td>
+            <td align="right">Rs. {{ sales_return.total_refund_amount|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <td style="font-size: 9px; padding-top: 3px;">Settlement Mode:</td>
+            <td align="right" style="font-size: 9.5px; font-weight: bold; padding-top: 3px;">
+                {{ sales_return.get_refund_mode_display }}
+            </td>
+        </tr>
+    </table>
+
+    <!-- 6. Return Justification Notes -->
+    {% if sales_return.reason or sales_return.technician_notes %}
+    <div class="reason-box">
+        {% if sales_return.reason %}
+            <strong>Reason:</strong> {{ sales_return.reason }}<br>
+        {% endif %}
+        {% if sales_return.technician_notes %}
+            <strong>Tech Notes:</strong> {{ sales_return.technician_notes }}
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 7. Acknowledgement Signatures -->
+    <div class="sig-container">
+        <div class="sig-line">
+            Customer Signature<br>
+            <span style="font-size: 7.5px;">(Refund Received)</span>
+        </div>
+        <div class="sig-line">
+            Authorized Stamp<br>
+            <span style="font-size: 7.5px;">({{ sales_return.branch.name }})</span>
+        </div>
+    </div>
+
+    <!-- 8. Return Policy Notice Footer -->
+    <div class="text-center" style="font-size: 8px; margin-top: 10px; line-height: 1.3;">
+        * This voucher certifies goods return and corresponding ledger adjustment.<br>
+        {% if SYS_CONFIG.bill_estimate_disclaimer %}
+            {{ SYS_CONFIG.bill_estimate_disclaimer }}<br>
+        {% endif %}
+        *** Thank You ***
+    </div>
+</body>
+</html>

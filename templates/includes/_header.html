@@ -169,6 +169,20 @@
                             <span>Shift Registers &amp; Float</span>
                         </a>
                     </li>
+
+                    <!-- 1-Click System Settings Link (Role-Guarded for Owner, Manager & Superuser) -->
+                    {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
+                    <li>
+                        <a class="dropdown-item text-dark py-2 fs-xs rounded-2 d-flex align-items-center justify-content-between" href="{% url 'core:settings' %}">
+                            <div class="d-flex align-items-center gap-2">
+                                <i class="fas fa-sliders text-primary"></i>
+                                <span>System Settings</span>
+                            </div>
+                            <span class="badge bg-primary bg-opacity-10 text-primary font-mono fs-3xs">IMEI &amp; TAX</span>
+                        </a>
+                    </li>
+                    {% endif %}
+
                     <li><hr class="dropdown-divider my-1"></li>
                     <li>
                         <form action="{% url 'users:logout' %}" method="post" class="m-0">

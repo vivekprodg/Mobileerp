@@ -20,8 +20,8 @@ class SystemConfiguration(TimeStampedModel):
     """
     Central master parameter singleton governing shop tax registration identity,
     dynamic tax rates, estimate/proforma bill headers, manager discount thresholds,
-    NTA MDMS compliance policies, trade-in margin buffers, and
-    dedicated Chart of Accounts control ledger bindings for automated journal entries.
+    NTA MDMS compliance policies, trade-in margin buffers, IMEI enforcement rules,
+    and dedicated Chart of Accounts control ledger bindings for automated journal entries.
     """
     CACHE_KEY = 'system_configuration_singleton'
 
@@ -106,6 +106,17 @@ class SystemConfiguration(TimeStampedModel):
         choices=[('80mm', '80mm Roll (Standard Thermal POS)'), ('58mm', '58mm Roll (Mini Thermal)'), ('a4', 'Standard A4 Sheet')],
         default='80mm',
         verbose_name=_("Thermal Printer Width")
+    )
+
+    # Master IMEI Tracking Enforcement Switch (Backlog vs. Strict Mode)
+    enforce_imei_tracking = models.BooleanField(
+        default=True,
+        db_index=True,
+        verbose_name=_("Enforce Mandatory Handset IMEI Tracking"),
+        help_text=_(
+            "When unchecked (Backlog Mode), phones can be added, purchased, and sold using simple "
+            "quantities without typing IMEIs. When checked (Live Mode), all phone transactions strictly demand IMEIs."
+        )
     )
 
     # NTA MDMS Compliance Module
@@ -278,7 +289,8 @@ class SystemConfiguration(TimeStampedModel):
                 default_vat_rate=Decimal('0.00'),
                 bill_header_title="SALES ESTIMATE SLIP",
                 require_manager_approval_discount=Decimal('10.00'),
-                default_trade_in_margin_percent=Decimal('15.00')
+                default_trade_in_margin_percent=Decimal('15.00'),
+                enforce_imei_tracking=True
             )
         cache.set(cls.CACHE_KEY, obj, timeout=300)
         return obj

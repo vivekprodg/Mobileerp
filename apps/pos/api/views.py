@@ -7,15 +7,18 @@ from rest_framework import status, permissions
 from apps.pos.models import POSHoldCart
 from apps.pos.api.serializers import POSHoldCartSerializer
 from apps.customers.models import Customer
+from apps.core.models import SystemConfiguration
 
 class HoldCartListCreateAPIView(APIView):
     """
     API endpoint to list and suspend (park) active customer carts with complete preservation of:
     - Explicit item discount types: AMOUNT (Rs.), PERCENTAGE (%), and NONE
-    - Item discount input values, calculated discount deductions, and secondary effective percentages
+    - Item discount input values, calculated deductions, and effective percentages
     - Multi-quantity lines with per-unit discount integrity
     - Bill-level discount types (AMOUNT vs. PERCENTAGE) and values
-    - Catalog rates, submitted unit prices, and dual-IMEI phone identifiers.
+    - Catalog rates, submitted unit prices, and dual-IMEI phone identifiers
+    - Preserved operational linkages: repair_ticket_id, trade_in_voucher_id, and customer_pan
+    - Master Switch Compliance: Allows parking backlog phones without IMEI when enforce_imei_tracking=False
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -25,7 +28,16 @@ class HoldCartListCreateAPIView(APIView):
         if branch and not request.user.is_superuser:
             qs = qs.filter(branch=branch)
         serializer = POSHoldCartSerializer(qs, many=True)
-        return Response({'held_carts': serializer.data})
+        data = serializer.data
+
+        # Guarantee that customer_pan, trade_in_voucher_id, and repair_ticket_id are exposed
+        for idx, cart_obj in enumerate(qs):
+            payload_data = cart_obj.cart_payload if isinstance(cart_obj.cart_payload, dict) else {}
+            data[idx]['customer_pan'] = cart_obj.customer_pan or payload_data.get('customer_pan') or ''
+            data[idx]['trade_in_voucher_id'] = cart_obj.trade_in_voucher_id or payload_data.get('trade_in_voucher_id') or None
+            data[idx]['repair_ticket_id'] = cart_obj.repair_ticket_id or payload_data.get('repair_ticket_id') or None
+
+        return Response({'held_carts': data})
 
     def post(self, request):
         branch = getattr(request, 'active_branch', None)
@@ -42,13 +54,26 @@ class HoldCartListCreateAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Evaluate Master Configuration switch for IMEI enforcement
+        try:
+            sys_config = SystemConfiguration.get_solo() if hasattr(SystemConfiguration, 'get_solo') else SystemConfiguration.objects.first()
+            enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True) if sys_config else True
+        except Exception:
+            enforce_imei = True
+
         sanitized_items = []
         running_subtotal = Decimal('0.00')
 
         for item in cart_data:
-            requires_imei = bool(item.get('requires_imei', False))
+            # Check if this item is a repair service (never demand IMEI for labor/service)
+            item_repair_ticket_id = item.get('repair_ticket_id') or None
+            is_repair_service = bool(item.get('is_repair_service', False) or item_repair_ticket_id)
+            requires_imei = bool(item.get('requires_imei', False)) and not is_repair_service
+
             imei_1 = (item.get('imei_number') or item.get('imei_1') or item.get('imei1') or '').strip()
-            if requires_imei and not imei_1:
+
+            # Enforce Primary IMEI 1 ONLY if the master switch is ON
+            if enforce_imei and requires_imei and not imei_1:
                 return Response({
                     'error': f"Item '{item.get('name', 'Handset')}' is missing mandatory Primary IMEI 1."
                 }, status=status.HTTP_400_BAD_REQUEST)
@@ -80,7 +105,6 @@ class HoldCartListCreateAPIView(APIView):
             elif raw_dtype == 'NONE':
                 norm_dtype = 'NONE'
             else:
-                # Fallback based on legacy discount percent
                 try:
                     norm_dtype = 'PERCENTAGE' if float(item.get('discount_percent', 0) or 0) > 0 else 'NONE'
                 except (ValueError, TypeError):
@@ -101,12 +125,12 @@ class HoldCartListCreateAPIView(APIView):
             if disc_val < Decimal('0.00'):
                 disc_val = Decimal('0.00')
 
-            is_discountable = bool(item.get('is_discountable', True))
+            is_discountable = bool(item.get('is_discountable', True)) and not is_repair_service
             if not is_discountable:
                 norm_dtype = 'NONE'
                 disc_val = Decimal('0.00')
 
-            # Calculate exact monetary deduction and secondary effective control percentage
+            # Calculate exact monetary deduction and secondary effective percentage
             if norm_dtype == 'AMOUNT':
                 item_discount_amount = min(disc_val, line_gross)
                 effective_pct = (
@@ -136,8 +160,7 @@ class HoldCartListCreateAPIView(APIView):
                 'cost_price': float(Decimal(str(item.get('cost_price', 0) or 0)).quantize(Decimal('0.01'))),
                 'quantity': float(qty),
                 'unit_code': item.get('unit_code', 'Pcs'),
-                # Explicitly preserved discount fields
-                'discount_type': norm_dtype,  # Strictly "AMOUNT", "PERCENTAGE", or "NONE"
+                'discount_type': norm_dtype,
                 'discount_value': float(disc_val),
                 'discount_input_value': float(disc_val),
                 'discount_percent': float(effective_pct),
@@ -153,6 +176,8 @@ class HoldCartListCreateAPIView(APIView):
                 'secondary_imei': (item.get('secondary_imei') or item.get('imei_2') or item.get('imei2') or '').strip(),
                 'conversion_id': item.get('conversion_id') or item.get('unit_conversion_id') or None,
                 'unit_conversion_id': item.get('conversion_id') or item.get('unit_conversion_id') or None,
+                'repair_ticket_id': item_repair_ticket_id,
+                'is_repair_service': is_repair_service,
             }
             sanitized_items.append(sanitized_item)
 
@@ -189,7 +214,7 @@ class HoldCartListCreateAPIView(APIView):
         discount_reason = str(request.data.get('discount_reason', '') or '').strip()
         notes = str(request.data.get('notes', '') or '').strip()
 
-        # Customer Resolution
+        # Customer & Tax PAN Resolution
         customer_obj = None
         customer_id = request.data.get('customer_id') or request.data.get('customer')
         if customer_id:
@@ -205,6 +230,32 @@ class HoldCartListCreateAPIView(APIView):
         if not cust_phone and customer_obj:
             cust_phone = customer_obj.phone_number
 
+        cust_pan = (
+            request.data.get('customer_pan', '') or
+            (customer_obj.pan_number if customer_obj and customer_obj.pan_number else '') or
+            ''
+        ).strip()
+
+        # Trade-In & Repair Ticket Linkages Resolution
+        trade_in_voucher_id = request.data.get('trade_in_voucher_id') or None
+        if trade_in_voucher_id:
+            try:
+                trade_in_voucher_id = int(trade_in_voucher_id)
+            except (ValueError, TypeError):
+                trade_in_voucher_id = None
+
+        repair_ticket_id = request.data.get('repair_ticket_id') or None
+        if not repair_ticket_id:
+            for itm in sanitized_items:
+                if itm.get('repair_ticket_id'):
+                    repair_ticket_id = itm.get('repair_ticket_id')
+                    break
+        if repair_ticket_id:
+            try:
+                repair_ticket_id = int(repair_ticket_id)
+            except (ValueError, TypeError):
+                repair_ticket_id = None
+
         try:
             subtotal = Decimal(str(request.data.get('subtotal', running_subtotal) or running_subtotal)).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
@@ -212,7 +263,7 @@ class HoldCartListCreateAPIView(APIView):
         except (InvalidOperation, ValueError, TypeError):
             subtotal = running_subtotal
 
-        # Build payload snapshot preserving item discount modes, values, and effective percentages
+        # Build comprehensive payload snapshot
         cart_payload = {
             'items': sanitized_items,
             'bill_discount_type': raw_bill_type,
@@ -221,6 +272,9 @@ class HoldCartListCreateAPIView(APIView):
             'discount_reason': discount_reason,
             'customer_phone': cust_phone,
             'customer_name': cust_name,
+            'customer_pan': cust_pan,
+            'trade_in_voucher_id': trade_in_voucher_id,
+            'repair_ticket_id': repair_ticket_id,
         }
 
         hold_reference = f"HOLD-{uuid.uuid4().hex[:6].upper()}"
@@ -232,6 +286,9 @@ class HoldCartListCreateAPIView(APIView):
             customer=customer_obj,
             customer_name=cust_name,
             customer_phone=cust_phone,
+            customer_pan=cust_pan,
+            trade_in_voucher_id=trade_in_voucher_id,
+            repair_ticket_id=repair_ticket_id,
             cart_payload=cart_payload,
             subtotal=subtotal,
             bill_discount_type=raw_bill_type,
@@ -250,8 +307,9 @@ class HoldCartRecallDeleteAPIView(APIView):
     """
     API endpoint to retrieve (recall) and permanently discard suspended hold carts.
     Guarantees that:
+    - Customer PAN, trade-in voucher ID, and repair ticket ID are fully restored.
     - Item discount types (AMOUNT, PERCENTAGE, NONE) and input values are returned intact.
-    - Top-level bill discount type, value, and reasons are fully restored.
+    - Top-level bill discount type, value, and reasons are completely preserved.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -270,6 +328,23 @@ class HoldCartRecallDeleteAPIView(APIView):
         data['bill_discount_type'] = norm_bill_type
         data['bill_discount_value'] = str(cart.bill_discount_value)
         data['discount_percent'] = str(cart.discount_percent)
+
+        # Restore customer PAN, trade-in voucher ID, and repair ticket ID
+        payload_data = cart.cart_payload if isinstance(cart.cart_payload, dict) else {}
+
+        customer_pan = cart.customer_pan or payload_data.get('customer_pan') or ''
+        trade_in_voucher_id = cart.trade_in_voucher_id or payload_data.get('trade_in_voucher_id') or None
+        repair_ticket_id = cart.repair_ticket_id or payload_data.get('repair_ticket_id') or None
+
+        data['customer_pan'] = customer_pan
+        data['trade_in_voucher_id'] = trade_in_voucher_id
+        data['repair_ticket_id'] = repair_ticket_id
+
+        # Guarantee payload dictionary reflects the restored attributes
+        if 'cart_payload' in data and isinstance(data['cart_payload'], dict):
+            data['cart_payload']['customer_pan'] = customer_pan
+            data['cart_payload']['trade_in_voucher_id'] = trade_in_voucher_id
+            data['cart_payload']['repair_ticket_id'] = repair_ticket_id
 
         return Response(data, status=status.HTTP_200_OK)
 

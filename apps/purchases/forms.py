@@ -8,10 +8,12 @@ Upgraded Capabilities:
    - Validates that bill discount is non-negative and percentages do not exceed 100%.
 2. GRNItemForm:
    - Exposes dual-mode line discounts: `discount_type` (Amount vs %) and `discount_input_value`.
-   - Fully removes legacy percentage-only restrictions.
-   - Strictly validates that a flat cash discount cannot exceed the line gross merchandise value.
+   - Dynamic Master Switch IMEI Enforcement:
+     * When `enforce_imei_tracking=True` (Strict Mode): Enforces exact 1-to-1 match between handset quantity and scanned IMEIs.
+     * When `enforce_imei_tracking=False` (Backlog Mode): Allows phones to be saved as quantity-only entries without IMEIs.
+     * Accessories: Always bypass IMEI requirements regardless of mode.
 3. Strict Serialized & Dual-IMEI Validation:
-   - Form-level validation ensures scanned IMEI tokens match purchased whole integer handset units.
+   - Validates numeric IMEI format and prevents duplicate entries within the same handset unit.
 """
 
 import re
@@ -28,6 +30,7 @@ from apps.purchases.models import (
 )
 from apps.inventory.models import Product, UnitOfMeasurement, UnitConversion
 from apps.branches.models import Branch
+from apps.core.models import SystemConfiguration
 from apps.core.nepali_calendar import NepaliCalendar
 
 # ==============================================================================
@@ -366,7 +369,10 @@ class GRNItemForm(forms.ModelForm):
     - Unit Purchase Rate is strictly treated as Pre-VAT.
     - Two-Way Line Discount: Flat Amount (रू) or Percentage (%).
     - Automatic validation preventing discount amount > line gross value.
-    - Scanned dual-IMEI pair count matching integer unit quantity.
+    - Dynamic Master Switch IMEI Enforcement:
+      * When enforce_imei_tracking is ON: Exact 1-to-1 match between handset quantity and scanned IMEIs.
+      * When enforce_imei_tracking is OFF (Backlog Mode): Allows phones to be saved as quantity-only entries with empty IMEIs.
+      * Accessories: Always bypass IMEI requirements regardless of mode.
     """
 
     class Meta:
@@ -457,7 +463,7 @@ class GRNItemForm(forms.ModelForm):
         rate = cleaned_data.get('purchase_rate') or Decimal('0.00')
         disc_type = cleaned_data.get('discount_type') or 'NONE'
         disc_input = cleaned_data.get('discount_input_value') or Decimal('0.00')
-        scanned_raw = cleaned_data.get('scanned_imei_list') or ''
+        scanned_raw = (cleaned_data.get('scanned_imei_list') or '').strip()
 
         # 1. Validate Discount Logic Against Pre-VAT Gross Value
         line_gross = (quantity * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -471,7 +477,8 @@ class GRNItemForm(forms.ModelForm):
                     _(f"Discount amount (Rs. {disc_input:,.2f}) cannot exceed total line value (Rs. {line_gross:,.2f}).")
                 )
 
-        # 2. Strict Serialized IMEI Tracking Validation
+        # 2. Dynamic Serialized IMEI Tracking Validation (Master Switch Sensitive)
+        # Non-phone accessories (requires_imei_tracking=False and requires_serial_tracking=False) ALWAYS bypass this check.
         if product and (product.requires_imei_tracking or product.requires_serial_tracking):
             factor = cleaned_data.get('conversion_factor') or Decimal('1.000')
             base_units = (quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
@@ -485,21 +492,42 @@ class GRNItemForm(forms.ModelForm):
             expected_units = int(base_units)
             tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
 
-            if expected_units > 0 and len(tokens) != expected_units:
-                raise forms.ValidationError(
-                    _(f"IMEI Count Mismatch on '{product.name}': Purchased quantity is {expected_units} unit(s), "
-                      f"but {len(tokens)} device IMEI pair(s) were scanned.")
-                )
+            # Fetch the Master IMEI Enforcement Setting
+            sys_config = SystemConfiguration.get_solo()
+            enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
 
+            # BACKLOG MODE (enforce_imei == False):
+            # If the user left the IMEI box completely blank, allow saving phone as a quantity-only entry!
+            if not enforce_imei and len(tokens) == 0:
+                return cleaned_data
+
+            # STRICT MODE (enforce_imei == True):
+            # Mandate an exact 1-to-1 match between quantity and scanned IMEIs.
+            if enforce_imei:
+                if expected_units > 0 and len(tokens) != expected_units:
+                    raise forms.ValidationError(
+                        _(f"IMEI Count Mismatch on '{product.name}': Purchased quantity is {expected_units} unit(s), "
+                          f"but {len(tokens)} device IMEI pair(s) were scanned. "
+                          f"Please scan exactly {expected_units} IMEI pair(s), or switch off 'Enforce Mandatory IMEI' in Settings for backlog entries.")
+                    )
+            else:
+                # In Backlog Mode, if staff typed some IMEIs but not all, alert them to enter all or leave completely blank
+                if len(tokens) > 0 and len(tokens) != expected_units:
+                    raise forms.ValidationError(
+                        _(f"IMEI Count Mismatch on '{product.name}': You entered {len(tokens)} IMEI(s) for {expected_units} unit(s). "
+                          f"In Backlog Mode, please either leave the IMEI field completely empty or enter all {expected_units} IMEI pair(s).")
+                    )
+
+            # Validate structure and format of any tokens provided
             for token in tokens:
                 parts = token.split('|')
                 im1 = parts[0].strip() if len(parts) > 0 and parts[0].strip() else ''
                 im2 = parts[1].strip() if len(parts) > 1 and parts[1].strip() else ''
 
                 if im1 and not im1.isdigit():
-                    raise forms.ValidationError(_(f"Invalid IMEI 1 '{im1}'. IMEIs must be numeric."))
+                    raise forms.ValidationError(_(f"Invalid IMEI 1 '{im1}'. IMEIs must be numeric digits."))
                 if im2 and not im2.isdigit():
-                    raise forms.ValidationError(_(f"Invalid IMEI 2 '{im2}'. IMEIs must be numeric."))
+                    raise forms.ValidationError(_(f"Invalid IMEI 2 '{im2}'. IMEIs must be numeric digits."))
                 if im1 and im2 and im1 == im2:
                     raise forms.ValidationError(_(f"IMEI 1 and IMEI 2 cannot be identical ('{im1}')."))
 
@@ -583,6 +611,7 @@ class PurchaseReturnItemForm(forms.ModelForm):
     Line item form for each product returned to a supplier.
     Captures product, return quantity, agreed return rate, tax rate,
     specific defect reason, and scanned IMEI/serial numbers for phones.
+    Supports Backlog Mode skipping if returning units entered without serials.
     """
     class Meta:
         model = PurchaseReturnItem
@@ -651,22 +680,38 @@ class PurchaseReturnItemForm(forms.ModelForm):
         cleaned_data = super().clean()
         product = cleaned_data.get('product')
         qty = cleaned_data.get('returned_quantity')
-        imei_raw = cleaned_data.get('returned_imei_list') or ''
+        imei_raw = (cleaned_data.get('returned_imei_list') or '').strip()
 
+        # Dynamic validation consulting SystemConfiguration.enforce_imei_tracking
         if product and (product.requires_imei_tracking or product.requires_serial_tracking):
             expected_units = int(qty or 0)
             tokens = [t.strip() for t in re.split(r'[\n,;]+', imei_raw) if t.strip()]
 
-            if expected_units > 0 and len(tokens) != expected_units:
-                raise forms.ValidationError(
-                    _(f"IMEI Count Mismatch for '{product.name}': You are returning {expected_units} unit(s), "
-                      f"but {len(tokens)} IMEI(s) were entered. Exactly {expected_units} IMEI(s) are required.")
-                )
+            sys_config = SystemConfiguration.get_solo()
+            enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
+
+            # If Backlog Mode is active and no IMEIs were entered, permit return without IMEIs
+            if not enforce_imei and len(tokens) == 0:
+                return cleaned_data
+
+            if enforce_imei:
+                if expected_units > 0 and len(tokens) != expected_units:
+                    raise forms.ValidationError(
+                        _(f"IMEI Count Mismatch for '{product.name}': You are returning {expected_units} unit(s), "
+                          f"but {len(tokens)} IMEI(s) were entered. Exactly {expected_units} IMEI(s) are required.")
+                    )
+            else:
+                if len(tokens) > 0 and len(tokens) != expected_units:
+                    raise forms.ValidationError(
+                        _(f"IMEI Count Mismatch for '{product.name}': You entered {len(tokens)} IMEI(s) for {expected_units} unit(s). "
+                          f"In Backlog Mode, please either leave the IMEI field empty or enter all {expected_units} IMEI(s).")
+                    )
 
             for token in tokens:
                 clean_token = token.split('|')[0].strip()
                 if not clean_token.isdigit() and len(clean_token) >= 14:
                     raise forms.ValidationError(_(f"Invalid IMEI '{clean_token}'. IMEIs must be numeric digits."))
+
         return cleaned_data
 
 PurchaseReturnItemFormSet = inlineformset_factory(

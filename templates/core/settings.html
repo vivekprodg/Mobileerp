@@ -4,39 +4,54 @@
 {% block title %}System Configuration | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4">
+<div class="container-fluid px-4 py-4" style="max-width: 1100px;">
     <div class="d-flex align-items-center justify-content-between mb-4">
         <div>
-            <h4 class="fw-bold text-dark mb-0">System & Hardware Settings</h4>
-            <p class="text-muted fs-xs mb-0">Configure estimation banners, thermal printer width, and Nepali calendar views</p>
+            <h4 class="fw-bold text-dark mb-0">System &amp; Hardware Settings</h4>
+            <p class="text-muted fs-xs mb-0">Configure store identity, estimation banners, thermal printer width, and inventory serial tracking rules</p>
         </div>
     </div>
+
+    <!-- Feedback Message Alerts -->
+    {% if messages %}
+    <div class="mb-3">
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show rounded-3 p-3 fs-xs shadow-xs" role="alert">
+            <i class="fas fa-circle-info me-1"></i> {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
         <form method="post" class="needs-validation">
             {% csrf_token %}
             <div class="row g-3">
+                <!-- Section 1: Store Identity & Profile -->
                 <div class="col-12">
-                    <h6 class="fw-bold text-primary border-bottom pb-2 mb-3">Shop Profile & Estimation Disclaimer</h6>
+                    <h6 class="fw-bold text-primary border-bottom pb-2 mb-3">
+                        <i class="fas fa-store me-1"></i> Shop Profile &amp; Estimation Disclaimer
+                    </h6>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label fw-semibold">Company Name (English)</label>
+                    <label class="form-label fw-semibold fs-xs">Company Name (English) <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" name="company_name_en" value="{{ SYS_CONFIG.company_name_en }}" required>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label fw-semibold">Company Name (Nepali)</label>
+                    <label class="form-label fw-semibold fs-xs">Company Name (Nepali)</label>
                     <input type="text" class="form-control" name="company_name_np" value="{{ SYS_CONFIG.company_name_np }}">
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label fw-semibold">PAN Number</label>
-                    <input type="text" class="form-control" name="pan_number" value="{{ SYS_CONFIG.pan_number|default:'' }}">
+                    <label class="form-label fw-semibold fs-xs">PAN Number</label>
+                    <input type="text" class="form-control font-monospace" name="pan_number" value="{{ SYS_CONFIG.pan_number|default:'' }}" placeholder="9-digit PAN">
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label fw-semibold">Default VAT Rate (%)</label>
-                    <input type="number" step="0.01" class="form-control" name="default_vat_rate" value="{{ SYS_CONFIG.default_vat_rate }}">
+                    <label class="form-label fw-semibold fs-xs">Default VAT Rate (%)</label>
+                    <input type="number" step="0.01" class="form-control font-monospace" name="default_vat_rate" value="{{ SYS_CONFIG.default_vat_rate }}">
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label fw-semibold">Printer Paper Width</label>
+                    <label class="form-label fw-semibold fs-xs">Printer Paper Width</label>
                     <select name="thermal_printer_paper_width" class="form-select">
                         <option value="80mm" {% if SYS_CONFIG.thermal_printer_paper_width == '80mm' %}selected{% endif %}>80mm Thermal POS Roll</option>
                         <option value="58mm" {% if SYS_CONFIG.thermal_printer_paper_width == '58mm' %}selected{% endif %}>58mm Mini Roll</option>
@@ -44,15 +59,50 @@
                     </select>
                 </div>
                 <div class="col-12">
-                    <label class="form-label fw-semibold">Bill Header Title</label>
+                    <label class="form-label fw-semibold fs-xs">Bill Header Title</label>
                     <input type="text" class="form-control" name="bill_header_title" value="{{ SYS_CONFIG.bill_header_title }}">
                 </div>
                 <div class="col-12">
-                    <label class="form-label fw-semibold">Non-IRD Estimation Notice Disclaimer</label>
-                    <textarea class="form-control" rows="3" name="bill_estimate_disclaimer">{{ SYS_CONFIG.bill_estimate_disclaimer }}</textarea>
+                    <label class="form-label fw-semibold fs-xs">Non-IRD Estimation Notice Disclaimer</label>
+                    <textarea class="form-control fs-xs" rows="3" name="bill_estimate_disclaimer">{{ SYS_CONFIG.bill_estimate_disclaimer }}</textarea>
                 </div>
+
+                <!-- Section 2: Master Inventory Serial & IMEI Tracking Policy -->
+                <div class="col-12 mt-4">
+                    <h6 class="fw-bold text-primary border-bottom pb-2 mb-3">
+                        <i class="fas fa-barcode me-1"></i> Inventory Serial &amp; IMEI Policy
+                    </h6>
+                </div>
+                <div class="col-12">
+                    <div class="p-3 rounded-4 border bg-light">
+                        <div class="form-check form-switch d-flex align-items-center gap-3 p-0 mb-0">
+                            <input class="form-check-input ms-0 mt-0" 
+                                   type="checkbox" 
+                                   role="switch" 
+                                   id="enforceImeiTrackingSwitch" 
+                                   name="enforce_imei_tracking" 
+                                   value="true" 
+                                   {% if SYS_CONFIG.enforce_imei_tracking %}checked{% endif %} 
+                                   style="width: 2.7em; height: 1.4em; cursor: pointer;">
+                            <label class="form-check-label fw-bold text-dark fs-sm pointer mb-0" for="enforceImeiTrackingSwitch">
+                                Enforce Mandatory Handset IMEI Tracking (मोबाइल फोनमा IMEI अनिवार्य गर्नुहोस्)
+                            </label>
+                        </div>
+                        <div class="alert alert-info border-0 rounded-3 p-3 mt-3 mb-0 fs-xs d-flex align-items-start gap-2 shadow-xs">
+                            <i class="fas fa-info-circle text-primary mt-0.5 fs-6 flex-shrink-0"></i>
+                            <div>
+                                <strong>Operating Guidance:</strong> 
+                                Turn this switch <strong>OFF</strong> (Backlog Mode) while typing in old pending purchase bills, historical sales records, or opening shelf stock where physical box IMEIs were not recorded. 
+                                Turn this switch <strong>ON</strong> (Strict Mode) once backlog entry is completed to guarantee that no smartphone can ever be purchased or sold without scanning its exact IMEI. 
+                                <em>Note: Non-phone accessories (chargers, covers, screen guards) never require an IMEI regardless of this setting.</em>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Submission Button -->
                 <div class="col-12 mt-4 text-end">
-                    <button type="submit" class="btn btn-primary px-4 py-2 rounded-pill fw-bold shadow-sm">
+                    <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm">
                         <i class="fas fa-save me-1"></i> Save Configuration
                     </button>
                 </div>

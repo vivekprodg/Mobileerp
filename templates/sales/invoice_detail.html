@@ -7,9 +7,9 @@
 <style>
 .invoice-detail-card {
     background: #ffffff;
-    border: 1px solid var(--erp-slate-200);
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
     border-radius: 16px;
-    box-shadow: var(--erp-shadow-xs);
+    box-shadow: var(--erp-shadow-xs, 0 1px 2px rgba(0,0,0,0.05));
 }
 
 .imei-badge-container {
@@ -37,7 +37,7 @@
 }
 
 .imei-copy-btn:hover {
-    color: var(--erp-primary);
+    color: var(--erp-primary, #2563eb);
     transform: scale(1.15);
 }
 
@@ -70,6 +70,18 @@
     border-radius: 8px;
     padding: 8px 10px;
     font-size: 0.75rem;
+}
+
+.void-warning-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background-color: #fee2e2;
+    color: #dc2626;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
 }
 </style>
 {% endblock %}
@@ -156,17 +168,16 @@
                 </a>
             {% endif %}
 
-            <!-- Restricted Bill Void Action -->
+            <!-- Restricted Bill Void Action: Opens Reason Modal -->
             {% if estimate.status != 'CANCELLED' and estimate.status != 'RETURNED' %}
                 {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
-                <form action="{% url 'sales:estimate_cancel' estimate.pk %}" method="post" class="d-inline m-0">
-                    {% csrf_token %}
-                    <button type="submit" 
-                            class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold" 
-                            onclick="return confirm('Are you sure you want to completely void this sales estimate? All inventory, debt, and trade-in balances will be safely reversed.');">
-                        <i class="fas fa-ban me-1"></i> Void Bill
-                    </button>
-                </form>
+                <button type="button" 
+                        class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold shadow-xs" 
+                        data-bs-toggle="modal" 
+                        data-bs-target="#voidBillConfirmModal"
+                        title="Void sales estimate and safely reverse inventory, debt, and journals">
+                    <i class="fas fa-ban me-1"></i> Void Bill
+                </button>
                 {% endif %}
             {% endif %}
 
@@ -180,7 +191,7 @@
     <!-- Non-IRD Estimation Notice Header Banner -->
     <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 fs-xs text-dark">
         <div class="d-flex align-items-center gap-2">
-            <i class="fas fa-info-circle text-warning fs-5"></i>
+            <i class="fas fa-circle-info text-warning fs-5"></i>
             <div>
                 <strong>{{ SYS_CONFIG.bill_header_title }}:</strong> {{ SYS_CONFIG.bill_estimate_disclaimer }}
             </div>
@@ -525,13 +536,7 @@
                     <tr>
                         <td class="text-muted">
                             <div class="d-flex align-items-center gap-1">
-                                <span>
-                                    {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
-                                        Bill Discount:
-                                    {% else %}
-                                        Bill Discount:
-                                    {% endif %}
-                                </span>
+                                <span>Bill Discount:</span>
                                 <span class="badge {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25{% else %}bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25{% endif %} font-monospace fs-2xs">
                                     {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
                                         Rs. {{ estimate.bill_discount_input_value|default:estimate.bill_discount_amount|floatformat:2|intcomma }} (Eff. {{ estimate.bill_discount_percent|floatformat:1 }}%)
@@ -694,6 +699,90 @@
     </div>
 </div>
 
+<!-- =========================================================================
+     MODAL: VOID / CANCEL SALES ESTIMATE CONFIRMATION MODAL
+     ========================================================================= -->
+<div class="modal fade" id="voidBillConfirmModal" tabindex="-1" aria-labelledby="voidBillConfirmModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <form action="{% url 'sales:estimate_cancel' estimate.pk %}" method="post" id="voidEstimateForm" novalidate>
+                {% csrf_token %}
+                <div class="modal-header bg-danger text-white py-3 px-4 border-0">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fas fa-triangle-exclamation fs-5"></i>
+                        <div>
+                            <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="voidBillConfirmModalLabel">Confirm Sales Bill Voiding</h6>
+                            <small class="text-white-50 fs-2xs font-monospace">{{ estimate.estimate_number }}</small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body p-4">
+                    <!-- Impact Notice Alert -->
+                    <div class="alert alert-danger bg-danger bg-opacity-10 border-danger border-opacity-25 rounded-3 p-3 fs-xs mb-3 text-dark">
+                        <strong class="d-block text-danger mb-1"><i class="fas fa-shield-halved me-1"></i> Irreversible Action Safeguard:</strong>
+                        <ul class="mb-0 ps-3 text-muted">
+                            <li>All sold items ({{ items.count }} lines) will be returned to <strong>sellable store inventory</strong>.</li>
+                            <li>Serialized smartphone IMEIs will be re-marked as <strong>IN_STOCK</strong>.</li>
+                            <li>Customer component warranties for this sale will be <strong>voided</strong>.</li>
+                            {% if estimate.due_amount > 0 %}
+                            <li>Customer debt of <strong>Rs. {{ estimate.due_amount|floatformat:2|intcomma }}</strong> will be reversed from Udhaari ledger.</li>
+                            {% endif %}
+                            <li>Sales Journal voucher will be cancelled and an inverse balancing voucher posted.</li>
+                        </ul>
+                    </div>
+
+                    <!-- Commercial Justification Dropdown -->
+                    <div class="mb-3">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">
+                            Operational Justification / Category <span class="text-danger">*</span>
+                        </label>
+                        <select id="voidCommercialReasonCategory" class="form-select form-select-sm fw-semibold">
+                            <option value="CASHIER_ENTRY_MISTAKE" selected>Cashier Entry Mistake / Typo (काउन्टरमा इन्ट्री गल्ती)</option>
+                            <option value="CUSTOMER_CHANGED_MIND">Customer Changed Mind Before Handover (ग्राहकले सामान लिन नचाहेको)</option>
+                            <option value="DUPLICATE_BILLING">Duplicate Bill Generated (दोहोरो बिल बनेको)</option>
+                            <option value="INCORRECT_PRICING_DISCOUNT">Incorrect Pricing or Discount Applied (मूल्य वा छुट गलत भएको)</option>
+                            <option value="PAYMENT_METHOD_DISCREPANCY">Payment Method Discrepancy (भुक्तानी माध्यम त्रुटि)</option>
+                            <option value="OTHER">Other Operational Reason (अन्य कारण खुलाउनुहोस्)</option>
+                        </select>
+                    </div>
+
+                    <!-- Mandatory Detailed Cancellation Reason Input -->
+                    <div class="mb-2">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">
+                            Detailed Cancellation Reason <span class="text-danger">*</span>
+                        </label>
+                        <textarea name="cancellation_reason" 
+                                  id="voidDetailedReasonTextarea" 
+                                  class="form-control form-control-sm" 
+                                  rows="3" 
+                                  minlength="5" 
+                                  placeholder="Please provide explicit details justifying this cancellation (minimum 5 characters)..." 
+                                  required></textarea>
+                        <div class="d-flex justify-content-between text-muted fs-2xs mt-1">
+                            <span>Minimum 5 characters required for audit trail.</span>
+                            <span id="voidCharCountDisplay">0 / 5 min</span>
+                        </div>
+                    </div>
+
+                    <!-- Inline Error Notification -->
+                    <div id="voidFormValidationAlert" class="alert alert-danger p-2 fs-2xs d-none mb-0 mt-2"></div>
+                </div>
+
+                <div class="modal-footer bg-light border-0 py-2 px-4 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">
+                        Keep Bill (Cancel)
+                    </button>
+                    <button type="submit" class="btn btn-danger btn-sm px-4 rounded-pill fw-bold shadow-sm" id="confirmVoidSubmitBtn">
+                        <i class="fas fa-ban me-1"></i> Confirm &amp; Void Bill
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
 function copyToClipboard(text, btnElement) {
     if (!text) return;
@@ -711,5 +800,57 @@ function copyToClipboard(text, btnElement) {
         console.error('Could not copy text: ', err);
     });
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    // =========================================================================
+    // VOID BILL CONFIRMATION MODAL LOGIC & REASON FORMATTING
+    // =========================================================================
+    const voidForm = document.getElementById('voidEstimateForm');
+    const reasonCategory = document.getElementById('voidCommercialReasonCategory');
+    const reasonTextarea = document.getElementById('voidDetailedReasonTextarea');
+    const charCountDisplay = document.getElementById('voidCharCountDisplay');
+    const validationAlert = document.getElementById('voidFormValidationAlert');
+    const confirmSubmitBtn = document.getElementById('confirmVoidSubmitBtn');
+
+    if (reasonTextarea) {
+        reasonTextarea.addEventListener('input', () => {
+            const length = reasonTextarea.value.trim().length;
+            if (charCountDisplay) {
+                charCountDisplay.innerText = `${length} / 5 min`;
+                charCountDisplay.className = length >= 5 ? 'text-success fw-bold fs-2xs' : 'text-muted fs-2xs';
+            }
+            if (validationAlert && length >= 5) {
+                validationAlert.classList.add('d-none');
+                validationAlert.innerText = '';
+            }
+        });
+    }
+
+    if (voidForm) {
+        voidForm.addEventListener('submit', (e) => {
+            const categoryText = reasonCategory.options[reasonCategory.selectedIndex].text;
+            const detailedText = reasonTextarea.value.trim();
+
+            if (!detailedText || detailedText.length < 5) {
+                e.preventDefault();
+                if (validationAlert) {
+                    validationAlert.innerText = 'A valid, detailed cancellation reason is required (minimum 5 characters).';
+                    validationAlert.classList.remove('d-none');
+                }
+                reasonTextarea.focus();
+                return false;
+            }
+
+            // Standardize structured justification format: "[CATEGORY] Detailed note"
+            const finalReason = `[${categoryText}] ${detailedText}`;
+            reasonTextarea.value = finalReason;
+
+            if (confirmSubmitBtn) {
+                confirmSubmitBtn.disabled = true;
+                confirmSubmitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Voiding Bill...';
+            }
+        });
+    }
+});
 </script>
 {% endblock %}

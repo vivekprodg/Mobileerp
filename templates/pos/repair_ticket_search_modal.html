@@ -1,0 +1,626 @@
+<!-- =========================================================================
+     REPAIR TICKET SEARCH & ATTACH MODAL (READY_FOR_PICKUP JOBS)
+     Enables counter cashiers to search finished repair jobs, attach labor/parts
+     charges to the active POS cart, and record repair_ticket_id for automated
+     DELIVERED status handover and technician commission logging upon checkout.
+     ========================================================================= -->
+<div class="modal fade" id="repairTicketSearchModal" tabindex="-1" aria-labelledby="repairTicketSearchModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <!-- Modal Header -->
+            <div class="modal-header bg-info bg-gradient text-white py-2 px-3 border-0">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-white text-info p-2 rounded-circle fs-6 shadow-xs">
+                        <i class="fas fa-wrench"></i>
+                    </span>
+                    <div>
+                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="repairTicketSearchModalLabel">
+                            Attach Finished Repair Ticket (मर्मत बिल समायोजन)
+                        </h6>
+                        <small class="text-white-50 fs-2xs">
+                            Lookup completed repair jobs in READY_FOR_PICKUP status to collect charges and finalize handover
+                        </small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" id="closeRepairModalBtn"></button>
+            </div>
+
+            <div class="modal-body p-3 bg-light">
+                <!-- Search & Filters Card -->
+                <div class="card border-0 shadow-xs rounded-3 p-3 bg-white mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <label class="form-label fs-xs fw-bold text-dark mb-0">
+                            <i class="fas fa-search text-info me-1"></i> Search Ready Repair Tickets:
+                        </label>
+                        <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs fw-bold">
+                            <i class="fas fa-circle-check me-1"></i> Status: Ready for Pickup (सम्पन्न)
+                        </span>
+                    </div>
+
+                    <div class="input-group input-group-sm mt-1">
+                        <span class="input-group-text bg-light border text-muted">
+                            <i class="fas fa-ticket-simple"></i>
+                        </span>
+                        <input type="text" 
+                               id="repairTicketSearchInput" 
+                               class="form-control border font-monospace fs-xs" 
+                               placeholder="Search Ticket # (e.g. SRV-MAIN-000001), Customer Phone 98XXXXXXXX, Name, or IMEI..." 
+                               autocomplete="off">
+                        <button type="button" class="btn btn-outline-secondary" id="clearRepairSearchBtn" style="display: none;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button type="button" class="btn btn-info text-white fw-bold px-3 shadow-xs" id="btnBrowseReadyTickets">
+                            <i class="fas fa-list-check me-1"></i> Browse Recent
+                        </button>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center text-muted fs-2xs mt-2 px-1">
+                        <span><i class="fas fa-keyboard me-1 text-primary"></i> Press <kbd class="bg-light text-dark border">F7</kbd> at counter anytime to open this lookup.</span>
+                        <span id="repairSearchMatchCount" class="fw-bold text-info"></span>
+                    </div>
+                </div>
+
+                <!-- Currently Attached Repair Ticket Banner (Displays when a ticket is attached) -->
+                <div id="attachedRepairTicketCard" class="card border-2 border-info bg-info bg-opacity-10 rounded-3 p-3 mb-3 d-none shadow-xs">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-info text-white font-monospace fw-bold fs-xs" id="dispAttachedTicketNo">SRV-000000</span>
+                            <span class="badge bg-success text-white fs-2xs fw-bold">ATTACHED TO CART</span>
+                        </div>
+                        <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 fs-2xs rounded-pill" id="btnDetachRepairTicket">
+                            <i class="fas fa-times me-1"></i> Detach from Bill
+                        </button>
+                    </div>
+
+                    <div class="row g-2 fs-xs text-dark">
+                        <div class="col-12 col-md-4">
+                            <span class="text-muted d-block fs-2xs">Device &amp; Hardware:</span>
+                            <strong id="dispAttachedDevice">Smartphone Model</strong>
+                            <small class="text-muted d-block font-monospace" id="dispAttachedImei">IMEI: ---</small>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <span class="text-muted d-block fs-2xs">Customer:</span>
+                            <strong id="dispAttachedCustomer">Customer Name</strong>
+                            <small class="text-muted d-block font-monospace" id="dispAttachedPhone">98XXXXXXXX</small>
+                        </div>
+                        <div class="col-12 col-md-4 text-md-end">
+                            <span class="text-muted d-block fs-2xs">Total Service Charges:</span>
+                            <h5 class="fw-extrabold text-info font-monospace mb-0" id="dispAttachedFee">Rs. 0.00</h5>
+                            <small class="text-muted fs-2xs" id="dispAttachedFeeBreakdown">Labor: Rs. 0 &bull; Parts: Rs. 0</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Scroll Container -->
+                <div class="card border-0 shadow-xs rounded-3 p-2 bg-white overflow-hidden" style="min-height: 220px; max-height: 380px; overflow-y: auto;">
+                    <!-- Loading Spinner -->
+                    <div id="repairTicketsLoadingState" class="text-center py-5 d-none">
+                        <div class="spinner-border spinner-border-sm text-info mb-2" role="status"></div>
+                        <div class="text-muted fs-xs">Querying completed service repair tickets...</div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div id="repairTicketsEmptyState" class="text-center py-5 text-muted">
+                        <i class="fas fa-wrench fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                        <span>Search by Ticket Number, Customer Name, Mobile, or click <strong>Browse Recent</strong></span>
+                    </div>
+
+                    <!-- Dynamic List of Ready Repair Tickets -->
+                    <div id="repairTicketsListContainer" class="d-flex flex-column gap-2"></div>
+                </div>
+
+                <!-- Guidance Footer Notice with Non-Blocking Safe URL Lookup -->
+                <div class="p-2 mt-2 bg-white rounded-3 border d-flex justify-content-between align-items-center fs-2xs text-muted">
+                    <span>
+                        <i class="fas fa-shield-alt text-success me-1"></i> Attaching a repair ensures customer collects paid bill and technician commission is safely computed.
+                    </span>
+                    {% url 'repairs:ticket_list' as repair_ticket_list_url %}
+                    {% url 'repairs:list' as repair_list_url %}
+                    <a href="{{ repair_ticket_list_url|default:repair_list_url|default:'/repairs/' }}" target="_blank" class="text-primary text-decoration-none fw-bold">
+                        Repairs Registry &rarr;
+                    </a>
+                </div>
+            </div>
+
+            <div class="modal-footer bg-white py-2 px-3 border-top d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">
+                    Close
+                </button>
+                <span class="text-muted fs-2xs font-monospace">Ready Repair Service Intake v2.0</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Safe Server-Side JSON Serialization for Prefilled Ticket Data -->
+{% if prefill_repair_ticket %}
+<script type="application/json" id="prefillRepairTicketData">
+{
+    "id": {{ prefill_repair_ticket.id }},
+    "ticket_number": "{{ prefill_repair_ticket.ticket_number|escapejs }}",
+    "customer_name": "{{ prefill_repair_ticket.customer_name_manual|default:prefill_repair_ticket.customer.name|default:'Walk-in Customer'|escapejs }}",
+    "customer_phone": "{{ prefill_repair_ticket.customer_phone_manual|default:prefill_repair_ticket.customer.phone_number|default:''|escapejs }}",
+    "device_brand": "{{ prefill_repair_ticket.device_brand|default:''|escapejs }}",
+    "device_model": "{{ prefill_repair_ticket.device_model|default:''|escapejs }}",
+    "imei": "{{ prefill_repair_ticket.imei|default:''|escapejs }}",
+    "reported_fault": "{{ prefill_repair_ticket.reported_fault|default:'Hardware Repair'|escapejs }}",
+    "labor_charge": {{ prefill_repair_ticket.labor_charge|default:0 }},
+    "parts_charge": {{ prefill_repair_ticket.parts_cost|default:0 }},
+    "final_total_amount": {{ prefill_repair_ticket.final_total_amount|default:0 }},
+    "technician_name": "{{ prefill_repair_ticket.technician.username|default:''|escapejs }}"
+}
+</script>
+{% endif %}
+
+<script>
+/**
+ * Repair Ticket Lookup & POS Cart Handover Engine
+ * Enables searching tickets in READY_FOR_PICKUP status, transferring labor/parts charges
+ * into the POS active cart, and injecting repair_ticket_id into checkout payloads.
+ */
+document.addEventListener('DOMContentLoaded', () => {
+    const repairModalEl = document.getElementById('repairTicketSearchModal');
+    const searchInput = document.getElementById('repairTicketSearchInput');
+    const clearBtn = document.getElementById('clearRepairSearchBtn');
+    const browseBtn = document.getElementById('btnBrowseReadyTickets');
+    const listContainer = document.getElementById('repairTicketsListContainer');
+    const emptyState = document.getElementById('repairTicketsEmptyState');
+    const loadingState = document.getElementById('repairTicketsLoadingState');
+    const matchCountEl = document.getElementById('repairSearchMatchCount');
+
+    const attachedBanner = document.getElementById('attachedRepairTicketCard');
+    const dispTicketNo = document.getElementById('dispAttachedTicketNo');
+    const dispDevice = document.getElementById('dispAttachedDevice');
+    const dispImei = document.getElementById('dispAttachedImei');
+    const dispCustomer = document.getElementById('dispAttachedCustomer');
+    const dispPhone = document.getElementById('dispAttachedPhone');
+    const dispFee = document.getElementById('dispAttachedFee');
+    const dispFeeBreakdown = document.getElementById('dispAttachedFeeBreakdown');
+    const btnDetach = document.getElementById('btnDetachRepairTicket');
+
+    let repairDebounce = null;
+    window.activeRepairTicket = null;
+    window.activeRepairTicketId = null;
+
+    // Helper: Escape HTML strings safely
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    // Standardize ticket representation across multiple endpoint response schemas
+    function normalizeRepairTicket(t) {
+        const id = t.id || t.pk;
+        const ticketNumber = t.ticket_number || t.number || `SRV-${id}`;
+        const custName = t.customer_name || (t.customer && t.customer.name) || t.customer_name_manual || 'Walk-in Customer';
+        const custPhone = t.customer_phone || (t.customer && t.customer.phone_number) || t.customer_phone_manual || '';
+        const custPan = t.customer_pan || (t.customer && t.customer.pan_number) || '';
+        const brand = t.device_brand || t.brand_name || '';
+        const model = t.device_model || t.model_name || '';
+        const deviceName = `${brand} ${model}`.trim() || t.device_name || 'Handset';
+        const imei = t.imei || t.imei_1 || t.serial_number || '';
+        const fault = t.reported_fault || t.problem_description || t.issue_description || 'General Service / Hardware Repair';
+        const labor = parseFloat(t.labor_charge || t.labor_fee || 0) || 0;
+        const parts = parseFloat(t.parts_charge || t.parts_cost || t.parts_total || 0) || 0;
+        const total = parseFloat(t.final_total_amount || t.total_amount || t.final_charge || (labor + parts)) || 0;
+        const techName = (t.technician && (t.technician.full_name || t.technician.username)) || t.technician_name || '';
+
+        return {
+            id,
+            ticket_number: ticketNumber,
+            customer_name: custName,
+            customer_phone: custPhone,
+            customer_pan: custPan,
+            device_name: deviceName,
+            imei,
+            fault,
+            labor_charge: labor,
+            parts_charge: parts,
+            total_amount: total,
+            technician: techName,
+            status: t.service_status || t.status || 'READY_FOR_PICKUP',
+            claim_type: t.claim_type || 'PAID'
+        };
+    }
+
+    // Multi-candidate endpoint query with automatic fallback
+    async function fetchRepairTicketsAPI(query = '') {
+        const candidateUrls = [
+            `/repairs/api/lookup/?status=READY_FOR_PICKUP&q=${encodeURIComponent(query)}`,
+            `/repairs/api/search/?status=READY_FOR_PICKUP&q=${encodeURIComponent(query)}`,
+            `/repairs/api/tickets/?status=READY_FOR_PICKUP&q=${encodeURIComponent(query)}`,
+            `/repairs/api/tickets/?service_status=READY_FOR_PICKUP&search=${encodeURIComponent(query)}`
+        ];
+
+        for (const url of candidateUrls) {
+            try {
+                const res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                if (res.ok) {
+                    const data = await res.json();
+                    let rawList = [];
+                    if (Array.isArray(data)) rawList = data;
+                    else if (data && Array.isArray(data.results)) rawList = data.results;
+                    else if (data && Array.isArray(data.tickets)) rawList = data.tickets;
+                    else if (data && Array.isArray(data.items)) rawList = data.items;
+                    else if (data && (data.ticket_number || data.id)) rawList = [data];
+
+                    return rawList.map(normalizeRepairTicket);
+                }
+            } catch (err) {
+                // Continue trying candidate routes
+            }
+        }
+        return [];
+    }
+
+    // Render list of repair tickets in the modal container
+    function renderRepairTicketCards(tickets) {
+        if (loadingState) loadingState.classList.add('d-none');
+
+        if (!tickets || tickets.length === 0) {
+            if (emptyState) {
+                emptyState.innerHTML = `
+                    <i class="fas fa-circle-info fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                    <span>No repair tickets found in <strong>READY_FOR_PICKUP</strong> status.</span>
+                `;
+                emptyState.classList.remove('d-none');
+            }
+            if (listContainer) listContainer.innerHTML = '';
+            if (matchCountEl) matchCountEl.innerText = '0 tickets found';
+            return;
+        }
+
+        if (emptyState) emptyState.classList.add('d-none');
+        if (matchCountEl) matchCountEl.innerText = `${tickets.length} ticket(s) ready`;
+
+        listContainer.innerHTML = tickets.map(t => {
+            const isCurrentlyAttached = (window.activeRepairTicketId === t.id);
+            const totalFmt = t.total_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const laborFmt = t.labor_charge.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const partsFmt = t.parts_charge.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+            return `
+                <div class="card border rounded-3 p-3 transition-all ${isCurrentlyAttached ? 'border-info bg-info bg-opacity-10' : 'bg-white hover-shadow-sm'}">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-2">
+                        <div>
+                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                                <span class="badge bg-dark font-monospace fs-xs">${escapeHtml(t.ticket_number)}</span>
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs fw-bold">
+                                    <i class="fas fa-check-circle me-1"></i> Ready for Pickup
+                                </span>
+                                ${t.claim_type === 'FREE_WARRANTY' ? '<span class="badge bg-primary fs-2xs">Free Warranty</span>' : ''}
+                            </div>
+                            
+                            <h6 class="fw-bold text-dark fs-sm mt-2 mb-1">
+                                <i class="fas fa-mobile-screen text-primary me-1"></i> ${escapeHtml(t.device_name)}
+                            </h6>
+
+                            <div class="d-flex flex-wrap align-items-center gap-2 text-muted fs-2xs font-monospace">
+                                ${t.imei ? `<span><strong>IMEI:</strong> ${escapeHtml(t.imei)}</span> &bull;` : ''}
+                                <span><i class="fas fa-user text-secondary me-1"></i> <strong>${escapeHtml(t.customer_name)}</strong></span>
+                                ${t.customer_phone ? `&bull; <span><i class="fas fa-phone text-success me-1"></i>${escapeHtml(t.customer_phone)}</span>` : ''}
+                            </div>
+
+                            <div class="mt-1 text-muted fs-2xs">
+                                <strong>Fault / Service:</strong> <span class="text-secondary">${escapeHtml(t.fault)}</span>
+                                ${t.technician ? ` &bull; Technician: <strong>${escapeHtml(t.technician)}</strong>` : ''}
+                            </div>
+                        </div>
+
+                        <div class="text-md-end d-flex flex-column justify-content-between align-items-md-end flex-shrink-0">
+                            <div>
+                                <span class="text-muted fs-2xs d-block text-uppercase">Payable Service Fee</span>
+                                <h5 class="fw-extrabold text-info font-monospace mb-0">Rs. ${totalFmt}</h5>
+                                <div class="text-muted fs-2xs">
+                                    Labor: Rs. ${laborFmt} &bull; Parts: Rs. ${partsFmt}
+                                </div>
+                            </div>
+
+                            <div class="mt-2">
+                                ${isCurrentlyAttached ? `
+                                    <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 py-1 fs-xs fw-bold detach-btn-action" data-ticket-id="${t.id}">
+                                        <i class="fas fa-times me-1"></i> Detached
+                                    </button>
+                                ` : `
+                                    <button type="button" class="btn btn-info text-white btn-sm rounded-pill px-3 py-1 fs-xs fw-bold shadow-xs attach-btn-action" data-ticket='${JSON.stringify(t).replace(/'/g, "&apos;")}'>
+                                        <i class="fas fa-plus-circle me-1"></i> Attach to Bill &rarr;
+                                    </button>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Wire up Attach Buttons
+        listContainer.querySelectorAll('.attach-btn-action').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const ticketData = JSON.parse(btn.dataset.ticket.replace(/&apos;/g, "'"));
+                attachRepairTicketToPOS(ticketData);
+            });
+        });
+
+        // Wire up Detach Buttons
+        listContainer.querySelectorAll('.detach-btn-action').forEach(btn => {
+            btn.addEventListener('click', () => {
+                detachRepairTicketFromPOS();
+            });
+        });
+    }
+
+    // Live search query dispatcher
+    function executeTicketSearch(query = '') {
+        if (loadingState) loadingState.classList.remove('d-none');
+        if (emptyState) emptyState.classList.add('d-none');
+        if (listContainer) listContainer.innerHTML = '';
+
+        fetchRepairTicketsAPI(query).then(tickets => {
+            renderRepairTicketCards(tickets);
+        });
+    }
+
+    // Attach Ticket to POS Engine and Cart
+    async function attachRepairTicketToPOS(ticket) {
+        window.activeRepairTicket = ticket;
+        window.activeRepairTicketId = ticket.id;
+
+        // Set authoritative repair ticket ID on smartPos engine and checkout instance
+        if (window.smartPos) {
+            window.smartPos.repairTicketId = ticket.id;
+            if (window.smartPos.checkout) {
+                window.smartPos.checkout.repairTicketId = ticket.id;
+            }
+        }
+
+        // 1. Update Modal Banner Display
+        if (dispTicketNo) dispTicketNo.innerText = ticket.ticket_number;
+        if (dispDevice) dispDevice.innerText = ticket.device_name;
+        if (dispImei) dispImei.innerText = ticket.imei ? `IMEI: ${ticket.imei}` : 'No IMEI specified';
+        if (dispCustomer) dispCustomer.innerText = ticket.customer_name;
+        if (dispPhone) dispPhone.innerText = ticket.customer_phone || '-';
+        if (dispFee) dispFee.innerText = `Rs. ${ticket.total_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (dispFeeBreakdown) dispFeeBreakdown.innerText = `Labor: Rs. ${ticket.labor_charge.toFixed(2)} • Parts: Rs. ${ticket.parts_charge.toFixed(2)}`;
+        if (attachedBanner) attachedBanner.classList.remove('d-none');
+
+        // 2. Resolve Non-Serialized Service Product from Catalog Cache or Server
+        let serviceProduct = null;
+        const catalogPool = (window.smartPos && window.smartPos.catalogService)
+            ? (window.smartPos.catalogService.allLoadedProducts || window.smartPos.catalogService.initialProducts || [])
+            : [];
+
+        if (Array.isArray(catalogPool) && catalogPool.length > 0) {
+            serviceProduct = catalogPool.find(p => 
+                p.sku === 'REPAIR-SERVICE' || 
+                p.is_service === true ||
+                (p.name && p.name.toLowerCase().includes('repair')) || 
+                (p.name && p.name.toLowerCase().includes('service'))
+            );
+
+            if (!serviceProduct) {
+                serviceProduct = catalogPool.find(p => !p.requires_imei && !p.requires_imei_tracking);
+            }
+        }
+
+        if (!serviceProduct) {
+            try {
+                const res = await fetch('/products/api/search/?q=repair&limit=5');
+                if (res.ok) {
+                    const data = await res.json();
+                    const results = Array.isArray(data) ? data : (data.results || []);
+                    serviceProduct = results.find(p => 
+                        p.sku === 'REPAIR-SERVICE' || 
+                        p.is_service === true ||
+                        (!p.requires_imei && !p.requires_imei_tracking)
+                    );
+                    if (!serviceProduct && results.length > 0) {
+                        serviceProduct = results.find(p => !p.requires_imei_tracking);
+                    }
+                }
+            } catch (err) {
+                console.warn('Could not query repair service product:', err);
+            }
+        }
+
+        if (!serviceProduct) {
+            try {
+                const res = await fetch('/products/api/search/?mode=simple&limit=20');
+                if (res.ok) {
+                    const data = await res.json();
+                    const results = Array.isArray(data) ? data : (data.results || []);
+                    serviceProduct = results.find(p => !p.requires_imei && !p.requires_imei_tracking);
+                }
+            } catch (err) {
+                console.warn('Could not query catalog fallback:', err);
+            }
+        }
+
+        const resolvedProdId = serviceProduct ? (serviceProduct.id || serviceProduct.product_id) : null;
+
+        // 3. Construct Repair Service Line Item compliant with POSCheckoutAPIView validation
+        const repairLineItem = {
+            product_id: resolvedProdId,
+            name: `Repair Service: ${ticket.device_name} (${ticket.ticket_number})`,
+            product_name: `Repair Service: ${ticket.device_name} (${ticket.ticket_number})`,
+            sku: serviceProduct ? serviceProduct.sku : 'REPAIR-SERVICE',
+            quantity: 1,
+            unit_price: ticket.total_amount,
+            price: ticket.total_amount,
+            selling_price: ticket.total_amount,
+            official_unit_price: ticket.total_amount,
+            price_override_amount: 0,
+            discount_type: 'NONE',
+            discount_value: 0,
+            discount_percent: 0,
+            line_total: ticket.total_amount,
+            requires_imei: false,
+            requires_imei_tracking: false,
+            imei_number: '',
+            imei_1: '',
+            imei_2: '',
+            secondary_imei: '',
+            repair_ticket_id: ticket.id,
+            is_repair_service: true,
+            is_discountable: false,
+            notes: `Handover for Ticket #${ticket.ticket_number}: ${ticket.fault}`
+        };
+
+        // 4. Inject into smartPos Cart
+        if (window.smartPos && window.smartPos.cart) {
+            window.smartPos.cart.items = window.smartPos.cart.items.filter(item => 
+                !item.is_repair_service && !item.repair_ticket_id
+            );
+
+            window.smartPos.cart.items.push(repairLineItem);
+
+            if (typeof window.smartPos.cart.calculateTotals === 'function') {
+                window.smartPos.cart.calculateTotals();
+            }
+            if (typeof window.smartPos.cart.renderCart === 'function') {
+                window.smartPos.cart.renderCart();
+            } else if (typeof window.smartPos.cart.render === 'function') {
+                window.smartPos.cart.render();
+            }
+        }
+
+        // 5. Pre-fill customer name and phone on POS terminal if empty
+        const custNameInput = document.getElementById('posCustomerInput');
+        const custPanInput = document.getElementById('posCustomerPanInput');
+        if (custNameInput && !custNameInput.value.trim() && ticket.customer_name && ticket.customer_name !== 'Walk-in Customer') {
+            if (window.smartPos && window.smartPos.customerManager) {
+                window.smartPos.customerManager.selectCustomer({
+                    id: ticket.customer_id || null,
+                    name: ticket.customer_name,
+                    phone: ticket.customer_phone || '',
+                    pan: ticket.customer_pan || '',
+                    customer_type: 'RETAIL',
+                    credit_balance: 0
+                });
+            } else {
+                custNameInput.value = ticket.customer_name;
+                if (ticket.customer_phone) custNameInput.value += ` (${ticket.customer_phone})`;
+            }
+        }
+        if (custPanInput && !custPanInput.value.trim() && ticket.customer_pan) {
+            custPanInput.value = ticket.customer_pan;
+            if (window.smartPos && window.smartPos.cart) {
+                window.smartPos.cart.customerPan = ticket.customer_pan;
+            }
+        }
+
+        // 6. Close Modal & Display Visual Alert
+        if (repairModalEl) {
+            const modalInstance = bootstrap.Modal.getInstance(repairModalEl);
+            if (modalInstance) modalInstance.hide();
+        }
+
+        if (window.smartPos && typeof window.smartPos.showNotification === 'function') {
+            window.smartPos.showNotification(`Repair Ticket #${ticket.ticket_number} (Rs. ${ticket.total_amount.toFixed(2)}) attached to cart.`, 'success');
+        }
+    }
+
+    // Detach Repair Ticket from POS
+    function detachRepairTicketFromPOS() {
+        if (!window.activeRepairTicketId) return;
+
+        const ticketNo = window.activeRepairTicket ? window.activeRepairTicket.ticket_number : '';
+        window.activeRepairTicket = null;
+        window.activeRepairTicketId = null;
+
+        if (window.smartPos) {
+            window.smartPos.repairTicketId = null;
+            if (window.smartPos.checkout) {
+                window.smartPos.checkout.repairTicketId = null;
+            }
+        }
+
+        if (attachedBanner) attachedBanner.classList.add('d-none');
+
+        // Remove service item from active cart
+        if (window.smartPos && window.smartPos.cart) {
+            window.smartPos.cart.items = window.smartPos.cart.items.filter(item => 
+                !item.is_repair_service && !item.repair_ticket_id
+            );
+
+            if (typeof window.smartPos.cart.calculateTotals === 'function') {
+                window.smartPos.cart.calculateTotals();
+            }
+            if (typeof window.smartPos.cart.renderCart === 'function') {
+                window.smartPos.cart.renderCart();
+            } else if (typeof window.smartPos.cart.render === 'function') {
+                window.smartPos.cart.render();
+            }
+        }
+
+        executeTicketSearch(searchInput ? searchInput.value.trim() : '');
+
+        if (window.smartPos && typeof window.smartPos.showNotification === 'function') {
+            window.smartPos.showNotification(`Repair ticket ${ticketNo} detached from cart.`, 'info');
+        }
+    }
+
+    // Wire up events
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            const q = this.value.trim();
+            if (clearBtn) clearBtn.style.display = q ? 'inline-block' : 'none';
+
+            clearTimeout(repairDebounce);
+            repairDebounce = setTimeout(() => {
+                executeTicketSearch(q);
+            }, 250);
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            clearBtn.style.display = 'none';
+            executeTicketSearch('');
+            searchInput.focus();
+        });
+    }
+
+    if (browseBtn) {
+        browseBtn.addEventListener('click', () => {
+            executeTicketSearch('');
+        });
+    }
+
+    if (btnDetach) {
+        btnDetach.addEventListener('click', detachRepairTicketFromPOS);
+    }
+
+    // Load initial list when modal is shown
+    if (repairModalEl) {
+        repairModalEl.addEventListener('shown.bs.modal', () => {
+            if (searchInput) searchInput.focus();
+            if (!listContainer.hasChildNodes() || listContainer.children.length === 0) {
+                executeTicketSearch('');
+            }
+        });
+    }
+
+    // Auto-attach pre-filled ticket from URL query parameter if present
+    const prefillDataEl = document.getElementById('prefillRepairTicketData');
+    if (prefillDataEl) {
+        try {
+            const rawJson = prefillDataEl.textContent.trim();
+            if (rawJson) {
+                const rawTicket = JSON.parse(rawJson);
+                const prefilledTicket = normalizeRepairTicket(rawTicket);
+                setTimeout(() => {
+                    attachRepairTicketToPOS(prefilledTicket);
+                }, 400);
+            }
+        } catch (e) {
+            console.warn('Could not auto-attach prefill repair ticket:', e);
+        }
+    }
+});
+</script>

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
@@ -71,18 +72,24 @@ class CashDrawerSessionAdmin(admin.ModelAdmin):
 class POSHoldCartAdmin(admin.ModelAdmin):
     list_display = [
         'hold_reference', 'branch', 'cashier', 'customer_name',
-        'subtotal', 'discount_display', 'items_count_display', 'created_at'
+        'customer_phone', 'customer_pan', 'subtotal', 'discount_display',
+        'linkages_display', 'items_count_display', 'created_at'
     ]
     list_filter = ['branch', 'bill_discount_type', 'created_at']
-    search_fields = ['hold_reference', 'customer_name', 'customer_phone', 'notes']
+    search_fields = ['hold_reference', 'customer_name', 'customer_phone', 'customer_pan', 'notes']
     readonly_fields = ['hold_reference', 'created_at', 'updated_at']
 
     fieldsets = (
         ("Held Cart Header", {
             'fields': (
                 ('hold_reference', 'branch', 'cashier'),
-                ('customer', 'customer_name', 'customer_phone'),
+                ('customer', 'customer_name', 'customer_phone', 'customer_pan'),
                 'notes'
+            )
+        }),
+        ("Operational Linkages (Repair & Trade-In)", {
+            'fields': (
+                ('trade_in_voucher_id', 'repair_ticket_id'),
             )
         }),
         ("Financial Totals & Discounts", {
@@ -115,6 +122,27 @@ class POSHoldCartAdmin(admin.ModelAdmin):
                 )
         return format_html('<span style="color: #94a3b8;">No Discount</span>')
     discount_display.short_description = "Bill Discount"
+
+    def linkages_display(self, obj):
+        badges = []
+        if obj.repair_ticket_id:
+            badges.append(
+                format_html(
+                    '<span style="background-color: #0ea5e9; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; font-family: monospace;">Repair #{}</span>',
+                    obj.repair_ticket_id
+                )
+            )
+        if obj.trade_in_voucher_id:
+            badges.append(
+                format_html(
+                    '<span style="background-color: #f59e0b; color: #000000; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; font-family: monospace;">Trade-In #{}</span>',
+                    obj.trade_in_voucher_id
+                )
+            )
+        if not badges:
+            return format_html('<span style="color: #94a3b8;">None</span>')
+        return format_html(" ".join(badges))
+    linkages_display.short_description = "Linkages"
 
     def items_count_display(self, obj):
         items = obj.cart_payload.get('items', []) if isinstance(obj.cart_payload, dict) else []

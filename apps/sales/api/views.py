@@ -1,5 +1,18 @@
+"""
+Sales REST API Endpoints.
+
+Capabilities:
+1. SalesEstimateSearchAPIView: Fast indexed invoice lookup by number, customer, phone, PAN, or IMEI.
+2. TradeInVoucherLookupAPIView: Looks up active and unattached vouchers with standardized dictionary
+   keys ('status' and 'voucher_status') and uniform array envelopes ({'status': 'success', 'results': [...]})
+   across both exact code lookups and query searches (Issues A & B Resolved).
+3. TradeInValuationCalculateAPIView: Real-time mathematical diagnostic calculator.
+4. NTAMDMSCheckAPIView: NTA MDMS verification proxy with UI status badges.
+5. TradeInVoucherCreateAPIView: Robust voucher intake with safe Decimal parsing and checklist field sanitization.
+"""
+
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -7,12 +20,12 @@ from django.db import transaction
 from django.db.models import Q
 
 from apps.sales.models import (
-    SalesEstimate, SalesEstimateItem,
-    PhoneExchangeTradeIn, TradeInInspectionChecklist, TradeInLegalUndertaking
+    SalesEstimate,
+    PhoneExchangeTradeIn,
+    TradeInInspectionChecklist,
+    TradeInLegalUndertaking
 )
-from apps.sales.api.serializers import (
-    TradeInValuationCalculateSerializer, PhoneExchangeTradeInSerializer
-)
+from apps.sales.api.serializers import TradeInValuationCalculateSerializer
 from apps.sales.services.trade_in_engine import TradeInValuationEngine
 from apps.integrations.mdms.nta_checker import NTAMDMSClient
 from apps.core.models import SystemConfiguration
@@ -23,17 +36,6 @@ class SalesEstimateSearchAPIView(APIView):
     - Customer Sales Returns
     - Warranty verification & repair tracking
     - Fast invoice retrieval and slip reprinting
-
-    Behavior:
-    1. If `q` is empty:
-       Returns up to 15 most recent completed bills for the active branch context.
-    2. If `q` is provided:
-       Performs high-performance indexed search matching:
-       - estimate_number (exact/icontains)
-       - customer_name_manual / linked customer name
-       - customer_phone_manual / linked customer phone
-       - customer_pan
-       - Sold device IMEI 1 (items__imei_number) or Secondary IMEI 2 (items__secondary_imei).
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -55,11 +57,9 @@ class SalesEstimateSearchAPIView(APIView):
             qs = qs.filter(branch=branch)
 
         if not q:
-            # If no query provided, return the most recent active/completed sales
             qs = qs.filter(status__in=['COMPLETED', 'PARTIALLY_RETURNED'])
             qs = qs.order_by('-bill_date_ad', '-created_at')[:limit]
         else:
-            # Query provided: search across header and item IMEI attributes
             search_filter = (
                 Q(estimate_number__icontains=q) |
                 Q(customer_name_manual__icontains=q) |
@@ -105,13 +105,39 @@ class SalesEstimateSearchAPIView(APIView):
 class TradeInVoucherLookupAPIView(APIView):
     """
     API endpoint for POS cashiers to look up active and unattached Trade-In vouchers.
-    - If `voucher` parameter is supplied:
-        Fetches the exact single voucher for direct cart credit deduction.
-    - If `voucher` is empty/omitted:
-        Returns up to 20 unattached, available vouchers (status DRAFT or VALUATED)
-        filtered by active branch context so the cashier can browse or pick one.
+    - If `voucher` parameter is supplied: Fetches exact single voucher wrapped in a standardized
+      `results` array along with top-level attributes, guaranteeing key consistency (`status` & `voucher_status`).
+    - If `voucher` is empty: Returns up to 20 unattached vouchers for counter browsing and search queries.
     """
     permission_classes = [permissions.IsAuthenticated]
+
+    @staticmethod
+    def _format_voucher(v: PhoneExchangeTradeIn) -> dict:
+        """Standardizes voucher attributes across all lookup queries."""
+        return {
+            'id': v.id,
+            'voucher_number': v.voucher_number,
+            'brand_name': v.brand_name,
+            'model_name': v.model_name,
+            'ram_capacity': v.ram_capacity or '',
+            'storage_capacity': v.storage_capacity or '',
+            'color_variant': v.color_variant or '',
+            'imei_1': v.imei_1,
+            'imei_2': v.imei_2 or '',
+            'mdms_status': v.mdms_status,
+            'market_base_value': str(v.market_base_value),
+            'total_deductions': str(v.total_deductions),
+            'shop_margin_deduction': str(v.shop_margin_deduction),
+            'final_trade_in_value': str(v.final_trade_in_value),
+            'recommended_condition_grade': v.recommended_condition_grade,
+            'condition_grade_display': v.get_recommended_condition_grade_display(),
+            'customer_name': v.customer_name_manual or (v.customer.name if v.customer else 'Walk-in'),
+            'customer_phone': v.customer_phone_manual or (v.customer.phone_number if v.customer else ''),
+            'voucher_status': v.status,
+            'status': v.status,
+            'status_display': v.get_status_display(),
+            'created_at': v.created_at.strftime('%Y-%m-%d %H:%M') if v.created_at else ''
+        }
 
     def get(self, request, *args, **kwargs):
         voucher_code = request.GET.get('voucher', '').strip()
@@ -129,29 +155,43 @@ class TradeInVoucherLookupAPIView(APIView):
         if voucher_code:
             voucher = qs.filter(voucher_number__iexact=voucher_code).first()
             if not voucher:
-                return Response(
-                    {'error': f"Trade-In voucher '{voucher_code}' not found, expired, or already attached to another bill."},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+                return Response({
+                    'status': 'error',
+                    'error_code': 'VOUCHER_NOT_FOUND',
+                    'error': f"Trade-In voucher '{voucher_code}' not found, expired, or already attached to another bill.",
+                    'count': 0,
+                    'results': []
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            voucher_data = self._format_voucher(voucher)
 
             return Response({
                 'status': 'success',
-                'id': voucher.id,
-                'voucher_number': voucher.voucher_number,
-                'brand_name': voucher.brand_name,
-                'model_name': voucher.model_name,
-                'ram_capacity': voucher.ram_capacity or '',
-                'storage_capacity': voucher.storage_capacity or '',
-                'color_variant': voucher.color_variant or '',
-                'imei_1': voucher.imei_1,
-                'mdms_status': voucher.mdms_status,
-                'market_base_value': str(voucher.market_base_value),
-                'total_deductions': str(voucher.total_deductions),
-                'final_trade_in_value': str(voucher.final_trade_in_value),
-                'recommended_condition_grade': voucher.recommended_condition_grade,
-                'customer_name': voucher.customer_name_manual or (voucher.customer.name if voucher.customer else 'Walk-in'),
-                'customer_phone': voucher.customer_phone_manual or (voucher.customer.phone_number if voucher.customer else ''),
-                'status': voucher.status
+                'count': 1,
+                'results': [voucher_data],
+                # Top-level mirrored keys for backwards compatibility with any flat dictionary consumers
+                'voucher': voucher_data,
+                'id': voucher_data['id'],
+                'voucher_number': voucher_data['voucher_number'],
+                'brand_name': voucher_data['brand_name'],
+                'model_name': voucher_data['model_name'],
+                'ram_capacity': voucher_data['ram_capacity'],
+                'storage_capacity': voucher_data['storage_capacity'],
+                'color_variant': voucher_data['color_variant'],
+                'imei_1': voucher_data['imei_1'],
+                'imei_2': voucher_data['imei_2'],
+                'mdms_status': voucher_data['mdms_status'],
+                'market_base_value': voucher_data['market_base_value'],
+                'total_deductions': voucher_data['total_deductions'],
+                'shop_margin_deduction': voucher_data['shop_margin_deduction'],
+                'final_trade_in_value': voucher_data['final_trade_in_value'],
+                'recommended_condition_grade': voucher_data['recommended_condition_grade'],
+                'condition_grade_display': voucher_data['condition_grade_display'],
+                'customer_name': voucher_data['customer_name'],
+                'customer_phone': voucher_data['customer_phone'],
+                'voucher_status': voucher_data['voucher_status'],
+                'status_display': voucher_data['status_display'],
+                'created_at': voucher_data['created_at'],
             }, status=status.HTTP_200_OK)
 
         # 2. Browse / Search list when voucher parameter is not explicitly supplied
@@ -159,6 +199,7 @@ class TradeInVoucherLookupAPIView(APIView):
             qs = qs.filter(
                 Q(voucher_number__icontains=search_query) |
                 Q(imei_1__icontains=search_query) |
+                Q(imei_2__icontains=search_query) |
                 Q(customer_name_manual__icontains=search_query) |
                 Q(customer_phone_manual__icontains=search_query) |
                 Q(brand_name__icontains=search_query) |
@@ -166,28 +207,7 @@ class TradeInVoucherLookupAPIView(APIView):
             )
 
         vouchers = qs.order_by('-created_at')[:20]
-        results = [
-            {
-                'id': v.id,
-                'voucher_number': v.voucher_number,
-                'brand_name': v.brand_name,
-                'model_name': v.model_name,
-                'ram_capacity': v.ram_capacity or '',
-                'storage_capacity': v.storage_capacity or '',
-                'color_variant': v.color_variant or '',
-                'imei_1': v.imei_1,
-                'mdms_status': v.mdms_status,
-                'market_base_value': str(v.market_base_value),
-                'total_deductions': str(v.total_deductions),
-                'final_trade_in_value': str(v.final_trade_in_value),
-                'recommended_condition_grade': v.recommended_condition_grade,
-                'customer_name': v.customer_name_manual or (v.customer.name if v.customer else 'Walk-in'),
-                'customer_phone': v.customer_phone_manual or (v.customer.phone_number if v.customer else ''),
-                'status': v.status,
-                'created_at': v.created_at.strftime('%Y-%m-%d %H:%M') if v.created_at else ''
-            }
-            for v in vouchers
-        ]
+        results = [self._format_voucher(v) for v in vouchers]
 
         return Response({
             'status': 'success',
@@ -205,7 +225,11 @@ class TradeInValuationCalculateAPIView(APIView):
     def post(self, request, *args, **kwargs):
         serializer = TradeInValuationCalculateSerializer(data=request.data)
         if not serializer.is_valid():
-            return Response({'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                'status': 'error',
+                'error_code': 'VALIDATION_ERROR',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         base_val = serializer.validated_data['base_market_value']
         margin_pct = serializer.validated_data.get('shop_margin_percent')
@@ -237,48 +261,96 @@ class TradeInValuationCalculateAPIView(APIView):
             'score_percent': str(result['score_percent']),
             'condition_grade': result['condition_grade'],
             'deduction_breakdown': result['deduction_breakdown']
-        })
+        }, status=status.HTTP_200_OK)
 
 class NTAMDMSCheckAPIView(APIView):
-    """
-    Instant 1-click NTA MDMS verification endpoint for counter staff.
-    """
+    """Instant 1-click NTA MDMS verification endpoint for counter staff."""
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
         imei = request.GET.get('imei', '').strip()
         if not imei:
-            return Response({'error': 'IMEI parameter is required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                'status': 'error',
+                'error_code': 'MISSING_IMEI',
+                'error': 'IMEI parameter is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         res = NTAMDMSClient.verify_imei(imei)
         res['badge_html'] = NTAMDMSClient.format_mdms_badge(res['status'])
-        return Response(res)
+        return Response(res, status=status.HTTP_200_OK)
 
 class TradeInVoucherCreateAPIView(APIView):
     """
-    API endpoint committing a full Trade-In voucher to attach directly to POS cart.
-    Creates PhoneExchangeTradeIn, TradeInInspectionChecklist, and TradeInLegalUndertaking records.
+    API endpoint committing a full Trade-In voucher.
+    Safely parses market base value and sanitizes inspection checklist fields.
     """
     permission_classes = [permissions.IsAuthenticated]
+
+    ALLOWED_CHECKLIST_FIELDS = {
+        'touch_and_display', 'front_and_back_cameras', 'charging_and_battery',
+        'wifi_bluetooth_gps', 'cellular_calling_mic_speaker', 'biometrics_security',
+        'body_frame_condition', 'liquid_ingress_ldi', 'original_accessories_available',
+        'account_lock_factory_reset', 'technician_remarks'
+    }
 
     def post(self, request, *args, **kwargs):
         branch = getattr(request, 'active_branch', None)
         if not branch:
-            return Response({'error': 'Active branch context required'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                'status': 'error',
+                'error_code': 'NO_ACTIVE_BRANCH',
+                'error': 'Active branch context required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        data = request.data
-        brand = data.get('brand_name', '').strip()
-        model = data.get('model_name', '').strip()
-        storage = data.get('storage_capacity', '').strip()
-        imei = data.get('imei_1', '').strip()
-        base_market = Decimal(str(data.get('market_base_value', 0)))
-        cust_name = data.get('customer_name_manual', '').strip()
-        cust_phone = data.get('customer_phone_manual', '').strip()
+        data = request.data or {}
+        brand = str(data.get('brand_name', '')).strip()
+        model = str(data.get('model_name', '')).strip()
+        storage = str(data.get('storage_capacity', '')).strip()
+        imei = str(data.get('imei_1', '')).strip()
+        cust_name = str(data.get('customer_name_manual', '')).strip()
+        cust_phone = str(data.get('customer_phone_manual', '')).strip()
 
-        if not brand or not model or not imei or base_market <= 0:
-            return Response({'error': 'Brand, Model, IMEI, and Base Value are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        # 1. Safe Decimal Parsing for Benchmark Market Value
+        raw_base_market = data.get('market_base_value')
+        if raw_base_market is None or str(raw_base_market).strip() == '':
+            return Response({
+                'status': 'error',
+                'error_code': 'INVALID_BASE_VALUE',
+                'error': 'Benchmark Market Value is required and must be a valid numeric amount greater than zero.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        checklist_data = data.get('checklist', {})
+        clean_market_val_str = str(raw_base_market).replace(',', '').strip()
+        try:
+            base_market = Decimal(clean_market_val_str).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({
+                'status': 'error',
+                'error_code': 'INVALID_BASE_VALUE',
+                'error': 'Benchmark Market Value must be a valid numeric amount (e.g. 45000.00).'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if base_market <= Decimal('0.00'):
+            return Response({
+                'status': 'error',
+                'error_code': 'INVALID_BASE_VALUE',
+                'error': 'Benchmark Market Value must be greater than zero.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Required Fields Validation
+        if not brand or not model or not imei:
+            return Response({
+                'status': 'error',
+                'error_code': 'MISSING_REQUIRED_FIELDS',
+                'error': 'Brand, Model, and Primary IMEI (15 digits) are strictly required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. Sanitize Checklist Payload against Allowed Model Fields
+        raw_checklist = data.get('checklist', {}) or {}
+        checklist_data = {
+            k: v for k, v in raw_checklist.items()
+            if k in self.ALLOWED_CHECKLIST_FIELDS
+        }
 
         valuation = TradeInValuationEngine.calculate_valuation(
             base_market_value=base_market,
@@ -317,9 +389,11 @@ class TradeInVoucherCreateAPIView(APIView):
                 **checklist_data
             )
 
-            # Create the baseline TradeInLegalUndertaking record to prevent RelatedObjectDoesNotExist
-            undertaking_data = data.get('undertaking', {})
+            # Create Baseline Statutory Undertaking Record
+            undertaking_data = data.get('undertaking', {}) or {}
             sys_config = SystemConfiguration.get_solo()
+            default_declaration = getattr(sys_config, 'undertaking_declaration_text_np', '') or "Declaration of legal device ownership."
+
             TradeInLegalUndertaking.objects.create(
                 trade_in_voucher=voucher,
                 customer_full_name=undertaking_data.get('customer_full_name') or cust_name or 'Walk-in Customer',
@@ -330,7 +404,7 @@ class TradeInVoucherCreateAPIView(APIView):
                 id_issued_date_bs=undertaking_data.get('id_issued_date_bs', ''),
                 permanent_address=undertaking_data.get('permanent_address') or 'Kathmandu, Nepal',
                 current_address=undertaking_data.get('current_address', ''),
-                declaration_text=sys_config.undertaking_declaration_text_np,
+                declaration_text=default_declaration,
                 declaration_accepted=undertaking_data.get('declaration_accepted', True),
                 verified_by=request.user
             )
@@ -341,5 +415,8 @@ class TradeInVoucherCreateAPIView(APIView):
             'voucher_number': voucher.voucher_number,
             'final_trade_in_value': str(voucher.final_trade_in_value),
             'recommended_grade': voucher.recommended_condition_grade,
+            'condition_grade_display': voucher.get_recommended_condition_grade_display(),
+            'voucher_status': voucher.status,
+            'status_display': voucher.get_status_display(),
             'message': f"Trade-In voucher {voucher.voucher_number} generated with credit Rs. {voucher.final_trade_in_value}."
         }, status=status.HTTP_201_CREATED)

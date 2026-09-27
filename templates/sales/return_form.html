@@ -55,6 +55,12 @@
 #invoiceSearchResultsDropdown .dropdown-item:hover {
     background-color: #eff6ff;
 }
+
+.dropdown-item-disabled {
+    opacity: 0.55;
+    pointer-events: none;
+    background-color: #f8fafc;
+}
 </style>
 {% endblock %}
 
@@ -75,17 +81,20 @@
             <a href="{% url 'sales:estimate_detail' estimate.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
                 &larr; Back to Bill Details
             </a>
+            <a href="{% url 'sales:return_list' %}" class="btn btn-outline-dark btn-sm rounded-pill px-3">
+                <i class="fas fa-list me-1"></i> Returns Registry
+            </a>
         </div>
     </div>
 
-    <!-- Quick Bill / Estimate Lookup Bar -->
+    <!-- Quick Bill / Estimate Lookup Bar with Live Autocomplete -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
         <div class="row g-2 align-items-center">
             <div class="col-12 col-md-3">
                 <label class="form-label fw-bold text-dark fs-xs mb-0">
                     <i class="fas fa-magnifying-glass text-primary me-1"></i> Look Up Another Invoice:
                 </label>
-                <small class="text-muted fs-2xs d-block">Switch to another bill</small>
+                <small class="text-muted fs-2xs d-block">Search &amp; switch active return bill</small>
             </div>
             <div class="col-12 col-md-9 position-relative">
                 <div class="input-group input-group-sm">
@@ -93,14 +102,14 @@
                     <input type="text" 
                            id="invoiceLookupSearchInput" 
                            class="form-control bg-light border-0" 
-                           placeholder="Search by Bill / Estimate # (e.g. EST-00123), Customer Name, or Phone (98XXXXXXXX)..." 
+                           placeholder="Search by Bill / Estimate # (e.g. EST-00123), Customer Name, Phone, or Sold IMEI..." 
                            autocomplete="off">
                     <button type="button" class="btn btn-light border-0 text-muted" id="clearInvoiceLookupBtn" style="display: none;">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
                 <!-- Results Dropdown -->
-                <div id="invoiceSearchResultsDropdown" class="dropdown-menu shadow-lg w-100 p-0 rounded-3 mt-1 border" style="display:none; max-height: 280px; overflow-y: auto; z-index: 1050;"></div>
+                <div id="invoiceSearchResultsDropdown" class="dropdown-menu shadow-lg w-100 p-0 rounded-3 mt-1 border" style="display:none; max-height: 320px; overflow-y: auto; z-index: 1050;"></div>
             </div>
         </div>
     </div>
@@ -111,17 +120,25 @@
             <div class="col-12 col-md-3">
                 <span class="text-muted d-block">Original Bill Slip:</span>
                 <strong class="font-monospace fs-sm text-primary">{{ estimate.estimate_number }}</strong>
+                <span class="badge bg-{% if estimate.status == 'COMPLETED' %}success{% elif estimate.status == 'PARTIALLY_RETURNED' %}warning text-dark{% else %}secondary{% endif %} fs-2xs ms-1">
+                    {{ estimate.get_status_display }}
+                </span>
             </div>
             <div class="col-12 col-md-3">
                 <span class="text-muted d-block">Customer Name:</span>
                 <strong class="text-dark fs-sm">{{ estimate.recipient_display_name }}</strong>
-                {% if estimate.customer_phone_manual %}
-                    <small class="text-muted d-block font-monospace"><i class="fas fa-phone fs-2xs me-1 text-success"></i>{{ estimate.customer_phone_manual }}</small>
+                {% if estimate.customer_phone_manual or estimate.customer.phone_number %}
+                    <small class="text-muted d-block font-monospace">
+                        <i class="fas fa-phone fs-2xs me-1 text-success"></i>{{ estimate.customer_phone_manual|default:estimate.customer.phone_number }}
+                    </small>
                 {% endif %}
             </div>
             <div class="col-12 col-md-2">
                 <span class="text-muted d-block">Date of Invoicing:</span>
                 <strong class="text-dark">{{ estimate.bill_date_ad }}</strong>
+                {% if estimate.bill_date_bs %}
+                    <small class="text-muted d-block">({{ estimate.bill_date_bs }} BS)</small>
+                {% endif %}
             </div>
             <div class="col-12 col-md-2">
                 <span class="text-muted d-block">Store Outlet:</span>
@@ -137,7 +154,7 @@
     <!-- Protocol Guidance Alert -->
     <div class="alert bg-info bg-opacity-10 border border-info border-opacity-25 rounded-4 p-3 mb-4 fs-xs text-dark">
         <div class="d-flex align-items-start gap-2">
-            <i class="fas fa-info-circle text-info fs-5 mt-1"></i>
+            <i class="fas fa-circle-info text-info fs-5 mt-1"></i>
             <div>
                 <strong class="text-dark d-block mb-1">Return &amp; Inventory Restocking Protocol:</strong>
                 <ul class="mb-0 ps-3 text-muted">
@@ -176,6 +193,8 @@
                                        value="1" 
                                        data-item-id="{{ item.id }}" 
                                        data-unit-price="{{ item.unit_price }}"
+                                       data-line-total="{{ item.line_total }}"
+                                       data-billed-qty="{{ item.quantity }}"
                                        {% if item_data.is_fully_returned %}disabled{% endif %}>
                             </div>
 
@@ -186,7 +205,7 @@
                                         {{ item.product.name }}
                                     </label>
                                     <span class="font-monospace fw-bold text-primary fs-xs">
-                                        Rate: Rs. {{ item.unit_price|floatformat:2|intcomma }} / {{ item.product.base_unit.code }}
+                                        Net Rate: Rs. {{ item.unit_price|floatformat:2|intcomma }} / {{ item.product.base_unit.code }}
                                     </span>
                                 </div>
 
@@ -202,7 +221,7 @@
                                             IMEI 2: {{ item.secondary_imei }}
                                         </span>
                                     {% endif %}
-                                    {% if item.serial_number %}
+                                    {% if item.serial_number and item.serial_number != item.imei_number %}
                                         <span class="badge bg-secondary bg-opacity-10 text-secondary font-monospace fs-2xs">
                                             S/N: {{ item.serial_number }}
                                         </span>
@@ -234,7 +253,9 @@
                                                    min="1" 
                                                    max="{{ item_data.remaining_returnable_qty|floatformat:0 }}" 
                                                    data-item-id="{{ item.id }}"
-                                                   data-unit-price="{{ item.unit_price }}">
+                                                   data-unit-price="{{ item.unit_price }}"
+                                                   data-line-total="{{ item.line_total }}"
+                                                   data-billed-qty="{{ item.quantity }}">
                                         </div>
 
                                         <div class="col-6 col-md-4">
@@ -258,7 +279,7 @@
                                                    name="defect_reason_{{ item.id }}" 
                                                    id="defect_reason_{{ item.id }}" 
                                                    class="form-control form-control-sm" 
-                                                   placeholder="e.g. Swollen battery, green line display, dead board">
+                                                   placeholder="e.g. Swollen battery, green line display, dead touch">
                                         </div>
 
                                         <!-- Live Restocking Destination Badge -->
@@ -315,7 +336,7 @@
                         <label class="form-label fw-bold text-dark fs-xs">Refund / Settlement Mode <span class="text-danger">*</span></label>
                         {{ form.refund_mode }}
                         <small class="text-muted fs-2xs mt-1 d-block">
-                            &bull; <strong>Cash Refund:</strong> Direct cash handover from register<br>
+                            &bull; <strong>Cash Refund:</strong> Direct cash payout from drawer float<br>
                             &bull; <strong>Store Credit:</strong> Deducts from customer Udhaari balance<br>
                             &bull; <strong>Exchange Adjust:</strong> Credit applied to new replacement bill
                         </small>
@@ -354,7 +375,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     // =========================================================================
-    // 1. ASYNCHRONOUS ESTIMATE / INVOICE LOOKUP API
+    // 1. ASYNCHRONOUS ESTIMATE / INVOICE LOOKUP API (WITH CANCEL/RETURN VALIDATION)
     // =========================================================================
     const lookupInput = document.getElementById('invoiceLookupSearchInput');
     const clearLookupBtn = document.getElementById('clearInvoiceLookupBtn');
@@ -388,22 +409,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         lookupDropdown.innerHTML = results.map(est => {
                             const formattedTotal = Number(est.grand_total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                            const targetUrl = `/sales/estimates/${est.id}/return/`;
+                            const targetUrl = `/sales/returns/create/${est.id}/`;
+                            const isCancelled = (est.status === 'CANCELLED');
+                            const isFullyReturned = (est.status === 'RETURNED');
+                            const isBlocked = isCancelled || isFullyReturned;
+
+                            let statusBadge = `<span class="badge bg-success bg-opacity-10 text-success fs-2xs">${est.status_display || est.status}</span>`;
+                            let actionPrompt = `<small class="text-primary d-block fs-2xs fw-bold">Select &amp; return items &rarr;</small>`;
+
+                            if (isCancelled) {
+                                statusBadge = `<span class="badge bg-danger bg-opacity-10 text-danger fs-2xs">Cancelled (Void)</span>`;
+                                actionPrompt = `<small class="text-danger d-block fs-2xs fw-bold"><i class="fas fa-ban me-1"></i>Cannot return void bill</small>`;
+                            } else if (isFullyReturned) {
+                                statusBadge = `<span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs">Already Fully Returned</span>`;
+                                actionPrompt = `<small class="text-muted d-block fs-2xs"><i class="fas fa-check-double me-1"></i>All items returned</small>`;
+                            } else if (est.status === 'PARTIALLY_RETURNED') {
+                                statusBadge = `<span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs">Partially Returned</span>`;
+                                actionPrompt = `<small class="text-warning-emphasis d-block fs-2xs fw-bold">Return remaining items &rarr;</small>`;
+                            }
+
+                            if (isBlocked) {
+                                return `
+                                    <div class="dropdown-item py-2 px-3 border-bottom d-flex justify-content-between align-items-center dropdown-item-disabled">
+                                        <div>
+                                            <div class="fw-bold fs-xs text-muted">
+                                                <i class="fas fa-file-invoice text-secondary me-1"></i> ${est.estimate_number || 'Estimate #' + est.id}
+                                                ${statusBadge}
+                                            </div>
+                                            <small class="text-muted fs-2xs">
+                                                Customer: <strong>${est.customer_name || 'Walk-in'}</strong> 
+                                                ${est.customer_phone ? `&bull; ${est.customer_phone}` : ''} 
+                                                &bull; ${est.bill_date_ad || ''}
+                                            </small>
+                                        </div>
+                                        <div class="text-end">
+                                            <span class="badge bg-light text-muted border font-monospace fs-xs">Rs. ${formattedTotal}</span>
+                                            ${actionPrompt}
+                                        </div>
+                                    </div>
+                                `;
+                            }
+
                             return `
                                 <a href="${targetUrl}" class="dropdown-item py-2 px-3 border-bottom d-flex justify-content-between align-items-center text-decoration-none">
                                     <div>
                                         <div class="fw-bold fs-xs text-dark">
                                             <i class="fas fa-file-invoice text-primary me-1"></i> ${est.estimate_number || 'Estimate #' + est.id}
+                                            ${statusBadge}
                                         </div>
                                         <small class="text-muted fs-2xs">
-                                            Customer: <strong>${est.customer_name || est.recipient_display_name || 'Walk-in Customer'}</strong> 
+                                            Customer: <strong>${est.customer_name || 'Walk-in'}</strong> 
                                             ${est.customer_phone ? `&bull; ${est.customer_phone}` : ''} 
                                             &bull; ${est.bill_date_ad || ''}
                                         </small>
                                     </div>
                                     <div class="text-end">
                                         <span class="badge bg-light text-primary border font-monospace fs-xs">Rs. ${formattedTotal}</span>
-                                        <small class="text-muted d-block fs-2xs">Click to process return &rarr;</small>
+                                        ${actionPrompt}
                                     </div>
                                 </a>
                             `;
@@ -464,10 +526,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const qtyInput = document.getElementById(`return_qty_${itemId}`);
                 const qty = parseFloat(qtyInput ? qtyInput.value : 1) || 0;
-                const rate = parseFloat(cb.dataset.unitPrice) || 0;
+                
+                // Calculate effective unit refund rate from line total / billed quantity
+                const lineTotal = parseFloat(cb.dataset.lineTotal) || 0;
+                const billedQty = parseFloat(cb.dataset.billedQty) || 1;
+                const unitRefundRate = billedQty > 0 ? (lineTotal / billedQty) : parseFloat(cb.dataset.unitPrice || 0);
 
                 totalUnits += qty;
-                totalRefund += (qty * rate);
+                totalRefund += (qty * unitRefundRate);
             } else {
                 if (controls) {
                     controls.style.opacity = '0.6';
@@ -479,7 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (selectedCountText) selectedCountText.innerText = `${selectedCount} Line(s)`;
         if (totalUnitsText) totalUnitsText.innerText = `${totalUnits} Units`;
-        if (refundAmountDisplay) refundAmountDisplay.innerText = `Rs. ${totalRefund.toFixed(2)}`;
+        if (refundAmountDisplay) refundAmountDisplay.innerText = `Rs. ${totalRefund.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
         if (submitBtn) {
             submitBtn.disabled = (selectedCount === 0 || totalRefund <= 0);

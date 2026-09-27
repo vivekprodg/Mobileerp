@@ -1,6 +1,5 @@
 """
 Mathematical Diagnostic Valuation Engine & Police Ownership Undertaking Controller.
-File Path: apps/sales/services/trade_in_engine.py
 
 Core Capabilities:
 1. 10-Point Technical Diagnostic Valuation:
@@ -8,19 +7,25 @@ Core Capabilities:
    - Calculates penalty deductions against pristine benchmark market value.
    - Safeguards store profit margins via configurable buffer deduction (default 15.00%).
    - Calculates diagnostic score percentage and assigns standard inventory condition grades (Grade A, B, C).
-2. Excess Trade-In Value Settlement:
-   - For registered customer accounts: Deposits excess surplus into customer ledger as store credit.
-   - For walk-in anonymous customers: Payouts difference as physical cash change.
-3. Inventory Restocking & Historical Serial Archiving (DAT-01 Compliance):
-   - Archives previous customer ownership records (marking historical ItemInstances as 'ARCHIVED')
-     to prevent unique constraint collisions on active 'IN_STOCK' units.
+2. Authoritative Excess Trade-In Value Settlement (Single Source of Truth):
+   - For registered customer accounts: Deposits surplus trade-in value into customer ledger as store credit.
+   - For walk-in anonymous customers: Payouts surplus difference as physical cash change returned on the invoice.
+   - Safe customer querying preventing crashes on deactivated or deleted records.
+   - Complete forensic audit trail recording for all surplus credit adjustments.
+3. Dual-SIM Historical Archival & Inventory Restocking:
+   - Evaluates both imei_1 and imei_2 using cross-matched OR queries to archive historical units.
    - Creates new active pre-owned ItemInstance in 'IN_STOCK' status with landed cost equal to buy-back payout.
    - Stamps NTA MDMS compliance status and updates BranchStock counter.
-4. Comprehensive Forensic Audit Trail:
+4. General Ledger Double-Entry Integration:
+   - Automatically posts balancing journal entry upon pre-owned device acquisition:
+     Debit: Merchandise Inventory Asset (Account 1310)
+     Credit: Trade-In Clearing / Payable (Account 2150)
+5. Comprehensive Forensic Audit Trail:
    - Generates immutable audit logs for valuation, buy-back acquisitions, and debt settlements.
 """
 
 import uuid
+import logging
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import date
 from typing import Dict, Any, Optional, Tuple, List
@@ -41,6 +46,7 @@ from apps.branches.models import Branch
 from apps.core.models import SystemConfiguration, AuditLog
 from apps.customers.models import Customer, CustomerUdhaariLedger
 
+logger = logging.getLogger(__name__)
 
 class TradeInValuationEngine:
     """
@@ -143,7 +149,6 @@ class TradeInValuationEngine:
 
         total_penalty_pct = Decimal('0.00')
         deduction_lines = []
-
         is_frp_locked = False
 
         for category, selected_choice in checklist_data.items():
@@ -224,11 +229,14 @@ class TradeInValuationEngine:
         """
         Restocks a traded-in smartphone into inventory:
         1. Archives any existing historical ItemInstance matching IMEI 1, IMEI 2, or Serial Number
-           (DAT-01 fix) to guarantee unique active IN_STOCK constraints are cleanly met.
+           across BOTH imei_1 and imei_2 columns using cross-matched OR queries.
         2. Matches or registers a catalog Product for pre-owned handsets.
         3. Increments BranchStock counter.
         4. Creates new active ItemInstance with condition grade, landed cost = buy-back offer,
            and NTA MDMS status.
+        5. Automatically posts double-entry journal vouchers to the General Ledger:
+           Debit: Merchandise Inventory Asset (1310)
+           Credit: Trade-In Clearing / Payable (2150)
         """
         clean_name = f"{trade_in_voucher.brand_name} {trade_in_voucher.model_name} (Pre-Owned / Trade-In)"
 
@@ -281,25 +289,21 @@ class TradeInValuationEngine:
                 tax_pricing_type='EXEMPT'
             )
 
-        # 2. Archive any older historical record with this IMEI 1, IMEI 2, or Serial Number
+        # 2. Comprehensive Dual-SIM Historical Archiving (Cross-Column OR Query)
         clean_imei_1 = trade_in_voucher.imei_1.strip() if trade_in_voucher.imei_1 else None
         clean_imei_2 = trade_in_voucher.imei_2.strip() if trade_in_voucher.imei_2 else None
         clean_sn = trade_in_voucher.serial_number.strip() if trade_in_voucher.serial_number else None
 
+        archival_filter = Q()
         if clean_imei_1:
-            ItemInstance.objects.filter(imei_1=clean_imei_1).exclude(status='ARCHIVED').update(
-                status='ARCHIVED',
-                updated_at=timezone.now()
-            )
-
+            archival_filter |= Q(imei_1=clean_imei_1) | Q(imei_2=clean_imei_1)
         if clean_imei_2:
-            ItemInstance.objects.filter(imei_2=clean_imei_2).exclude(status='ARCHIVED').update(
-                status='ARCHIVED',
-                updated_at=timezone.now()
-            )
-
+            archival_filter |= Q(imei_1=clean_imei_2) | Q(imei_2=clean_imei_2)
         if clean_sn:
-            ItemInstance.objects.filter(serial_number=clean_sn).exclude(status='ARCHIVED').update(
+            archival_filter |= Q(serial_number=clean_sn)
+
+        if archival_filter:
+            ItemInstance.objects.filter(archival_filter).exclude(status='ARCHIVED').update(
                 status='ARCHIVED',
                 updated_at=timezone.now()
             )
@@ -344,6 +348,15 @@ class TradeInValuationEngine:
         trade_in_voucher.status = 'RESTOCKED'
         trade_in_voucher.save(update_fields=['restocked_product', 'restocked_item_instance', 'status', 'updated_at'])
 
+        # 5. General Ledger Double-Entry Auto-Posting
+        cls._post_gl_trade_in_acquisition(
+            trade_in_voucher=trade_in_voucher,
+            item_instance=item_instance,
+            branch=branch,
+            user=user
+        )
+
+        # 6. Audit Trail Logging
         AuditLog.objects.create(
             user=user,
             branch=branch,
@@ -361,6 +374,86 @@ class TradeInValuationEngine:
         return item_instance
 
     @classmethod
+    def _post_gl_trade_in_acquisition(
+        cls,
+        trade_in_voucher: PhoneExchangeTradeIn,
+        item_instance: ItemInstance,
+        branch: Branch,
+        user=None
+    ) -> None:
+        """
+        Posts double-entry GL journal for physical pre-owned handset acquisition:
+        - Debit: Merchandise Inventory Asset (1310)
+        - Credit: Trade-In Clearing / Payable (2150)
+        """
+        payout_val = trade_in_voucher.final_trade_in_value
+        if payout_val <= Decimal('0.00'):
+            return
+
+        try:
+            from apps.accounting.services.auto_posting import AutoPostingService
+            if hasattr(AutoPostingService, 'post_trade_in_acquisition'):
+                AutoPostingService.post_trade_in_acquisition(
+                    trade_in_voucher=trade_in_voucher,
+                    item_instance=item_instance,
+                    user=user
+                )
+                return
+        except Exception as err:
+            logger.debug(f"[TradeIn GL AutoPosting Method Check] Delegating to JournalEngine: {err}")
+
+        # Fallback to direct balanced journal entry via JournalEngine
+        try:
+            from apps.accounting.models import Account
+            from apps.accounting.services.auto_posting import JournalEngine
+
+            inv_account = Account.objects.filter(code='1310').first() or Account.objects.filter(
+                name__icontains='Inventory', account_type='ASSET'
+            ).first()
+
+            clearing_account = Account.objects.filter(code='2150').first() or Account.objects.filter(
+                name__icontains='Trade-In', account_type='LIABILITY'
+            ).first() or Account.objects.filter(
+                name__icontains='Clearing'
+            ).first()
+
+            if inv_account and clearing_account:
+                narration = (
+                    f"Acquisition of Pre-Owned Handset: {trade_in_voucher.brand_name} {trade_in_voucher.model_name} "
+                    f"(IMEI: {trade_in_voucher.imei_1}) under Voucher {trade_in_voucher.voucher_number}"
+                )
+                lines = [
+                    {
+                        'account': inv_account,
+                        'debit': payout_val,
+                        'credit': Decimal('0.00'),
+                        'narration': narration
+                    },
+                    {
+                        'account': clearing_account,
+                        'debit': Decimal('0.00'),
+                        'credit': payout_val,
+                        'narration': narration
+                    }
+                ]
+
+                JournalEngine.create_balanced_entry(
+                    voucher_type='JOURNAL',
+                    date_ad=timezone.now().date(),
+                    branch=branch,
+                    lines=lines,
+                    narration=narration,
+                    reference_doc=trade_in_voucher.voucher_number,
+                    user=user,
+                    auto_post=True
+                )
+        except Exception as gl_err:
+            logger.error(
+                f"[TradeIn GL Posting Error] Voucher {trade_in_voucher.voucher_number} failed to post to GL: {gl_err}",
+                exc_info=True
+            )
+
+    @classmethod
     @transaction.atomic
     def settle_excess_trade_in_credit(
         cls,
@@ -370,65 +463,88 @@ class TradeInValuationEngine:
         user=None
     ) -> Dict[str, Any]:
         """
-        Settles surplus trade-in buy-back valuation when the old phone value exceeds bill total:
-        - If customer is a registered profile: Deposits remaining amount as store credit in ledger.
-        - If walk-in anonymous customer: Payouts difference as cash change returned on bill.
+        Authoritative settlement engine for surplus trade-in buy-back valuation:
+        1. When buy-back voucher credit exceeds the merchandise grand total:
+           - For registered customer profiles: Deposits surplus into CustomerUdhaariLedger as Store Credit.
+           - For walk-in anonymous customers: Augments physical cash change returned on the invoice.
+        2. Maintains safe row-level locking on Customer accounts.
+        3. Persists estimate updates and generates immutable forensic audit trail records.
         """
         if excess_amount <= Decimal('0.00'):
             return {'settled': False, 'mode': 'NONE', 'amount': Decimal('0.00')}
 
         excess_amount = excess_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+        # 1. Registered Customer Profile: Deposit into Store Credit / Udhaari Ledger
         if estimate.customer_id:
-            customer = Customer.objects.select_for_update().get(id=estimate.customer_id)
-            prev_bal = customer.current_credit_balance
-            new_bal = prev_bal - excess_amount
-            customer.current_credit_balance = new_bal
-            customer.save(update_fields=['current_credit_balance', 'updated_at'])
+            customer = Customer.objects.select_for_update().filter(id=estimate.customer_id, is_active=True).first()
+            if customer:
+                prev_bal = customer.current_credit_balance
+                new_bal = prev_bal - excess_amount
+                customer.current_credit_balance = new_bal
+                customer.save(update_fields=['current_credit_balance', 'updated_at'])
 
-            CustomerUdhaariLedger.objects.create(
-                customer=customer,
-                branch=estimate.branch,
-                entry_type='CREDIT',
-                amount=excess_amount,
-                previous_balance=prev_bal,
-                resulting_balance=new_bal,
-                reference_invoice=estimate.estimate_number,
-                payment_mode='OTHER',
-                remarks=f"Surplus trade-in credit from buy-back voucher {trade_in_voucher.voucher_number} on bill {estimate.estimate_number}",
-                recorded_by=user
-            )
+                CustomerUdhaariLedger.objects.create(
+                    customer=customer,
+                    branch=estimate.branch,
+                    entry_type='CREDIT',
+                    amount=excess_amount,
+                    previous_balance=prev_bal,
+                    resulting_balance=new_bal,
+                    reference_invoice=estimate.estimate_number,
+                    payment_mode='OTHER',
+                    remarks=(
+                        f"Surplus trade-in buy-back credit from voucher {trade_in_voucher.voucher_number} "
+                        f"on estimate {estimate.estimate_number}"
+                    ),
+                    recorded_by=user
+                )
 
-            AuditLog.objects.create(
-                user=user,
-                branch=estimate.branch,
-                action_type='UPDATE',
-                module='TradeInExcessCredit',
-                object_repr=f"Customer Store Credit: {customer.name}",
-                details={
-                    'voucher': trade_in_voucher.voucher_number,
-                    'estimate': estimate.estimate_number,
-                    'excess_credited': str(excess_amount),
-                    'new_balance': str(new_bal)
+                AuditLog.objects.create(
+                    user=user,
+                    branch=estimate.branch,
+                    action_type='UPDATE',
+                    module='TradeInExcessCredit',
+                    object_repr=f"Customer Store Credit: {customer.name}",
+                    details={
+                        'voucher': trade_in_voucher.voucher_number,
+                        'estimate': estimate.estimate_number,
+                        'excess_credited': str(excess_amount),
+                        'previous_balance': str(prev_bal),
+                        'new_balance': str(new_bal),
+                        'settlement_mode': 'STORE_CREDIT'
+                    }
+                )
+
+                return {
+                    'settled': True,
+                    'mode': 'STORE_CREDIT',
+                    'amount': excess_amount,
+                    'customer': customer.name
                 }
-            )
 
-            return {'settled': True, 'mode': 'STORE_CREDIT', 'amount': excess_amount, 'customer': customer.name}
-        else:
-            estimate.change_returned += excess_amount
-            estimate.save(update_fields=['change_returned', 'updated_at'])
+        # 2. Walk-in Anonymous Customer: Augment cash change returned on bill
+        current_change = estimate.change_returned if estimate.change_returned is not None else Decimal('0.00')
+        estimate.change_returned = current_change + excess_amount
+        estimate.save(update_fields=['change_returned', 'updated_at'])
 
-            AuditLog.objects.create(
-                user=user,
-                branch=estimate.branch,
-                action_type='UPDATE',
-                module='TradeInExcessCash',
-                object_repr=f"Walk-In Cash Refund: {estimate.estimate_number}",
-                details={
-                    'voucher': trade_in_voucher.voucher_number,
-                    'estimate': estimate.estimate_number,
-                    'excess_cash_returned': str(excess_amount)
-                }
-            )
+        AuditLog.objects.create(
+            user=user,
+            branch=estimate.branch,
+            action_type='UPDATE',
+            module='TradeInExcessCash',
+            object_repr=f"Walk-In Cash Change: {estimate.estimate_number}",
+            details={
+                'voucher': trade_in_voucher.voucher_number,
+                'estimate': estimate.estimate_number,
+                'excess_cash_returned': str(excess_amount),
+                'total_change_returned': str(estimate.change_returned),
+                'settlement_mode': 'CASH_CHANGE'
+            }
+        )
 
-            return {'settled': True, 'mode': 'CASH_CHANGE', 'amount': excess_amount}
+        return {
+            'settled': True,
+            'mode': 'CASH_CHANGE',
+            'amount': excess_amount
+        }

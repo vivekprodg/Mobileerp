@@ -1,9 +1,28 @@
-import re
+"""
+Sales & POS Module Forms.
+
+Capabilities:
+- Robust KYC Document image validation handling both fresh UploadedFile streams
+  and existing FieldFile storage handles without stream pointer locks.
+- TradeInDeviceIntakeForm, TradeIn10PointChecklistForm, TradeInLegalUndertakingForm.
+- SalesReturnProcessForm.
+- Unified ManagerDiscountOverrideForm supporting supervisor PIN verification and
+  dual-mode commercial justifications.
+- Architectural Model Cleanup: Deprecation of legacy SalesBillHoldForm.
+  Active cart parking/suspension is managed exclusively by `apps.pos.models.POSHoldCart`
+  and the `/pos/api/hold-carts/` endpoints in `apps.pos`.
+"""
+
+import io
+import warnings
 from decimal import Decimal
 from PIL import Image
 
 from django import forms
+from django.core.files.uploadedfile import UploadedFile
+from django.db.models.fields.files import FieldFile
 from django.utils.translation import gettext_lazy as _
+
 from apps.sales.models import (
     SalesEstimate, SalesReturn,
     PhoneExchangeTradeIn, TradeInInspectionChecklist, TradeInLegalUndertaking
@@ -18,42 +37,60 @@ KYC_ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp'}
 KYC_ALLOWED_MIME_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
 KYC_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per document
 
-
 def validate_kyc_document_image(file_obj, field_label="Uploaded document"):
     """
     Validates customer KYC uploads (Citizenship Card, Live Photo):
-    1. Blocks files larger than 10MB.
-    2. Enforces allowed image extensions (.jpg, .jpeg, .png, .webp).
-    3. Blocks non-image MIME types and executable scripts.
-    4. Verifies image integrity using Pillow.
+    1. Distinguishes safely between existing saved files (FieldFile) and freshly uploaded files (UploadedFile).
+    2. Enforces maximum size (10MB) and allowed extensions (.jpg, .jpeg, .png, .webp).
+    3. Verifies image integrity using Pillow and resets the stream pointer via a finally block
+       to prevent upload corruption across cloud or local storage backends.
     """
     if not file_obj:
         return file_obj
 
-    if file_obj.size > KYC_MAX_FILE_SIZE:
+    # If file is already persisted in the database and not being re-uploaded, bypass check
+    if isinstance(file_obj, FieldFile) and not hasattr(file_obj, 'file'):
+        return file_obj
+
+    # Enforce file size limit
+    if hasattr(file_obj, 'size') and file_obj.size > KYC_MAX_FILE_SIZE:
         raise forms.ValidationError(
             _(f"{field_label} exceeds the 10MB maximum file size limit.")
         )
 
-    ext = file_obj.name.split('.')[-1].lower() if '.' in file_obj.name else ''
+    # Validate file extension
+    file_name = getattr(file_obj, 'name', '')
+    ext = file_name.split('.')[-1].lower() if '.' in file_name else ''
     if ext not in KYC_ALLOWED_IMAGE_EXTENSIONS:
         raise forms.ValidationError(
             _(f"{field_label} must be a valid image file (.jpg, .jpeg, .png, .webp).")
         )
 
-    if hasattr(file_obj, 'content_type') and file_obj.content_type.lower() not in KYC_ALLOWED_MIME_TYPES:
-        raise forms.ValidationError(
-            _(f"{field_label} format is invalid. Please upload a genuine JPG, PNG, or WebP image.")
-        )
+    # Validate MIME type if available on uploaded file
+    if hasattr(file_obj, 'content_type') and file_obj.content_type:
+        content_type = file_obj.content_type.lower()
+        if content_type not in KYC_ALLOWED_MIME_TYPES:
+            raise forms.ValidationError(
+                _(f"{field_label} format is invalid ({content_type}). Please upload a genuine JPG, PNG, or WebP image.")
+            )
 
-    try:
-        img = Image.open(file_obj)
-        img.verify()
-        file_obj.seek(0)
-    except Exception as e:
-        raise forms.ValidationError(
-            _(f"{field_label} is corrupt or not a valid image file.")
-        ) from e
+    # Deep Image Integrity Check via Pillow (Only for newly uploaded streams)
+    if isinstance(file_obj, UploadedFile) or hasattr(file_obj, 'seek'):
+        try:
+            if hasattr(file_obj, 'seek'):
+                file_obj.seek(0)
+            img = Image.open(file_obj)
+            img.verify()
+        except Exception as e:
+            raise forms.ValidationError(
+                _(f"{field_label} is corrupt or not a valid readable image file.")
+            ) from e
+        finally:
+            try:
+                if hasattr(file_obj, 'seek'):
+                    file_obj.seek(0)
+            except (AttributeError, io.UnsupportedOperation):
+                pass
 
     return file_obj
 
@@ -147,7 +184,7 @@ class TradeInLegalUndertakingForm(forms.ModelForm):
         return validate_kyc_document_image(file_obj, _("Customer Live Snapshot"))
 
 # ==============================================================================
-# SALES RETURN, HOLD & OVERRIDE FORMS
+# SALES RETURN, DEPRECATED HOLD & OVERRIDE FORMS
 # ==============================================================================
 class SalesReturnProcessForm(forms.Form):
     reason = forms.CharField(
@@ -168,6 +205,16 @@ class SalesReturnProcessForm(forms.Form):
     )
 
 class SalesBillHoldForm(forms.ModelForm):
+    """
+    DEPRECATED (Legacy Unused Form).
+    
+    Architectural Notice:
+    Cart parking and suspension is handled exclusively by `apps.pos.models.POSHoldCart`
+    and the `/pos/api/hold-carts/` endpoint in the `apps.pos` module.
+    
+    This class stub is maintained solely for backward-compatibility to prevent import
+    errors in any existing scripts. Do not use this form for new implementations.
+    """
     class Meta:
         model = SalesEstimate
         fields = ['customer', 'customer_name_manual', 'customer_phone_manual', 'notes']
@@ -177,6 +224,15 @@ class SalesBillHoldForm(forms.ModelForm):
             'customer_phone_manual': forms.TextInput(attrs={'class': 'form-control', 'placeholder': '98XXXXXXXX'}),
             'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 2}),
         }
+
+    def __init__(self, *args, **kwargs):
+        warnings.warn(
+            "SalesBillHoldForm is deprecated and unused. "
+            "Parked and suspended carts are managed exclusively via `apps.pos.models.POSHoldCart`.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        super().__init__(*args, **kwargs)
 
 class ManagerDiscountOverrideForm(forms.Form):
     """

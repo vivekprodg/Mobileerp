@@ -9,6 +9,10 @@ Key Capabilities:
    - FinancialPeriod: Granular month-by-month locks for all 12 Bikram Sambat months.
 2. General Ledger Chart of Accounts (COA):
    - Hierarchical AccountGroup and Account models with system control tags.
+   - Standardized SYSTEM_TAG_CHOICES officially supporting:
+     * Cash Drawer Discrepancies: CASH_SHORTAGE, CASH_SURPLUS, MISC_INCOME.
+     * Trade-In Barter Settlement: TRADE_IN_CLEARING (Account 2150).
+     * Omnichannel Digital Clearings: FONEPAY, ESEWA, KHALTI, CARD_CLEARING.
    - Protects transacted and system-reserved accounts from structural tampering.
    - Optimized indexing on (code, name, branch) and high-speed query helpers for
      instant partial matching ("11", "cash", "fonepay", "बैंक").
@@ -130,8 +134,8 @@ class AccountQuerySet(models.QuerySet):
 
     def search(self, query: str, branch=None):
         """
-        Fast lookup optimized for partial account codes (e.g., '11', '1010')
-        or name keywords (e.g., 'cash', 'bank', 'fonepay', 'vat') across
+        Fast lookup optimized for partial account codes (e.g., '11', '1010', '5050')
+        or name keywords (e.g., 'cash', 'shortage', 'bank', 'fonepay', 'vat') across
         both English and Nepali ledger names.
         """
         if not query or not query.strip():
@@ -144,6 +148,7 @@ class AccountQuerySet(models.QuerySet):
             models.Q(code__istartswith=query) |
             models.Q(name__icontains=query) |
             models.Q(name_np__icontains=query) |
+            models.Q(system_tag__icontains=query) |
             models.Q(code__icontains=query)
         ).order_by('code')
 
@@ -153,7 +158,7 @@ class Account(TimeStampedModel):
     """
     code = models.CharField(
         max_length=30, unique=True, db_index=True,
-        verbose_name=_("Account Code (e.g. 1010-01, 1130-KTM)")
+        verbose_name=_("Account Code (e.g. 1110-01, 2150-KTM, 5050-NR)")
     )
     name = models.CharField(
         max_length=200, db_index=True,
@@ -174,9 +179,10 @@ class Account(TimeStampedModel):
     )
     currency = models.CharField(max_length=5, default='NPR', verbose_name=_("Currency"))
 
+    # System Automation Tags officially covering all operational reconciliation modules
     SYSTEM_TAG_CHOICES = [
         ('NONE', _('Standard Custom Ledger')),
-        ('CASH', _('Cash in Hand (Counter Float)')),
+        ('CASH', _('Cash in Hand (Counter Float / Main Drawer)')),
         ('BANK', _('Bank Account / Checking Account')),
         ('FONEPAY', _('FonePay Merchant Clearing / Dynamic QR')),
         ('ESEWA', _('eSewa Digital Wallet Clearing')),
@@ -184,6 +190,7 @@ class Account(TimeStampedModel):
         ('CARD_CLEARING', _('Card POS Merchant Settlement / In-Transit')),
         ('ACCOUNTS_RECEIVABLE', _('Accounts Receivable / Trade Debtors (Customer Control)')),
         ('ACCOUNTS_PAYABLE', _('Accounts Payable / Trade Creditors (Supplier Control)')),
+        ('TRADE_IN_CLEARING', _('Trade-In Buy-Back Clearing / Payable (Account 2150)')),
         ('INVENTORY_ASSET', _('Merchandise Inventory Asset (Sellable Stock)')),
         ('DEFECTIVE_INVENTORY_ASSET', _('Quarantined Defective Inventory Asset')),
         ('INVENTORY_SHRINKAGE', _('Stock Shrinkage & Damage Write-Off Expense')),
@@ -200,6 +207,9 @@ class Account(TimeStampedModel):
         ('LOAN_PRINCIPAL', _('Bank Loan & Long-Term Borrowings (Liability)')),
         ('INTEREST_EXPENSE', _('Finance & Interest Charges Expense')),
         ('PAYMENT_GATEWAY_FEE', _('Payment Gateway MDR / POS Commission Expense')),
+        ('CASH_SHORTAGE', _('Cash Drawer Shortage Expense (Account 5050)')),
+        ('CASH_SURPLUS', _('Cash Drawer Excess & Surplus Income (Account 4040)')),
+        ('MISC_INCOME', _('Miscellaneous Operating Income / Surplus')),
         ('OWNER_CAPITAL', _('Proprietor Capital / Equity')),
         ('OWNER_DRAWINGS', _('Owner Drawings (Contra-Equity)')),
         ('RETAINED_EARNINGS', _('Retained Earnings / Current Year P&L')),
@@ -236,14 +246,12 @@ class Account(TimeStampedModel):
         verbose_name = _('General Ledger Account')
         verbose_name_plural = _('General Ledger Accounts')
         indexes = [
-            # High-performance text search and auto-complete indexes
             models.Index(fields=['code'], name='idx_acc_code'),
             models.Index(fields=['name'], name='idx_acc_name'),
             models.Index(fields=['code', 'name'], name='idx_acc_code_name'),
             models.Index(fields=['name_np'], name='idx_acc_name_np'),
             models.Index(fields=['branch', 'code'], name='idx_acc_branch_code'),
             models.Index(fields=['branch', 'name'], name='idx_acc_branch_name'),
-            # System and hierarchy relationship indexes
             models.Index(fields=['system_tag', 'branch'], name='idx_acc_tag_branch'),
             models.Index(fields=['group', 'branch'], name='idx_acc_group_branch'),
         ]
@@ -260,7 +268,7 @@ class Account(TimeStampedModel):
     def search(cls, query: str, branch=None, limit: int = 50):
         """
         Classmethod helper for autocomplete endpoints in manual journals,
-        expense vouchers, and bank reconciliations.
+        expense vouchers, POS discrepancy postings, and bank reconciliations.
         """
         return cls.objects.search(query=query, branch=branch)[:limit]
 
@@ -318,7 +326,6 @@ class AccountingFiscalYear(TimeStampedModel):
         return f"FY {self.name}{closed_tag}"
 
     def save(self, *args, **kwargs):
-        # Automatically populate Gregorian and BS dates from fiscal year label
         if not self.start_date_ad or not self.end_date_ad or not self.start_date_bs or not self.end_date_bs:
             try:
                 ad_start, ad_end, bs_start, bs_end = NepaliCalendar.get_fiscal_year_range(self.name)
@@ -330,9 +337,6 @@ class AccountingFiscalYear(TimeStampedModel):
                 pass
         super().save(*args, **kwargs)
 
-    # =========================================================================
-    # FISCAL YEAR MANAGEMENT CLASSMETHODS & CONTEXT MANAGERS
-    # =========================================================================
     @classmethod
     def get_or_create_fiscal_year(cls, fy_name: str, is_closed: bool = False) -> 'AccountingFiscalYear':
         """
@@ -350,7 +354,6 @@ class AccountingFiscalYear(TimeStampedModel):
             }
         )
 
-        # Ensure all 12 BS monthly periods exist
         base_year = int(fy_name.split('/')[0])
         for month_idx in range(1, 13):
             if month_idx <= 9:
@@ -410,9 +413,6 @@ class AccountingFiscalYear(TimeStampedModel):
         """
         Context manager ensuring historical years are unlocked for a batch operation
         and guaranteed to be re-locked in a finally block even on unhandled crashes.
-        Usage:
-            with AccountingFiscalYear.temporary_unlock(['2080/81', '2081/82']):
-                # Run migration here safely
         """
         originally_closed = list(
             cls.objects.filter(name__in=fy_names, is_closed=True).values_list('name', flat=True)
@@ -601,7 +601,6 @@ class JournalEntry(TimeStampedModel):
 
     def clean(self):
         super().clean()
-        # Enforce Closed Period Lockdown
         if self.fiscal_year:
             fy = AccountingFiscalYear.objects.filter(name=self.fiscal_year, is_closed=True).first()
             if fy:

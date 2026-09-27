@@ -326,7 +326,7 @@
         </div>
     </div>
 
-    <!-- DEDICATED PURCHASE REPORTS SUITE (7 ESSENTIAL REPORTS - PART B INCLUDED) -->
+    <!-- DEDICATED PURCHASE REPORTS SUITE (7 ESSENTIAL REPORTS) -->
     <div class="sidebar-subgroup-wrap">
         <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupPurchasesSuite', this)">
             <i class="fas fa-cart-flatbed text-warning"></i>
@@ -468,9 +468,18 @@
         </div>
     </div>
 
-    <!-- 9. Administration (Role Scoped) -->
+    <!-- 9. Administration & Master Configuration (Role Scoped: OWNER, MANAGER, SUPERUSER) -->
     {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
-    <div class="sidebar-section-heading">Administration</div>
+    <div class="sidebar-section-heading">Administration &amp; System</div>
+
+    <!-- System Settings & Master IMEI / Tax Policy Switch (1-Click Master Control) -->
+    <a href="{% url 'core:settings' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'core' and request.resolver_match.url_name == 'settings' %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="System Settings &amp; Master IMEI Policy">
+        <i class="fas fa-sliders text-primary"></i>
+        <span class="sidebar-label-wrap">System Settings</span>
+        <span class="badge bg-primary bg-opacity-10 text-primary ms-auto fs-3xs">IMEI &amp; TAX</span>
+    </a>
 
     {% if user.is_superuser or user.role == 'OWNER' %}
     <a href="{% url 'branches:branch_list' %}" 

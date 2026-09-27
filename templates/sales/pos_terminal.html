@@ -26,9 +26,9 @@
     border-radius: 999px;
     font-size: 0.78rem;
     font-weight: 700;
-    border: 1px solid var(--erp-slate-200);
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
     background: #ffffff;
-    color: var(--erp-slate-600);
+    color: var(--erp-slate-600, #475569);
     cursor: pointer;
     transition: all 0.15s ease;
     white-space: nowrap;
@@ -37,16 +37,16 @@
 
 .cat-pill:hover, 
 .cat-pill.active {
-    background-color: var(--erp-primary) !important;
+    background-color: var(--erp-primary, #2563eb) !important;
     color: #ffffff !important;
-    border-color: var(--erp-primary) !important;
+    border-color: var(--erp-primary, #2563eb) !important;
     box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
 }
 
 /* Active Invoice Date Banner & Backdate Badges */
 .pos-date-strip {
     background: #ffffff;
-    border: 1px solid var(--erp-slate-200);
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
     border-radius: 10px;
     padding: 5px 10px;
 }
@@ -87,15 +87,9 @@
 }
 
 @keyframes pulseBorder {
-    0% { 
-        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); 
-    }
-    70% { 
-        box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); 
-    }
-    100% { 
-        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); 
-    }
+    0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
+    70% { box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
 }
 
 .imei-slot-badge {
@@ -149,12 +143,8 @@
 
 /* Flash Visual Effect on Barcode Scan */
 @keyframes scanFlashGreen {
-    0% { 
-        background-color: rgba(16, 185, 129, 0.4); 
-    }
-    100% { 
-        background-color: transparent; 
-    }
+    0% { background-color: rgba(16, 185, 129, 0.4); }
+    100% { background-color: transparent; }
 }
 
 .scan-flash {
@@ -257,14 +247,8 @@
 }
 
 @keyframes laserScan { 
-    0% { 
-        top: 8%; 
-        opacity: 0.8; 
-    } 
-    100% { 
-        top: 92%; 
-        opacity: 1; 
-    } 
+    0% { top: 8%; opacity: 0.8; } 
+    100% { top: 92%; opacity: 1; } 
 }
 
 .scanner-controls-bar {
@@ -286,11 +270,12 @@
 
     <!-- Hidden Meta Configuration for JavaScript Engine -->
     <div id="posTaxConfigMeta"
-         data-tax-mode="{{ SHOP_TAX_MODE }}"
-         data-default-vat-rate="{{ DEFAULT_TAX_RATE }}"
-         data-can-backdate="{% if IS_MANAGER or IS_OWNER or user.is_superuser %}true{% else %}false{% endif %}"
-         data-today-bs="{{ CURRENT_BS_DATE_EN }}"
-         data-today-bs-np="{{ CURRENT_BS_DATE_NP }}"
+         data-tax-mode="{{ SHOP_TAX_MODE|default:config.tax_system_mode|default:'EXEMPT' }}"
+         data-default-vat-rate="{{ DEFAULT_TAX_RATE|default:config.default_vat_rate|default:'0.00' }}"
+         data-enforce-imei="{% if SYS_CONFIG.enforce_imei_tracking == False or config.enforce_imei_tracking == False or ENFORCE_IMEI_TRACKING == False or enforce_imei_tracking == False %}false{% else %}true{% endif %}"
+         data-can-backdate="{% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' or IS_MANAGER or IS_OWNER %}true{% else %}false{% endif %}"
+         data-today-bs="{{ CURRENT_BS_DATE_EN|default:'' }}"
+         data-today-bs-np="{{ CURRENT_BS_DATE_NP|default:'' }}"
          style="display: none;">
     </div>
     
@@ -298,20 +283,26 @@
     <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 py-2 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs flex-shrink-0">
         <span class="text-truncate">
             <i class="fas fa-circle-exclamation text-warning me-1"></i>
-            <strong>{{ COMPANY_NAME }} &bull; {{ BILL_HEADER_TITLE }}:</strong> {{ ESTIMATE_DISCLAIMER }}
+            <strong>{{ COMPANY_NAME }} &bull; {{ SYS_CONFIG.bill_header_title|default:BILL_HEADER_TITLE|default:"SALES ESTIMATE" }}:</strong> 
+            {{ SYS_CONFIG.bill_estimate_disclaimer|default:ESTIMATE_DISCLAIMER|default:"Proforma quotation slip for estimation purposes only." }}
         </span>
         <div class="d-flex align-items-center gap-2 flex-shrink-0">
+            {% if SYS_CONFIG.enforce_imei_tracking == False or config.enforce_imei_tracking == False or ENFORCE_IMEI_TRACKING == False or enforce_imei_tracking == False %}
+            <span class="badge bg-warning text-dark border border-warning" title="Backlog Mode Active: Mobile phones can be sold without mandatory IMEI tracking">
+                <i class="fas fa-clock-rotate-left me-1"></i> Backlog Mode (IMEI Optional)
+            </span>
+            {% endif %}
             <span id="posNetworkStatusBadge" class="badge bg-success text-white">
                 <i class="fas fa-wifi me-1"></i> Online
             </span>
             <button type="button" class="btn btn-sm btn-outline-primary bg-white text-primary border-primary border-opacity-25 px-2 py-0 fs-2xs fw-bold" id="toggleDualScanModeBtn" title="Toggle Auto Dual-IMEI Scanning">
                 <i class="fas fa-barcode text-primary me-1"></i> Dual-IMEI Scan: <span id="dualScanModeStatusText" class="text-success">AUTO (ON)</span>
             </button>
-            {% if ENABLE_MDMS_TRACKING %}
+            {% if config.enable_mdms_tracking or ENABLE_MDMS_TRACKING %}
             <span class="badge bg-success text-white"><i class="fas fa-shield-halved me-1"></i> NTA MDMS Guard</span>
             {% endif %}
-            <span class="badge bg-primary text-white">{{ STORE_OUTLET_NAME }} ({{ STORE_OUTLET_CODE }})</span>
-            <span class="badge bg-dark text-white font-mono" id="topBarDateBadge">{{ CURRENT_BS_DATE_EN }} BS</span>
+            <span class="badge bg-primary text-white">{{ active_branch.name|default:STORE_OUTLET_NAME }} ({{ active_branch.code|default:STORE_OUTLET_CODE }})</span>
+            <span class="badge bg-dark text-white font-mono" id="topBarDateBadge">{{ CURRENT_BS_DATE_EN|default:"" }} BS</span>
         </div>
     </div>
 
@@ -433,7 +424,7 @@
                             
                             <!-- Visual B.S. Date Badge (Changes styling if backdated) -->
                             <span id="activeBsDateBadge" class="date-status-badge-today">
-                                <span id="displayBillDateBs">{{ CURRENT_BS_DATE_EN }}</span> BS
+                                <span id="displayBillDateBs">{{ CURRENT_BS_DATE_EN|default:"" }}</span> BS
                             </span>
                             
                             <span class="text-muted fs-2xs" id="displayBillDateNp">
@@ -460,7 +451,7 @@
                         </div>
                     </div>
 
-                    <!-- 2. Hidden Collapsible B.S. Datepicker Input Bar (Revealed on Click) -->
+                    <!-- 2. Hidden Collapsible B.S. Datepicker Input Bar -->
                     <div class="p-2 bg-white border rounded-3 d-none shadow-xs" id="customDatePickerWrapper">
                         <div class="d-flex align-items-center gap-2">
                             <label class="form-label fs-2xs fw-bold text-dark mb-0 text-nowrap">
@@ -472,7 +463,7 @@
                                    id="posBillDateBsInput" 
                                    name="bill_date_bs" 
                                    class="form-control form-control-sm font-mono fs-xs nepali-datepicker text-center fw-bold text-primary" 
-                                   value="{{ CURRENT_BS_DATE_EN }}" 
+                                   value="{{ CURRENT_BS_DATE_EN|default:'' }}" 
                                    placeholder="YYYY-MM-DD (BS)" 
                                    style="max-width: 145px;" 
                                    autocomplete="off">
@@ -511,19 +502,21 @@
                             <input type="text" id="posCustomerPanInput" class="form-control border-0 font-monospace fs-xs px-1" placeholder="9-Digit" maxlength="15">
                         </div>
 
-                        <!-- Action Controls: Repair Ticket Attach, Trade-in Exchange, Shortcuts -->
+                        <!-- Action Controls: Repair Ticket Attach [F7], Trade-in Exchange, Shortcuts -->
                         <div class="d-flex gap-1 flex-shrink-0">
-                            <!-- Direct Repair Ticket Search & Link Button (Unified with pos_engine.js) -->
+                            <!-- Direct Repair Ticket Search & Link Button -->
                             <button type="button" 
-                                    class="btn btn-outline-info btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark" 
+                                    class="btn btn-outline-info btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark shadow-xs" 
                                     id="attachRepairPromptBtn" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#repairTicketSearchModal" 
                                     title="Search &amp; Attach Ready Repair Ticket [F7]">
                                 <i class="fas fa-wrench text-info me-1"></i> Repair [F7]
                             </button>
 
                             <!-- Trade-in Voucher Attach Button -->
                             <button type="button" 
-                                    class="btn btn-outline-warning btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark" 
+                                    class="btn btn-outline-warning btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark shadow-xs" 
                                     id="attachTradeInPromptBtn" 
                                     data-bs-toggle="modal" 
                                     data-bs-target="#exchangeModal" 
@@ -533,7 +526,7 @@
 
                             <!-- Keyboard Shortcuts Help -->
                             <button type="button" 
-                                    class="btn btn-outline-dark btn-sm rounded-pill text-nowrap fs-xs" 
+                                    class="btn btn-outline-dark btn-sm rounded-pill text-nowrap fs-xs shadow-xs" 
                                     data-bs-toggle="modal" 
                                     data-bs-target="#shortcutsModal" 
                                     title="POS Shortcuts">
@@ -574,17 +567,22 @@
 
                     <div class="d-flex justify-content-between text-xs text-danger mb-1 px-1" id="posTradeInRow" style="display: none;">
                         <span><i class="fas fa-repeat me-1"></i> Trade-In Credit <small id="posTradeInTag"></small>:</span>
-                        <span id="posTradeInText" class="font-monospace fw-bold">-Rs. 0.00</span>
+                        <div class="d-flex align-items-center gap-1">
+                            <span id="posTradeInText" class="font-monospace fw-bold">-Rs. 0.00</span>
+                            <button type="button" class="btn btn-link text-danger p-0 border-0 ms-1 fs-2xs" id="posRemoveTradeInBtn" title="Detach Trade-In Voucher">
+                                <i class="fas fa-times-circle"></i>
+                            </button>
+                        </div>
                     </div>
                     
-                    {% if IS_VAT_MODE %}
+                    {% if config.tax_system_mode == 'VAT' or SHOP_TAX_MODE == 'VAT' or IS_VAT_MODE %}
                     <div class="d-flex justify-content-between text-xs text-muted mb-1 px-1" id="posVatRow">
                         <span id="posVatLabel">Tax / VAT Breakdown ({{ DEFAULT_TAX_RATE }}%):</span>
                         <span id="posVatText" class="font-monospace fw-semibold">Rs. 0.00</span>
                     </div>
                     {% endif %}
 
-                    <!-- ENHANCED DUAL-MODE BILL DISCOUNT UI (PERCENTAGE VS FIXED AMOUNT) -->
+                    <!-- DUAL-MODE BILL DISCOUNT UI (PERCENTAGE VS FIXED AMOUNT) -->
                     <div class="d-flex justify-content-between align-items-center text-xs text-muted mb-2 px-1">
                         <div class="d-flex align-items-center gap-1">
                             <span class="fw-semibold text-dark">Bill Discount:</span>
@@ -633,17 +631,17 @@
                     <!-- Checkout Actions -->
                     <div class="row g-1">
                         <div class="col-4">
-                            <button type="button" class="btn btn-warning btn-sm w-100 py-2 fw-bold text-dark rounded-3 fs-xs" id="posHoldCartBtn" title="Hold Active Cart [F9]">
+                            <button type="button" class="btn btn-warning btn-sm w-100 py-2 fw-bold text-dark rounded-3 fs-xs shadow-xs" id="posHoldCartBtn" title="Hold Active Cart [F9]">
                                 <i class="fas fa-pause me-1"></i> Hold [F9]
                             </button>
                         </div>
                         <div class="col-4">
-                            <button type="button" class="btn btn-secondary btn-sm w-100 py-2 fw-bold text-white rounded-3 fs-xs" id="posRecallHeldCartsBtn" onclick="window.smartPos.holdCartManager.openRecallModal()" title="Recall Parked Carts [F10]">
+                            <button type="button" class="btn btn-secondary btn-sm w-100 py-2 fw-bold text-white rounded-3 fs-xs shadow-xs" id="posRecallHeldCartsBtn" title="Recall Parked Carts [F10]">
                                 <i class="fas fa-folder-open me-1"></i> Recall [F10]
                             </button>
                         </div>
                         <div class="col-4">
-                            <button type="button" class="btn btn-info btn-sm w-100 py-2 fw-bold text-white rounded-3 fs-xs" id="posSplitPaymentBtn" onclick="window.smartPos.openSplitPaymentModal()" title="Split Payment [F8]">
+                            <button type="button" class="btn btn-info btn-sm w-100 py-2 fw-bold text-white rounded-3 fs-xs shadow-xs" id="posSplitPaymentBtn" title="Split Payment [F8]">
                                 <i class="fas fa-layer-group me-1"></i> Split [F8]
                             </button>
                         </div>
@@ -699,8 +697,118 @@
             </div>
             <div class="modal-footer bg-light py-2 px-3 d-flex justify-content-between">
                 <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="confirmImeiModalBtn">
-                    Add to Bill &rarr;
+                <div class="d-flex gap-2">
+                    <!-- Skip IMEI Button dynamically unhidden by pos_engine.js in Backlog Mode -->
+                    <button type="button" class="btn btn-outline-warning btn-sm px-3 rounded-pill fw-bold d-none" id="skipImeiModalBtn" title="Sell Handset without Serial/IMEI in Backlog Mode">
+                        <i class="fas fa-forward me-1"></i> Skip IMEI (Backlog)
+                    </button>
+                    <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="confirmImeiModalBtn">
+                        Add to Bill &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 2: UPGRADED OLD PHONE TRADE-IN / BUY-BACK VOUCHER ATTACH MODAL
+     ========================================================================= -->
+<div class="modal fade" id="exchangeModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-warning text-dark py-2 px-3">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-dark text-warning p-2 rounded-circle"><i class="fas fa-repeat"></i></span>
+                    <div>
+                        <h6 class="modal-title fs-sm fw-bold mb-0">Attach Trade-In Buy-Back Voucher (पुरानो फोन साट्ने)</h6>
+                        <small class="text-dark-50 fs-2xs">Search active trade-in inspection voucher to apply credit deduction</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            
+            <div class="modal-body p-3 bg-light">
+                <!-- Search Box for Unattached Vouchers -->
+                <div class="card border-0 shadow-xs rounded-3 p-3 bg-white mb-3">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">
+                        <i class="fas fa-search text-warning-emphasis me-1"></i> Search Active Trade-In Vouchers:
+                    </label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light border"><i class="fas fa-ticket-simple text-muted"></i></span>
+                        <input type="text" 
+                               id="tradeInVoucherSearchInput" 
+                               class="form-control border font-monospace" 
+                               placeholder="Search Voucher # (e.g. EXC-MAIN-...), Customer Phone 98XXXXXXXX, or IMEI..." 
+                               autocomplete="off">
+                        <button type="button" class="btn btn-outline-secondary" id="clearTradeInSearchBtn" style="display: none;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button type="button" class="btn btn-warning fw-bold px-3" id="btnBrowseAvailableVouchers">
+                            Browse Recent
+                        </button>
+                    </div>
+                    <!-- Live Search Dropdown -->
+                    <div id="tradeInSearchResultsDropdown" class="list-group shadow mt-1 rounded-3 border overflow-hidden" style="display: none; max-height: 240px; overflow-y: auto; z-index: 1060;"></div>
+                </div>
+
+                <!-- Selected Voucher Highlight Container -->
+                <div id="selectedVoucherCard" class="card border-2 border-warning bg-warning bg-opacity-10 rounded-3 p-3 d-none mb-3">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <span class="badge bg-warning text-dark font-monospace fw-bold fs-xs" id="dispVoucherNumber">EXC-000000</span>
+                            <span class="badge bg-dark text-white fs-2xs ms-1" id="dispConditionGrade">GRADE B</span>
+                            <span class="badge bg-success bg-opacity-10 text-success border border-success fs-2xs ms-1" id="dispMdmsBadge">MDMS OK</span>
+                        </div>
+                        <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 fs-2xs rounded-pill" id="btnDetachTradeInVoucher">
+                            <i class="fas fa-times me-1"></i> Detach
+                        </button>
+                    </div>
+
+                    <div class="row g-2 fs-xs">
+                        <div class="col-6">
+                            <span class="text-muted d-block fs-2xs">Device Traded-In:</span>
+                            <strong class="text-dark" id="dispDeviceModel">Brand &amp; Model</strong>
+                            <small class="text-muted d-block font-monospace" id="dispDeviceSpecs">128GB - Black</small>
+                        </div>
+                        <div class="col-6">
+                            <span class="text-muted d-block fs-2xs">Customer Details:</span>
+                            <strong class="text-dark" id="dispCustomerName">Customer Name</strong>
+                            <small class="text-muted d-block font-monospace" id="dispCustomerPhone">98XXXXXXXX</small>
+                        </div>
+                        <div class="col-12 mt-2 pt-2 border-top border-warning border-opacity-25 d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="text-muted fs-2xs d-block">Handset Primary IMEI:</span>
+                                <span class="font-monospace text-dark fw-bold" id="dispDeviceImei">35XXXXXXXXXXXXX</span>
+                            </div>
+                            <div class="text-end">
+                                <span class="text-muted fs-2xs d-block">Agreed Buy-Back Valuation:</span>
+                                <h5 class="fw-extrabold text-danger font-monospace mb-0" id="dispTradeInAmount">Rs. 0.00</h5>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hidden Input Fields Transmitting Verified Voucher Data to POS Checkout -->
+                <input type="hidden" id="selectedTradeInVoucherId" name="trade_in_voucher_id" value="">
+                <input type="hidden" id="selectedTradeInVoucherNumber" value="">
+                <input type="hidden" id="selectedTradeInVoucherAmount" value="0.00">
+
+                <!-- Helper Notice & Direct Intake Wizard Launcher -->
+                <div class="d-flex justify-content-between align-items-center p-2 bg-white rounded-3 border fs-xs">
+                    <span class="text-muted">
+                        <i class="fas fa-info-circle text-primary me-1"></i> Device not evaluated yet?
+                    </span>
+                    <a href="{% url 'sales:trade_in_wizard' %}" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill fw-bold fs-2xs">
+                        <i class="fas fa-plus-circle me-1"></i> New Diagnostic Intake &rarr;
+                    </a>
+                </div>
+            </div>
+
+            <div class="modal-footer bg-white py-2 px-3 d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-warning btn-sm px-4 rounded-pill fw-bold shadow-sm" id="applyTradeInVoucherBtn" disabled>
+                    <i class="fas fa-check-circle me-1"></i> Apply Trade-In Credit
                 </button>
             </div>
         </div>
@@ -708,41 +816,7 @@
 </div>
 
 <!-- =========================================================================
-     MODAL 2: OLD PHONE EXCHANGE / TRADE-IN POPUP MODAL
-     ========================================================================= -->
-<div class="modal fade" id="exchangeModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content border-0 shadow-lg rounded-4">
-            <div class="modal-header bg-warning text-dark py-2 px-3">
-                <h6 class="modal-title fs-sm fw-bold mb-0">
-                    <i class="fas fa-repeat me-1"></i> Old Phone Exchange / Trade-In (साट्ने)
-                </h6>
-                <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body p-3">
-                <div class="position-relative mb-2">
-                    <label class="form-label fs-xs fw-bold text-dark mb-1">Old Phone Model Name / Voucher Ref</label>
-                    <input type="text" 
-                           id="exchangePhoneModel" 
-                           class="form-control" 
-                           placeholder="e.g. Redmi Note 10 Pro or EXC-BR-XXXXXX"
-                           autocomplete="off">
-                </div>
-                <div class="mb-2">
-                    <label class="form-label fs-xs fw-bold text-dark mb-1">Agreed Buy-Back Value (NPR)</label>
-                    <input type="number" id="exchangePhoneValue" class="form-control font-mono fw-bold text-success fs-6" placeholder="Rs. 8000">
-                </div>
-            </div>
-            <div class="modal-footer bg-light py-2 px-3 d-flex justify-content-between">
-                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-warning btn-sm fw-bold" id="applyExchangeBtn">Apply Exchange Credit</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- =========================================================================
-     MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL (WITH B.S. CONFIRMED DATE)
+     MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL
      ========================================================================= -->
 <div class="modal fade" id="receiptModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
@@ -760,17 +834,17 @@
                     {% if COMPANY_NAME_NP %}
                     <div class="text-center" style="font-size: 10px;">{{ COMPANY_NAME_NP }}</div>
                     {% endif %}
-                    <div class="text-center" style="font-size: 9px;">{{ ACTIVE_BRANCH.address }}, {{ ACTIVE_BRANCH.city }} &bull; Tel: {{ ACTIVE_BRANCH.phone_number }}</div>
-                    {% if SYS_CONFIG.pan_number %}
-                    <div class="text-center" style="font-size: 9px;">PAN: {{ SYS_CONFIG.pan_number }}</div>
+                    <div class="text-center" style="font-size: 9px;">{{ active_branch.address }}, {{ active_branch.city }} &bull; Tel: {{ active_branch.phone_number }}</div>
+                    {% if config.pan_number or SYS_CONFIG.pan_number %}
+                    <div class="text-center" style="font-size: 9px;">PAN: {{ config.pan_number|default:SYS_CONFIG.pan_number }}</div>
                     {% endif %}
                     
                     <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 5px 0;" class="text-center fw-bold">
-                        *** {{ BILL_HEADER_TITLE }} ***
+                        *** {{ SYS_CONFIG.bill_header_title|default:BILL_HEADER_TITLE|default:"ESTIMATION SLIP" }} ***
                     </div>
 
                     <div>Slip No : <strong id="recSlipNo">EST-000000</strong></div>
-                    <div>Date    : <span id="recBillDate">{{ CURRENT_BS_DATE_EN }} BS</span></div>
+                    <div>Date    : <span id="recBillDate">{{ CURRENT_BS_DATE_EN|default:"" }} BS</span></div>
                     <div>Customer: <span id="recCustomer">Walk-in Customer</span></div>
                     
                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
@@ -812,7 +886,7 @@
                 <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal" id="finishReceiptBtn">
                     Next Bill
                 </button>
-                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold shadow-sm" onclick="window.print()">
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold shadow-sm" id="printThermalReceiptModalBtn">
                     <i class="fas fa-print me-1"></i> Print 80mm Slip
                 </button>
             </div>
@@ -822,7 +896,7 @@
 
 <!-- ==========================================================================
      MODAL 4: SUPERVISOR MANAGER OVERRIDE PIN & REASON AUTHORIZATION MODAL
-     ========================================================================= -->
+     ========================================================================== -->
 <div class="modal fade" id="posManagerPinModal" tabindex="-1" aria-labelledby="posManagerPinModalLabel" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
@@ -886,7 +960,7 @@
 
 <!-- ==========================================================================
      MODAL 5: POS LIVE CAMERA & IMAGE SCANNER POPUP MODAL
-     ========================================================================= -->
+     ========================================================================== -->
 <div class="modal fade" id="posCameraScannerModal" tabindex="-1" aria-labelledby="posCameraScannerModalLabel" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark text-white">
@@ -943,6 +1017,7 @@
 {% include "pos/hold_bills_modal.html" %}
 {% include "pos/split_payment_modal.html" %}
 {% include "pos/quick_add_modal.html" %}
+{% include "pos/repair_ticket_search_modal.html" %}
 
 {% endblock %}
 
@@ -954,7 +1029,7 @@
 
 <script>
 /**
- * POS Interactive Controls, Nepali Date Controller & Operational Event Listeners
+ * POS Interactive Controls, Nepali Date Controller & Clean Event Listeners
  */
 document.addEventListener('DOMContentLoaded', () => {
     // =========================================================================
@@ -975,7 +1050,305 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // =========================================================================
-    // 2. ACTIVE INVOICE NEPALI B.S. DATE CONTROLLER & BACKDATING ENGINE
+    // 2. REPAIR TICKET SEARCH MODAL TRIGGER & SHORTCUT
+    // =========================================================================
+    const attachRepairPromptBtn = document.getElementById('attachRepairPromptBtn');
+
+    function openRepairTicketModal() {
+        const repairModalEl = document.getElementById('repairTicketSearchModal') || 
+                              document.getElementById('repairSearchModal') || 
+                              document.getElementById('repairTicketModal');
+        if (repairModalEl) {
+            const modalInstance = bootstrap.Modal.getOrCreateInstance(repairModalEl);
+            modalInstance.show();
+        } else if (window.smartPos && typeof window.smartPos.openRepairModal === 'function') {
+            window.smartPos.openRepairModal();
+        }
+    }
+
+    if (attachRepairPromptBtn) {
+        attachRepairPromptBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            openRepairTicketModal();
+        });
+    }
+
+    // =========================================================================
+    // 3. SAFE ATTACHMENT OF RECALL, SPLIT & RECEIPT BUTTON HANDLERS
+    // =========================================================================
+    const recallBtn = document.getElementById('posRecallHeldCartsBtn');
+    if (recallBtn) {
+        recallBtn.addEventListener('click', () => {
+            if (window.smartPos && window.smartPos.holdCartManager && typeof window.smartPos.holdCartManager.openRecallModal === 'function') {
+                window.smartPos.holdCartManager.openRecallModal();
+            } else {
+                const heldModal = document.getElementById('holdBillsModal');
+                if (heldModal) bootstrap.Modal.getOrCreateInstance(heldModal).show();
+            }
+        });
+    }
+
+    const splitBtn = document.getElementById('posSplitPaymentBtn');
+    if (splitBtn) {
+        splitBtn.addEventListener('click', () => {
+            if (window.smartPos && typeof window.smartPos.openSplitPaymentModal === 'function') {
+                window.smartPos.openSplitPaymentModal();
+            } else {
+                const splitModal = document.getElementById('splitPaymentModal');
+                if (splitModal) bootstrap.Modal.getOrCreateInstance(splitModal).show();
+            }
+        });
+    }
+
+    const printReceiptBtn = document.getElementById('printThermalReceiptModalBtn');
+    if (printReceiptBtn) {
+        printReceiptBtn.addEventListener('click', () => {
+            window.print();
+        });
+    }
+
+    // =========================================================================
+    // 4. ROBUST MULTI-FORMAT TRADE-IN VOUCHER LOOKUP
+    // =========================================================================
+    const voucherSearchInput = document.getElementById('tradeInVoucherSearchInput');
+    const clearSearchBtn = document.getElementById('clearTradeInSearchBtn');
+    const voucherDropdown = document.getElementById('tradeInSearchResultsDropdown');
+    const btnBrowseVouchers = document.getElementById('btnBrowseAvailableVouchers');
+    const selectedVoucherCard = document.getElementById('selectedVoucherCard');
+    const btnDetachVoucher = document.getElementById('btnDetachTradeInVoucher');
+    const applyVoucherBtn = document.getElementById('applyTradeInVoucherBtn');
+
+    const hidVoucherId = document.getElementById('selectedTradeInVoucherId');
+    const hidVoucherNo = document.getElementById('selectedTradeInVoucherNumber');
+    const hidVoucherAmt = document.getElementById('selectedTradeInVoucherAmount');
+
+    const posTradeInRow = document.getElementById('posTradeInRow');
+    const posTradeInTag = document.getElementById('posTradeInTag');
+    const posTradeInText = document.getElementById('posTradeInText');
+    const posRemoveTradeInBtn = document.getElementById('posRemoveTradeInBtn');
+
+    let voucherDebounce = null;
+    let currentlySelectedVoucher = null;
+
+    function renderVoucherSearchResults(vouchers) {
+        if (!vouchers || !vouchers.length) {
+            voucherDropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No available or unattached trade-in vouchers found.</div>';
+            voucherDropdown.style.display = 'block';
+            return;
+        }
+
+        voucherDropdown.innerHTML = vouchers.map(v => {
+            const valAmt = Number(v.final_trade_in_value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return `
+                <button type="button" class="list-group-item list-group-item-action py-2 px-3 border-bottom d-flex justify-content-between align-items-center select-tradein-item-btn"
+                        data-id="${v.id}"
+                        data-voucher="${v.voucher_number}"
+                        data-model="${v.brand_name} ${v.model_name}"
+                        data-specs="${v.storage_capacity || ''} ${v.color_variant || ''}"
+                        data-imei="${v.imei_1 || ''}"
+                        data-grade="${v.recommended_condition_grade || 'USED_GRADE_B'}"
+                        data-customer="${v.customer_name || 'Walk-in'}"
+                        data-phone="${v.customer_phone || ''}"
+                        data-amount="${v.final_trade_in_value || 0}">
+                    <div>
+                        <div class="fw-bold font-monospace fs-xs text-primary">
+                            <i class="fas fa-ticket-simple me-1"></i> ${v.voucher_number}
+                            <span class="badge bg-light text-dark border ms-1 font-sans fs-2xs">${v.brand_name} ${v.model_name}</span>
+                        </div>
+                        <small class="text-muted fs-2xs">
+                            Customer: <strong>${v.customer_name || 'Walk-in'}</strong> (${v.customer_phone || 'No phone'}) 
+                            &bull; IMEI: <span class="font-monospace">${v.imei_1 || 'N/A'}</span>
+                        </small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-danger bg-opacity-10 text-danger font-monospace fs-xs">Rs. ${valAmt}</span>
+                        <small class="text-primary d-block fs-2xs fw-bold">Select &rarr;</small>
+                    </div>
+                </button>
+            `;
+        }).join('');
+
+        voucherDropdown.style.display = 'block';
+
+        voucherDropdown.querySelectorAll('.select-tradein-item-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                selectTradeInVoucher({
+                    id: btn.dataset.id,
+                    voucher_number: btn.dataset.voucher,
+                    model_name: btn.dataset.model,
+                    specs: btn.dataset.specs,
+                    imei: btn.dataset.imei,
+                    grade: btn.dataset.grade,
+                    customer: btn.dataset.customer,
+                    phone: btn.dataset.phone,
+                    amount: btn.dataset.amount
+                });
+            });
+        });
+    }
+
+    function fetchTradeInVouchers(query = '') {
+        voucherDropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-2 text-warning"></i>Searching active vouchers...</div>';
+        voucherDropdown.style.display = 'block';
+
+        let url = '/sales/api/trade-in/lookup/';
+        if (query) {
+            if (query.toUpperCase().startsWith('EXC-')) {
+                url += `?voucher=${encodeURIComponent(query)}&q=${encodeURIComponent(query)}`;
+            } else {
+                url += `?q=${encodeURIComponent(query)}`;
+            }
+        }
+
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'error') {
+                    voucherDropdown.innerHTML = `<div class="p-3 text-center text-danger fs-xs"><i class="fas fa-triangle-exclamation me-1"></i>${data.error || 'Voucher not found or invalid.'}</div>`;
+                    return;
+                }
+
+                let results = [];
+                if (Array.isArray(data)) {
+                    results = data;
+                } else if (data && Array.isArray(data.results)) {
+                    results = data.results;
+                } else if (data && (data.voucher_number || data.id)) {
+                    results = [data];
+                } else if (data && data.voucher && (data.voucher.voucher_number || data.voucher.id)) {
+                    results = [data.voucher];
+                }
+
+                renderVoucherSearchResults(results);
+            })
+            .catch(err => {
+                console.error('[TradeInLookup] Error:', err);
+                voucherDropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Error querying trade-in vouchers.</div>';
+            });
+    }
+
+    function selectTradeInVoucher(v) {
+        currentlySelectedVoucher = v;
+        hidVoucherId.value = v.id;
+        hidVoucherNo.value = v.voucher_number;
+        hidVoucherAmt.value = v.amount;
+
+        document.getElementById('dispVoucherNumber').innerText = v.voucher_number;
+        document.getElementById('dispDeviceModel').innerText = v.model_name;
+        document.getElementById('dispDeviceSpecs').innerText = v.specs || 'Standard Spec';
+        document.getElementById('dispDeviceImei').innerText = v.imei || 'Not Specified';
+        document.getElementById('dispCustomerName').innerText = v.customer || 'Walk-in Customer';
+        document.getElementById('dispCustomerPhone').innerText = v.phone || '-';
+        document.getElementById('dispConditionGrade').innerText = v.grade;
+        
+        const numAmt = Number(v.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        document.getElementById('dispTradeInAmount').innerText = `-Rs. ${numAmt}`;
+
+        selectedVoucherCard.classList.remove('d-none');
+        applyVoucherBtn.disabled = false;
+        voucherDropdown.style.display = 'none';
+        if (voucherSearchInput) voucherSearchInput.value = v.voucher_number;
+    }
+
+    function detachTradeInVoucher() {
+        currentlySelectedVoucher = null;
+        hidVoucherId.value = '';
+        hidVoucherNo.value = '';
+        hidVoucherAmt.value = '0.00';
+
+        selectedVoucherCard.classList.add('d-none');
+        applyVoucherBtn.disabled = true;
+        if (voucherSearchInput) voucherSearchInput.value = '';
+        if (clearSearchBtn) clearSearchBtn.style.display = 'none';
+
+        if (posTradeInRow) posTradeInRow.style.display = 'none';
+        if (posTradeInTag) posTradeInTag.innerText = '';
+        if (posTradeInText) posTradeInText.innerText = '-Rs. 0.00';
+
+        if (window.smartPos && window.smartPos.cart) {
+            window.smartPos.cart.tradeInVoucherId = null;
+            window.smartPos.cart.tradeInCreditAmount = 0;
+            if (typeof window.smartPos.cart.calculateTotals === 'function') {
+                window.smartPos.cart.calculateTotals();
+            }
+        }
+    }
+
+    if (voucherSearchInput) {
+        voucherSearchInput.addEventListener('input', function() {
+            const q = this.value.trim();
+            if (clearSearchBtn) clearSearchBtn.style.display = q ? 'block' : 'none';
+
+            clearTimeout(voucherDebounce);
+            if (q.length < 2) {
+                voucherDropdown.style.display = 'none';
+                return;
+            }
+
+            voucherDebounce = setTimeout(() => {
+                fetchTradeInVouchers(q);
+            }, 250);
+        });
+    }
+
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', () => {
+            voucherSearchInput.value = '';
+            clearSearchBtn.style.display = 'none';
+            voucherDropdown.style.display = 'none';
+            voucherSearchInput.focus();
+        });
+    }
+
+    if (btnBrowseVouchers) {
+        btnBrowseVouchers.addEventListener('click', () => fetchTradeInVouchers(''));
+    }
+
+    if (btnDetachVoucher) {
+        btnDetachVoucher.addEventListener('click', detachTradeInVoucher);
+    }
+
+    if (posRemoveTradeInBtn) {
+        posRemoveTradeInBtn.addEventListener('click', detachTradeInVoucher);
+    }
+
+    if (applyVoucherBtn) {
+        applyVoucherBtn.addEventListener('click', () => {
+            if (!currentlySelectedVoucher) return;
+
+            const vAmt = parseFloat(currentlySelectedVoucher.amount) || 0;
+            if (posTradeInRow) posTradeInRow.style.display = 'flex';
+            if (posTradeInTag) posTradeInTag.innerText = `(${currentlySelectedVoucher.voucher_number})`;
+            if (posTradeInText) posTradeInText.innerText = `-Rs. ${vAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+            if (window.smartPos && window.smartPos.cart) {
+                window.smartPos.cart.tradeInVoucherId = parseInt(currentlySelectedVoucher.id, 10);
+                window.smartPos.cart.tradeInCreditAmount = vAmt;
+                window.smartPos.cart.tradeInVoucherNumber = currentlySelectedVoucher.voucher_number;
+                if (typeof window.smartPos.cart.calculateTotals === 'function') {
+                    window.smartPos.cart.calculateTotals();
+                }
+            }
+
+            const exchangeModalEl = document.getElementById('exchangeModal');
+            if (exchangeModalEl) {
+                bootstrap.Modal.getInstance(exchangeModalEl).hide();
+            }
+
+            if (window.smartPos && typeof window.smartPos.showNotification === 'function') {
+                window.smartPos.showNotification(`Trade-In voucher ${currentlySelectedVoucher.voucher_number} attached. Rs. ${vAmt} credit applied.`, 'success');
+            }
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (voucherSearchInput && !voucherSearchInput.contains(e.target) && !voucherDropdown.contains(e.target)) {
+            voucherDropdown.style.display = 'none';
+        }
+    });
+
+    // =========================================================================
+    // 5. ACTIVE INVOICE NEPALI B.S. DATE CONTROLLER & BACKDATING ENGINE
     // =========================================================================
     const taxMetaEl = document.getElementById('posTaxConfigMeta');
     const todayBsDate = taxMetaEl ? (taxMetaEl.dataset.todayBs || '{{ CURRENT_BS_DATE_EN }}') : '{{ CURRENT_BS_DATE_EN }}';
@@ -1001,17 +1374,9 @@ document.addEventListener('DOMContentLoaded', () => {
         activeInvoiceBsDate = newBsDate;
         isInvoiceBackdated = (newBsDate !== todayBsDate);
 
-        if (displayBillDateBs) {
-            displayBillDateBs.innerText = newBsDate;
-        }
-
-        if (topBarDateBadge) {
-            topBarDateBadge.innerText = `${newBsDate} BS`;
-        }
-
-        if (recBillDate) {
-            recBillDate.innerText = `${newBsDate} BS`;
-        }
+        if (displayBillDateBs) displayBillDateBs.innerText = newBsDate;
+        if (topBarDateBadge) topBarDateBadge.innerText = `${newBsDate} BS`;
+        if (recBillDate) recBillDate.innerText = `${newBsDate} BS`;
 
         if (activeBsDateBadge) {
             if (isInvoiceBackdated) {
@@ -1108,16 +1473,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (activeInvoiceBsDate) {
                 payload.bill_date_bs = activeInvoiceBsDate;
             }
+            if (hidVoucherId && hidVoucherId.value) {
+                payload.trade_in_voucher_id = parseInt(hidVoucherId.value, 10);
+            }
             return payload;
         };
     }
 
     // =========================================================================
-    // 3. GLOBAL SHORTCUTS LISTENER: F2 (PRODUCT SCAN) & CTRL + K (GLOBAL SEARCH)
+    // 6. GLOBAL SHORTCUTS: F2 (PRODUCT SCAN), F7 (REPAIR SEARCH), CTRL+K
     // =========================================================================
     const searchInput = document.getElementById('posProductSearchInput');
     window.addEventListener('keydown', (e) => {
-        // [F2] Focus POS Search Input
         if (e.key === 'F2') {
             e.preventDefault();
             if (searchInput) {
@@ -1125,7 +1492,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 searchInput.select();
             }
         }
-        // [Ctrl + K] Universal Quick Search Command Palette
+        if (e.key === 'F7') {
+            e.preventDefault();
+            openRepairTicketModal();
+        }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
             e.preventDefault();
             if (typeof window.openGlobalSearchModal === 'function') {
@@ -1138,7 +1508,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // =========================================================================
-    // 4. DUAL-MODE BILL DISCOUNT SWITCH [% | Rs.] CONTROLS
+    // 7. DUAL-MODE BILL DISCOUNT SWITCH [% | Rs.] CONTROLS
     // =========================================================================
     const btnDiscountPercent = document.getElementById('btnDiscountModePercent');
     const btnDiscountFixed = document.getElementById('btnDiscountModeFixed');
@@ -1204,7 +1574,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 5. SUPERVISOR OVERRIDE MODAL: DISCOUNT REASON DROPDOWN & NOTES SYNC
+    // 8. SUPERVISOR OVERRIDE MODAL: DISCOUNT REASON DROPDOWN & NOTES SYNC
     // =========================================================================
     const reasonSelect = document.getElementById('posDiscountReasonSelect');
     const reasonNotesContainer = document.getElementById('posDiscountReasonNotesContainer');
@@ -1265,7 +1635,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 6. CAMERA BARCODE SCANNER INTEGRATION
+    // 9. CAMERA BARCODE SCANNER INTEGRATION
     // =========================================================================
     const openCameraBtn = document.getElementById('posOpenCameraButton');
     const cameraModalEl = document.getElementById('posCameraScannerModal');
@@ -1381,7 +1751,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 7. MODAL CLOSE & RESET FOCUS LISTENERS
+    // 10. MODAL CLOSE & RESET FOCUS LISTENERS
     // =========================================================================
     const finishReceiptBtn = document.getElementById('finishReceiptBtn');
     const closeReceiptBtn = document.getElementById('closeReceiptBtn');

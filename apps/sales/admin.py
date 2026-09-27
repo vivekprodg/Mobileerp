@@ -1,6 +1,11 @@
 """
 Django Admin Configuration for Sales, Invoices, POS Checkouts,
 Trade-In Exchanges, and Itemized Sales Returns.
+
+Aligned with:
+- Standard Retail Turnover Accounting (Barter Trade-In = Tender Payment Offset).
+- Safe Police-Compliant Undertaking Administration.
+- Forensic Financial Audit Trail.
 """
 
 from django.contrib import admin
@@ -76,7 +81,7 @@ class SalesPaymentTransactionInline(admin.TabularInline):
     payment_mode_badge.short_description = _("Payment Mode")
 
 # =============================================================================
-# 2. SALES ESTIMATE / INVOICE ADMIN (HISTORICAL AUDIT PROTECTED)
+# 2. SALES ESTIMATE / INVOICE ADMIN (TURNOVER ACCOUNTING ALIGNED)
 # =============================================================================
 @admin.register(SalesEstimate)
 class SalesEstimateAdmin(admin.ModelAdmin):
@@ -84,9 +89,9 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         'estimate_number', 'branch', 'recipient_display_name',
         'customer_phone_display', 'customer_pan_display',
         'bill_date_ad', 'bill_date_bs', 'fiscal_year',
-        'taxable_amount_display', 'vat_amount_display', 'grand_total',
-        'merchandise_discount_display', 'trade_in_credit_display',
-        'paid_amount', 'due_amount', 'status_badge', 'payment_status_badge'
+        'taxable_amount_display', 'vat_amount_display', 'grand_total_display',
+        'merchandise_discount_display', 'trade_in_tender_display',
+        'net_payable_display', 'paid_amount', 'due_amount', 'status_badge', 'payment_status_badge'
     ]
     list_filter = [
         'status', 'payment_status', 'fiscal_year', 'bill_discount_type',
@@ -100,7 +105,11 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         'items__secondary_imei', 'items__serial_number', 'discount_reason'
     ]
     inlines = [SalesEstimateItemInline, SalesPaymentTransactionInline]
-    readonly_fields = [f.name for f in SalesEstimate._meta.fields]
+    readonly_fields = [
+        f.name for f in SalesEstimate._meta.fields
+    ] + [
+        'net_customer_payable_display', 'effective_trade_in_tender_display', 'excess_trade_in_credit_display'
+    ]
 
     fieldsets = (
         ("1. Transaction & Historical Date Information", {
@@ -117,29 +126,37 @@ class SalesEstimateAdmin(admin.ModelAdmin):
                 'customer_pan'
             )
         }),
-        ("3. Financial Breakdown & 13% Tax Breakdown (Annex-5 Aligned)", {
-            'description': "Three-way tax split separating Taxable Base, 13% Output VAT, and Gross Total.",
+        ("3. Merchandise Turnover & 13% Tax Breakdown", {
+            'description': (
+                "Turnover Accounting: Grand Total strictly represents the gross merchandise sales value + applicable taxes. "
+                "Trade-In allowances act exclusively as a tender settlement offset (barter payment)."
+            ),
             'fields': (
                 ('subtotal', 'item_discount_total'),
                 ('bill_discount_type', 'bill_discount_input_value'),
                 ('bill_discount_percent', 'bill_discount_amount'),
-                ('has_trade_in_exchange', 'trade_in_discount_amount', 'trade_in_voucher_reference'),
                 ('is_vat_applicable', 'taxable_amount', 'non_taxable_amount', 'vat_amount'),
-                ('round_off', 'grand_total')
+                ('round_off', 'grand_total'),
             )
         }),
-        ("4. Acquisition Cost (COGS) & Margins", {
+        ("4. Trade-In Barter Tender & Settlement Offsets", {
+            'fields': (
+                ('has_trade_in_exchange', 'trade_in_discount_amount', 'trade_in_voucher_reference'),
+                ('effective_trade_in_tender_display', 'excess_trade_in_credit_display', 'net_customer_payable_display'),
+            )
+        }),
+        ("5. Acquisition Cost (COGS) & Margins", {
             'fields': (
                 ('total_cost_amount', 'total_gross_profit'),
             )
         }),
-        ("5. Payments, Collections & Udhaari (Debt)", {
+        ("6. Payments, Collections & Udhaari (Debt)", {
             'fields': (
                 ('paid_amount', 'due_amount', 'change_returned'),
                 ('status', 'payment_status')
             )
         }),
-        ("6. Commercial Approvals & Justifications", {
+        ("7. Commercial Approvals & Justifications", {
             'fields': (
                 ('manager_override_by', 'discount_approved_at'),
                 'discount_reason',
@@ -172,6 +189,10 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         return format_html('<span style="color: #94a3b8;">Rs. 0.00</span>')
     vat_amount_display.short_description = _("13% VAT")
 
+    def grand_total_display(self, obj):
+        return format_html('<span class="font-monospace fw-bold text-primary">Rs. {:,.2f}</span>', obj.grand_total)
+    grand_total_display.short_description = _("Grand Total (Turnover)")
+
     def merchandise_discount_display(self, obj):
         tot_disc = obj.total_sales_discount
         if tot_disc > 0:
@@ -183,14 +204,30 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         return format_html('<span style="color: #94a3b8;">-</span>')
     merchandise_discount_display.short_description = _("Sales Discount")
 
-    def trade_in_credit_display(self, obj):
+    def trade_in_tender_display(self, obj):
         if obj.has_trade_in_exchange and obj.trade_in_discount_amount > 0:
             return format_html(
                 '<span style="color: #92400e; font-weight: 700; font-family: monospace;">-Rs. {:,.2f}</span>',
                 obj.trade_in_discount_amount
             )
         return format_html('<span style="color: #94a3b8;">-</span>')
-    trade_in_credit_display.short_description = _("Trade-In Credit")
+    trade_in_tender_display.short_description = _("Trade-In Tender")
+
+    def net_payable_display(self, obj):
+        return format_html('<span class="font-monospace fw-bold text-dark">Rs. {:,.2f}</span>', obj.net_customer_payable)
+    net_payable_display.short_description = _("Net Payable")
+
+    def effective_trade_in_tender_display(self, obj):
+        return format_html('Rs. {:,.2f}', obj.effective_trade_in_tender)
+    effective_trade_in_tender_display.short_description = _("Effective Tender Consumed")
+
+    def excess_trade_in_credit_display(self, obj):
+        return format_html('Rs. {:,.2f}', obj.excess_trade_in_credit)
+    excess_trade_in_credit_display.short_description = _("Surplus Trade-In Refunded/Credited")
+
+    def net_customer_payable_display(self, obj):
+        return format_html('<strong class="font-monospace text-primary">Rs. {:,.2f}</strong>', obj.net_customer_payable)
+    net_customer_payable_display.short_description = _("Net Balance Payable")
 
     def status_badge(self, obj):
         colors = {
@@ -244,7 +281,7 @@ class TradeInLegalUndertakingInline(admin.StackedInline):
         ('id_issued_district', 'id_issued_date_bs'),
         'permanent_address', 'current_address',
         'preview_customer_photo', 'preview_id_front', 'preview_id_back',
-        'declaration_accepted', 'verified_by'
+        'declaration_text', 'declaration_accepted', 'verified_by'
     ]
     readonly_fields = ['preview_customer_photo', 'preview_id_front', 'preview_id_back']
 
@@ -361,6 +398,74 @@ class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
             color, obj.get_status_display()
         )
     status_badge.short_description = _("Voucher Status")
+
+@admin.register(TradeInLegalUndertaking)
+class TradeInLegalUndertakingAdmin(admin.ModelAdmin):
+    list_display = [
+        'customer_full_name', 'id_type', 'id_number', 'id_issued_district',
+        'trade_in_voucher', 'declaration_accepted', 'verified_by', 'created_at'
+    ]
+    list_filter = ['id_type', 'declaration_accepted', 'id_issued_district', 'created_at']
+    search_fields = [
+        'customer_full_name', 'id_number', 'trade_in_voucher__voucher_number',
+        'permanent_address', 'customer_father_or_spouse_name'
+    ]
+    readonly_fields = ['preview_customer_photo', 'preview_id_front', 'preview_id_back', 'created_at', 'updated_at']
+
+    fieldsets = (
+        ("Customer Identity & Police KYC", {
+            'fields': (
+                'trade_in_voucher',
+                ('customer_full_name', 'customer_father_or_spouse_name'),
+                ('id_type', 'id_number'),
+                ('id_issued_district', 'id_issued_date_bs'),
+                ('permanent_address', 'current_address')
+            )
+        }),
+        ("Identity Evidence & Snapshots", {
+            'fields': (
+                ('id_front_image', 'preview_id_front'),
+                ('id_back_image', 'preview_id_back'),
+                ('customer_live_photo', 'preview_customer_photo'),
+                'customer_digital_signature'
+            )
+        }),
+        ("Legal Undertaking & Verification", {
+            'fields': (
+                'declaration_text',
+                'declaration_accepted',
+                'verified_by',
+                ('created_at', 'updated_at')
+            )
+        }),
+    )
+
+    def preview_customer_photo(self, obj):
+        if obj.customer_live_photo:
+            return format_html(
+                '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                obj.customer_live_photo.url
+            )
+        return "(No live photo)"
+    preview_customer_photo.short_description = _("Customer Live Snapshot")
+
+    def preview_id_front(self, obj):
+        if obj.id_front_image:
+            return format_html(
+                '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                obj.id_front_image.url
+            )
+        return "(No ID front)"
+    preview_id_front.short_description = _("ID Front Photo")
+
+    def preview_id_back(self, obj):
+        if obj.id_back_image:
+            return format_html(
+                '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                obj.id_back_image.url
+            )
+        return "(No ID back)"
+    preview_id_back.short_description = _("ID Back Photo")
 
 # =============================================================================
 # 4. SALES RETURN & DEFECTIVE ITEMS ADMIN

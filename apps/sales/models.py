@@ -11,9 +11,11 @@ Key Capabilities:
    - imei_number and secondary_imei allow null=True, blank=True at the database level.
    - Live counter 15-digit IMEI mandate is enforced at the POS service layer for physical phones,
      allowing historical tax summary records and accessories to save without database errors.
-3. Dual-Mode Merchandise Discount Separation:
-   - Structured isolation between line-level and bill-level discounts (Amount vs. Percentage).
-   - Pure merchandise discounts are cleanly separated from old phone trade-in exchange credits.
+3. Retail Turnover Accounting Model:
+   - grand_total strictly represents the total gross sales turnover of merchandise sold plus applicable taxes.
+   - Trade-in buy-back valuation allowance (trade_in_discount_amount) is treated as a tender settlement offset
+     (barter payment) rather than a commercial price reduction, protecting balance sheet inventory assets
+     and statutory revenue metrics from distortion.
 4. Fast Counter Lookup & Search Indexes:
    - Composite and single-column indexes on customer_phone_manual, customer_name_manual,
      customer_pan, and branch to optimize real-time POS and return invoice lookups.
@@ -51,9 +53,10 @@ class SalesEstimate(TimeStampedModel):
     dynamic tax calculations, trade-in exchange deductions, customer warranty cards,
     and structured merchandise discounts (Percentage or Fixed Cash Amount).
 
-    HISTORICAL INTEGRITY SUPPORT:
-    - bill_date_ad uses default=timezone.now to allow importing legacy transactions from 2080 B.S.
-    - fiscal_year (e.g. '2080/81') and Bikram Sambat date (bill_date_bs) are auto-derived in save().
+    TURNOVER ACCOUNTING CONVENTIONS:
+    - grand_total represents the gross merchandise sales value + applicable taxes.
+    - trade_in_discount_amount represents the customer's trade-in buy-back allowance (barter tender).
+    - net_customer_payable represents the remaining cash/digital payment required from the customer.
     """
     STATUS_CHOICES = [
         ('DRAFT', _('Draft / On Hold (होल्ड)')),
@@ -159,12 +162,12 @@ class SalesEstimate(TimeStampedModel):
         help_text=_("Exact timestamp when manager override PIN authorized the discount/price override.")
     )
 
-    # Old Phone Trade-In / Exchange Buy-Back Credit (Separated from Sales Discounts)
+    # Old Phone Trade-In / Exchange Buy-Back Credit (Payment Tender Offset)
     has_trade_in_exchange = models.BooleanField(default=False, verbose_name=_("Has Old Phone Trade-In Exchange"))
     trade_in_discount_amount = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
-        verbose_name=_("Trade-In Buy-Back Valuation Credit (NPR)"),
-        help_text=_("Agreed buy-back valuation of customer's old phone deducted directly from bill payable total.")
+        verbose_name=_("Trade-In Buy-Back Valuation Allowance (NPR)"),
+        help_text=_("Agreed buy-back valuation of customer's old phone treated as a payment tender offset (barter settlement).")
     )
     trade_in_voucher_reference = models.CharField(
         max_length=50, blank=True, null=True, db_index=True,
@@ -184,7 +187,11 @@ class SalesEstimate(TimeStampedModel):
     )
 
     round_off = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Round Off Offset"))
-    grand_total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), db_index=True, verbose_name=_("Payable Grand Total"))
+    grand_total = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'), db_index=True,
+        verbose_name=_("Gross Merchandise Grand Total"),
+        help_text=_("Full commercial value of merchandise sold + taxes. Trade-in allowances act as a tender offset against this total.")
+    )
 
     # Cost of Goods Sold (COGS) & Margin Realization
     total_cost_amount = models.DecimalField(
@@ -315,10 +322,40 @@ class SalesEstimate(TimeStampedModel):
 
     @property
     def trade_in_credit(self) -> Decimal:
-        """Returns the buy-back valuation credit applied from an old phone trade-in exchange."""
+        """Returns the buy-back valuation allowance applied from an old phone trade-in exchange."""
         if self.has_trade_in_exchange and self.trade_in_discount_amount:
             return self.trade_in_discount_amount
         return Decimal('0.00')
+
+    @property
+    def effective_trade_in_tender(self) -> Decimal:
+        """
+        Calculates trade-in buy-back allowance consumed as tender against this invoice.
+        Capped strictly at grand_total. Any excess represents surplus credit/cash change.
+        """
+        if self.has_trade_in_exchange and self.trade_in_discount_amount > Decimal('0.00'):
+            return min(self.grand_total, self.trade_in_discount_amount)
+        return Decimal('0.00')
+
+    @property
+    def excess_trade_in_credit(self) -> Decimal:
+        """
+        Calculates surplus trade-in buy-back valuation exceeding the invoice grand_total,
+        which is refunded as cash change (walk-in) or deposited into customer store credit.
+        """
+        if self.has_trade_in_exchange and self.trade_in_discount_amount > self.grand_total:
+            return (self.trade_in_discount_amount - self.grand_total).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+        return Decimal('0.00')
+
+    @property
+    def net_customer_payable(self) -> Decimal:
+        """
+        Turnover Accounting: Merchandise Grand Total minus Trade-In Barter Tender.
+        This represents the net cash/electronic payment or debt required from the customer.
+        """
+        return max(Decimal('0.00'), self.grand_total - self.effective_trade_in_tender)
 
 class SalesEstimateItem(TimeStampedModel):
     """
@@ -326,7 +363,7 @@ class SalesEstimateItem(TimeStampedModel):
 
     SCHEMA CONSTRAINT DESIGN:
     - imei_number and secondary_imei have blank=True, null=True.
-    - Non-serialized accessories, repair labor, and historical Mobilesoft tax sales save without database constraint crashes.
+    - Non-serialized accessories, repair labor, and historical tax sales save without database constraint crashes.
     - Mandatory 15-digit IMEI validation for real phones is enforced at the POS service/form layer.
     """
     DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
@@ -430,7 +467,7 @@ class SalesEstimateItem(TimeStampedModel):
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Calculated Tax Amount"))
     line_total = models.DecimalField(max_digits=14, decimal_places=2, verbose_name=_("Final Line Total"))
 
-    # Smartphone / IMEI / Batch tracking linkage (Nullable and optional for non-serialized items)
+    # Smartphone / IMEI / Batch tracking linkage
     item_instance = models.ForeignKey(
         ItemInstance, on_delete=models.SET_NULL, null=True, blank=True, related_name='sold_records'
     )
@@ -838,8 +875,13 @@ class TradeInLegalUndertaking(TimeStampedModel):
         help_text=_("Base64 string of digital signature or thumbprint canvas data")
     )
 
-    # Legal Declaration & Acceptance
-    declaration_text = models.TextField(verbose_name=_("Full Undertaking Text"))
+    # Legal Declaration & Acceptance (blank=True, default="" prevents Django Admin validation crashes)
+    declaration_text = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Full Undertaking Text"),
+        help_text=_("Statutory declaration text (defaults to system configuration text if left blank).")
+    )
     declaration_accepted = models.BooleanField(
         default=True,
         verbose_name=_("Customer Accepted Legal Ownership Responsibility")
@@ -858,6 +900,17 @@ class TradeInLegalUndertaking(TimeStampedModel):
 
     def __str__(self):
         return f"Undertaking: {self.customer_full_name} (ID: {self.id_number}) - Voucher {self.trade_in_voucher.voucher_number}"
+
+    def save(self, *args, **kwargs):
+        if not self.declaration_text:
+            try:
+                from apps.core.models import SystemConfiguration
+                sys_cfg = SystemConfiguration.get_solo()
+                if sys_cfg and getattr(sys_cfg, 'undertaking_declaration_text_np', None):
+                    self.declaration_text = sys_cfg.undertaking_declaration_text_np
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
 
 class SalesReturn(TimeStampedModel):
     """

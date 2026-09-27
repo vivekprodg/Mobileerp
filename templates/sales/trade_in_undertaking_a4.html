@@ -155,7 +155,7 @@
     </style>
 </head>
 <body onload="window.print()">
-    <!-- Top Action Toolbar -->
+    <!-- Top Action Toolbar (Hidden in Print View) -->
     <div class="no-print" style="background:#0f172a; color:#ffffff; padding:8px 16px; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <span style="font-size:12px; font-weight:700;">
             Police-Compliant Handover Undertaking Certificate &bull; Voucher {{ trade_in.voucher_number }}
@@ -181,7 +181,9 @@
             
             <div style="font-size: 9.5px; color: #475569;">
                 {{ trade_in.branch.address }}, {{ trade_in.branch.city }} | फोन: {{ trade_in.branch.phone_number }}
-                {% if SYS_CONFIG.pan_number %} | PAN / दर्ता नं: <strong>{{ SYS_CONFIG.pan_number }}</strong>{% endif %}
+                {% if SYS_CONFIG.pan_number or config.pan_number %}
+                    | PAN / दर्ता नं: <strong>{{ SYS_CONFIG.pan_number|default:config.pan_number }}</strong>
+                {% endif %}
             </div>
             
             <div style="font-size: 12.5px; font-weight: 800; text-decoration: underline; color: #b91c1c; margin-top: 4px; letter-spacing: .02em;">
@@ -197,7 +199,7 @@
             <tr>
                 <td style="width: 50%;">
                     जिम्मानामा भौचर नं: <strong class="font-mono" style="color:#2563eb; font-size: 11px;">{{ trade_in.voucher_number }}</strong><br>
-                    मिति (AD): <strong>{{ trade_in.created_at|date:"Y-m-d H:i" }}</strong> &bull; BS: <strong>{{ CURRENT_BS_DATE_EN }} BS</strong><br>
+                    मिति (AD): <strong>{{ trade_in.intake_date_ad|default:trade_in.created_at|date:"Y-m-d" }}</strong> &bull; BS: <strong>{{ trade_in.intake_date_bs|default:"-" }} BS</strong>{% if trade_in.fiscal_year %} (आ.व. {{ trade_in.fiscal_year }}){% endif %}<br>
                     शाखा / काउन्टर: <strong>{{ trade_in.branch.name }} ({{ trade_in.branch.code }})</strong>
                 </td>
                 <td style="width: 50%;">
@@ -290,10 +292,10 @@
         </table>
         {% endif %}
 
-        <!-- 6. Section 4: Police Anti-Theft Legal Undertaking Declaration -->
+        <!-- 6. Section 4: Police Anti-Theft Legal Undertaking Declaration (Dual-Variable Fallback) -->
         <div class="section-header" style="color: #b91c1c;">४. कानुनी जिम्मानामा तथा मञ्जुरीनामा व्यहोरा (Statutory Undertaking)</div>
         <div class="undertaking-text-box">
-            {{ SYS_CONFIG.undertaking_declaration_text_np }}
+            {{ SYS_CONFIG.undertaking_declaration_text_np|default:config.undertaking_declaration_text_np|default:undertaking.declaration_text }}
         </div>
 
         <!-- 7. Section 5: Signatures, Thumbprints & Store Certification -->

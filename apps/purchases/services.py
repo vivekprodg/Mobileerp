@@ -21,9 +21,10 @@ Core Capabilities:
 6. Final Supplier Payable & Udhaari Debt:
    - Net Invoice Total = Pre-VAT Base + 13% VAT + Overheads.
    - Due Balance = Net Invoice Total - Paid Amount.
-7. Strict Serialized & Dual-IMEI Enforcement:
-   - Requires exact 1-to-1 match between handset quantities and scanned IMEIs.
-   - Validates uniqueness, verifies against active IN_STOCK units, and initializes ItemInstances.
+7. Master-Switch Sensitive Serialized & Dual-IMEI Enforcement:
+   - In Strict Mode (enforce_imei_tracking=True): Requires exact 1-to-1 match between handset quantities and scanned IMEIs.
+   - In Backlog Mode (enforce_imei_tracking=False): Allows phone inward entry without IMEIs, creating FIFO ProductBatch
+     records to safeguard inventory valuation from ghost stock.
 8. Thread-Safe Supplier Ledger Reconciliation & Fail-Closed General Ledger Posting:
    - Row-level locking (select_for_update) on supplier ledger and automatic double-entry GL postings.
 """
@@ -48,7 +49,7 @@ from apps.inventory.models import Product, ItemInstance, ProductBatch, BranchSto
 from apps.inventory.services import InventoryService
 from apps.branches.models import Branch, BranchDocumentSequence
 from apps.reports.models import ProductCostHistory
-from apps.core.models import AuditLog
+from apps.core.models import SystemConfiguration, AuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,6 @@ def _post_purchase_return_direct(purchase_return: PurchaseReturn, user=None):
         auto_post=True
     )
 
-
 # Ensure dynamic hooks exist on auto_posting module
 try:
     import apps.accounting.services.auto_posting as _ap_mod
@@ -180,7 +180,7 @@ class PurchaseService:
         if not items:
             raise ValidationError("Cannot approve a GRN without line items. Please add at least one product.")
 
-        # Step 1: Strict Pre-Validation of Serialized / Dual-IMEI Quantities & Collisions
+        # Step 1: Pre-Validation of Serialized / Dual-IMEI Quantities & Master Setting Sensitivity
         cls._validate_grn_lines(grn, items)
 
         # Step 2: Full Mathematical Valuation & Proportional Overhead Allocation
@@ -199,19 +199,23 @@ class PurchaseService:
         return grn
 
     # =========================================================================
-    # STEP 1: STRICT PRE-VALIDATION OF SERIALIZED QUANTITIES & IMEIS
+    # STEP 1: SERIALIZED QUANTITIES & MASTER SETTING VALIDATION
     # =========================================================================
-
     @classmethod
     def _validate_grn_lines(cls, grn: GoodsReceivedNote, items: List[GRNItem]) -> None:
         """
-        Strictly validates that every serialized product has an exact 1-to-1 match
-        between the required base unit quantity and the count of scanned IMEIs.
-        Validates both IMEI 1 and IMEI 2:
-        - Rejects internal duplicate IMEIs within the consignment.
-        - Rejects devices where IMEI 1 equals IMEI 2.
-        - Rejects collisions where either IMEI matches an already active IN_STOCK unit.
+        Validates serialized handset lines consulting the master configuration switch:
+        - When enforce_imei_tracking is ON: Strictly mandates an exact 1-to-1 match
+          between purchased whole integer units and scanned IMEIs.
+        - When enforce_imei_tracking is OFF (Backlog Mode): If no IMEIs are supplied,
+          cleanly bypasses the check, permitting historical quantity-only purchase entry.
+        - If IMEIs are supplied in either mode: Validates format, internal duplication,
+          and rejects collisions against already active IN_STOCK items.
+        - Non-phone accessories always bypass serial checks.
         """
+        sys_config = SystemConfiguration.get_solo()
+        enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
+
         seen_imeis = set()
 
         for item in items:
@@ -231,21 +235,28 @@ class PurchaseService:
                     )
 
                 expected_units = int(base_qty)
+                scanned_raw = (item.scanned_imei_list or '').strip()
+                has_imeis = bool(scanned_raw)
 
-                if not item.scanned_imei_list or not item.scanned_imei_list.strip():
+                # BACKLOG MODE: If IMEI enforcement is OFF and staff provided no IMEIs, bypass!
+                if not enforce_imei and not has_imeis:
+                    continue
+
+                if not has_imeis:
                     raise ValidationError(
                         f"IMEI / Serial numbers are strictly required for '{product.name}'. "
-                        f"Expected exactly {expected_units} unit identifier(s), but the scanned list is completely empty."
+                        f"Expected exactly {expected_units} unit identifier(s), but the scanned list is completely empty. "
+                        f"(You can disable 'Enforce Mandatory Handset IMEI Tracking' in Settings to enter backlog purchase bills without IMEIs)."
                     )
 
-                imei_tokens = [t.strip() for t in re.split(r'[\n,;]+', item.scanned_imei_list) if t.strip()]
+                imei_tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
                 scanned_count = len(imei_tokens)
 
                 if scanned_count != expected_units:
                     raise ValidationError(
                         f"IMEI count mismatch for '{product.name}': Purchased quantity is {expected_units} unit(s), "
                         f"but received {scanned_count} IMEI entry/pair(s). "
-                        f"Please scan exactly {expected_units} IMEI pair(s) before verifying inward stock."
+                        f"Please scan exactly {expected_units} IMEI pair(s), or leave completely blank in Backlog Mode."
                     )
 
                 for token in imei_tokens:
@@ -323,7 +334,8 @@ class PurchaseService:
         5. Dedicated 13% VAT calculated strictly on Taxable Base when VAT toggle is ON.
         6. Proportional value-based overhead distribution for exact unit landed cost.
         7. Net Invoice Total = Pre-VAT Base + 13% VAT + Overheads.
-        8. Live branch stock counters, FIFO batches, and IMEI instances created.
+        8. Live branch stock counters, FIFO batches (safeguarding non-serialized & backlog items),
+           and physical IMEI ItemInstance records created.
         """
         total_line_gross = Decimal('0.00')
         total_line_discount = Decimal('0.00')
@@ -457,7 +469,7 @@ class PurchaseService:
                 allow_negative=True
             )
 
-            # B. Price Fluctuation Audit & Update Master Selling Price
+            # B. Price Fluctuation Audit, Master Selling Price & FIFO Batch Creation (Prevents Ghost Stock)
             batch_id = cls._update_product_master_and_batches(
                 grn=grn,
                 item=item,
@@ -466,7 +478,7 @@ class PurchaseService:
                 user=user
             )
 
-            # C. Register Physical ItemInstance Records (Dual-IMEI & MDMS)
+            # C. Register Physical ItemInstance Records (Dual-IMEI & MDMS) if IMEIs were provided
             cls._register_imei_instances(
                 grn=grn,
                 item=item,
@@ -484,7 +496,10 @@ class PurchaseService:
     ) -> str:
         """
         Updates product master purchase price to the latest landed cost, adjusts MRP if provided,
-        logs historical price transitions, and creates date-specific FIFO batches for non-serialized items.
+        logs historical price transitions, and creates date-specific FIFO batches for:
+        1. All standard non-serialized items (accessories, chargers, covers).
+        2. Handset phone items that were entered WITHOUT IMEIs during Backlog Mode.
+        This guarantees inventory asset valuation and FIFO cost deduction are never corrupted.
         """
         old_cost = product.purchase_price
         old_sell = product.selling_price
@@ -509,7 +524,13 @@ class PurchaseService:
         product.save(update_fields=['purchase_price', 'selling_price', 'updated_at'])
 
         batch_id = f"BATCH-{grn.grn_number}-{product.id}"
-        if not product.requires_imei_tracking and not product.requires_serial_tracking:
+        has_imeis = bool(item.scanned_imei_list and item.scanned_imei_list.strip())
+        is_serialized = product.requires_imei_tracking or product.requires_serial_tracking
+
+        # CREATE FIFO BATCH IF:
+        # 1. Product is an accessory (not serialized), OR
+        # 2. Product is a phone received WITHOUT IMEIs (Backlog Mode) so its cost is tracked!
+        if not is_serialized or not has_imeis:
             ProductBatch.objects.create(
                 batch_number=batch_id,
                 product=product,
@@ -535,11 +556,16 @@ class PurchaseService:
         """
         Parses scanned IMEI tokens and creates physical ItemInstance records with
         NTA MDMS certification and individual warranty end dates.
+        Safely returns if item has no scanned IMEIs (e.g. Backlog entry or accessory).
         """
-        if not (product.requires_imei_tracking or product.requires_serial_tracking) or not item.scanned_imei_list:
+        if not (product.requires_imei_tracking or product.requires_serial_tracking):
             return
 
-        imei_tokens = [t.strip() for t in re.split(r'[\n,;]+', item.scanned_imei_list) if t.strip()]
+        scanned_raw = (item.scanned_imei_list or '').strip()
+        if not scanned_raw:
+            return
+
+        imei_tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
         line_mdms = item.default_mdms_status if not grn.distributor_mdms_certified else 'REGISTERED_OFFICIAL'
 
         for token in imei_tokens:
@@ -681,10 +707,10 @@ class PurchaseReturnService:
     """
     Commercial Purchase Return / Debit Note Processing Engine.
     Executes atomic merchandise return to suppliers:
-    1. Pre-validates stock and serialized IMEIs in IN_STOCK status.
+    1. Pre-validates stock and serialized IMEIs in IN_STOCK status (supporting Backlog Mode).
     2. Deducts physical inventory via InventoryService.adjust_stock.
-    3. Locks serialized ItemInstances as 'RETURNED_TO_SUPPLIER'.
-    4. Deducts from FIFO batches.
+    3. Locks serialized ItemInstances as 'RETURNED_TO_SUPPLIER' if present.
+    4. Deducts from FIFO batches for non-serialized items or backlog units.
     5. Reconciles supplier debt balance and records ledger entry.
     6. Automatically posts double-entry General Ledger reversal vouchers fail-closed.
     """
@@ -768,6 +794,9 @@ class PurchaseReturnService:
 
     @classmethod
     def _validate_return_items(cls, purchase_return: PurchaseReturn, items: List[PurchaseReturnItem]) -> None:
+        sys_config = SystemConfiguration.get_solo()
+        enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
+
         for item in items:
             product = item.product
             factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
@@ -791,8 +820,12 @@ class PurchaseReturnService:
 
             if product.requires_imei_tracking or product.requires_serial_tracking:
                 expected_units = int(base_qty)
-                raw_imei = item.returned_imei_list or ''
+                raw_imei = (item.returned_imei_list or '').strip()
                 tokens = [t.strip() for t in re.split(r'[\n,;]+', raw_imei) if t.strip()]
+
+                # If Backlog Mode is active and no IMEIs were entered for return, allow skipping
+                if not enforce_imei and len(tokens) == 0:
+                    continue
 
                 if len(tokens) != expected_units:
                     raise ValidationError(
@@ -859,26 +892,28 @@ class PurchaseReturnService:
                 allow_negative=False
             )
 
-            # 2. Update Serialized Phone ItemInstances to RETURNED_TO_SUPPLIER
-            if product.requires_imei_tracking or product.requires_serial_tracking:
-                if item.returned_imei_list:
-                    tokens = [t.strip() for t in re.split(r'[\n,;]+', item.returned_imei_list) if t.strip()]
-                    for token in tokens:
-                        clean_imei = token.split('|')[0].strip()
-                        instance = ItemInstance.objects.select_for_update().filter(
-                            Q(imei_1=clean_imei) | Q(imei_2=clean_imei) | Q(serial_number=clean_imei),
-                            branch=purchase_return.branch,
-                            status='IN_STOCK'
-                        ).first()
+            # 2. Update Serialized Phone ItemInstances to RETURNED_TO_SUPPLIER if IMEIs were tracked
+            raw_imei = (item.returned_imei_list or '').strip()
+            is_serialized = product.requires_imei_tracking or product.requires_serial_tracking
 
-                        if instance:
-                            instance.status = 'RETURNED_TO_SUPPLIER'
-                            instance.save(update_fields=['status', 'updated_at'])
-                            if not item.item_instance:
-                                item.item_instance = instance
-                                item.save(update_fields=['item_instance', 'updated_at'])
+            if is_serialized and raw_imei:
+                tokens = [t.strip() for t in re.split(r'[\n,;]+', raw_imei) if t.strip()]
+                for token in tokens:
+                    clean_imei = token.split('|')[0].strip()
+                    instance = ItemInstance.objects.select_for_update().filter(
+                        Q(imei_1=clean_imei) | Q(imei_2=clean_imei) | Q(serial_number=clean_imei),
+                        branch=purchase_return.branch,
+                        status='IN_STOCK'
+                    ).first()
 
-            # 3. Deduct from active non-serialized inventory FIFO batches
+                    if instance:
+                        instance.status = 'RETURNED_TO_SUPPLIER'
+                        instance.save(update_fields=['status', 'updated_at'])
+                        if not item.item_instance:
+                            item.item_instance = instance
+                            item.save(update_fields=['item_instance', 'updated_at'])
+
+            # 3. Deduct from active FIFO batches (for non-serialized items OR backlog units returned without IMEIs)
             else:
                 batches = ProductBatch.objects.select_for_update().filter(
                     product=product,

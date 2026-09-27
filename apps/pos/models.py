@@ -69,8 +69,8 @@ class CashDrawerSession(TimeStampedModel):
 class POSHoldCart(TimeStampedModel):
     """
     Suspended / On-Hold Cart allowing cashiers to park an active customer cart
-    and serve another customer without losing line items, scanned IMEIs, or dual-mode discount configurations.
-    Supports Amount, Percentage, and None discount types at both item and bill levels.
+    and serve another customer without losing line items, scanned IMEIs, dual-mode discount configurations,
+    customer tax PAN numbers, attached repair ticket IDs, or trade-in voucher IDs.
     """
     DISCOUNT_TYPE_CHOICES = [
         ('AMOUNT', _('Fixed Amount (Rs.)')),
@@ -85,10 +85,21 @@ class POSHoldCart(TimeStampedModel):
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True)
     customer_name = models.CharField(max_length=150, blank=True, null=True)
     customer_phone = models.CharField(max_length=25, blank=True, null=True)
+    customer_pan = models.CharField(max_length=25, blank=True, null=True, db_index=True, verbose_name=_("Customer PAN"))
+
+    # Operational Linkages (Preserved across Hold/Recall cycles)
+    trade_in_voucher_id = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name=_("Trade-In Voucher ID"),
+        help_text=_("Linked Buy-Back Trade-In voucher ID held with cart.")
+    )
+    repair_ticket_id = models.PositiveIntegerField(
+        null=True, blank=True, verbose_name=_("Repair Ticket ID"),
+        help_text=_("Linked Workshop Repair Ticket ID held with cart.")
+    )
 
     cart_payload = models.JSONField(
         default=dict,
-        help_text=_("Complete JSON snapshot of cart line items, pricing, package units, dual-IMEIs, and discount parameters (type, raw value, and effective percent).")
+        help_text=_("Complete JSON snapshot of cart line items, pricing, package units, dual-IMEIs, repair handover, trade-in, and discount parameters.")
     )
     subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
 
@@ -125,6 +136,7 @@ class POSHoldCart(TimeStampedModel):
         indexes = [
             models.Index(fields=['branch', 'created_at'], name='idx_hold_branch_created'),
             models.Index(fields=['hold_reference'], name='idx_hold_ref'),
+            models.Index(fields=['customer_pan'], name='idx_hold_cust_pan'),
         ]
 
     def clean(self):

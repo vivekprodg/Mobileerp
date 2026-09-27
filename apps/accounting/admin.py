@@ -3,6 +3,7 @@ Django Admin Configuration for Accounting Module.
 Aligned with General Ledger Models and Dual English/Bikram Sambat Systems.
 """
 
+from decimal import Decimal
 from django.contrib import admin, messages
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
@@ -13,6 +14,7 @@ from apps.accounting.models import (
     JournalEntry, JournalItem, ExpenseVoucher, BankReconciliation, BankStatementLine
 )
 
+
 @admin.register(AccountGroup)
 class AccountGroupAdmin(admin.ModelAdmin):
     list_display = ('code', 'name', 'name_np', 'category', 'nature', 'parent', 'is_system_reserved')
@@ -20,6 +22,7 @@ class AccountGroupAdmin(admin.ModelAdmin):
     search_fields = ('code', 'name', 'name_np')
     ordering = ('code',)
     raw_id_fields = ('parent',)
+
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
@@ -31,7 +34,7 @@ class AccountAdmin(admin.ModelAdmin):
         'system_tag', 'group__category', 'group__nature', 'branch', 'is_system_reserved'
     ]
     search_fields = ['code', 'name', 'name_np', 'system_tag']
-    search_help_text = _("Search accounts by partial code, English name, Nepali name, or system tag (e.g., 1010, cash, नगद, BANK)")
+    search_help_text = _("Search accounts by partial code, English name, Nepali name, or system tag (e.g., 1110, cash, shortage, surplus, FONEPAY, 2150)")
     ordering = ['code']
     raw_id_fields = ['group', 'branch']
     readonly_fields = ['current_balance', 'created_at', 'updated_at']
@@ -58,9 +61,9 @@ class AccountAdmin(admin.ModelAdmin):
             agg = acc.journal_lines.filter(journal_entry__status='POSTED').aggregate(
                 dr=Sum('debit_amount'), cr=Sum('credit_amount')
             )
-            total_dr = agg['dr'] or 0
-            total_cr = agg['cr'] or 0
-            op = acc.opening_balance or 0
+            total_dr = agg['dr'] or Decimal('0.00')
+            total_cr = agg['cr'] or Decimal('0.00')
+            op = acc.opening_balance or Decimal('0.00')
             if acc.opening_balance_nature == 'DEBIT':
                 total_dr += op
             else:
@@ -77,11 +80,13 @@ class AccountAdmin(admin.ModelAdmin):
 
         self.message_user(request, f"Successfully recalculated balance for {recalculated} account(s).")
 
+
 class JournalItemInline(admin.TabularInline):
     model = JournalItem
     extra = 0
     fields = ['account', 'debit_amount', 'credit_amount', 'customer', 'supplier', 'line_narration']
     raw_id_fields = ['account', 'customer', 'supplier']
+
 
 @admin.register(JournalEntry)
 class JournalEntryAdmin(admin.ModelAdmin):
@@ -112,6 +117,7 @@ class JournalEntryAdmin(admin.ModelAdmin):
         )
     balance_check.short_description = _("Balance Equality")
 
+
 @admin.register(ExpenseVoucher)
 class ExpenseVoucherAdmin(admin.ModelAdmin):
     list_display = [
@@ -127,6 +133,7 @@ class ExpenseVoucherAdmin(admin.ModelAdmin):
     def amount_display(self, obj):
         return format_html('<strong>Rs. {:,.2f}</strong>', obj.amount)
     amount_display.short_description = _("Amount")
+
 
 @admin.register(AccountingFiscalYear)
 class AccountingFiscalYearAdmin(admin.ModelAdmin):
@@ -176,6 +183,7 @@ class AccountingFiscalYearAdmin(admin.ModelAdmin):
             )
         )
 
+
 @admin.register(FinancialPeriod)
 class FinancialPeriodAdmin(admin.ModelAdmin):
     list_display = ['period_name_en', 'period_name_np', 'fiscal_year', 'period_number', 'start_date_bs', 'end_date_bs', 'is_closed']
@@ -183,10 +191,12 @@ class FinancialPeriodAdmin(admin.ModelAdmin):
     search_fields = ['period_name_en', 'period_name_np']
     raw_id_fields = ['fiscal_year']
 
+
 class BankStatementLineInline(admin.TabularInline):
     model = BankStatementLine
     extra = 0
     raw_id_fields = ['matched_journal_item']
+
 
 @admin.register(BankReconciliation)
 class BankReconciliationAdmin(admin.ModelAdmin):
@@ -198,6 +208,7 @@ class BankReconciliationAdmin(admin.ModelAdmin):
     search_fields = ['bank_account__name', 'notes']
     raw_id_fields = ['bank_account', 'branch', 'reconciled_by']
     inlines = [BankStatementLineInline]
+
 
 @admin.register(BankStatementLine)
 class BankStatementLineAdmin(admin.ModelAdmin):

@@ -12,15 +12,26 @@ from apps.core.models import AuditLog
 
 logger = logging.getLogger(__name__)
 
-
 class POSSessionService:
     """
     Manages opening and closing shift reconciliations, cash drawer float math,
-    and hold cart buffers. Correctly aggregates cash sales (deducting change returned),
-    cash debt repayments, and cash return refunds.
+    and hold cart buffers. Correctly aggregates cash sales (deducting change returned
+    and surplus trade-in buy-back cash payouts), cash debt repayments, and cash return refunds.
+
+    Strictly validates payment channels during debt repayments to prevent internal
+    non-monetary store credit and trade-in ledger adjustments from falsely contaminating
+    digital sales metrics (FonePay, eSewa, Khalti, Card, Bank).
+
     Automatically posts cash discrepancies (shortage or excess) to the General Ledger
-    strictly inside the shift closure atomic transaction.
+    strictly inside the shift closure atomic transaction using standardized account codes
+    (1110 for Cash in Hand, 5050 for Shortage Expense, and 4040 for Surplus Income).
     """
+
+    # Authoritative set of verified digital and banking collection channels
+    DIGITAL_PAYMENT_MODES = {
+        'FONEPAY', 'ESEWA', 'KHALTI', 'CARD', 'POS', 'POS_CARD',
+        'BANK', 'BANK_TRANSFER', 'CONNECT_IPS', 'CONNECTIPS', 'CHEQUE', 'QR'
+    }
 
     @classmethod
     def get_active_session(cls, user, branch: Branch):
@@ -65,13 +76,20 @@ class POSSessionService:
     def close_shift(cls, session: CashDrawerSession, actual_cash: Decimal, remarks: str = "", verifier=None) -> CashDrawerSession:
         """
         Closes shift, computes expected drawer cash, and registers discrepancies.
-        If a shortage or surplus exists, the General Ledger discrepancy voucher is
-        posted synchronously. Any failure aborts shift closure to avoid ledger drift.
+        Correctly accounts for:
+        1. Net physical cash from sales = Total Cash Tendered - Total Change Given
+           (which mathematically includes surplus cash paid out to walk-in trade-in customers).
+        2. Real customer debt repayments collected via CASH and verified DIGITAL channels,
+           strictly excluding non-monetary store credit adjustments ('OTHER', 'ADJUSTMENT').
+        3. Cash refunds paid out on Sales Returns.
+        Synchronously posts balanced GL discrepancy vouchers on shortages or excesses.
         """
         if session.status == 'CLOSED':
             raise ValidationError("Session is already closed.")
 
+        # ---------------------------------------------------------------------
         # 1. Aggregate Sales Completed during this shift
+        # ---------------------------------------------------------------------
         sales = SalesEstimate.objects.filter(
             branch=session.branch,
             cashier=session.cashier,
@@ -80,30 +98,40 @@ class POSSessionService:
         ).prefetch_related('payment_transactions')
 
         total_sales_amt = Decimal('0.00')
-        total_cash_sales = Decimal('0.00')
+        total_cash_tendered = Decimal('0.00')
         total_digital = Decimal('0.00')
         total_credit = Decimal('0.00')
         total_change_given = Decimal('0.00')
+        total_trade_in_cash_payouts = Decimal('0.00')
 
         for est in sales:
             total_sales_amt += est.grand_total
-            bill_cash_tendered = Decimal('0.00')
 
             for pay in est.payment_transactions.all():
-                if pay.payment_mode == 'CASH':
-                    bill_cash_tendered += pay.amount
-                elif pay.payment_mode == 'CREDIT':
+                mode = pay.payment_mode.upper().strip()
+                if mode == 'CASH':
+                    total_cash_tendered += pay.amount
+                elif mode == 'CREDIT':
                     total_credit += pay.amount
-                else:
+                elif mode in cls.DIGITAL_PAYMENT_MODES:
                     total_digital += pay.amount
 
-            # Deduct change returned on this bill from physical cash tendered
+            # Track total change handed to customer on this bill
             bill_change = est.change_returned if est.change_returned else Decimal('0.00')
-            net_cash_retained_on_bill = max(Decimal('0.00'), bill_cash_tendered - bill_change)
-            total_cash_sales += net_cash_retained_on_bill
             total_change_given += bill_change
 
-        # 2. Aggregate Cash Repayments for Past Customer Udhaari collected during this shift
+            # Track surplus cash payouts from trade-in exchanges for auditing
+            if est.has_trade_in_exchange and not est.customer_id and est.trade_in_discount_amount > est.grand_total:
+                surplus_cash = (est.trade_in_discount_amount - est.grand_total).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                total_trade_in_cash_payouts += surplus_cash
+
+        # Net cash retained in drawer from sales transactions:
+        # Cash Tendered into drawer minus All Change & Trade-In Cash Payouts leaving drawer
+        net_cash_sales = (total_cash_tendered - total_change_given).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # ---------------------------------------------------------------------
+        # 2. Aggregate Repayments for Past Customer Udhaari (With Anti-Contamination Guard)
+        # ---------------------------------------------------------------------
         debt_repayments = CustomerUdhaariLedger.objects.filter(
             branch=session.branch,
             recorded_by=session.cashier,
@@ -112,13 +140,25 @@ class POSSessionService:
         )
 
         total_cash_debt_repayments = Decimal('0.00')
-        for repayment in debt_repayments:
-            if repayment.payment_mode == 'CASH':
-                total_cash_debt_repayments += repayment.amount
-            else:
-                total_digital += repayment.amount
+        total_digital_debt_repayments = Decimal('0.00')
+        total_non_monetary_adjustments = Decimal('0.00')
 
+        for repayment in debt_repayments:
+            mode = (repayment.payment_mode or '').upper().strip()
+            if mode == 'CASH':
+                total_cash_debt_repayments += repayment.amount
+            elif mode in cls.DIGITAL_PAYMENT_MODES:
+                total_digital += repayment.amount
+                total_digital_debt_repayments += repayment.amount
+            else:
+                # Internal store credit, trade-in surplus offset, or manual balance adjustment
+                # (e.g., 'OTHER', 'ADJUSTMENT', 'STORE_CREDIT').
+                # These do NOT represent real incoming funds and are strictly excluded from digital sales.
+                total_non_monetary_adjustments += repayment.amount
+
+        # ---------------------------------------------------------------------
         # 3. Aggregate Cash Sales Returns & Refunds issued during this shift
+        # ---------------------------------------------------------------------
         returns_sum = Decimal('0.00')
         returns = SalesReturn.objects.filter(
             branch=session.branch,
@@ -129,10 +169,12 @@ class POSSessionService:
         for r in returns:
             returns_sum += r.total_refund_amount
 
+        # ---------------------------------------------------------------------
         # 4. Total Expected Physical Cash in Drawer:
-        # Opening Float + Net Retained Direct Cash Sales + Cash Debt Repayments - Cash Refunds
+        # Opening Float + Net Retained Cash from Sales + Cash Debt Repayments - Cash Refunds
+        # ---------------------------------------------------------------------
         expected_cash = (
-            session.opening_cash + total_cash_sales + total_cash_debt_repayments - returns_sum
+            session.opening_cash + net_cash_sales + total_cash_debt_repayments - returns_sum
         ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         discrepancy = (actual_cash - expected_cash).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
@@ -141,7 +183,7 @@ class POSSessionService:
         session.actual_closing_cash = actual_cash
         session.cash_discrepancy = discrepancy
         session.total_sales_amount = total_sales_amt
-        session.total_cash_sales = total_cash_sales
+        session.total_cash_sales = net_cash_sales
         session.total_digital_sales = total_digital
         session.total_credit_sales = total_credit
         session.total_returns_amount = returns_sum
@@ -149,9 +191,14 @@ class POSSessionService:
         session.verified_by = verifier
 
         closing_note = (
-            f"Net Cash Sales: Rs. {total_cash_sales:.2f} (Change Given: Rs. {total_change_given:.2f}) | "
-            f"Debt Cash Collected: Rs. {total_cash_debt_repayments:.2f}"
+            f"Cash In: Rs. {total_cash_tendered:.2f} | Change/Surplus Out: Rs. {total_change_given:.2f} "
+            f"(Trade-In Payouts: Rs. {total_trade_in_cash_payouts:.2f}) | "
+            f"Net Sales Cash: Rs. {net_cash_sales:.2f} | Debt Cash: Rs. {total_cash_debt_repayments:.2f} | "
+            f"Digital Collections: Rs. {total_digital:.2f}"
         )
+        if total_non_monetary_adjustments > Decimal('0.00'):
+            closing_note += f" | Store Credit Adjustments: Rs. {total_non_monetary_adjustments:.2f}"
+
         if discrepancy != Decimal('0.00'):
             status_word = "Shortage" if discrepancy < Decimal('0.00') else "Excess"
             closing_note += f" | Cash {status_word}: Rs. {abs(discrepancy):.2f}"
@@ -167,7 +214,8 @@ class POSSessionService:
         session.save()
 
         # ---------------------------------------------------------------------
-        # 5. GENERAL LEDGER INTEGRATION FOR CASH DISCREPANCIES (SHORTAGE / EXCESS)
+        # 5. General Ledger Integration for Cash Discrepancies (Shortage / Excess)
+        # Standardized to Account 1110 (Cash in Hand), 5050 (Shortage), 4040 (Surplus)
         # ---------------------------------------------------------------------
         if session.cash_discrepancy != Decimal('0.00'):
             cls._post_cash_discrepancy_gl(session=session, user=verifier or session.cashier)
@@ -183,9 +231,14 @@ class POSSessionService:
                 'expected_cash': str(expected_cash),
                 'actual_cash': str(actual_cash),
                 'discrepancy': str(discrepancy),
-                'net_cash_sales': str(total_cash_sales),
+                'cash_tendered_sales': str(total_cash_tendered),
                 'change_given_total': str(total_change_given),
+                'trade_in_surplus_cash_paid': str(total_trade_in_cash_payouts),
+                'net_cash_sales': str(net_cash_sales),
                 'debt_repayments_cash': str(total_cash_debt_repayments),
+                'debt_repayments_digital': str(total_digital_debt_repayments),
+                'debt_adjustments_non_cash': str(total_non_monetary_adjustments),
+                'total_digital_sales': str(total_digital),
                 'returns_cash': str(returns_sum),
                 'status': 'CLOSED'
             }
@@ -197,10 +250,8 @@ class POSSessionService:
     def _post_cash_discrepancy_gl(cls, session: CashDrawerSession, user=None) -> None:
         """
         Posts balanced double-entry vouchers for cash drawer discrepancies:
-        - If negative (shortage): Debit Cash Shortage Expense, Credit Cash in Hand.
-        - If positive (excess): Debit Cash in Hand, Credit Miscellaneous Operating Income (Cash Excess).
-
-        Operates strictly inside the shift closure transaction without swallowing errors.
+        - If negative (shortage): Debit Cash Shortage Expense (5050), Credit Cash in Hand (1110).
+        - If positive (excess): Debit Cash in Hand (1110), Credit Miscellaneous Operating Income (4040).
         """
         try:
             from apps.accounting.models import JournalEntry
@@ -223,12 +274,12 @@ class POSSessionService:
                 return
 
             cash_acc = AutoPostingService.get_or_create_control_account(
-                branch, 'CASH', '1010', 'Cash in Hand', 'ASSET', 'DEBIT'
+                branch, 'CASH', '1110', 'Cash in Hand (Main Drawer)', 'ASSET', 'DEBIT'
             )
 
             lines = []
             if discrepancy < Decimal('0.00'):
-                # Cash Shortage: Debit Expense, Credit Cash Asset
+                # Cash Shortage: Debit Expense (5050), Credit Cash Asset (1110)
                 shortage_acc = AutoPostingService.get_or_create_control_account(
                     branch, 'CASH_SHORTAGE', '5050', 'Cash Drawer Shortage Expense', 'INDIRECT_EXPENSE', 'DEBIT'
                 )
@@ -248,9 +299,9 @@ class POSSessionService:
                 voucher_narration = f"Cash Drawer Shortage: Session {session.session_number} (Shortage: Rs. {abs_amount:.2f})"
 
             else:
-                # Cash Excess: Debit Cash Asset, Credit Miscellaneous Revenue
+                # Cash Excess: Debit Cash Asset (1110), Credit Miscellaneous Revenue (4040)
                 excess_acc = AutoPostingService.get_or_create_control_account(
-                    branch, 'MISC_INCOME', '4040', 'Cash Drawer Excess & Surplus Income', 'REVENUE', 'CREDIT'
+                    branch, 'CASH_SURPLUS', '4040', 'Cash Drawer Excess & Surplus Income', 'REVENUE', 'CREDIT'
                 )
                 narration = f"Cash surplus on shift close {session.session_number} ({session.cashier.username})"
                 lines.append({

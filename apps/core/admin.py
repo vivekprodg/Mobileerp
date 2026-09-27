@@ -10,12 +10,14 @@ from apps.core.models import SystemConfiguration, AuditLog
 class SystemConfigurationAdmin(admin.ModelAdmin):
     """
     Admin controller for the SystemConfiguration master singleton.
-    Manages organization identity, operating tax mode, receipt headers,
-    trade-in rules, MDMS policies, and General Ledger Chart of Accounts bindings.
+    Manages organization identity, operating tax mode, master IMEI tracking rules,
+    receipt headers, trade-in policies, MDMS compliance, and General Ledger
+    Chart of Accounts bindings.
     """
     list_display = [
         'company_name_en',
         'tax_system_mode_badge',
+        'imei_enforcement_badge',
         'pan_number',
         'vat_number',
         'default_vat_rate',
@@ -62,7 +64,17 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 ('pan_number', 'vat_number'),
             )
         }),
-        (_("2. Cashier Discount & Manager Override Limits"), {
+        (_("2. Master Handset IMEI Tracking Enforcement (Backlog vs. Strict Mode)"), {
+            'description': _(
+                "Controls whether mobile phone additions, purchases (GRN), and sales bills strictly mandate "
+                "15-digit IMEI serial numbers. Turn OFF (Unchecked) to enter backlog paper bills and opening "
+                "shelf stock without IMEIs. Turn ON (Checked) for live shop operations. Accessories are never affected."
+            ),
+            'fields': (
+                'enforce_imei_tracking',
+            )
+        }),
+        (_("3. Cashier Discount & Manager Override Limits"), {
             'description': _(
                 "Set the maximum discount percentage a cashier can apply before the "
                 "POS terminal blocks checkout and demands a Manager Override PIN."
@@ -72,7 +84,7 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 'allow_negative_stock',
             )
         }),
-        (_("3. Estimation Voucher & Proforma Header Customization"), {
+        (_("4. Estimation Voucher & Proforma Header Customization"), {
             'description': _(
                 "Customize bill titles and disclaimer warnings printed on non-tax receipts."
             ),
@@ -82,7 +94,7 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 'bill_estimate_disclaimer',
             )
         }),
-        (_("4. Second-Hand Trade-In & Police Legal Undertaking"), {
+        (_("5. Second-Hand Trade-In & Police Legal Undertaking"), {
             'description': _(
                 "Configure fair valuation safety buffers and the legal anti-theft declaration "
                 "required for customer signature during handset buy-backs."
@@ -92,7 +104,7 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 'undertaking_declaration_text_np',
             )
         }),
-        (_("5. NTA MDMS Handset Compliance (Nepal)"), {
+        (_("6. NTA MDMS Handset Compliance (Nepal)"), {
             'description': _(
                 "Enforce MDMS IMEI registration verification and configure gray market sales alerts."
             ),
@@ -101,14 +113,14 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 'warn_on_gray_market_sale',
             )
         }),
-        (_("6. Localization & POS Hardware Controls"), {
+        (_("7. Localization & POS Hardware Controls"), {
             'fields': (
                 ('currency_symbol', 'currency_code'),
                 ('enable_nepali_calendar', 'default_language'),
                 'thermal_printer_paper_width',
             )
         }),
-        (_("7. Chart of Accounts Control Ledger Bindings (Double-Entry Automation)"), {
+        (_("8. Chart of Accounts Control Ledger Bindings (Double-Entry Automation)"), {
             'description': _(
                 "Designate control accounts for automated journal voucher generation across sales, "
                 "digital QR wallets, inventory assets, COGS, and tax obligations."
@@ -125,7 +137,7 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 ('default_interest_expense_account', 'default_drawings_account'),
             )
         }),
-        (_("8. System Metadata"), {
+        (_("9. System Metadata"), {
             'classes': ('collapse',),
             'fields': (
                 ('uuid', 'is_active'),
@@ -149,6 +161,18 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
             obj.get_tax_system_mode_display()
         )
 
+    @admin.display(description=_("IMEI Tracking Policy"))
+    def imei_enforcement_badge(self, obj):
+        if obj.enforce_imei_tracking:
+            return format_html(
+                '<span style="color: #ffffff; background-color: #059669; padding: 3px 9px; '
+                'border-radius: 999px; font-weight: 700; font-size: 10.5px;">STRICT (MANDATORY)</span>'
+            )
+        return format_html(
+            '<span style="color: #ffffff; background-color: #d97706; padding: 3px 9px; '
+            'border-radius: 999px; font-weight: 700; font-size: 10.5px;">RELAXED (BACKLOG)</span>'
+        )
+
     def has_add_permission(self, request):
         # Enforce Singleton pattern: allow creation only if table is currently empty
         return not SystemConfiguration.objects.exists()
@@ -162,7 +186,7 @@ class AuditLogAdmin(admin.ModelAdmin):
     """
     Immutable forensic security audit log viewer.
     Records all sensitive actions including manager discount overrides, bill voiding,
-    manual stock deductions, MDMS overrides, and failed login alerts.
+    manual stock deductions, MDMS overrides, IMEI policy adjustments, and failed login alerts.
     """
     list_display = [
         'timestamp',
