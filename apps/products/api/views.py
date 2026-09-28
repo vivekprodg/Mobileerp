@@ -114,7 +114,7 @@ class ProductSearchAPIView(APIView):
         if not query:
             products_qs = _get_base_product_queryset().select_related(
                 'base_unit', 'category', 'brand'
-            ).prefetch_related('branch_stocks')
+            ).prefetch_related('branch_stocks', 'component_warranty_rules')
 
             products = list(products_qs.order_by('-updated_at')[:limit])
 
@@ -204,11 +204,26 @@ class ProductSearchAPIView(APIView):
         variant_tag = f" ({variant_desc})" if variant_desc else ""
         badge = "IMEI" if p.requires_imei_tracking else ("SPARE" if p.is_spare_part else "STD")
 
+        # Build clean component warranty breakdown tags
+        rules = p.component_warranty_rules.all()
+        if rules.exists():
+            comp_map = {r.component_type: r.warranty_months for r in rules}
+            dev = comp_map.get('DEVICE', p.warranty_months or 12)
+            bat = comp_map.get('BATTERY', 6)
+            scr = comp_map.get('SCREEN', 3)
+            warranty_summary = f"Phone: {dev}M | Batt: {bat}M | Screen: {scr}M"
+        elif p.requires_imei_tracking:
+            warranty_summary = f"Phone: {p.warranty_months or 12}M | Batt: 6M | Screen: 3M"
+        elif p.warranty_months > 0:
+            warranty_summary = f"{p.warranty_months}M General Warranty"
+        else:
+            warranty_summary = "No Warranty"
+
         return {
             'id': p.id,
             'text': f"{p.name}{variant_tag} [{p.sku}]",
             'title': f"{p.name}{variant_tag}",
-            'subtitle': f"SKU: {p.sku} | Barcode: {p.barcode or 'N/A'} | Stock: {stock_qty}",
+            'subtitle': f"SKU: {p.sku} | Barcode: {p.barcode or 'N/A'} | Stock: {stock_qty} | Warranty: {warranty_summary}",
             'badge': badge,
             'sku': p.sku,
             'barcode': p.barcode or '',
@@ -226,6 +241,8 @@ class ProductSearchAPIView(APIView):
             'is_vat_applicable': p.is_vat_applicable,
             'vat_rate': str(p.vat_rate),
             'tax_pricing_type': p.tax_pricing_type,
+            'warranty_months': p.warranty_months,
+            'warranty_summary': warranty_summary,
         }
 
     def _build_simple_imei_payload(self, imei_match, customer_type):
@@ -233,11 +250,21 @@ class ProductSearchAPIView(APIView):
         stock_qty = Decimal('1.000') if imei_match.status == 'IN_STOCK' else Decimal('0.000')
         price = ProductCatalogService.get_applicable_price(prod, Decimal('1.000'), customer_type)
 
+        rules = prod.component_warranty_rules.all()
+        if rules.exists():
+            comp_map = {r.component_type: r.warranty_months for r in rules}
+            dev = comp_map.get('DEVICE', prod.warranty_months or 12)
+            bat = comp_map.get('BATTERY', 6)
+            scr = comp_map.get('SCREEN', 3)
+            warranty_summary = f"Phone: {dev}M | Batt: {bat}M | Screen: {scr}M"
+        else:
+            warranty_summary = f"Phone: {prod.warranty_months or 12}M | Batt: 6M | Screen: 3M"
+
         return {
             'id': prod.id,
             'text': f"{prod.name} [IMEI: {imei_match.imei_1}]",
             'title': f"{prod.name} ({imei_match.get_condition_display()})",
-            'subtitle': f"IMEI: {imei_match.imei_1} | S/N: {imei_match.serial_number or 'N/A'} | Status: {imei_match.get_status_display()}",
+            'subtitle': f"IMEI: {imei_match.imei_1} | S/N: {imei_match.serial_number or 'N/A'} | Status: {imei_match.get_status_display()} | Warranty: {warranty_summary}",
             'badge': 'IMEI',
             'item_instance_id': imei_match.id,
             'imei_1': imei_match.imei_1 or '',
@@ -256,6 +283,7 @@ class ProductSearchAPIView(APIView):
             'unit_code': prod.base_unit.code if prod.base_unit else 'Pcs',
             'mdms_status': imei_match.mdms_status,
             'status': imei_match.status,
+            'warranty_summary': warranty_summary,
         }
 
     def _build_simple_package_payload(self, pkg_match, branch):
@@ -267,11 +295,13 @@ class ProductSearchAPIView(APIView):
                 stock_qty = bs.available_quantity
 
         pkg_price = pkg_match.selling_price_per_unit or (prod.selling_price * pkg_match.conversion_factor)
+        warranty_summary = f"{prod.warranty_months}M General Warranty" if prod.warranty_months > 0 else "No Warranty"
+
         return {
             'id': prod.id,
             'text': f"{prod.name} ({pkg_match.unit_name}) [{pkg_match.barcode}]",
             'title': f"{prod.name} ({pkg_match.unit_name})",
-            'subtitle': f"Package: {pkg_match.unit_name} (x{pkg_match.conversion_factor}) | Barcode: {pkg_match.barcode}",
+            'subtitle': f"Package: {pkg_match.unit_name} (x{pkg_match.conversion_factor}) | Barcode: {pkg_match.barcode} | Warranty: {warranty_summary}",
             'badge': 'PKG',
             'package_conversion_id': pkg_match.id,
             'sku': prod.sku,
@@ -285,6 +315,7 @@ class ProductSearchAPIView(APIView):
             'requires_serial': False,
             'is_spare_part': prod.is_spare_part,
             'unit_code': pkg_match.unit_name,
+            'warranty_summary': warranty_summary,
         }
 
     # -------------------------------------------------------------------------
@@ -316,22 +347,42 @@ class ProductSearchAPIView(APIView):
                     'claim_count': cw.claim_count,
                 })
         else:
-            for rule in prod.component_warranty_rules.all():
-                start_dt = imei_match.sale_date or imei_match.purchase_date or today
-                exp_dt = start_dt + timedelta(days=rule.warranty_months * 30)
-                is_valid = exp_dt >= today
-                component_warranties.append({
-                    'component_type': rule.component_type,
-                    'component_name': rule.component_name,
-                    'warranty_months': rule.warranty_months,
-                    'start_date': str(start_dt),
-                    'expiry_date': str(exp_dt),
-                    'is_valid': is_valid,
-                    'days_remaining': max(0, (exp_dt - today).days),
-                    'status': 'ACTIVE' if is_valid else 'EXPIRED',
-                    'status_display': 'Active' if is_valid else 'Expired',
-                    'claim_count': 0,
-                })
+            rules = prod.component_warranty_rules.all()
+            if rules.exists():
+                for rule in rules:
+                    start_dt = imei_match.sale_date or imei_match.purchase_date or today
+                    exp_dt = start_dt + timedelta(days=rule.warranty_months * 30)
+                    is_valid = exp_dt >= today
+                    component_warranties.append({
+                        'component_type': rule.component_type,
+                        'component_name': rule.component_name,
+                        'warranty_months': rule.warranty_months,
+                        'start_date': str(start_dt),
+                        'expiry_date': str(exp_dt),
+                        'is_valid': is_valid,
+                        'days_remaining': max(0, (exp_dt - today).days),
+                        'status': 'ACTIVE' if is_valid else 'EXPIRED',
+                        'status_display': 'Active' if is_valid else 'Expired',
+                        'claim_count': 0,
+                    })
+            else:
+                body_m = prod.warranty_months or 12
+                component_warranties = [
+                    {'component_type': 'DEVICE', 'component_name': 'Main Handset Body & Motherboard', 'warranty_months': body_m},
+                    {'component_type': 'BATTERY', 'component_name': 'Internal Battery', 'warranty_months': 6},
+                    {'component_type': 'SCREEN', 'component_name': 'Screen / Display Panel', 'warranty_months': 3},
+                ]
+
+        comp_map = {cw['component_type']: cw['warranty_months'] for cw in component_warranties}
+        dev = comp_map.get('DEVICE', prod.warranty_months or 12)
+        bat = comp_map.get('BATTERY', 6)
+        scr = comp_map.get('SCREEN', 3)
+        warranty_summary = f"Phone: {dev}M | Batt: {bat}M | Screen: {scr}M"
+        warranty_tags = {
+            'phone': f"{dev}M",
+            'battery': f"{bat}M",
+            'screen': f"{scr}M"
+        }
 
         is_dual_sim = prod.sim_configuration in ['DUAL_SIM', 'ESIM_DUAL']
         has_imei_2 = bool(imei_match.imei_2 and imei_match.imei_2.strip() != '')
@@ -382,6 +433,8 @@ class ProductSearchAPIView(APIView):
             'warranty_months': prod.warranty_months,
             'warranty_provider': prod.warranty_provider or 'Brand Official',
             'component_warranties': component_warranties,
+            'warranty_summary': warranty_summary,
+            'warranty_tags': warranty_tags,
             'available_stock': '1.000' if imei_match.status == 'IN_STOCK' else '0.000',
             'requires_imei': True,
             'avatar_class': avatar_meta['avatar_class'],
@@ -399,6 +452,7 @@ class ProductSearchAPIView(APIView):
 
         pkg_price = pkg_match.selling_price_per_unit or (prod.selling_price * pkg_match.conversion_factor)
         avatar_meta = get_product_avatar_meta(prod)
+        warranty_summary = f"{prod.warranty_months}M General Warranty" if prod.warranty_months > 0 else "No Warranty"
 
         return {
             'match_type': 'PACKAGE_UNIT',
@@ -419,6 +473,7 @@ class ProductSearchAPIView(APIView):
             'is_vat_applicable': prod.is_vat_applicable,
             'vat_rate': str(prod.vat_rate),
             'tax_pricing_type': prod.tax_pricing_type,
+            'warranty_summary': warranty_summary,
             'available_stock': str(stock_qty / pkg_match.conversion_factor if pkg_match.conversion_factor else stock_qty),
             'requires_imei': False,
             'requires_dual_imei_scan': False,
@@ -439,7 +494,9 @@ class ProductSearchAPIView(APIView):
         avatar_meta = get_product_avatar_meta(p)
 
         in_stock_units = []
-        if p.requires_imei_tracking or avatar_meta['category_key'] == 'PHONES':
+        is_phone = p.requires_imei_tracking or avatar_meta['category_key'] == 'PHONES'
+
+        if is_phone:
             instances_qs = p.tracked_instances.filter(status='IN_STOCK')
             if branch:
                 instances_qs = instances_qs.filter(branch=branch)
@@ -454,14 +511,42 @@ class ProductSearchAPIView(APIView):
                     'landed_cost': str(inst.landed_cost)
                 })
 
+        rules = p.component_warranty_rules.all()
         comp_rules = [
             {
                 'component_type': r.component_type,
                 'component_name': r.component_name,
                 'warranty_months': r.warranty_months,
             }
-            for r in p.component_warranty_rules.all()
+            for r in rules
         ]
+
+        if not comp_rules and is_phone:
+            body_m = p.warranty_months or 12
+            comp_rules = [
+                {'component_type': 'DEVICE', 'component_name': 'Main Handset Body & Motherboard', 'warranty_months': body_m},
+                {'component_type': 'BATTERY', 'component_name': 'Internal Battery', 'warranty_months': 6},
+                {'component_type': 'SCREEN', 'component_name': 'Screen / Display Panel', 'warranty_months': 3},
+            ]
+
+        # Build clean warranty summary string and tags
+        if is_phone:
+            comp_map = {r['component_type']: r['warranty_months'] for r in comp_rules}
+            dev = comp_map.get('DEVICE', p.warranty_months or 12)
+            bat = comp_map.get('BATTERY', 6)
+            scr = comp_map.get('SCREEN', 3)
+            warranty_summary = f"Phone: {dev}M | Batt: {bat}M | Screen: {scr}M"
+            warranty_tags = {
+                'phone': f"{dev}M",
+                'battery': f"{bat}M",
+                'screen': f"{scr}M"
+            }
+        elif p.warranty_months > 0:
+            warranty_summary = f"{p.warranty_months}M General Warranty"
+            warranty_tags = {'general': f"{p.warranty_months}M"}
+        else:
+            warranty_summary = "No Warranty"
+            warranty_tags = {}
 
         is_dual_sim = p.sim_configuration in ['DUAL_SIM', 'ESIM_DUAL']
 
@@ -498,10 +583,12 @@ class ProductSearchAPIView(APIView):
             'warranty_months': p.warranty_months,
             'warranty_provider': p.warranty_provider or '',
             'component_warranty_rules': comp_rules,
+            'warranty_summary': warranty_summary,
+            'warranty_tags': warranty_tags,
             'rack_location': f"{p.rack_number or ''} {p.shelf_identifier or ''}".strip(),
             'available_stock': str(stock_qty),
-            'requires_imei': p.requires_imei_tracking or (avatar_meta['category_key'] == 'PHONES'),
-            'requires_dual_imei_scan': (p.requires_imei_tracking or (avatar_meta['category_key'] == 'PHONES')) and is_dual_sim,
+            'requires_imei': is_phone,
+            'requires_dual_imei_scan': is_phone and is_dual_sim,
             'requires_serial': p.requires_serial_tracking,
             'in_stock_units': in_stock_units,
             'avatar_class': avatar_meta['avatar_class'],

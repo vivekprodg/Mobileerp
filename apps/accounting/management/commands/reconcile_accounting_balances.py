@@ -1,6 +1,6 @@
 """
 Accounting Sub-Ledger & Cache Balance Reconciliation Command.
-File Path: apps/accounting/management/commands/reconcile_accounting_balances.py
+
 
 Executes a 4-point programmatic audit and repair:
 1. Recomputes Account.current_balance from opening_balance + Sum(debit) - Sum(credit).

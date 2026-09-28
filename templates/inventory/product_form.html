@@ -47,11 +47,20 @@
     border-radius: 12px;
     padding: 14px;
     margin-bottom: 12px;
-    transition: border-color 0.15s ease;
+    transition: all 0.2s ease;
 }
 
 .warranty-card-row:hover {
     border-color: var(--erp-primary-border);
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.warranty-preset-bar {
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
 }
 
 /* Photo Thumbnail Preview Card */
@@ -92,6 +101,16 @@
     font-size: 22px;
     border: 1px dashed #94a3b8;
 }
+
+.damage-exclusion-banner {
+    background-color: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
 </style>
 {% endblock %}
 
@@ -109,7 +128,7 @@
                     <i class="fas fa-mobile-screen text-primary me-2"></i>
                     {% if form.instance.pk %}Edit Product: {{ form.instance.name }}{% else %}Register New Product / Smartphone{% endif %}
                 </h4>
-                <p class="text-muted fs-xs mb-0">Structured tabbed form with complete mobile hardware specs, warranties, taxes, and warehouse storage locations.</p>
+                <p class="text-muted fs-xs mb-0">Structured tabbed form with complete mobile hardware specs, component warranties, taxes, and warehouse storage locations.</p>
             </div>
             
             <div class="d-flex align-items-center gap-2">
@@ -198,7 +217,7 @@
                             {{ form.name }}
                         </div>
 
-                        <!-- 1. Category Universal Contextual Search with Quick-Add -->
+                        <!-- Category Universal Contextual Search with Quick-Add -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Category <span class="text-danger">*</span></label>
                             <div class="contextual-search-wrapper" 
@@ -226,7 +245,7 @@
                             {% endif %}
                         </div>
 
-                        <!-- 2. Subcategory Universal Contextual Search Chained to Category -->
+                        <!-- Subcategory Universal Contextual Search Chained to Category -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Sub-Category</label>
                             <div class="contextual-search-wrapper" 
@@ -254,7 +273,7 @@
                             {% endif %}
                         </div>
 
-                        <!-- 3. Brand Universal Contextual Search with Quick-Add -->
+                        <!-- Brand Universal Contextual Search with Quick-Add -->
                         <div class="col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Brand <span class="text-danger">*</span></label>
                             <div class="contextual-search-wrapper" 
@@ -299,7 +318,7 @@
                             {{ form.barcode }}
                         </div>
 
-                        <!-- 4. Base Unit Universal Contextual Search with Quick-Add -->
+                        <!-- Base Unit Universal Contextual Search with Quick-Add -->
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Base Unit <span class="text-danger">*</span></label>
                             <div class="contextual-search-wrapper" 
@@ -560,7 +579,7 @@
 
             </div>
 
-            <!-- TAB 3: COMPONENT WARRANTIES -->
+            <!-- TAB 3: COMPONENT WARRANTIES WITH 1-CLICK PRESETS & DYNAMIC SYNCHRONIZATION -->
             <div class="tab-pane fade" id="tab-warranties" role="tabpanel" aria-labelledby="warranties-tab">
                 <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
                     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
@@ -573,11 +592,34 @@
                         <span class="badge bg-success bg-opacity-10 text-success fs-xs fw-bold">Automated Sub-Warranty Engine</span>
                     </div>
 
+                    <!-- 1-CLICK PRESET BUTTONS TOOLBAR -->
+                    <div class="warranty-preset-bar d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-outline-primary btn-sm rounded-pill fw-bold" id="btnPresetSmartphoneWarranty">
+                                <i class="fas fa-mobile-screen me-1"></i> Apply Smartphone Preset (12M Body / 6M Battery / 3M Screen)
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill fw-bold" id="btnPresetAccessoryWarranty">
+                                <i class="fas fa-box me-1"></i> Apply Accessory Preset (0 Months)
+                            </button>
+                        </div>
+                        <span class="text-muted fs-2xs">
+                            <i class="fas fa-magic text-primary me-1"></i> Quick 1-Click Pre-fill &amp; Auto-Sync
+                        </span>
+                    </div>
+
+                    <!-- DAMAGE EXCLUSION POLICY NOTICE -->
+                    <div class="damage-exclusion-banner mb-3 d-flex align-items-center gap-2">
+                        <i class="fas fa-triangle-exclamation fs-5 text-danger flex-shrink-0"></i>
+                        <div>
+                            <strong>Physical &amp; Liquid Damage Exclusion Policy:</strong> All component warranties strictly cover genuine factory manufacturing defects only. Broken display glass, drop impact dents, and water/liquid ingress immediately void all claims.
+                        </div>
+                    </div>
+
                     {{ warranty_formset.management_form }}
 
                     <div id="warrantyFormsetContainer">
                         {% for wform in warranty_formset %}
-                        <div class="warranty-card-row">
+                        <div class="warranty-card-row" data-formset-row-idx="{{ forloop.counter0 }}">
                             <div class="row g-2 align-items-center">
                                 <div class="col-12 col-md-3">
                                     <label class="form-label fs-2xs fw-bold text-muted mb-1">Component Type</label>
@@ -733,6 +775,9 @@
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Overall Device Warranty (Months)</label>
                             {{ form.warranty_months }}
+                            <small class="text-muted fs-2xs mt-1 d-block">
+                                <i class="fas fa-arrows-rotate text-success me-1"></i> Synchronized automatically with the Main Handset Body rule from Tab 3.
+                            </small>
                         </div>
 
                         <div class="col-md-6">
@@ -829,7 +874,7 @@
             </div>
             <div class="modal-footer bg-light border-0">
                 <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="saveQuickBrandBtn">Save Brand</button>
+                <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="saveQuickBrandBtn">Save Brand</button>
             </div>
         </div>
     </div>
@@ -849,7 +894,7 @@
                     <input type="text" class="form-control" id="quickUnitName" placeholder="e.g. Pieces, Box, Pack" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label fw-bold fs-xs text-dark">Symbol / Code</label>
+                    <label class="form-label fw-bold text-dark fs-xs">Symbol / Code</label>
                     <input type="text" class="form-control font-monospace" id="quickUnitCode" placeholder="e.g. PCS, BOX, SET">
                 </div>
                 <div id="quickUnitError" class="text-danger fs-2xs d-none"></div>
@@ -881,8 +926,7 @@
 
 <script>
 /**
- * Product Form Behavioral Controller
- * Relies strictly on the master contextual_search.js engine loaded from base.html.
+ * Product Form Behavioral Controller with Bidirectional Warranty Synchronization & Smart Condition Text Reset
  */
 document.addEventListener('DOMContentLoaded', () => {
     const categoryWrapper = document.getElementById('categorySearchWrapper');
@@ -892,11 +936,190 @@ document.addEventListener('DOMContentLoaded', () => {
     const imeiCheckbox = document.getElementById('id_requires_imei') || document.querySelector('[name="requires_imei_tracking"]');
     const mobilePanels = document.querySelectorAll('.mobile-feature-panel');
     const mobileIndicator = document.getElementById('mobileSpecsIndicator');
+    const overallWarrantyInput = document.querySelector('[name="warranty_months"]') || document.getElementById('id_warranty_months');
+
+    const standardDefectExclusion = "Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found.";
+    const consumableAccessoryText = "No warranty for consumable accessory.";
 
     const getCsrf = () => document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
 
     // =========================================================================
-    // 1. Dynamic Dropdown Chaining: Category -> Subcategory
+    // 1. SMART 1-CLICK PRESETS & BIDIRECTIONAL WARRANTY SYNCHRONIZATION
+    // =========================================================================
+    const btnPresetPhone = document.getElementById('btnPresetSmartphoneWarranty');
+    const btnPresetAccessory = document.getElementById('btnPresetAccessoryWarranty');
+    const warrantyRows = document.querySelectorAll('#warrantyFormsetContainer .warranty-card-row');
+
+    function syncOverallToDeviceRow() {
+        if (!overallWarrantyInput) return;
+        const currentOverallVal = parseInt(overallWarrantyInput.value, 10);
+
+        warrantyRows.forEach(row => {
+            const typeSelect = row.querySelector('select[name$="-component_type"]');
+            if (typeSelect && typeSelect.value === 'DEVICE') {
+                const monthsInput = row.querySelector('input[name$="-warranty_months"]');
+                if (monthsInput && !isNaN(currentOverallVal)) {
+                    monthsInput.value = currentOverallVal;
+                    syncRowConditionText(row);
+                }
+            }
+        });
+    }
+
+    function syncDeviceRowToOverall() {
+        if (!overallWarrantyInput) return;
+
+        warrantyRows.forEach(row => {
+            const typeSelect = row.querySelector('select[name$="-component_type"]');
+            if (typeSelect && typeSelect.value === 'DEVICE') {
+                const monthsInput = row.querySelector('input[name$="-warranty_months"]');
+                if (monthsInput) {
+                    const monthsVal = parseInt(monthsInput.value, 10);
+                    if (!isNaN(monthsVal)) {
+                        overallWarrantyInput.value = monthsVal;
+                    }
+                }
+            }
+        });
+    }
+
+    function syncRowConditionText(row) {
+        const monthsInput = row.querySelector('input[name$="-warranty_months"]');
+        const condInput = row.querySelector('input[name$="-coverage_conditions"]');
+        if (!monthsInput || !condInput) return;
+
+        const months = parseInt(monthsInput.value, 10) || 0;
+        const currentText = (condInput.value || '').trim();
+
+        if (months > 0) {
+            // If condition text is empty or stuck on the "consumable accessory" warning, reset to the genuine manufacturer defect clause
+            if (!currentText || currentText.toLowerCase().includes('consumable') || currentText.toLowerCase().includes('no warranty')) {
+                condInput.value = standardDefectExclusion;
+            }
+        } else {
+            // Zero months warranty
+            if (!currentText || currentText.toLowerCase().includes('genuine manufacturing defects')) {
+                condInput.value = consumableAccessoryText;
+            }
+        }
+    }
+
+    // Attach real-time input listeners across all component rows
+    warrantyRows.forEach(row => {
+        const monthsInput = row.querySelector('input[name$="-warranty_months"]');
+        const typeSelect = row.querySelector('select[name$="-component_type"]');
+
+        if (monthsInput) {
+            monthsInput.addEventListener('input', () => {
+                syncRowConditionText(row);
+                if (typeSelect && typeSelect.value === 'DEVICE') {
+                    syncDeviceRowToOverall();
+                }
+            });
+        }
+
+        if (typeSelect) {
+            typeSelect.addEventListener('change', () => {
+                if (typeSelect.value === 'DEVICE') {
+                    syncDeviceRowToOverall();
+                }
+            });
+        }
+    });
+
+    // Listen to changes in the Tab 5 Overall Warranty input
+    if (overallWarrantyInput) {
+        overallWarrantyInput.addEventListener('input', syncOverallToDeviceRow);
+    }
+
+    // 1-Click Smartphone Preset Handler
+    if (btnPresetPhone) {
+        btnPresetPhone.addEventListener('click', () => {
+            // Row 0: Handset Body & Motherboard (12M)
+            if (warrantyRows[0]) {
+                const typeSelect = warrantyRows[0].querySelector('select[name$="-component_type"]');
+                const nameInput = warrantyRows[0].querySelector('input[name$="-component_name"]');
+                const monthsInput = warrantyRows[0].querySelector('input[name$="-warranty_months"]');
+                const condInput = warrantyRows[0].querySelector('input[name$="-coverage_conditions"]');
+
+                if (typeSelect) typeSelect.value = 'DEVICE';
+                if (nameInput) nameInput.value = 'Main Handset Body & Motherboard';
+                if (monthsInput) monthsInput.value = 12;
+                if (condInput) condInput.value = standardDefectExclusion;
+            }
+
+            // Row 1: Internal Battery (6M)
+            if (warrantyRows[1]) {
+                const typeSelect = warrantyRows[1].querySelector('select[name$="-component_type"]');
+                const nameInput = warrantyRows[1].querySelector('input[name$="-component_name"]');
+                const monthsInput = warrantyRows[1].querySelector('input[name$="-warranty_months"]');
+                const condInput = warrantyRows[1].querySelector('input[name$="-coverage_conditions"]');
+
+                if (typeSelect) typeSelect.value = 'BATTERY';
+                if (nameInput) nameInput.value = 'Internal Battery';
+                if (monthsInput) monthsInput.value = 6;
+                if (condInput) condInput.value = standardDefectExclusion;
+            }
+
+            // Row 2: Screen / Display Panel (3M)
+            if (warrantyRows[2]) {
+                const typeSelect = warrantyRows[2].querySelector('select[name$="-component_type"]');
+                const nameInput = warrantyRows[2].querySelector('input[name$="-component_name"]');
+                const monthsInput = warrantyRows[2].querySelector('input[name$="-warranty_months"]');
+                const condInput = warrantyRows[2].querySelector('input[name$="-coverage_conditions"]');
+
+                if (typeSelect) typeSelect.value = 'SCREEN';
+                if (nameInput) nameInput.value = 'Screen / Display Panel';
+                if (monthsInput) monthsInput.value = 3;
+                if (condInput) condInput.value = standardDefectExclusion;
+            }
+
+            // Synchronize Overall Warranty input in Tab 5 to 12
+            if (overallWarrantyInput) {
+                overallWarrantyInput.value = 12;
+            }
+
+            // Check IMEI tracking
+            if (imeiCheckbox && !imeiCheckbox.checked) {
+                imeiCheckbox.checked = true;
+                evaluateMobileDisplay();
+            }
+
+            // Flash visual confirmation
+            warrantyRows.forEach(row => {
+                row.style.borderColor = '#10b981';
+                setTimeout(() => row.style.borderColor = '', 1200);
+            });
+        });
+    }
+
+    // 1-Click Accessory Preset Handler
+    if (btnPresetAccessory) {
+        btnPresetAccessory.addEventListener('click', () => {
+            warrantyRows.forEach(row => {
+                const monthsInput = row.querySelector('input[name$="-warranty_months"]');
+                const condInput = row.querySelector('input[name$="-coverage_conditions"]');
+                if (monthsInput) monthsInput.value = 0;
+                if (condInput) condInput.value = consumableAccessoryText;
+                row.style.borderColor = '#94a3b8';
+                setTimeout(() => row.style.borderColor = '', 1200);
+            });
+
+            // Zero out Overall Warranty input in Tab 5
+            if (overallWarrantyInput) {
+                overallWarrantyInput.value = 0;
+            }
+
+            // Uncheck IMEI tracking for accessories
+            if (imeiCheckbox && imeiCheckbox.checked) {
+                imeiCheckbox.checked = false;
+                evaluateMobileDisplay();
+            }
+        });
+    }
+
+    // =========================================================================
+    // 2. DYNAMIC DROPDOWN CHAINING: CATEGORY -> SUBCATEGORY
     // =========================================================================
     if (categoryWrapper && subcategoryWrapper) {
         categoryWrapper.addEventListener('item-selected', (e) => {
@@ -906,7 +1129,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 subcategoryWrapper.dataset.searchUrl = newSubcatUrl;
                 subcategoryWrapper.dataset.autocompleteUrl = newSubcatUrl;
                 
-                // Clear existing subcategory selection to ensure child belongs to parent
                 const subcatHidden = subcategoryWrapper.querySelector('input[type="hidden"]');
                 const subcatInput = subcategoryWrapper.querySelector('.async-search-input');
                 const subcatChip = subcategoryWrapper.querySelector('.async-selected-chip');
@@ -940,7 +1162,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 2. Mobile Specifications Visibility Auto-Toggle
+    // 3. MOBILE SPECIFICATIONS VISIBILITY AUTO-TOGGLE
     // =========================================================================
     function evaluateMobileDisplay() {
         let isMobileCategory = false;
@@ -969,7 +1191,7 @@ document.addEventListener('DOMContentLoaded', () => {
     evaluateMobileDisplay();
 
     // =========================================================================
-    // 3. Quick-Add Modal Submissions with Standardized Component Selection
+    // 4. QUICK-ADD MODAL SUBMISSIONS WITH STANDARDIZED COMPONENT SELECTION
     // =========================================================================
     function triggerComponentSelection(wrapperEl, item) {
         if (!wrapperEl || !item) return;
@@ -999,7 +1221,6 @@ document.addEventListener('DOMContentLoaded', () => {
             textInput.classList.add('d-none');
         }
 
-        // Dispatch universal custom event
         const payload = {
             bubbles: true,
             cancelable: true,
@@ -1150,7 +1371,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 4. Image Live Preview Controller
+    // 5. IMAGE LIVE PREVIEW CONTROLLER
     // =========================================================================
     const imageFileInput = document.querySelector('input[type="file"][name="image"]');
     const imagePreview = document.getElementById('productFormImagePreview');
@@ -1176,7 +1397,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 5. Unsaved Changes Guard
+    // 6. UNSAVED CHANGES GUARD
     // =========================================================================
     const masterForm = document.getElementById('productMasterForm');
     let formIsDirty = false;

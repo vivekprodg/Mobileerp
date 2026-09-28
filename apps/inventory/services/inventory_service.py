@@ -15,7 +15,6 @@ from apps.branches.models import Branch
 
 logger = logging.getLogger(__name__)
 
-
 class InventoryService:
     """
     Business logic service handling atomic stock updates,
@@ -237,6 +236,7 @@ class InventoryService:
         instance = ItemInstance.objects.create(
             product=product,
             branch=branch,
+            device_uid=f"DEV-{uuid.uuid4().hex[:12].upper()}",
             imei_1=clean_imei_1,
             imei_2=clean_imei_2,
             imei_2_pending_scan=pending_scan,
@@ -263,15 +263,57 @@ class InventoryService:
     ) -> List[DeviceComponentWarranty]:
         """
         Creates individual component warranty ledger records upon POS phone sale:
-        e.g., Device Body = 12M, Screen = 6M, Battery = 6M, Charger = 6M.
+        - Main Body (12M): Exactly 365 days from sale date.
+        - Battery (6M): Exactly 180 days from sale date.
+        - Screen (3M): Exactly 90 days from sale date.
+
+        Carries over the statutory exclusion note:
+        "Covers manufacturing defects only. Void if physical drop cracks or liquid damage found."
+        into the customer's permanent warranty record.
         """
         product = item_instance.product
         created_records = []
         rules = product.component_warranty_rules.all()
 
+        standard_exclusion = (
+            "Covers manufacturing defects only. "
+            "Void if physical drop cracks or liquid damage found."
+        )
+
         if rules.exists():
             for rule in rules:
-                end_date = sale_date + timedelta(days=rule.warranty_months * 30)
+                comp_type = (rule.component_type or '').upper()
+                months = rule.warranty_months if rule.warranty_months is not None else 0
+
+                # Compute exact expiration dates:
+                # - Screen Expiry Date: Exactly 90 days (3 months) from purchase.
+                # - Battery Expiry Date: Exactly 180 days (6 months) from purchase.
+                # - Main Body Expiry Date: Exactly 365 days (12 months) from purchase.
+                if months == 0:
+                    duration_days = 0
+                elif comp_type == 'SCREEN' and months == 3:
+                    duration_days = 90
+                elif comp_type == 'BATTERY' and months == 6:
+                    duration_days = 180
+                elif comp_type == 'DEVICE' and months == 12:
+                    duration_days = 365
+                elif months == 3:
+                    duration_days = 90
+                elif months == 6:
+                    duration_days = 180
+                elif months == 12:
+                    duration_days = 365
+                elif months > 0:
+                    duration_days = months * 30
+                else:
+                    duration_days = 0
+
+                end_date = sale_date + timedelta(days=duration_days)
+
+                # Carry over the exclusion note into the permanent record
+                rule_conditions = (rule.coverage_conditions or "").strip()
+                remarks = rule_conditions or standard_exclusion
+
                 cw = DeviceComponentWarranty.objects.create(
                     item_instance=item_instance,
                     component_type=rule.component_type,
@@ -280,22 +322,45 @@ class InventoryService:
                     warranty_start_date=sale_date,
                     warranty_expiry_date=end_date,
                     status='ACTIVE',
-                    remarks=rule.coverage_conditions or ""
+                    remarks=remarks
                 )
                 created_records.append(cw)
         else:
-            overall_months = custom_warranty_months or product.warranty_months or 12
-            end_date = sale_date + timedelta(days=overall_months * 30)
-            cw = DeviceComponentWarranty.objects.create(
-                item_instance=item_instance,
-                component_type='DEVICE',
-                component_name="Main Handset & Motherboard",
-                warranty_months=overall_months,
-                warranty_start_date=sale_date,
-                warranty_expiry_date=end_date,
-                status='ACTIVE',
-                remarks="Full handset official manufacturer warranty"
-            )
-            created_records.append(cw)
+            # Fallback when no component rules exist on the product
+            if product.requires_imei_tracking:
+                default_rules = [
+                    ('DEVICE', 'Main Handset Body & Motherboard', custom_warranty_months or product.warranty_months or 12, 365),
+                    ('BATTERY', 'Internal Battery', 6, 180),
+                    ('SCREEN', 'Screen / Display Panel', 3, 90),
+                ]
+                for c_type, c_name, c_months, c_days in default_rules:
+                    days = 365 if c_months == 12 else (180 if c_months == 6 else (90 if c_months == 3 else c_months * 30))
+                    end_date = sale_date + timedelta(days=days)
+                    cw = DeviceComponentWarranty.objects.create(
+                        item_instance=item_instance,
+                        component_type=c_type,
+                        component_name=c_name,
+                        warranty_months=c_months,
+                        warranty_start_date=sale_date,
+                        warranty_expiry_date=end_date,
+                        status='ACTIVE',
+                        remarks=standard_exclusion
+                    )
+                    created_records.append(cw)
+            else:
+                overall_months = custom_warranty_months or product.warranty_months or 12
+                days = 365 if overall_months == 12 else overall_months * 30
+                end_date = sale_date + timedelta(days=days)
+                cw = DeviceComponentWarranty.objects.create(
+                    item_instance=item_instance,
+                    component_type='DEVICE',
+                    component_name="Main Product Warranty",
+                    warranty_months=overall_months,
+                    warranty_start_date=sale_date,
+                    warranty_expiry_date=end_date,
+                    status='ACTIVE',
+                    remarks=standard_exclusion
+                )
+                created_records.append(cw)
 
         return created_records

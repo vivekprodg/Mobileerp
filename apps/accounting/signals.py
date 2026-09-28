@@ -1,6 +1,5 @@
 """
 Accounting Event Listeners & Auto-Posting Signal Handlers.
-File Path: apps/accounting/signals.py
 
 Core Architectural Design:
 1. Strict Fail-Closed Integrity:

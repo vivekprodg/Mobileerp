@@ -36,6 +36,10 @@ Core Capabilities & Architectural Safeguards:
    - Blocks voiding of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
    - Restores sold physical merchandise stock, batches, serials, and voids active device warranties.
    - Reverses linked Trade-In Buy-Back handsets and Repair Tickets with full General Ledger rollback.
+10. Standard Component Warranty String & Accessory Zero-Warranty Handling:
+   - Formats phone line item warranty summary to cleanly state:
+     "Device: 12M | Battery: 6M | Screen: 3M (Physical Damage Excluded)".
+   - Automatically sets accessories with 0 warranty months to cleanly state "No Warranty".
 """
 
 import re
@@ -827,8 +831,8 @@ class SalesPOSService:
                 secondary_imei=secondary_imei or None,
                 serial_number=item_instance.serial_number if item_instance else None,
                 device_condition=item_instance.get_condition_display() if item_instance else "Brand New",
-                warranty_months=product.warranty_months if not is_historical else 0,
-                warranty_start_date=today_ad if not is_historical else None,
+                warranty_months=product.warranty_months if (not is_historical and product.warranty_months) else 0,
+                warranty_start_date=today_ad if (not is_historical and product.warranty_months and product.warranty_months > 0) else None,
                 warranty_expiry_date=warranty_exp,
                 warranty_terms=warranty_summary
             ))
@@ -866,6 +870,9 @@ class SalesPOSService:
         - When enforce_imei_tracking is ON (Strict Mode): Mandates an active 15-digit IMEI.
         - Transition Safety Guard: If in Strict Mode and cashier sells a backlog phone with a physical
           scanned IMEI not yet in DB, registers the ItemInstance on the fly against available shelf stock.
+        - Formats the line item warranty summary string to cleanly state:
+          "Device: 12M | Battery: 6M | Screen: 3M (Physical Damage Excluded)" for phones.
+        - Accessories (where warranty is 0) cleanly state "No Warranty".
         """
         if is_historical:
             return Decimal('0.00'), None, None, None, "Historical Migration - Stock & Warranty Unaltered"
@@ -874,7 +881,15 @@ class SalesPOSService:
         item_instance = None
         batch_ref = None
         warranty_exp = None
-        warranty_summary = f"{product.warranty_months}M General Warranty"
+
+        is_phone = product.requires_imei_tracking
+        has_warranty = bool(product.warranty_months and product.warranty_months > 0)
+
+        # Baseline default warranty summary
+        if has_warranty:
+            warranty_summary = f"{product.warranty_months}M General Warranty"
+        else:
+            warranty_summary = "No Warranty"
 
         sys_config = SystemConfiguration.get_solo()
         enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
@@ -882,8 +897,6 @@ class SalesPOSService:
         clean_imei_1 = imei_num.strip() if imei_num else None
         clean_imei_2 = secondary_imei.strip() if secondary_imei else None
         has_imeis = bool(clean_imei_1 or clean_imei_2)
-
-        is_phone = product.requires_imei_tracking
 
         # ---------------------------------------------------------------------
         # SERIALIZED PHONE ALLOCATION LOGIC
@@ -962,9 +975,41 @@ class SalesPOSService:
                 sale_date=today_ad,
                 custom_warranty_months=product.warranty_months
             )
-            w_terms = [f"{cw.component_name}: {cw.warranty_months}M" for cw in created_warranties]
-            if w_terms:
-                warranty_summary = " | ".join(w_terms)
+
+            # Format the line item warranty summary string to cleanly state:
+            # "Device: 12M | Battery: 6M | Screen: 3M (Physical Damage Excluded)"
+            comp_map = {}
+            for cw in created_warranties:
+                c_type = (cw.component_type or '').upper()
+                c_name_up = (cw.component_name or '').upper()
+                c_months = cw.warranty_months
+                if c_type == 'DEVICE' or 'DEVICE' in c_name_up or 'BODY' in c_name_up or 'MOTHERBOARD' in c_name_up:
+                    comp_map['Device'] = f"{c_months}M"
+                elif c_type == 'BATTERY' or 'BATTERY' in c_name_up:
+                    comp_map['Battery'] = f"{c_months}M"
+                elif c_type == 'SCREEN' or 'SCREEN' in c_name_up or 'DISPLAY' in c_name_up:
+                    comp_map['Screen'] = f"{c_months}M"
+                else:
+                    comp_map[cw.component_name] = f"{c_months}M"
+
+            if created_warranties:
+                parts = []
+                dev_val = comp_map.pop('Device', f"{product.warranty_months or 12}M")
+                parts.append(f"Device: {dev_val}")
+
+                bat_val = comp_map.pop('Battery', '6M')
+                parts.append(f"Battery: {bat_val}")
+
+                scr_val = comp_map.pop('Screen', '3M')
+                parts.append(f"Screen: {scr_val}")
+
+                for extra_name, extra_val in comp_map.items():
+                    parts.append(f"{extra_name}: {extra_val}")
+
+                warranty_summary = f"{' | '.join(parts)} (Physical Damage Excluded)"
+            else:
+                body_m = product.warranty_months or 12
+                warranty_summary = f"Device: {body_m}M | Battery: 6M | Screen: 3M (Physical Damage Excluded)"
 
             # Deplete any FIFO ProductBatch created during backlog purchase
             cls._deplete_fifo_batch_if_exists(product, branch, base_units)
@@ -975,8 +1020,16 @@ class SalesPOSService:
         else:
             actual_unit_cost, batch_ref = cls._deplete_fifo_batches(product, branch, base_units)
 
-            if product.warranty_months > 0:
+            if has_warranty:
                 warranty_exp = today_ad + timedelta(days=product.warranty_months * 30)
+                if not is_phone:
+                    warranty_summary = f"{product.warranty_months}M General Warranty"
+                else:
+                    body_m = product.warranty_months or 12
+                    warranty_summary = f"Device: {body_m}M | Battery: 6M | Screen: 3M (Physical Damage Excluded)"
+            else:
+                # Accessories with 0 warranty cleanly state "No Warranty"
+                warranty_summary = "No Warranty"
 
         # Deduct physical warehouse shelf stock
         imei_log_str = f"{imei_num} / {secondary_imei}".strip(' /') if (imei_num or secondary_imei) else ""

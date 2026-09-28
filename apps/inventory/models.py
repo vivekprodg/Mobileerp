@@ -8,6 +8,7 @@ from decimal import Decimal
 from datetime import date
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from apps.core.models import TimeStampedModel
 from apps.branches.models import Branch
@@ -247,6 +248,43 @@ class Product(TimeStampedModel):
         variant_tag = f" ({self.variant_name})" if self.variant_name else ""
         return f"{self.name}{variant_tag} [{self.sku}]"
 
+    # =========================================================================
+    # SMART WARRANTY PROPERTIES (SINGLE SOURCE OF TRUTH)
+    # =========================================================================
+    @property
+    def effective_warranty_months(self) -> int:
+        """
+        Smart Display Helper: Returns the authoritative overall warranty duration.
+        If component warranty rules exist, the Main Handset Body ('DEVICE') rule defines the duration.
+        Otherwise, returns self.warranty_months (which may be 0 for non-warranted items).
+        """
+        if hasattr(self, '_prefetched_objects_cache') and 'component_warranty_rules' in self._prefetched_objects_cache:
+            body_rule = next((r for r in self.component_warranty_rules.all() if r.component_type == 'DEVICE'), None)
+            if body_rule is not None:
+                return body_rule.warranty_months
+        elif self.pk:
+            body_rule = self.component_warranty_rules.filter(component_type='DEVICE').first()
+            if body_rule is not None:
+                return body_rule.warranty_months
+        return self.warranty_months or 0
+
+    @property
+    def effective_warranty_display(self) -> str:
+        """
+        Human-readable formatted warranty label for templates, admin, and invoices.
+        Examples: '12 Months (Authorized Distributor)' or 'No Warranty Applicable'.
+        """
+        months = self.effective_warranty_months
+        if months > 0:
+            provider = self.warranty_provider or "Authorized Distributor"
+            return f"{months} Months ({provider})"
+        return "No Warranty Applicable (0 Months)"
+
+    @property
+    def has_warranty(self) -> bool:
+        """Returns True if the product has an active positive warranty period."""
+        return self.effective_warranty_months > 0
+
     def clean(self):
         super().clean()
         if self.barcode is not None:
@@ -259,6 +297,13 @@ class Product(TimeStampedModel):
             self.barcode = str(self.barcode).strip()
             if self.barcode == '':
                 self.barcode = None
+
+        # Auto-Sync 1: Synchronize warranty_months from Main Handset Body component rule if it exists
+        if self.pk:
+            body_rule = self.component_warranty_rules.filter(component_type='DEVICE').first()
+            if body_rule is not None:
+                self.warranty_months = body_rule.warranty_months
+
         super().save(*args, **kwargs)
 
 class ProductComponentWarrantyRule(TimeStampedModel):
@@ -292,6 +337,27 @@ class ProductComponentWarrantyRule(TimeStampedModel):
 
     def __str__(self):
         return f"{self.product.name} -> {self.get_component_type_display()}: {self.warranty_months} Months"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Auto-Sync 2: Synchronize parent product warranty_months when Main Handset Body rule is created or updated
+        if self.component_type == 'DEVICE' and self.product_id:
+            Product.objects.filter(pk=self.product_id).update(
+                warranty_months=self.warranty_months,
+                updated_at=timezone.now()
+            )
+
+    def delete(self, *args, **kwargs):
+        product_id = self.product_id
+        is_device = (self.component_type == 'DEVICE')
+        super().delete(*args, **kwargs)
+        if is_device and product_id:
+            remaining_rule = ProductComponentWarrantyRule.objects.filter(product_id=product_id, component_type='DEVICE').first()
+            new_months = remaining_rule.warranty_months if remaining_rule else 0
+            Product.objects.filter(pk=product_id).update(
+                warranty_months=new_months,
+                updated_at=timezone.now()
+            )
 
 class UnitConversion(TimeStampedModel):
     """Packaging unit conversion: e.g. 1 Box of Tempered Glass = 50 Pieces."""

@@ -11,16 +11,13 @@ from apps.inventory.models import (
 )
 from apps.core.models import SystemConfiguration
 
-
 # ==============================================================================
 # WIDGET GENERATOR HELPERS
 # ==============================================================================
-
 def make_text_input(placeholder="", css_class="form-control", **extra_attrs):
     attrs = {'class': css_class, 'placeholder': placeholder}
     attrs.update(extra_attrs)
     return forms.TextInput(attrs=attrs)
-
 
 def make_number_input(step="0.01", min_val=None, max_val=None, placeholder="", css_class="form-control", **extra_attrs):
     attrs = {'class': css_class, 'step': str(step), 'placeholder': placeholder}
@@ -31,29 +28,24 @@ def make_number_input(step="0.01", min_val=None, max_val=None, placeholder="", c
     attrs.update(extra_attrs)
     return forms.NumberInput(attrs=attrs)
 
-
 def make_select(css_class="form-select", **extra_attrs):
     attrs = {'class': css_class}
     attrs.update(extra_attrs)
     return forms.Select(attrs=attrs)
-
 
 def make_textarea(rows=2, placeholder="", css_class="form-control", **extra_attrs):
     attrs = {'class': css_class, 'rows': str(rows), 'placeholder': placeholder}
     attrs.update(extra_attrs)
     return forms.Textarea(attrs=attrs)
 
-
 def make_checkbox(css_class="form-check-input", **extra_attrs):
     attrs = {'class': css_class}
     attrs.update(extra_attrs)
     return forms.CheckboxInput(attrs=attrs)
 
-
 # ==============================================================================
 # UNIT OF MEASUREMENT (UOM) FORM
 # ==============================================================================
-
 class UnitOfMeasurementForm(forms.ModelForm):
     class Meta:
         model = UnitOfMeasurement
@@ -93,11 +85,9 @@ class UnitOfMeasurementForm(forms.ModelForm):
             raise forms.ValidationError(_(f"A unit with code '{code}' already exists."))
         return code
 
-
 # ==============================================================================
 # CATEGORY & SUBCATEGORY FORMS
 # ==============================================================================
-
 class ProductCategoryForm(forms.ModelForm):
     class Meta:
         model = ProductCategory
@@ -120,11 +110,9 @@ class ProductCategoryForm(forms.ModelForm):
         if not self.instance.pk:
             self.fields['is_active'].initial = True
 
-
 # ==============================================================================
-# COMPONENT WARRANTY RULE FORMSET
+# COMPONENT WARRANTY RULE FORM & INLINE FORMSET
 # ==============================================================================
-
 class ProductComponentWarrantyRuleForm(forms.ModelForm):
     class Meta:
         model = ProductComponentWarrantyRule
@@ -136,10 +124,15 @@ class ProductComponentWarrantyRuleForm(forms.ModelForm):
             'coverage_conditions': make_text_input(placeholder='e.g. Covers manufacturing defects only. Void if cracked.', css_class='form-control form-control-sm'),
         }
         help_texts = {
-            'warranty_months': _('Warranty duration in months for this specific sub-component.'),
+            'warranty_months': _('Warranty duration in months for this specific sub-component (0 for no warranty).'),
             'coverage_conditions': _('Printed on estimation warranty certificate given to customer.'),
         }
 
+    def clean_warranty_months(self):
+        val = self.cleaned_data.get('warranty_months')
+        if val is None or str(val).strip() == '':
+            return 0
+        return max(0, int(val))
 
 ProductComponentWarrantyRuleFormSet = inlineformset_factory(
     Product,
@@ -149,11 +142,9 @@ ProductComponentWarrantyRuleFormSet = inlineformset_factory(
     can_delete=True
 )
 
-
 # ==============================================================================
 # MASTER PRODUCT SPECIFICATION FORM
 # ==============================================================================
-
 class ProductForm(forms.ModelForm):
     barcode = forms.CharField(
         required=False,
@@ -262,8 +253,12 @@ class ProductForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['barcode'].required = False
+        self.fields['purchase_price'].required = False
+        self.fields['warranty_months'].required = False
 
         if not self.instance.pk:
+            self.fields['purchase_price'].initial = Decimal('0.00')
+
             config = SystemConfiguration.get_solo()
             if config.tax_system_mode == 'VAT':
                 self.fields['is_vat_applicable'].initial = True
@@ -277,6 +272,12 @@ class ProductForm(forms.ModelForm):
             base_pcs = UnitOfMeasurement.objects.filter(code='PCS').first()
             if base_pcs:
                 self.fields['base_unit'].initial = base_pcs
+
+    def clean_purchase_price(self):
+        val = self.cleaned_data.get('purchase_price')
+        if val is None or str(val).strip() == '':
+            return Decimal('0.00')
+        return val
 
     def clean_barcode(self):
         code = self.cleaned_data.get('barcode')
@@ -292,11 +293,58 @@ class ProductForm(forms.ModelForm):
             return code
         return None
 
+    def clean_warranty_months(self):
+        """
+        Gracefully accepts 0 months for non-warranted accessories or phones.
+        Defaults to 0 if left blank.
+        """
+        val = self.cleaned_data.get('warranty_months')
+        if val is None or str(val).strip() == '':
+            return 0
+        return max(0, int(val))
+
+    def clean(self):
+        """
+        Form Cleaning Synchronization:
+        If component warranty rules were submitted in POST (e.g. Tab 3),
+        automatically extract the Main Handset Body ('DEVICE') warranty duration
+        and assign it to warranty_months, overriding any accidental 0 from Tab 5.
+        """
+        cleaned_data = super().clean()
+
+        if hasattr(self, 'data') and self.data:
+            total_forms_raw = self.data.get('component_warranty_rules-TOTAL_FORMS', '0')
+            try:
+                total_forms = int(total_forms_raw)
+            except (ValueError, TypeError):
+                total_forms = 0
+
+            found_device_months = None
+            for i in range(total_forms):
+                c_type = self.data.get(f'component_warranty_rules-{i}-component_type')
+                c_months = self.data.get(f'component_warranty_rules-{i}-warranty_months')
+                delete_flag = self.data.get(f'component_warranty_rules-{i}-DELETE')
+
+                if c_type == 'DEVICE' and c_months is not None and str(c_months).strip() != '' and not delete_flag:
+                    try:
+                        found_device_months = max(0, int(c_months))
+                        break
+                    except (ValueError, TypeError):
+                        pass
+
+            if found_device_months is not None:
+                cleaned_data['warranty_months'] = found_device_months
+                self.instance.warranty_months = found_device_months
+
+        if cleaned_data.get('warranty_months') is None:
+            cleaned_data['warranty_months'] = 0
+            self.instance.warranty_months = 0
+
+        return cleaned_data
 
 # ==============================================================================
 # IMEI INSTANCE MDMS STATUS UPDATE FORM
 # ==============================================================================
-
 class ItemInstanceMDMSUpdateForm(forms.ModelForm):
     class Meta:
         model = ItemInstance
@@ -307,11 +355,9 @@ class ItemInstanceMDMSUpdateForm(forms.ModelForm):
             'mdms_remarks': make_text_input(placeholder='e.g. Verified on NTA MDMS Official Portal'),
         }
 
-
 # ==============================================================================
 # VENDOR RMA & WARRANTY CLAIM FORMS
 # ==============================================================================
-
 class VendorRMAClaimForm(forms.ModelForm):
     class Meta:
         model = VendorRMAClaim
@@ -323,11 +369,9 @@ class VendorRMAClaimForm(forms.ModelForm):
             'resolution_notes': make_textarea(rows=3, placeholder='Dispatch notes and defect summaries...'),
         }
 
-
 # ==============================================================================
 # PACKAGING UNIT CONVERSION FORM
 # ==============================================================================
-
 class UnitConversionForm(forms.ModelForm):
     class Meta:
         model = UnitConversion
@@ -353,11 +397,9 @@ class UnitConversionForm(forms.ModelForm):
             return code
         return None
 
-
 # ==============================================================================
 # STOCK ADJUSTMENT FORM
 # ==============================================================================
-
 class ManualStockAdjustmentForm(forms.Form):
     ADJUSTMENT_TYPES = [
         ('ADJUSTMENT_ADD', 'Add Stock (+) Physical Audit / Found'),
@@ -376,11 +418,9 @@ class ManualStockAdjustmentForm(forms.Form):
         widget=make_textarea(rows=2, placeholder="Mandatory reason for audit trail...")
     )
 
-
 # ==============================================================================
 # EXCEL IMPORT PIPELINE FORMS
 # ==============================================================================
-
 class ProductExcelUploadForm(forms.Form):
     excel_file = forms.FileField(
         label=_("Select Excel / CSV File"),
@@ -397,7 +437,6 @@ class ProductExcelUploadForm(forms.Form):
             if file.size > 25 * 1024 * 1024:
                 raise forms.ValidationError(_("File size exceeds the 25MB maximum upload limit."))
         return file
-
 
 class ProductExcelMappingForm(forms.Form):
     CONFLICT_CHOICES = [

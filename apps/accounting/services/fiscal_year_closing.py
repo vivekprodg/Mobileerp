@@ -1,6 +1,5 @@
 """
 Fiscal Year Financial Close & Retained Earnings Transfer Engine.
-File Path: apps/accounting/services/fiscal_year_closing.py
 
 Executes formal Year-End Financial Close conforming to standard accounting procedures:
 1. Mathematical Verification:

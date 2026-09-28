@@ -86,11 +86,12 @@
         }
 
         .warranty-box {
-            border: 1px dotted #000000;
-            padding: 3px;
+            border: 1px dashed #000000;
+            padding: 4px;
             margin: 3px 0;
             font-size: 9px;
             background-color: #fafafa;
+            line-height: 1.3;
         }
 
         @media print {
@@ -158,7 +159,7 @@
 
     <div class="divider"></div>
 
-    <!-- 3. Line Items Table (Dual-Mode Line Concessions & Overrides) -->
+    <!-- 3. Line Items Table -->
     <table>
         <thead>
             <tr>
@@ -197,7 +198,7 @@
             </tr>
             {% endif %}
 
-            <!-- Item-Level Discount Line: Explicit Amount vs. Percentage Format -->
+            <!-- Item-Level Discount Line -->
             {% if item.discount_amount > 0 %}
             <tr>
                 <td colspan="4" class="concession-line">
@@ -243,12 +244,22 @@
             </tr>
             {% endif %}
 
-            {% if item.warranty_terms %}
+            <!-- Clean, Compact Component Warranty Box on Thermal Slips -->
+            {% if item.imei_number or item.product.requires_imei_tracking %}
             <tr>
                 <td colspan="4">
                     <div class="warranty-box">
-                        <strong>Warranty Coverage:</strong><br>
-                        {{ item.warranty_terms }}
+                        <strong>Warranty: Phone {{ item.product.warranty_months|default:12 }}M | Batt 6M | Screen 3M</strong><br>
+                        <strong>[Physical / Water Damage Strictly Void]</strong>
+                    </div>
+                </td>
+            </tr>
+            {% elif item.warranty_months > 0 and item.warranty_terms != "No Warranty" %}
+            <tr>
+                <td colspan="4">
+                    <div class="warranty-box">
+                        <strong>Warranty:</strong> {{ item.warranty_terms }}<br>
+                        <span>[Physical / Liquid Damage Void]</span>
                     </div>
                 </td>
             </tr>
@@ -316,7 +327,7 @@
         </tr>
     </table>
 
-    <!-- 5. Settlement & Payments Section (Trade-In Buy-Back Credit strictly separated) -->
+    <!-- 5. Settlement & Payments Section -->
     <div style="font-size: 9px; font-weight: bold; margin-top: 5px; text-transform: uppercase;">
         Settlement &amp; Tendered Payments:
     </div>

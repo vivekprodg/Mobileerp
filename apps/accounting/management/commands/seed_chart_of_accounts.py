@@ -1,6 +1,5 @@
 """
 Management Command: seed_chart_of_accounts
-File Path: apps/accounting/management/commands/seed_chart_of_accounts.py
 
 Initializes an industry-standard Chart of Accounts (COA) tailored specifically
 for Nepal's retail and wholesale smartphone, electronics, and optical ecosystems.

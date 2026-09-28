@@ -287,9 +287,19 @@
                 <span class="text-muted d-block">Physical Dimensions &amp; Region:</span>
                 <strong class="text-dark">{{ product.size_dimension|default:"-" }} ({{ product.region_variant|default:"Global/Nepal" }})</strong>
             </div>
+
+            <!-- UNIFIED OVERALL WARRANTY DISPLAY (SYNCHRONIZED WITH COMPONENT BODY RULE) -->
             <div class="col-12">
                 <span class="text-muted d-block">Official Overall Warranty:</span>
-                <strong class="text-success">{{ product.warranty_months }} Months ({{ product.warranty_provider|default:"Official Distributor" }})</strong>
+                {% if product.effective_warranty_months > 0 %}
+                    <strong class="text-success fs-xs">
+                        <i class="fas fa-shield-halved me-1"></i> {{ product.effective_warranty_months }} Months ({{ product.warranty_provider|default:"Authorized Distributor" }})
+                    </strong>
+                {% else %}
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25 px-2.5 py-1 fs-xs fw-semibold">
+                        <i class="fas fa-shield-xmark me-1"></i> No Warranty Applicable
+                    </span>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -397,43 +407,136 @@
         </div>
     </div>
 
-    <!-- COMPONENT-LEVEL WARRANTY SCHEDULE MATRIX -->
+    <!-- =========================================================================
+         UPGRADED COMPONENT-LEVEL WARRANTY SCHEDULE MATRIX & EXCLUSION BADGE
+         ========================================================================= -->
     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
         <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
-            <h6 class="fw-bold text-dark mb-0">
-                <i class="fas fa-shield-halved text-success me-2"></i> Official Component Warranty Schedule Breakdown
-            </h6>
+            <div>
+                <h6 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-shield-halved text-success me-2"></i> Official Component Warranty Schedule Breakdown
+                </h6>
+                <small class="text-muted fs-2xs">Verified manufacturer component duration limits and statutory exclusion terms</small>
+            </div>
             <span class="badge bg-primary rounded-pill fs-xs">Provider: {{ product.warranty_provider|default:"Authorized Distributor" }}</span>
         </div>
+
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 fs-xs">
                 <thead class="bg-light text-muted text-uppercase fs-2xs">
                     <tr>
-                        <th class="ps-3">Component Type</th>
-                        <th>Component Description</th>
-                        <th>Warranty Period</th>
-                        <th>Coverage Conditions</th>
+                        <th class="ps-3" style="width: 25%;">Component Category</th>
+                        <th style="width: 30%;">Component Description</th>
+                        <th style="width: 18%;">Warranty Period</th>
+                        <th style="width: 27%;">Coverage Terms &amp; Scope</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for rule in component_rules %}
                     <tr>
-                        <td class="ps-3 fw-bold text-dark">{{ rule.get_component_type_display }}</td>
+                        <td class="ps-3 fw-bold text-dark">
+                            {% if rule.component_type == 'DEVICE' %}
+                                <i class="fas fa-mobile-screen text-primary me-1"></i> Main Handset Body
+                            {% elif rule.component_type == 'BATTERY' %}
+                                <i class="fas fa-battery-half text-warning me-1"></i> Internal Battery
+                            {% elif rule.component_type == 'SCREEN' %}
+                                <i class="fas fa-tv text-success me-1"></i> Screen / Display Panel
+                            {% else %}
+                                <i class="fas fa-screwdriver-wrench text-secondary me-1"></i> {{ rule.get_component_type_display }}
+                            {% endif %}
+                        </td>
                         <td>{{ rule.component_name }}</td>
                         <td>
-                            <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs px-2 py-1">
-                                {{ rule.warranty_months }} Months Coverage
-                            </span>
+                            {% if rule.warranty_months > 0 %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs px-2 py-1">
+                                    <i class="fas fa-check-circle me-1"></i> {{ rule.warranty_months }} Months Active
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-xs px-2 py-1">
+                                    No Warranty (0M)
+                                </span>
+                            {% endif %}
                         </td>
-                        <td class="text-muted">{{ rule.coverage_conditions }}</td>
+                        <td class="text-muted">
+                            {% if "consumable" in rule.coverage_conditions|lower and rule.warranty_months > 0 %}
+                                Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found.
+                            {% else %}
+                                {{ rule.coverage_conditions|default:"Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found." }}
+                            {% endif %}
+                        </td>
                     </tr>
                     {% empty %}
-                    <tr>
-                        <td colspan="4" class="text-center py-3 text-muted">
-                            Overall Handset Warranty: <strong>{{ product.warranty_months }} Months</strong> (No separate sub-component splits defined).
+                        {% if product.requires_imei_tracking %}
+                        <!-- 1. Handset Body -->
+                        <tr>
+                            <td class="ps-3 fw-bold text-dark">
+                                <i class="fas fa-mobile-screen text-primary me-1"></i> Main Handset Body &amp; Motherboard
+                            </td>
+                            <td>Main Phone Chassis, Motherboard &amp; Cellular Components</td>
+                            <td>
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs px-2 py-1">
+                                    <i class="fas fa-check-circle me-1"></i> {{ product.effective_warranty_months|default:12 }} Months Active
+                                </span>
+                            </td>
+                            <td class="text-muted">Official Manufacturer Warranty against genuine factory component failure.</td>
+                        </tr>
+
+                        <!-- 2. Internal Battery -->
+                        <tr>
+                            <td class="ps-3 fw-bold text-dark">
+                                <i class="fas fa-battery-half text-warning me-1"></i> Internal Battery
+                            </td>
+                            <td>Original Li-Ion / Li-Po Battery Cell</td>
+                            <td>
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs px-2 py-1">
+                                    <i class="fas fa-check-circle me-1"></i> 6 Months Active
+                                </span>
+                            </td>
+                            <td class="text-muted">Covers premature swelling or charging failure. Normal degradation excluded.</td>
+                        </tr>
+
+                        <!-- 3. Screen / Display -->
+                        <tr>
+                            <td class="ps-3 fw-bold text-dark">
+                                <i class="fas fa-tv text-success me-1"></i> Screen / Display Panel
+                            </td>
+                            <td>Touchscreen Digitizer &amp; AMOLED/LCD Display</td>
+                            <td>
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold fs-xs px-2 py-1">
+                                    <i class="fas fa-check-circle me-1"></i> 3 Months Active
+                                </span>
+                            </td>
+                            <td class="text-muted">Touch failure or display lines. Zero coverage for cracked or chipped glass.</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td class="ps-3 fw-bold text-dark"><i class="fas fa-box text-secondary me-1"></i> Consumable Accessory</td>
+                            <td>Standard Non-Serialized Accessory</td>
+                            <td>
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-xs px-2 py-1">
+                                    {% if product.effective_warranty_months > 0 %}{{ product.effective_warranty_months }} Months{% else %}No Warranty (0M){% endif %}
+                                </span>
+                            </td>
+                            <td class="text-muted">Standard supplier terms apply.</td>
+                        </tr>
+                        {% endif %}
+                    {% endfor %}
+
+                    <!-- 4. Mandatory Damage Exclusion Row -->
+                    <tr class="table-danger bg-opacity-10">
+                        <td class="ps-3 fw-bold text-danger">
+                            <i class="fas fa-ban text-danger me-1"></i> Physical &amp; Liquid Damage
+                        </td>
+                        <td class="text-danger fw-semibold">Drops, Screen Cracks, Denting &amp; Water Ingress</td>
+                        <td>
+                            <span class="badge bg-danger text-white fw-bold fs-xs px-2 py-1">
+                                EXCLUDED (0 Months)
+                            </span>
+                        </td>
+                        <td class="text-danger fw-bold fs-2xs">
+                            <i class="fas fa-triangle-exclamation me-1"></i> Strictly voids all warranty immediately. Any repair or replacement will be charged to the customer.
                         </td>
                     </tr>
-                    {% endfor %}
                 </tbody>
             </table>
         </div>

@@ -1,6 +1,5 @@
 """
 Multi-Format Excel & CSV Bulk Catalog Importer.
-File Path: D:\Mobile Shop\Inventory\apps\inventory\services\excel_importer.py
 
 Core Capabilities:
 1. Smart Fuzzy Header Auto-Detection:
@@ -16,9 +15,15 @@ Core Capabilities:
    - If smartphones/tablets are imported with opening stock but without individual 15-digit IMEIs,
      creates clearly indexed placeholder device records linked to SKU/device_uid with
      `imei_2_pending_scan=True`.
-5. Flexible Duplicate Conflict Resolution:
+5. Intelligent Warranty Alignment & Zero-Warranty Safeguards:
+   - For serialized phones (IMEI-tracked): Accurately sets the product's overall warranty to 12 months
+     (or the exact positive number provided in the sheet) and binds synchronized component rules:
+     Device (12M or sheet value), Battery (6M), and Screen (3M).
+   - For non-serialized accessories without warranty: Explicitly records 0 months on the product
+     without generating unnecessary or broken component sub-records.
+6. Flexible Duplicate Conflict Resolution:
    - Supports 'MERGE' (consolidate stock), 'OVERWRITE' (update prices & counts), 'SKIP', and 'NEW_VARIANT'.
-6. Atomic Row-Level Savepoints & Detailed Diagnostic Summary:
+7. Atomic Row-Level Savepoints & Detailed Diagnostic Summary:
    - Isolates row failures so valid rows are committed, providing full error reports and audit logs.
 """
 
@@ -31,6 +36,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
 from django.db import transaction
 from django.utils.text import slugify
+from django.utils import timezone
 
 from apps.inventory.models import (
     Product, ProductCategory, ProductSubCategory, Brand, UnitOfMeasurement,
@@ -348,7 +354,7 @@ class ExcelProductImporter:
                     purchase_date=today,
                     warranty_start_date=today,
                     warranty_end_date=warranty_end,
-                    warranty_remarks=f"Opening Stock Warranty: {warranty_months}M"
+                    warranty_remarks=f"Opening Stock Warranty: {warranty_months}M" if warranty_months > 0 else "No Warranty"
                 )
             )
 
@@ -369,6 +375,9 @@ class ExcelProductImporter:
         """
         Executes bulk import across all spreadsheet rows inside isolated row-level savepoints.
         Barcodes are saved if provided in the file, or set to None without auto-generation.
+        Warranty terms are intelligently synchronized:
+          - Phone (IMEI): default 12M body / 6M batt / 3M screen (or exact sheet value).
+          - Accessory: strictly 0M if no warranty specified.
         """
         summary = {
             'total_rows': len(df),
@@ -425,10 +434,6 @@ class ExcelProductImporter:
                     raw_rack = str(row.get(mapping.get('rack_number', ''), '')).strip()
                     raw_imeis = str(row.get(mapping.get('imei_numbers', ''), '')).strip()
 
-                    raw_warranty = int(cls.parse_decimal(row.get(mapping.get('warranty_months', '')), Decimal('12')))
-                    raw_batt_war = int(cls.parse_decimal(row.get(mapping.get('battery_warranty_months', '')), Decimal('6')))
-                    raw_screen_war = int(cls.parse_decimal(row.get(mapping.get('screen_warranty_months', '')), Decimal('6')))
-
                     cost_price = cls.parse_decimal(row.get(mapping.get('purchase_price', '')))
                     selling_price = cls.parse_decimal(row.get(mapping.get('selling_price', '')))
                     wholesale_price = cls.parse_decimal(row.get(mapping.get('wholesale_price', '')))
@@ -437,9 +442,12 @@ class ExcelProductImporter:
 
                     stock_qty = cls.parse_decimal(row.get(mapping.get('initial_stock', '')))
 
+                    # -------------------------------------------------------------
+                    # 1. INTELLIGENT SERIALIZATION DETECTION
+                    # -------------------------------------------------------------
                     imei_flag_val = str(row.get(mapping.get('requires_imei_tracking', ''), '')).strip().lower()
                     requires_imei = imei_flag_val in ['yes', 'true', '1', 'y']
-                    if not requires_imei and (raw_ram or raw_storage or raw_imeis or 'phone' in raw_cat.lower() or 'mobile' in raw_cat.lower() or 'smartphone' in raw_cat.lower() or 'स्मार्टफोन' in raw_cat.lower()):
+                    if not requires_imei and (raw_ram or raw_storage or raw_imeis or 'phone' in raw_cat.lower() or 'mobile' in raw_cat.lower() or 'smartphone' in raw_cat.lower() or 'ह्यान्डसेट' in raw_cat.lower() or 'स्मार्टफोन' in raw_cat.lower()):
                         requires_imei = True
 
                     sim_config = cls.parse_sim_configuration(
@@ -449,7 +457,44 @@ class ExcelProductImporter:
                         requires_imei=requires_imei
                     )
 
-                    # 1. Automatic Category Lookup & Self-Healing Creation
+                    # -------------------------------------------------------------
+                    # 2. INTELLIGENT WARRANTY ALIGNMENT & DEFAULTS
+                    # -------------------------------------------------------------
+                    raw_warranty_str = str(row.get(mapping.get('warranty_months', ''), '')).strip()
+                    raw_batt_str = str(row.get(mapping.get('battery_warranty_months', ''), '')).strip()
+                    raw_screen_str = str(row.get(mapping.get('screen_warranty_months', ''), '')).strip()
+
+                    if requires_imei:
+                        # Case A: Serialized Smartphone / Tablet
+                        parsed_war = cls.parse_decimal(raw_warranty_str, Decimal('-1'))
+                        if parsed_war > Decimal('0.00'):
+                            overall_warranty = int(parsed_war)
+                        else:
+                            # Intelligently default blank or 0 cells to 12 months for phones
+                            overall_warranty = 12
+
+                        parsed_batt = cls.parse_decimal(raw_batt_str, Decimal('-1'))
+                        if parsed_batt >= Decimal('0.00'):
+                            batt_warranty = int(parsed_batt)
+                        else:
+                            batt_warranty = min(overall_warranty, 6) if overall_warranty > 0 else 6
+
+                        parsed_screen = cls.parse_decimal(raw_screen_str, Decimal('-1'))
+                        if parsed_screen >= Decimal('0.00'):
+                            screen_warranty = int(parsed_screen)
+                        else:
+                            screen_warranty = min(overall_warranty, 3) if overall_warranty > 0 else 3
+                    else:
+                        # Case B: Non-serialized Accessory (Earphones, Chargers, Glasses, Cases)
+                        parsed_war = cls.parse_decimal(raw_warranty_str, Decimal('0'))
+                        if parsed_war > Decimal('0.00'):
+                            overall_warranty = int(parsed_war)
+                        else:
+                            overall_warranty = 0
+                        batt_warranty = 0
+                        screen_warranty = 0
+
+                    # 3. Category Lookup & Self-Healing Creation
                     category_obj = ProductCategory.objects.filter(name__iexact=raw_cat).first()
                     if not category_obj:
                         clean_slug = slugify(raw_cat)[:4].upper()
@@ -465,7 +510,7 @@ class ExcelProductImporter:
                         category_obj.is_active = True
                         category_obj.save(update_fields=['is_active'])
 
-                    # 2. Automatic Brand Lookup & Creation
+                    # 4. Brand Lookup & Creation
                     brand_obj = None
                     if raw_brand:
                         brand_obj = Brand.objects.filter(name__iexact=raw_brand).first()
@@ -513,7 +558,7 @@ class ExcelProductImporter:
                                         stock_qty=stock_qty,
                                         raw_imei_str=raw_imeis,
                                         cost_price=cost_price or existing_prod.purchase_price,
-                                        warranty_months=raw_warranty,
+                                        warranty_months=overall_warranty,
                                         default_mdms_status=existing_prod.default_mdms_status,
                                         supplier_name="Excel Consolidation"
                                     )
@@ -534,7 +579,7 @@ class ExcelProductImporter:
                             raw_sku = cls.generate_sku(raw_brand, raw_model, raw_storage)
                             raw_barcode = None  # Leave blank for new variant
 
-                    # 3. Database Lookup for Existing Product Record
+                    # 5. Database Lookup for Existing Product Record
                     product_obj = None
                     if raw_barcode:
                         product_obj = Product.objects.filter(barcode=raw_barcode).first()
@@ -566,7 +611,57 @@ class ExcelProductImporter:
                             product_obj.sim_configuration = sim_config
                         if raw_barcode and not product_obj.barcode:
                             product_obj.barcode = raw_barcode
+
+                        # Synchronize warranty terms on existing product
+                        product_obj.warranty_months = overall_warranty
+                        product_obj.requires_imei_tracking = requires_imei
                         product_obj.save()
+
+                        # Align component warranty rules
+                        if requires_imei:
+                            ProductComponentWarrantyRule.objects.update_or_create(
+                                product=product_obj,
+                                component_type='DEVICE',
+                                defaults={
+                                    'component_name': 'Main Handset Body & Motherboard',
+                                    'warranty_months': overall_warranty,
+                                    'coverage_conditions': "Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found."
+                                }
+                            )
+                            ProductComponentWarrantyRule.objects.update_or_create(
+                                product=product_obj,
+                                component_type='BATTERY',
+                                defaults={
+                                    'component_name': 'Internal Battery',
+                                    'warranty_months': batt_warranty,
+                                    'coverage_conditions': "Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found."
+                                }
+                            )
+                            ProductComponentWarrantyRule.objects.update_or_create(
+                                product=product_obj,
+                                component_type='SCREEN',
+                                defaults={
+                                    'component_name': 'Screen / Display Panel',
+                                    'warranty_months': screen_warranty,
+                                    'coverage_conditions': "Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found."
+                                }
+                            )
+                            Product.objects.filter(pk=product_obj.pk).update(warranty_months=overall_warranty)
+                        else:
+                            if overall_warranty == 0:
+                                ProductComponentWarrantyRule.objects.filter(product=product_obj).delete()
+                                Product.objects.filter(pk=product_obj.pk).update(warranty_months=0)
+                            else:
+                                ProductComponentWarrantyRule.objects.update_or_create(
+                                    product=product_obj,
+                                    component_type='DEVICE',
+                                    defaults={
+                                        'component_name': 'Main Product Warranty',
+                                        'warranty_months': overall_warranty,
+                                        'coverage_conditions': "Standard manufacturer warranty."
+                                    }
+                                )
+                                Product.objects.filter(pk=product_obj.pk).update(warranty_months=overall_warranty)
 
                         if (cost_price > Decimal('0.00') and cost_price != old_cost) or (selling_price > Decimal('0.00') and selling_price != old_sell):
                             ProductCostHistory.objects.create(
@@ -623,7 +718,7 @@ class ExcelProductImporter:
                                     stock_qty=delta_added,
                                     raw_imei_str=raw_imeis,
                                     cost_price=product_obj.purchase_price,
-                                    warranty_months=raw_warranty,
+                                    warranty_months=overall_warranty,
                                     default_mdms_status=product_obj.default_mdms_status,
                                     supplier_name="Excel Bulk Update"
                                 )
@@ -651,6 +746,7 @@ class ExcelProductImporter:
                         summary['updated'] += 1
 
                     else:
+                        # 6. Create New Product Record
                         final_sku = raw_sku or cls.generate_sku(raw_brand, raw_model, raw_storage)
                         while Product.objects.filter(sku=final_sku).exists():
                             final_sku = cls.generate_sku(raw_brand, raw_model, raw_storage)
@@ -684,7 +780,7 @@ class ExcelProductImporter:
                             wholesale_price=wholesale_price,
                             requires_imei_tracking=requires_imei,
                             rack_number=raw_rack or None,
-                            warranty_months=raw_warranty,
+                            warranty_months=overall_warranty,
                             tax_pricing_type=default_tax_mode,
                             is_vat_applicable=is_vat_shop,
                             vat_rate=default_rate
@@ -692,27 +788,46 @@ class ExcelProductImporter:
                         new_product._skip_signal_branch_stock = True
                         new_product.save()
 
+                        # 7. Component Warranty Rules Creation
                         if requires_imei:
                             ProductComponentWarrantyRule.objects.bulk_create([
                                 ProductComponentWarrantyRule(
                                     product=new_product,
                                     component_type='DEVICE',
                                     component_name='Main Handset Body & Motherboard',
-                                    warranty_months=raw_warranty
+                                    warranty_months=overall_warranty,
+                                    coverage_conditions="Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found."
                                 ),
                                 ProductComponentWarrantyRule(
                                     product=new_product,
                                     component_type='BATTERY',
                                     component_name='Internal Battery',
-                                    warranty_months=raw_batt_war
+                                    warranty_months=batt_warranty,
+                                    coverage_conditions="Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found."
                                 ),
                                 ProductComponentWarrantyRule(
                                     product=new_product,
                                     component_type='SCREEN',
-                                    component_name='Display Panel / Touchscreen',
-                                    warranty_months=raw_screen_war
+                                    component_name='Screen / Display Panel',
+                                    warranty_months=screen_warranty,
+                                    coverage_conditions="Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found."
                                 )
                             ])
+                            # Single Source of Truth Guarantee: Explicitly update product warranty_months
+                            Product.objects.filter(pk=new_product.pk).update(warranty_months=overall_warranty)
+                        elif overall_warranty > 0:
+                            # Non-serialized item with warranty
+                            ProductComponentWarrantyRule.objects.create(
+                                product=new_product,
+                                component_type='DEVICE',
+                                component_name='Main Product Warranty',
+                                warranty_months=overall_warranty,
+                                coverage_conditions="Standard manufacturer warranty."
+                            )
+                            Product.objects.filter(pk=new_product.pk).update(warranty_months=overall_warranty)
+                        else:
+                            # Accessory with 0 warranty: no component rules, warranty_months strictly 0
+                            Product.objects.filter(pk=new_product.pk).update(warranty_months=0)
 
                         branch_stock_entries = [
                             BranchStock(
@@ -749,7 +864,7 @@ class ExcelProductImporter:
                                     stock_qty=stock_qty,
                                     raw_imei_str=raw_imeis,
                                     cost_price=cost_price,
-                                    warranty_months=raw_warranty,
+                                    warranty_months=overall_warranty,
                                     default_mdms_status=new_product.default_mdms_status,
                                     supplier_name="Opening Stock via Excel"
                                 )

@@ -20,6 +20,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.core.cache import cache
 from django.conf import settings
+from django.utils import timezone
 
 from apps.branches.models import Branch
 from apps.inventory.models import (
@@ -69,7 +70,6 @@ class InventoryCatalogService:
 
     @staticmethod
     def get_filtered_products(request_params: dict, active_branch: Branch):
-        # Prefetch branch stock scoped specifically to the active branch to avoid loading all branches into memory
         if active_branch:
             branch_stock_prefetch = Prefetch(
                 'branch_stocks',
@@ -154,7 +154,6 @@ class InventoryCatalogService:
                 'recent_activities': []
             }
 
-        # Cache catalog KPIs for 30 seconds per branch
         cache_key = f"inv_catalog_kpi_branch_{active_branch.id}"
         cached_kpis = cache.get(cache_key)
         if cached_kpis is not None:
@@ -162,13 +161,11 @@ class InventoryCatalogService:
 
         branch_stocks = BranchStock.objects.filter(branch=active_branch, product__is_active=True)
 
-        # Database expression: quantity * purchase_price evaluated in SQL
         cost_val_expr = ExpressionWrapper(
             F('quantity') * F('product__purchase_price'),
             output_field=DecimalField(max_digits=18, decimal_places=2)
         )
 
-        # Single combined database aggregation query
         stock_agg = branch_stocks.aggregate(
             sum_qty=Coalesce(Sum('quantity'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=18, decimal_places=3))),
             total_val=Coalesce(Sum(cost_val_expr), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
@@ -418,10 +415,6 @@ class UnitQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
 class UnitSearchAPIView(LoginRequiredMixin, View):
-    """
-    Search and auto-complete endpoint for Units of Measurement (UOM).
-    Returns matched units with code, name, and allow_decimal flags.
-    """
     def get(self, request, *args, **kwargs):
         q = request.GET.get('q', '').strip()
         try:
@@ -598,11 +591,6 @@ class CategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
 class CategorySearchAPIView(LoginRequiredMixin, View):
-    """
-    Search and filter endpoint for Product Categories.
-    If 'q' is empty, returns all active categories.
-    If 'q' is provided, matches category name, name_np, or short code.
-    """
     def get(self, request, *args, **kwargs):
         q = request.GET.get('q', '').strip()
         include_inactive = request.GET.get('include_inactive', 'false').lower() == 'true'
@@ -641,11 +629,6 @@ class CategorySearchAPIView(LoginRequiredMixin, View):
 # PRODUCT SUBCATEGORY QUICK CREATE & SEARCH API VIEWS
 # ==============================================================================
 class SubCategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
-    """
-    Lightweight JSON endpoint to register product subcategories dynamically
-    (e.g., from product creation/edit modals or frontend quick-add controls).
-    """
-
     def test_func(self):
         return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER', 'STAFF']
 
@@ -726,11 +709,6 @@ class SubCategoryQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, Vie
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
 class SubCategorySearchAPIView(LoginRequiredMixin, View):
-    """
-    Search and filter endpoint for Product SubCategories.
-    Accepts 'category_id' to scope subcategories to a specific parent category.
-    Supports partial text search via 'q' on name and code.
-    """
     def get(self, request, *args, **kwargs):
         category_id = request.GET.get('category_id') or request.GET.get('category')
         q = request.GET.get('q', '').strip()
@@ -840,11 +818,6 @@ class BrandUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         return response
 
 class BrandQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
-    """
-    Lightweight JSON endpoint to create a Brand dynamically from modals
-    or the quick-add button in product creation interfaces.
-    """
-
     def test_func(self):
         return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER', 'STAFF']
 
@@ -907,11 +880,6 @@ class BrandQuickCreateAPIView(LoginRequiredMixin, UserPassesTestMixin, View):
             return JsonResponse({'status': 'error', 'message': str(err)}, status=400)
 
 class BrandSearchAPIView(LoginRequiredMixin, View):
-    """
-    Search and filter endpoint for Brands.
-    If 'q' is empty: Returns top brands ordered alphabetically.
-    If 'q' is provided: Filters by name__icontains or origin_country__icontains.
-    """
     def get(self, request, *args, **kwargs):
         q = request.GET.get('q', '').strip()
 
@@ -975,6 +943,16 @@ class ProductDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+
+        # Self-healing sync check: If product is loaded and warranty is out-of-sync, auto-repair it
+        body_rule = self.object.component_warranty_rules.filter(component_type='DEVICE').first()
+        if body_rule is not None and self.object.warranty_months != body_rule.warranty_months:
+            self.object.warranty_months = body_rule.warranty_months
+            Product.objects.filter(pk=self.object.pk).update(
+                warranty_months=body_rule.warranty_months,
+                updated_at=timezone.now()
+            )
+
         context['component_rules'] = self.object.component_warranty_rules.all()
         context['stock_levels'] = self.object.branch_stocks.select_related('branch')
         context['batches'] = self.object.batches.select_related('branch').order_by('-purchase_date')
@@ -1036,19 +1014,54 @@ class ProductCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
             if warranty_formset.is_valid():
                 warranty_formset.instance = self.object
                 warranty_formset.save()
+
+            # 1. Check if component warranty rules exist on the saved product
+            body_rule = self.object.component_warranty_rules.filter(component_type='DEVICE').first()
+
+            if body_rule is not None:
+                # Synchronize parent overall warranty with the Main Handset Body component rule
+                if self.object.warranty_months != body_rule.warranty_months:
+                    self.object.warranty_months = body_rule.warranty_months
+                    self.object.save(update_fields=['warranty_months', 'updated_at'])
             elif self.object.requires_imei_tracking:
+                # Fallback component warranty rules when staff don't manually touch the warranty tab for a serialized handset
+                body_months = self.object.warranty_months if self.object.warranty_months is not None else 12
+                if body_months > 0:
+                    standard_exclusion = (
+                        "Covers genuine manufacturing defects only. "
+                        "Void if physical drop cracks, glass breakage, or liquid/water ingress found."
+                    )
+                else:
+                    standard_exclusion = "Out of warranty / Sold without active manufacturer warranty."
+
                 ProductComponentWarrantyRule.objects.get_or_create(
                     product=self.object, component_type='DEVICE',
-                    defaults={'component_name': 'Main Handset Body & Motherboard', 'warranty_months': self.object.warranty_months}
+                    defaults={
+                        'component_name': 'Main Handset Body & Motherboard',
+                        'warranty_months': body_months,
+                        'coverage_conditions': standard_exclusion
+                    }
                 )
                 ProductComponentWarrantyRule.objects.get_or_create(
                     product=self.object, component_type='BATTERY',
-                    defaults={'component_name': 'Internal Battery', 'warranty_months': 6}
+                    defaults={
+                        'component_name': 'Internal Battery',
+                        'warranty_months': 6 if body_months >= 6 else body_months,
+                        'coverage_conditions': standard_exclusion
+                    }
                 )
                 ProductComponentWarrantyRule.objects.get_or_create(
                     product=self.object, component_type='SCREEN',
-                    defaults={'component_name': 'Screen / Display Panel', 'warranty_months': 6}
+                    defaults={
+                        'component_name': 'Screen / Display Panel',
+                        'warranty_months': 3 if body_months >= 3 else body_months,
+                        'coverage_conditions': standard_exclusion
+                    }
                 )
+
+                if self.object.warranty_months != body_months:
+                    self.object.warranty_months = body_months
+                    self.object.save(update_fields=['warranty_months', 'updated_at'])
 
             AuditLog.objects.create(
                 user=self.request.user,
@@ -1064,7 +1077,8 @@ class ProductCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
                     'ram': self.object.ram,
                     'storage': self.object.internal_storage,
                     'requires_imei': self.object.requires_imei_tracking,
-                    'is_spare_part': self.object.is_spare_part
+                    'is_spare_part': self.object.is_spare_part,
+                    'warranty_months': self.object.warranty_months
                 }
             )
 
@@ -1097,6 +1111,13 @@ class ProductUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
                 warranty_formset.instance = self.object
                 warranty_formset.save()
 
+            # Synchronize parent product warranty_months with the Main Handset Body component rule
+            body_rule = self.object.component_warranty_rules.filter(component_type='DEVICE').first()
+            if body_rule is not None:
+                if self.object.warranty_months != body_rule.warranty_months:
+                    self.object.warranty_months = body_rule.warranty_months
+                    self.object.save(update_fields=['warranty_months', 'updated_at'])
+
             AuditLog.objects.create(
                 user=self.request.user,
                 branch=getattr(self.request, 'active_branch', None) or Branch.get_default_main_branch(),
@@ -1104,7 +1125,7 @@ class ProductUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
                 module='InventoryProduct',
                 object_repr=str(self.object),
                 ip_address=self.request.META.get('REMOTE_ADDR'),
-                details={'updated_fields': list(form.changed_data), 'is_spare_part': self.object.is_spare_part}
+                details={'updated_fields': list(form.changed_data), 'is_spare_part': self.object.is_spare_part, 'warranty_months': self.object.warranty_months}
             )
 
         messages.success(self.request, f"Product '{self.object.name}' updated successfully.")

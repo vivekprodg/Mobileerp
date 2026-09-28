@@ -2,7 +2,8 @@ from decimal import Decimal
 from rest_framework import serializers
 from apps.inventory.models import (
     Product, ProductCategory, ProductSubCategory, Brand,
-    UnitOfMeasurement, UnitConversion, BranchStock, ItemInstance
+    UnitOfMeasurement, UnitConversion, BranchStock, ItemInstance,
+    ProductComponentWarrantyRule
 )
 from apps.products.models import ProductPriceTier, BarcodeLabelTemplate
 
@@ -11,36 +12,35 @@ class ProductCategorySerializer(serializers.ModelSerializer):
         model = ProductCategory
         fields = ['id', 'name', 'name_np', 'code', 'description']
 
-
 class BrandSerializer(serializers.ModelSerializer):
     class Meta:
         model = Brand
         fields = ['id', 'name', 'origin_country']
-
 
 class UnitOfMeasurementSerializer(serializers.ModelSerializer):
     class Meta:
         model = UnitOfMeasurement
         fields = ['id', 'name', 'name_np', 'code', 'allow_decimal']
 
-
 class UnitConversionSerializer(serializers.ModelSerializer):
     class Meta:
         model = UnitConversion
         fields = ['id', 'unit_name', 'conversion_factor', 'selling_price_per_unit', 'barcode']
-
 
 class ProductPriceTierSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductPriceTier
         fields = ['id', 'tier_type', 'min_quantity', 'price_per_unit']
 
+class ProductComponentWarrantyRuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductComponentWarrantyRule
+        fields = ['id', 'component_type', 'component_name', 'warranty_months', 'coverage_conditions']
 
 class BarcodeLabelTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = BarcodeLabelTemplate
         fields = '__all__'
-
 
 class ItemInstanceSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
@@ -64,7 +64,6 @@ class ItemInstanceSerializer(serializers.ModelSerializer):
             'warranty_start_date', 'warranty_end_date', 'warranty_remarks', 'created_at'
         ]
 
-
 class ProductListSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     brand_name = serializers.CharField(source='brand.name', read_only=True, default='')
@@ -72,6 +71,8 @@ class ProductListSerializer(serializers.ModelSerializer):
     default_mdms_status_display = serializers.CharField(source='get_default_mdms_status_display', read_only=True)
     current_stock = serializers.SerializerMethodField()
     available_stock = serializers.SerializerMethodField()
+    component_warranty_rules = serializers.SerializerMethodField()
+    warranty_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -84,7 +85,8 @@ class ProductListSerializer(serializers.ModelSerializer):
             'default_mdms_status', 'default_mdms_status_display',
             'requires_imei_tracking', 'requires_serial_tracking',
             'is_spare_part', 'is_vat_applicable', 'vat_rate', 'rack_number', 'shelf_identifier',
-            'warranty_months', 'warranty_provider', 'current_stock', 'available_stock'
+            'warranty_months', 'warranty_provider', 'current_stock', 'available_stock',
+            'component_warranty_rules', 'warranty_summary'
         ]
 
     def get_current_stock(self, obj) -> str:
@@ -103,6 +105,40 @@ class ProductListSerializer(serializers.ModelSerializer):
             return str(stock.available_quantity) if stock else "0.000"
         return "0.000"
 
+    def get_component_warranty_rules(self, obj):
+        rules = obj.component_warranty_rules.all()
+        if rules.exists():
+            return [
+                {
+                    'component_type': r.component_type,
+                    'component_name': r.component_name,
+                    'warranty_months': r.warranty_months,
+                    'coverage_conditions': r.coverage_conditions or ''
+                }
+                for r in rules
+            ]
+        elif obj.requires_imei_tracking:
+            body_m = obj.warranty_months or 12
+            return [
+                {'component_type': 'DEVICE', 'component_name': 'Main Handset Body & Motherboard', 'warranty_months': body_m},
+                {'component_type': 'BATTERY', 'component_name': 'Internal Battery', 'warranty_months': 6},
+                {'component_type': 'SCREEN', 'component_name': 'Screen / Display Panel', 'warranty_months': 3},
+            ]
+        return []
+
+    def get_warranty_summary(self, obj):
+        if obj.requires_imei_tracking:
+            rules = obj.component_warranty_rules.all()
+            if rules.exists():
+                comp_map = {r.component_type: r.warranty_months for r in rules}
+                dev = comp_map.get('DEVICE', obj.warranty_months or 12)
+                bat = comp_map.get('BATTERY', 6)
+                scr = comp_map.get('SCREEN', 3)
+                return f"Phone: {dev}M | Batt: {bat}M | Screen: {scr}M"
+            return f"Phone: {obj.warranty_months or 12}M | Batt: 6M | Screen: 3M"
+        elif obj.warranty_months > 0:
+            return f"{obj.warranty_months}M General Warranty"
+        return "No Warranty"
 
 class ProductDetailSerializer(serializers.ModelSerializer):
     category = ProductCategorySerializer(read_only=True)
@@ -113,6 +149,8 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     default_mdms_status_display = serializers.CharField(source='get_default_mdms_status_display', read_only=True)
     stock_by_branch = serializers.SerializerMethodField()
     in_stock_imei_units = serializers.SerializerMethodField()
+    component_warranty_rules = serializers.SerializerMethodField()
+    warranty_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -133,7 +171,8 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             'inventory_tracking_type', 'requires_imei_tracking', 'requires_serial_tracking',
             'reorder_level', 'rack_number', 'shelf_identifier', 'bin_location',
             'warranty_months', 'warranty_provider', 'unit_conversions',
-            'price_tiers', 'stock_by_branch', 'in_stock_imei_units'
+            'price_tiers', 'stock_by_branch', 'in_stock_imei_units',
+            'component_warranty_rules', 'warranty_summary'
         ]
 
     def get_stock_by_branch(self, obj):
@@ -173,3 +212,38 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             }
             for unit in qs[:50]
         ]
+
+    def get_component_warranty_rules(self, obj):
+        rules = obj.component_warranty_rules.all()
+        if rules.exists():
+            return [
+                {
+                    'component_type': r.component_type,
+                    'component_name': r.component_name,
+                    'warranty_months': r.warranty_months,
+                    'coverage_conditions': r.coverage_conditions or ''
+                }
+                for r in rules
+            ]
+        elif obj.requires_imei_tracking:
+            body_m = obj.warranty_months or 12
+            return [
+                {'component_type': 'DEVICE', 'component_name': 'Main Handset Body & Motherboard', 'warranty_months': body_m},
+                {'component_type': 'BATTERY', 'component_name': 'Internal Battery', 'warranty_months': 6},
+                {'component_type': 'SCREEN', 'component_name': 'Screen / Display Panel', 'warranty_months': 3},
+            ]
+        return []
+
+    def get_warranty_summary(self, obj):
+        if obj.requires_imei_tracking:
+            rules = obj.component_warranty_rules.all()
+            if rules.exists():
+                comp_map = {r.component_type: r.warranty_months for r in rules}
+                dev = comp_map.get('DEVICE', obj.warranty_months or 12)
+                bat = comp_map.get('BATTERY', 6)
+                scr = comp_map.get('SCREEN', 3)
+                return f"Phone: {dev}M | Batt: {bat}M | Screen: {scr}M"
+            return f"Phone: {obj.warranty_months or 12}M | Batt: 6M | Screen: 3M"
+        elif obj.warranty_months > 0:
+            return f"{obj.warranty_months}M General Warranty"
+        return "No Warranty"

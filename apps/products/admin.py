@@ -13,7 +13,6 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from apps.products.models import ProductPriceTier, BarcodeLabelTemplate, HistoricalProduct
 
-
 # =============================================================================
 # 1. PRODUCT PRICE TIER ADMIN
 # =============================================================================
@@ -51,11 +50,9 @@ class ProductPriceTierAdmin(admin.ModelAdmin):
         )
     tier_type_badge.short_description = _("Tier Type")
 
-
 # =============================================================================
 # 2. BARCODE LABEL TEMPLATE ADMIN
 # =============================================================================
-
 @admin.register(BarcodeLabelTemplate)
 class BarcodeLabelTemplateAdmin(admin.ModelAdmin):
     list_display = [
@@ -91,11 +88,9 @@ class BarcodeLabelTemplateAdmin(admin.ModelAdmin):
         return format_html('<span class="font-monospace fw-bold">{} &times; {} mm</span>', obj.width_mm, obj.height_mm)
     dimensions_display.short_description = _("Dimensions")
 
-
 # =============================================================================
 # 3. HISTORICAL PRODUCT PLACEHOLDER ADMIN (FOR MOBILESOFT MIGRATION)
 # =============================================================================
-
 @admin.register(HistoricalProduct)
 class HistoricalProductAdmin(admin.ModelAdmin):
     """

@@ -53,8 +53,14 @@
         .warranty-cert-table th { 
             background-color: #eff6ff; 
             color: #1d4ed8; 
+            font-size: 10.5px;
         }
         
+        .warranty-cert-table td {
+            font-size: 11px;
+            padding: 6px 8px;
+        }
+
         .disclaimer-box { 
             border: 1px dashed #64748b; 
             background-color: #f8fafc; 
@@ -143,7 +149,7 @@
         </div>
     </div>
 
-    <!-- Line Items Table (Dual-Mode Line Concessions & Price Overrides) -->
+    <!-- Line Items Table -->
     <table>
         <thead>
             <tr>
@@ -206,7 +212,7 @@
                 <!-- Selling Rate -->
                 <td class="text-end">{{ item.unit_price|floatformat:2|intcomma }}</td>
 
-                <!-- Line Discount: Displays Formatted Concession & Transparent Sub-Label -->
+                <!-- Line Discount -->
                 <td class="text-end">
                     {% if item.discount_amount > 0 %}
                         <span style="color: #b91c1c; font-weight: bold;">-Rs. {{ item.discount_amount|floatformat:2|intcomma }}</span>
@@ -278,7 +284,7 @@
                 <td class="text-end fw-bold font-monospace" style="font-size: 14px; color: #2563eb;">Rs. {{ estimate.grand_total|floatformat:2|intcomma }}</td>
             </tr>
 
-            <!-- Settlement / Tender Section (Trade-In Buy-Back Credit strictly separated) -->
+            <!-- Settlement / Tender Section -->
             {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
             <tr style="background-color: #fffbeb;">
                 <th colspan="{{ col_span }}" class="text-end" style="color: #b45309;">
@@ -310,43 +316,103 @@
         </tfoot>
     </table>
 
-    <!-- COMPONENT-LEVEL WARRANTY SCHEDULE -->
+    <!-- OFFICIAL COMPONENT-LEVEL WARRANTY SCHEDULE -->
     <h4 style="margin: 20px 0 6px 0; font-size: 12.5px; color: #1e3a8a;">
-        OFFICIAL COMPONENT-LEVEL WARRANTY SCHEDULE
+        OFFICIAL COMPONENT-LEVEL WARRANTY SCHEDULE &amp; EXCLUSION CERTIFICATE
     </h4>
     <table class="warranty-cert-table">
         <thead>
             <tr>
-                <th style="width: 35%;">Item / Handset Identification</th>
-                <th style="width: 30%;">Component Coverage Terms</th>
-                <th style="width: 15%;" class="text-center">Start Date</th>
-                <th style="width: 20%;" class="text-center">Claim Policy</th>
+                <th style="width: 28%;">Item / Serial / IMEI</th>
+                <th style="width: 22%;">Component Name</th>
+                <th style="width: 14%;" class="text-center">Warranty Period</th>
+                <th style="width: 36%;">Claim Policy &amp; Mandatory Exclusions</th>
             </tr>
         </thead>
         <tbody>
             {% for item in items %}
-            <tr>
-                <td>
-                    <strong style="font-size: 12px;">{{ item.product.name }}</strong>
-                    {% if item.imei_number %}
-                        <div style="font-family: monospace; font-size: 10.5px; margin-top: 2px;">
-                            <strong>IMEI 1:</strong> {{ item.imei_number }}
-                        </div>
-                    {% endif %}
-                    {% if item.secondary_imei %}
-                        <div style="font-family: monospace; font-size: 10.5px;">
-                            <strong>IMEI 2:</strong> {{ item.secondary_imei }}
-                        </div>
-                    {% endif %}
-                </td>
-                <td>
-                    <strong style="color: #1d4ed8;">{{ item.warranty_terms|default:"12 Months Official Brand Warranty" }}</strong>
-                </td>
-                <td class="text-center">{{ estimate.bill_date_ad }}</td>
-                <td style="font-size: 10px; color: #475569;">
-                    Covers genuine manufacturing defects. Void if physical drop cracks or liquid ingress found.
-                </td>
-            </tr>
+                {% if item.imei_number or item.product.requires_imei_tracking %}
+                    <!-- 1. Main Handset Body & Motherboard -->
+                    <tr>
+                        <td rowspan="3" style="vertical-align: top;">
+                            <strong style="font-size: 12px; color: #0f172a;">{{ item.product.name }}</strong>
+                            {% if item.imei_number %}
+                                <div style="font-family: monospace; font-size: 10px; margin-top: 3px;">
+                                    <strong>IMEI 1:</strong> {{ item.imei_number }}
+                                </div>
+                            {% endif %}
+                            {% if item.secondary_imei %}
+                                <div style="font-family: monospace; font-size: 10px;">
+                                    <strong>IMEI 2:</strong> {{ item.secondary_imei }}
+                                </div>
+                            {% endif %}
+                            {% if item.serial_number and item.serial_number != item.imei_number %}
+                                <div style="font-family: monospace; font-size: 10px;">
+                                    <strong>S/N:</strong> {{ item.serial_number }}
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <strong style="color: #1e40af;">Main Handset Body &amp; Motherboard</strong>
+                        </td>
+                        <td class="text-center font-monospace fw-bold text-primary">
+                            {{ item.product.warranty_months|default:12 }} Months
+                        </td>
+                        <td rowspan="3" style="vertical-align: middle; line-height: 1.4;">
+                            <strong style="color: #b91c1c;">
+                                Covers genuine manufacturing defects. Void if physical drop cracks, glass breakage, or liquid ingress found.
+                            </strong>
+                            <div style="font-size: 9.5px; color: #64748b; margin-top: 4px;">
+                                Valid from: <strong>{{ estimate.bill_date_ad }}</strong>. Any drop damage, display crack, or water corrosion voids warranty immediately.
+                            </div>
+                        </td>
+                    </tr>
+                    <!-- 2. Internal Battery -->
+                    <tr>
+                        <td>
+                            <strong style="color: #d97706;">Internal Battery</strong>
+                        </td>
+                        <td class="text-center font-monospace fw-bold text-warning-emphasis">
+                            6 Months
+                        </td>
+                    </tr>
+                    <!-- 3. Screen / Display Panel -->
+                    <tr>
+                        <td>
+                            <strong style="color: #059669;">Screen / Display Panel</strong>
+                        </td>
+                        <td class="text-center font-monospace fw-bold text-success">
+                            3 Months
+                        </td>
+                    </tr>
+                {% else %}
+                    <!-- Non-Phone / Accessory Warranty Line -->
+                    <tr>
+                        <td>
+                            <strong style="font-size: 12px; color: #0f172a;">{{ item.product.name }}</strong>
+                            {% if item.product.sku %}
+                                <div style="font-family: monospace; font-size: 10px; color: #64748b;">SKU: {{ item.product.sku }}</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span>Consumable / Accessory</span>
+                        </td>
+                        <td class="text-center font-monospace">
+                            {% if item.warranty_months > 0 %}
+                                <strong>{{ item.warranty_months }} Months</strong>
+                            {% else %}
+                                <span style="color: #64748b;">No Warranty</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 10px; color: #64748b;">
+                            {% if item.warranty_months > 0 %}
+                                <strong style="color: #b91c1c;">Covers genuine manufacturing defects. Void if physical drop cracks, glass breakage, or liquid ingress found.</strong>
+                            {% else %}
+                                Consumable merchandise. No warranty coverage applicable after retail handover.
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endif %}
             {% endfor %}
         </tbody>
     </table>

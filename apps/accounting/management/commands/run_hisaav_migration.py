@@ -13,7 +13,6 @@ from apps.sales.models import SalesEstimate, SalesReturn, SalesReturnItem, Custo
 from apps.inventory.models import Product, BranchStock, StockMovementLog
 from apps.branches.models import Branch
 
-
 class Command(BaseCommand):
     help = "Production command executing Steps 1 to 4 of the Hisaav Legacy Migration."
 

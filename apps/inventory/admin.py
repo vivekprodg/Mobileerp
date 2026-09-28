@@ -1,10 +1,11 @@
 """
 Django Admin Configuration for Inventory, Warehouses, IMEI Handset Tracking, Batches & Audit Logs.
-Fully integrated with the Enhanced Product Catalog, NTA MDMS Compliance, and Warranty Ledgers.
+Fully integrated with the Enhanced Product Catalog, NTA MDMS Compliance, and Synchronized Warranty Ledgers.
 """
 
 from decimal import Decimal
 from django.contrib import admin
+from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from apps.inventory.models import (
@@ -93,8 +94,8 @@ class ProductAdmin(admin.ModelAdmin):
     list_display = [
         'name', 'sku', 'barcode_display', 'category', 'brand',
         'display_variant_info', 'selling_price', 'purchase_price',
-        'imei_tracking_badge', 'is_discountable_badge', 'tax_pricing_type_badge',
-        'mdms_default_badge', 'is_spare_part_badge', 'rack_number'
+        'warranty_badge', 'imei_tracking_badge', 'is_discountable_badge',
+        'tax_pricing_type_badge', 'mdms_default_badge', 'is_spare_part_badge', 'rack_number'
     ]
     list_filter = [
         'requires_imei_tracking', 'is_discountable', 'default_mdms_status',
@@ -107,6 +108,8 @@ class ProductAdmin(admin.ModelAdmin):
     ]
     autocomplete_fields = ['category', 'subcategory', 'brand', 'base_unit']
     list_select_related = ['category', 'brand', 'base_unit']
+    readonly_fields = ['effective_warranty_display_field']
+    actions = ['sync_warranties_action']
     inlines = [
         ProductComponentWarrantyRuleInline, UnitConversionInline,
         BranchStockInline, ProductBatchInline, ItemInstanceInline
@@ -159,7 +162,10 @@ class ProductAdmin(admin.ModelAdmin):
             )
         }),
         ("6. Official Overall Warranty Terms", {
-            'fields': (('warranty_months', 'warranty_provider'),)
+            'fields': (
+                ('warranty_months', 'warranty_provider'),
+                'effective_warranty_display_field'
+            )
         }),
     )
 
@@ -174,6 +180,34 @@ class ProductAdmin(admin.ModelAdmin):
             return f"{obj.ram}/{obj.internal_storage} ({obj.color_variant or 'Std'})"
         return obj.variant_name or "-"
     display_variant_info.short_description = _("Variant (RAM/ROM)")
+
+    def warranty_badge(self, obj):
+        months = obj.effective_warranty_months
+        if months > 0:
+            return format_html(
+                '<span style="color: #065f46; background-color: #ecfdf5; border: 1px solid #a7f3d0; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">'
+                '<i class="fas fa-shield-halved me-1"></i> {}M</span>',
+                months
+            )
+        return format_html(
+            '<span style="color: #64748b; background-color: #f1f5f9; padding: 2px 7px; border-radius: 999px; font-size: 10px;">'
+            'NO WARRANTY</span>'
+        )
+    warranty_badge.short_description = _("Warranty")
+
+    def effective_warranty_display_field(self, obj):
+        color = '#059669' if obj.has_warranty else '#64748b'
+        return format_html(
+            '<div style="padding: 6px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">'
+            '<strong style="color: {}; font-size: 13px;">{}</strong>'
+            '<small style="display: block; color: #64748b; font-size: 11px; margin-top: 2px;">'
+            'Single Source of Truth: Synchronized automatically with the Main Handset Body component rule.'
+            '</small>'
+            '</div>',
+            color,
+            obj.effective_warranty_display
+        )
+    effective_warranty_display_field.short_description = _("Synchronized Warranty Status")
 
     def imei_tracking_badge(self, obj):
         if obj.requires_imei_tracking:
@@ -232,6 +266,43 @@ class ProductAdmin(admin.ModelAdmin):
             return format_html('<span style="color: white; background-color: #ec4899; padding: 2px 7px; border-radius: 999px; font-weight: bold; font-size: 10px;">SPARE PART</span>')
         return format_html('<span style="color: #64748b; font-size: 10px;">STANDARD</span>')
     is_spare_part_badge.short_description = _("Item Type")
+
+    def save_formset(self, request, form, formset, change):
+        """
+        Immediately updates the parent Product's warranty_months in the database
+        when an inline rule for Main Handset Body is added or updated in the admin panel.
+        """
+        super().save_formset(request, form, formset, change)
+        if formset.model == ProductComponentWarrantyRule and form.instance.pk:
+            body_rule = form.instance.component_warranty_rules.filter(component_type='DEVICE').first()
+            if body_rule is not None:
+                Product.objects.filter(pk=form.instance.pk).update(
+                    warranty_months=body_rule.warranty_months,
+                    updated_at=timezone.now()
+                )
+
+    @admin.action(description=_("Synchronize overall warranty with Main Handset Body component rule"))
+    def sync_warranties_action(self, request, queryset):
+        """
+        Admin action to instantly repair any existing out-of-sync products (e.g. Product #1977).
+        """
+        synced_count = 0
+        for product in queryset:
+            body_rule = product.component_warranty_rules.filter(component_type='DEVICE').first()
+            if body_rule is not None and product.warranty_months != body_rule.warranty_months:
+                product.warranty_months = body_rule.warranty_months
+                product.save(update_fields=['warranty_months', 'updated_at'])
+                synced_count += 1
+            elif body_rule is None and product.requires_imei_tracking and product.warranty_months > 0:
+                ProductComponentWarrantyRule.objects.create(
+                    product=product,
+                    component_type='DEVICE',
+                    component_name='Main Handset Body & Motherboard',
+                    warranty_months=product.warranty_months,
+                    coverage_conditions="Covers genuine manufacturing defects only. Void if liquid or physical damage found."
+                )
+                synced_count += 1
+        self.message_user(request, f"Successfully synchronized warranty values for {synced_count} product(s).")
 
 # ==============================================================================
 # 3. ITEM INSTANCE (IMEI / SERIAL) ADMIN
