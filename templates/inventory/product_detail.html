@@ -87,6 +87,40 @@
                         <i class="fas fa-wrench me-1"></i> Spare Part
                     </span>
                 {% endif %}
+
+                <!-- Tax Mode Badge in Header -->
+                {% if not product.is_vat_applicable or product.tax_pricing_type == 'EXEMPT' %}
+                    <span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25 px-2 py-1 fs-xs">
+                        <i class="fas fa-percent me-1"></i> Tax Exempt (0%)
+                    </span>
+                {% elif product.tax_pricing_type == 'INCLUSIVE' %}
+                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-2 py-1 fs-xs">
+                        <i class="fas fa-check-circle me-1"></i> Tax Inclusive ({{ product.vat_rate|floatformat:0 }}% VAT Included)
+                    </span>
+                {% else %}
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2 py-1 fs-xs">
+                        <i class="fas fa-plus-circle me-1"></i> Tax Exclusive (+{{ product.vat_rate|floatformat:0 }}% VAT at POS)
+                    </span>
+                {% endif %}
+
+                <!-- Default MDMS Status Badge in Header -->
+                {% if product.default_mdms_status == 'REGISTERED_OFFICIAL' %}
+                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-2 py-1 fs-xs">
+                        <i class="fas fa-shield-halved me-1"></i> NTA MDMS Registered
+                    </span>
+                {% elif product.default_mdms_status == 'GRAY_UNREGISTERED' %}
+                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 px-2 py-1 fs-xs">
+                        <i class="fas fa-triangle-exclamation me-1"></i> Gray Market
+                    </span>
+                {% elif product.default_mdms_status == 'INDIVIDUAL_CUSTOMS_PAID' %}
+                    <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 px-2 py-1 fs-xs">
+                        <i class="fas fa-passport me-1"></i> Customs Duty Paid
+                    </span>
+                {% else %}
+                    <span class="badge bg-light text-muted border px-2 py-1 fs-xs">
+                        MDMS: {{ product.get_default_mdms_status_display }}
+                    </span>
+                {% endif %}
             </div>
             <p class="text-muted fs-xs mb-0 mt-1">
                 Model: <strong>{{ product.model_name|default:product.name }}</strong> ({{ product.model_number|default:"N/A" }}) &bull; 
@@ -155,10 +189,22 @@
                     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 border-start border-primary border-4">
                         <span class="text-muted fs-2xs text-uppercase fw-bold">Selling Price (MRP)</span>
                         <h3 class="fw-bold text-primary font-monospace mt-1 mb-0">Rs. {{ product.selling_price|floatformat:2|intcomma }}</h3>
+                        
+                        <!-- Tax Mode Specification Detail in MRP Card -->
+                        <div class="mt-1">
+                            {% if not product.is_vat_applicable or product.tax_pricing_type == 'EXEMPT' %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs fw-bold">Tax-Exempt (0%)</span>
+                            {% elif product.tax_pricing_type == 'INCLUSIVE' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fs-3xs fw-bold">Incl. {{ product.vat_rate|floatformat:0 }}% VAT</span>
+                            {% else %}
+                                <span class="badge bg-primary bg-opacity-10 text-primary fs-3xs fw-bold">+{{ product.vat_rate|floatformat:0 }}% VAT Excl.</span>
+                            {% endif %}
+                        </div>
+
                         {% if IS_MANAGER or IS_ACCOUNTANT %}
-                        <small class="text-muted fs-2xs">Wholesale: Rs. {{ product.wholesale_price|default:product.selling_price|floatformat:2|intcomma }}</small>
+                        <small class="text-muted fs-2xs d-block mt-1">Wholesale: Rs. {{ product.wholesale_price|default:product.selling_price|floatformat:2|intcomma }}</small>
                         {% else %}
-                        <small class="text-muted fs-2xs">Base Unit: {{ product.base_unit.name }} ({{ product.base_unit.code }})</small>
+                        <small class="text-muted fs-2xs d-block mt-1">Base Unit: {{ product.base_unit.name }} ({{ product.base_unit.code }})</small>
                         {% endif %}
                     </div>
                 </div>
@@ -197,12 +243,48 @@
     </div>
 
     <!-- Complete Technical Hardware Specifications Card -->
-    {% if product.operating_system or product.processor_chipset or product.display_size or product.rear_camera or product.battery_capacity or product.size_dimension or product.wifi_spec or product.bluetooth_version %}
+    {% if product.operating_system or product.processor_chipset or product.display_size or product.rear_camera or product.battery_capacity or product.size_dimension or product.wifi_spec or product.bluetooth_version or product.default_mdms_status or product.tax_pricing_type %}
     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
         <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
-            <i class="fas fa-microchip text-primary me-2"></i> Smartphone Hardware Specifications &amp; Performance Profile
+            <i class="fas fa-microchip text-primary me-2"></i> Smartphone Hardware Specifications &amp; Compliance Profile
         </h6>
         <div class="row g-3 fs-xs">
+            <!-- Tax & MDMS Overview Row -->
+            <div class="col-md-4">
+                <span class="text-muted d-block">Tax Pricing Mode:</span>
+                {% if not product.is_vat_applicable or product.tax_pricing_type == 'EXEMPT' %}
+                    <strong class="text-secondary"><i class="fas fa-ban me-1"></i> Tax-Exempt (0% VAT)</strong>
+                {% elif product.tax_pricing_type == 'INCLUSIVE' %}
+                    <strong class="text-success"><i class="fas fa-check-circle me-1"></i> Tax-Inclusive ({{ product.vat_rate|floatformat:0 }}% VAT Included in MRP)</strong>
+                {% else %}
+                    <strong class="text-primary"><i class="fas fa-plus-circle me-1"></i> Tax-Exclusive (+{{ product.vat_rate|floatformat:0 }}% VAT Added at Checkout)</strong>
+                {% endif %}
+            </div>
+
+            <div class="col-md-4">
+                <span class="text-muted d-block">NTA MDMS Default Status:</span>
+                {% if product.default_mdms_status == 'REGISTERED_OFFICIAL' %}
+                    <strong class="text-success"><i class="fas fa-shield-halved me-1"></i> Registered Official (Nepal Distributor)</strong>
+                {% elif product.default_mdms_status == 'GRAY_UNREGISTERED' %}
+                    <strong class="text-danger"><i class="fas fa-triangle-exclamation me-1"></i> Gray Market / Unregistered</strong>
+                {% elif product.default_mdms_status == 'INDIVIDUAL_CUSTOMS_PAID' %}
+                    <strong class="text-info"><i class="fas fa-passport me-1"></i> Individual Passenger Import (Duty Paid)</strong>
+                {% else %}
+                    <strong class="text-muted">{{ product.get_default_mdms_status_display }}</strong>
+                {% endif %}
+            </div>
+
+            <div class="col-md-4">
+                <span class="text-muted d-block">Cashier Discount Policy:</span>
+                <strong class="text-dark">
+                    {% if product.is_discountable %}
+                        <span class="badge bg-success bg-opacity-10 text-success"><i class="fas fa-check me-1"></i>Discount Allowed (Max {{ product.max_discount_percent|floatformat:1 }}%)</span>
+                    {% else %}
+                        <span class="badge bg-danger bg-opacity-10 text-danger"><i class="fas fa-lock me-1"></i>No Discount Permitted</span>
+                    {% endif %}
+                </strong>
+            </div>
+
             <div class="col-md-4">
                 <span class="text-muted d-block">Operating System:</span>
                 <strong class="text-dark">{{ product.operating_system|default:"-" }}</strong>
@@ -288,7 +370,7 @@
                 <strong class="text-dark">{{ product.size_dimension|default:"-" }} ({{ product.region_variant|default:"Global/Nepal" }})</strong>
             </div>
 
-            <!-- UNIFIED OVERALL WARRANTY DISPLAY (SYNCHRONIZED WITH COMPONENT BODY RULE) -->
+            <!-- UNIFIED OVERALL WARRANTY DISPLAY -->
             <div class="col-12">
                 <span class="text-muted d-block">Official Overall Warranty:</span>
                 {% if product.effective_warranty_months > 0 %}
@@ -307,14 +389,21 @@
 
     <!-- PACKAGING CONVERSIONS & TIERED WHOLESALE PRICING ROW -->
     <div class="row g-4 mb-4">
-        <!-- Packaging Unit Conversions Card -->
+        <!-- Packaging Unit Conversions Card with Add Button -->
         <div class="col-12 col-lg-6">
             <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
                 <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
-                    <h6 class="fw-bold text-dark mb-0">
-                        <i class="fas fa-boxes-packing text-primary me-2"></i> Packaging Unit Conversions
-                    </h6>
-                    <span class="badge bg-primary bg-opacity-10 text-primary fs-xs">Outer Packages</span>
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-boxes-packing text-primary me-2"></i> Packaging Unit Conversions
+                        </h6>
+                        <small class="text-muted fs-2xs">Bulk outer packaging units &amp; custom carton pricing</small>
+                    </div>
+                    {% if IS_MANAGER %}
+                    <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold" data-bs-toggle="modal" data-bs-target="#addPackagingUnitModal">
+                        <i class="fas fa-plus me-1"></i> Add Packaging Unit
+                    </button>
+                    {% endif %}
                 </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0 fs-xs">
@@ -407,9 +496,7 @@
         </div>
     </div>
 
-    <!-- =========================================================================
-         UPGRADED COMPONENT-LEVEL WARRANTY SCHEDULE MATRIX & EXCLUSION BADGE
-         ========================================================================= -->
+    <!-- UPGRADED COMPONENT-LEVEL WARRANTY SCHEDULE MATRIX & EXCLUSION BADGE -->
     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
         <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
             <div>
@@ -522,7 +609,7 @@
                         {% endif %}
                     {% endfor %}
 
-                    <!-- 4. Mandatory Damage Exclusion Row -->
+                    <!-- Mandatory Damage Exclusion Row -->
                     <tr class="table-danger bg-opacity-10">
                         <td class="ps-3 fw-bold text-danger">
                             <i class="fas fa-ban text-danger me-1"></i> Physical &amp; Liquid Damage
@@ -557,6 +644,7 @@
                     <tr>
                         <th class="ps-3">Primary IMEI 1</th>
                         <th>Secondary IMEI 2</th>
+                        <th>Serial Number</th>
                         <th>Condition</th>
                         <th>Status</th>
                         <th>Branch</th>
@@ -572,6 +660,7 @@
                     <tr>
                         <td class="ps-3 font-monospace fw-bold text-primary">{{ unit.imei_1|default:"-" }}</td>
                         <td class="font-monospace text-muted">{{ unit.imei_2|default:"-" }}</td>
+                        <td class="font-monospace text-dark">{{ unit.serial_number|default:"-" }}</td>
                         <td><span class="badge bg-light text-dark border">{{ unit.get_condition_display }}</span></td>
                         <td>
                             <span class="badge bg-{% if unit.status == 'IN_STOCK' %}success{% elif unit.status == 'SOLD' %}secondary{% else %}warning text-dark{% endif %}">
@@ -602,7 +691,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="{% if IS_MANAGER or IS_ACCOUNTANT %}8{% else %}7{% endif %}" class="text-center py-4 text-muted">
+                        <td colspan="{% if IS_MANAGER or IS_ACCOUNTANT %}9{% else %}8{% endif %}" class="text-center py-4 text-muted">
                             No individual IMEI units registered for this model yet.
                         </td>
                     </tr>
@@ -731,9 +820,63 @@
 
 </div>
 
-<!-- =========================================================
-     ADD PRICE TIER MODAL (FOR WHOLESALE & VOLUME DISCOUNTS)
-     ========================================================= -->
+<!-- MODAL 1: ADD PACKAGING UNIT MODAL -->
+{% if IS_MANAGER %}
+<div class="modal fade" id="addPackagingUnitModal" tabindex="-1" aria-labelledby="addPackagingUnitModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <form action="{% url 'products:add_conversion' product.id as p_conv_url %}{% url 'inventory:product_add_conversion' product.id as i_conv_url %}{{ p_conv_url|default:i_conv_url|default:'' }}" method="post" id="addPackagingUnitForm">
+                {% csrf_token %}
+                <div class="modal-header bg-primary text-white border-0 py-3">
+                    <h5 class="modal-title fs-6 fw-bold" id="addPackagingUnitModalLabel">
+                        <i class="fas fa-boxes-packing me-2"></i> Add Packaging Unit for {{ product.name|truncatechars:25 }}
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Package Name <span class="text-danger">*</span></label>
+                        <input type="text" name="unit_name" class="form-control" placeholder="e.g. Box of 50, Packet of 10, Carton of 100" required>
+                        <small class="text-muted fs-2xs mt-1 d-block">Label for the outer packaging unit (e.g. Box (50 Pcs)).</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">How many base pieces in this package? <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <input type="number" step="0.001" min="0.001" name="conversion_factor" class="form-control font-monospace" placeholder="e.g. 50" required>
+                            <span class="input-group-text bg-light text-muted fs-xs">{{ product.base_unit.code }}</span>
+                        </div>
+                        <small class="text-muted fs-2xs mt-1 d-block">1 Package = [X] {{ product.base_unit.name }} ({{ product.base_unit.code }}).</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Package Selling Price (NPR)</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light text-muted fs-xs">Rs.</span>
+                            <input type="number" step="0.01" min="0.00" name="selling_price_per_unit" class="form-control font-monospace" placeholder="Optional custom package price">
+                        </div>
+                        <small class="text-muted fs-2xs mt-1 d-block">Optional: Leave blank to auto-calculate (Base Price &times; Conversion Ratio).</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs">Package Barcode (Optional)</label>
+                        <input type="text" name="barcode" class="form-control font-monospace" placeholder="Scan outer carton/box barcode or leave blank">
+                        <small class="text-muted fs-2xs mt-1 d-block">Scan the barcode on the outer box to instantly sell the whole package at POS checkout.</small>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold">
+                        <i class="fas fa-save me-1"></i> Save Packaging Unit
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- MODAL 2: ADD PRICE TIER MODAL -->
 {% if IS_MANAGER %}
 <div class="modal fade" id="addPriceTierModal" tabindex="-1" aria-labelledby="addPriceTierModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">

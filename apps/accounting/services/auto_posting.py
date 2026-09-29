@@ -9,28 +9,33 @@ Features:
    - Credit: Accounts Payable (Account 2110 for remaining Supplier Udhaari due debt).
    - Enforces absolute mathematical equality: Sum(Debits) == Sum(Credits) with penny rounding reconciliation.
 2. Three-Way Sales Tax Split & Trade-In Clearing Alignment:
-   - Dr: Cash / Bank / Wallets or Customer Accounts Receivable (Gross Collections).
+   - Dr: Genuine Monetary Payment Modes (Cash, FonePay, eSewa, Khalti, Card, Bank) for paid collections.
+   - Dr: Customer Accounts Receivable (1210) strictly for the remaining unpaid Udhaari due debt.
    - Dr: Trade-In Buy-Back Clearing (Account 2150) offsetting previous buy-back intake.
-   - Dr: Sales Discount Allowed (if concessions were given).
-   - Cr: Cash in Hand (if change was returned or trade-in surplus cash paid to walk-in).
-   - Cr: Sales Revenue Account (Taxable Base + Non-Taxable / Exempt Base).
-   - Cr: Output VAT 13% Account (Output VAT Collected).
-3. Historical Backdating Integrity (2080 B.S. & Onwards):
+   - Dr: Sales Discount Allowed (6170) if concessions were given.
+   - Cr: Cash in Hand (1110) if change was returned or trade-in surplus cash paid to walk-in customer.
+   - Cr: Sales Revenue Account (4110) (Taxable Base + Non-Taxable / Exempt Base).
+   - Cr: Output VAT 13% Account (2210) (Output VAT Collected).
+   - COGS / Inventory Asset: Relieved at landed cost (skipped if cost == 0.00 for historical migrations).
+3. Non-Monetary Tender Isolation (Double-Accounting Prevention):
+   - In post_sales_estimate, 'CREDIT' and 'UDHAARI' tenders inside the payment loop are skipped.
+   - The dedicated estimate.due_amount handler creates the single authoritative debit to AR (1210).
+4. Historical Backdating Integrity (2080 B.S. & Onwards):
    - Timestamps vouchers with the converted Gregorian date of the bill, locking them
-     to the correct historical Nepali Fiscal Year (e.g. 2080/81, 2081/82).
-4. Balance Sheet Asset Protection:
+     to the correct historical Nepali Fiscal Year (e.g. 2080/81, 2081/82, 2082/83, 2083/84).
+5. Balance Sheet Asset Protection:
    - Skips COGS and Inventory Asset credits when total_cost_amount is 0.00,
      preventing artificial inventory deficits during historical data migrations.
-5. Omnichannel Payment Ledger Routing:
+6. Omnichannel Payment Ledger Routing:
    - Cash (1110), Bank (1120), FonePay (1130), eSewa (1140), Khalti (1150), Card POS (1160), AR (1210), AP (2110), Trade-In Clearing (2150).
-6. Operational Dispatchers:
+7. Operational Dispatchers:
    - Sales POS Checkouts, Purchase GRNs, Customer Udhaari Repayments, Supplier Payouts,
      Sales Returns (Credit Notes), Purchase Returns (Debit Notes), Stock Damage Write-Offs,
-     and Digital Gateway Batch Settlements.
+     Trade-In Acquisitions, and Digital Gateway Batch Settlements.
 """
 
 import uuid
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import date, datetime
 from typing import List, Dict, Any, Optional
 
@@ -48,6 +53,7 @@ from apps.purchases.models import GoodsReceivedNote, PurchaseReturn, SupplierUdh
 from apps.customers.models import Customer, CustomerUdhaariLedger
 from apps.branches.models import Branch, BranchDocumentSequence
 from apps.core.nepali_calendar import NepaliCalendar
+
 
 # =============================================================================
 # 1. CORE DOUBLE-ENTRY JOURNAL ENGINE
@@ -251,6 +257,7 @@ class JournalEngine:
 
         return journal_entry
 
+
 # =============================================================================
 # 2. AUTOMATIC POSTING DISPATCHER SERVICE
 # =============================================================================
@@ -384,7 +391,8 @@ class AutoPostingService:
         Creates a balanced double-entry voucher for a finalized Sales POS Invoice.
 
         THREE-WAY TAX SPLIT & TRADE-IN CLEARING ALIGNMENT:
-        - Dr: Payment Modes (Cash, FonePay, eSewa, Bank) or Accounts Receivable = Gross Tender Received
+        - Dr: Genuine Monetary Payment Modes (Cash, FonePay, eSewa, Bank, Card) for paid collections.
+        - Dr: Customer Accounts Receivable (1210) strictly for the remaining unpaid Udhaari due debt.
         - Dr: Trade-In Clearing (2150) = Offsets the buy-back allowance consumed by the bill
               plus any surplus cash change handed to a walk-in customer.
         - Dr: Sales Discount Allowed (6170) = Commercial concessions granted.
@@ -423,21 +431,55 @@ class AutoPostingService:
         )
 
         # ---------------------------------------------------------------------
-        # 1. DEBIT: Payment Settlements & Customer Udhaari
+        # 1. DEBIT: Genuine Monetary Payment Settlements
         # ---------------------------------------------------------------------
-        payments = estimate.payment_transactions.all()
+        # Support kwargs-injected payment lists or fallback to database relationship
+        raw_payments = (
+            kwargs.get('payment_details') or
+            kwargs.get('payments') or
+            kwargs.get('payment_transactions')
+        )
+        if raw_payments is None:
+            raw_payments = estimate.payment_transactions.all()
+
         has_recorded_payments = False
 
-        for p in payments:
-            if p.amount <= Decimal('0.00'):
+        for p in raw_payments:
+            if isinstance(p, dict):
+                p_mode = str(p.get('mode') or p.get('payment_mode') or '').strip().upper()
+                raw_amt = p.get('amount', 0)
+                ref = str(p.get('transaction_ref') or p.get('reference') or p.get('trace_id') or '').strip() or '-'
+                display_mode = p.get('mode') or p.get('payment_mode') or p_mode
+            else:
+                p_mode = str(getattr(p, 'payment_mode', '') or '').strip().upper()
+                raw_amt = getattr(p, 'amount', 0)
+                ref = str(getattr(p, 'transaction_ref', '') or '').strip() or '-'
+                display_mode = p.get_payment_mode_display() if hasattr(p, 'get_payment_mode_display') else p_mode
+
+            try:
+                p_amount = Decimal(str(raw_amt or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            except (InvalidOperation, ValueError, TypeError):
+                p_amount = Decimal('0.00')
+
+            if p_amount <= Decimal('0.00'):
                 continue
+
+            # CRITICAL FIX: Skip non-monetary CREDIT / UDHAARI payment transactions.
+            # Accounts Receivable (1210) is debited authoritatively once by the dedicated
+            # 'if estimate.due_amount > Decimal("0.00"):' block below. Skipping here prevents
+            # duplicate debiting of AR 1210 and eliminates unbalanced journal voucher errors.
+            if p_mode in ['CREDIT', 'UDHAARI', 'ON_CREDIT', 'DUE']:
+                continue
+
+            # Skip Trade-In here as it is handled authoritatively in Section 2 (Trade-In Clearing / 2150)
+            if p_mode in ['TRADE_IN', 'EXCHANGE']:
+                continue
+
             has_recorded_payments = True
-            target_acc = cls.resolve_payment_account(branch, p.payment_mode, for_party='CUSTOMER')
-            display_mode = p.get_payment_mode_display() if hasattr(p, 'get_payment_mode_display') else p.payment_mode
-            ref = getattr(p, 'transaction_ref', '') or '-'
+            target_acc = cls.resolve_payment_account(branch, p_mode, for_party='CUSTOMER')
             lines.append({
                 'account': target_acc,
-                'debit': p.amount,
+                'debit': p_amount,
                 'credit': Decimal('0.00'),
                 'customer': estimate.customer,
                 'narration': f"Sale collection ({display_mode}) - Ref: {ref}"
@@ -453,7 +495,7 @@ class AutoPostingService:
                     'narration': f"Cash sale on {estimate.estimate_number}"
                 })
 
-        # Customer Udhaari Debt
+        # Customer Udhaari Debt (Single Authoritative Debit to 1210 Accounts Receivable)
         if estimate.due_amount > Decimal('0.00'):
             lines.append({
                 'account': ar_acc,
@@ -467,7 +509,7 @@ class AutoPostingService:
         # 2. DEBIT: Trade-In Buy-Back Tender Settlement
         # Offsets the credit previously recorded on Account 2150 during device restock.
         # ---------------------------------------------------------------------
-        trade_in_surplus_cash_paid = Decimal('0.00')
+        trade_in_surplus_cash = Decimal('0.00')
 
         if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > Decimal('0.00'):
             # The effective trade-in value consumed as tender against this invoice
@@ -1197,7 +1239,84 @@ class AutoPostingService:
         )
 
     # =========================================================================
-    # 8. DIGITAL GATEWAY BATCH SETTLEMENT
+    # 8. TRADE-IN BUY-BACK ACQUISITION POSTING
+    # =========================================================================
+    @classmethod
+    @transaction.atomic
+    def post_trade_in_acquisition(
+        cls,
+        trade_in_voucher,
+        item_instance=None,
+        user=None,
+        **kwargs
+    ) -> Optional[JournalEntry]:
+        """
+        Creates a balanced double-entry voucher for a pre-owned handset trade-in intake:
+        - Debit: Merchandise Inventory Asset (Account 1310) at buy-back payout cost.
+        - Credit: Trade-In Buy-Back Clearing / Payable (Account 2150).
+        """
+        payout_val = Decimal(str(trade_in_voucher.final_trade_in_value or 0)).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+        if payout_val <= Decimal('0.00'):
+            return None
+
+        source_module = 'TRADE_IN'
+        source_id = str(trade_in_voucher.id)
+
+        duplicate_filter = Q(source_module=source_module, source_id=source_id, status='POSTED')
+        duplicate_filter |= Q(voucher_type='JOURNAL', reference_document=trade_in_voucher.voucher_number, status='POSTED')
+        existing = JournalEntry.objects.filter(duplicate_filter).first()
+        if existing:
+            return existing
+
+        branch = trade_in_voucher.branch
+        date_ad = getattr(trade_in_voucher, 'intake_date_ad', None) or timezone.now().date()
+
+        inv_asset_acc = cls.get_or_create_control_account(
+            branch, 'INVENTORY_ASSET', '1310', 'Merchandise Inventory Asset', 'ASSET', 'DEBIT'
+        )
+        trade_in_clearing_acc = cls.get_or_create_control_account(
+            branch, 'TRADE_IN_CLEARING', '2150', 'Trade-In Buy-Back Clearing / Payable', 'LIABILITY', 'CREDIT'
+        )
+
+        narration = (
+            f"Pre-Owned Buy-Back Acquisition: {trade_in_voucher.brand_name} {trade_in_voucher.model_name} "
+            f"(IMEI: {trade_in_voucher.imei_1}) - Voucher {trade_in_voucher.voucher_number}"
+        )
+
+        lines = [
+            {
+                'account': inv_asset_acc,
+                'debit': payout_val,
+                'credit': Decimal('0.00'),
+                'customer': getattr(trade_in_voucher, 'customer', None),
+                'narration': narration
+            },
+            {
+                'account': trade_in_clearing_acc,
+                'debit': Decimal('0.00'),
+                'credit': payout_val,
+                'customer': getattr(trade_in_voucher, 'customer', None),
+                'narration': f"Trade-In buyback payable recorded for {trade_in_voucher.voucher_number}"
+            }
+        ]
+
+        return JournalEngine.create_balanced_entry(
+            voucher_type='JOURNAL',
+            date_ad=date_ad,
+            branch=branch,
+            lines=lines,
+            narration=narration,
+            reference_doc=trade_in_voucher.voucher_number,
+            source_module=source_module,
+            source_id=source_id,
+            user=user or getattr(trade_in_voucher, 'cashier', None),
+            auto_post=True
+        )
+
+    # =========================================================================
+    # 9. DIGITAL GATEWAY BATCH SETTLEMENT
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -1293,6 +1412,7 @@ class AutoPostingService:
             auto_post=True
         )
 
+
 # =============================================================================
 # MODULE-LEVEL CONVENIENCE BRIDGES (ZERO-IMPORT FAILURE GUARANTEE)
 # =============================================================================
@@ -1307,4 +1427,5 @@ post_sales_return = AutoPostingService.post_sales_return
 post_purchase_return = AutoPostingService.post_purchase_return
 post_purchase_return_journal = AutoPostingService.post_purchase_return
 post_inventory_shrinkage = AutoPostingService.post_inventory_shrinkage
+post_trade_in_acquisition = AutoPostingService.post_trade_in_acquisition
 post_gateway_settlement = AutoPostingService.post_gateway_settlement

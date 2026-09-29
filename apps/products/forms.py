@@ -2,7 +2,7 @@ from decimal import Decimal
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from apps.inventory.models import Product, UnitOfMeasurement
+from apps.inventory.models import Product, ProductCategory, ProductSubCategory, Brand, UnitOfMeasurement
 from apps.products.models import ProductPriceTier, BarcodeLabelTemplate
 from apps.core.models import SystemConfiguration
 
@@ -11,6 +11,8 @@ class ProductQuickCreateForm(forms.ModelForm):
     Front-counter quick registration form.
     - purchase_price is optional and cleanly defaults to 0.00 if left blank.
     - Barcode is completely optional without automatic generation.
+    - subcategory is explicitly recognized and saved to database from quick-add popups.
+    - is_discountable is enabled by default to allow cashier discounts unless intentionally turned off.
     - Multi-component warranty support: Handset Body, Battery & Screen with explicit conditions.
     - Intelligent fallbacks: Defaults to 12M Body / 6M Battery / 3M Screen for smartphones,
       or 0M across the board for non-serialized consumable accessories.
@@ -40,6 +42,14 @@ class ProductQuickCreateForm(forms.ModelForm):
         initial=Decimal('0.000'),
         min_value=Decimal('0.000'),
         widget=forms.NumberInput(attrs={'class': 'form-control', 'placeholder': '0.00'})
+    )
+
+    is_discountable = forms.BooleanField(
+        required=False,
+        initial=True,
+        label=_("Allow Cashier Discount"),
+        widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        help_text=_("Uncheck this to lock discounts and prohibit cashiers from discounting this product.")
     )
 
     tax_pricing_type = forms.ChoiceField(
@@ -99,10 +109,10 @@ class ProductQuickCreateForm(forms.ModelForm):
     class Meta:
         model = Product
         fields = [
-            'name', 'sku', 'barcode', 'category', 'brand',
+            'name', 'sku', 'barcode', 'category', 'subcategory', 'brand',
             'model_name', 'model_number', 'variant_name', 'ram', 'internal_storage',
             'color_variant', 'network_type', 'base_unit',
-            'purchase_price', 'selling_price', 'wholesale_price',
+            'purchase_price', 'selling_price', 'wholesale_price', 'is_discountable',
             'tax_pricing_type', 'requires_imei_tracking', 'is_vat_applicable', 'vat_rate',
             'warranty_months', 'battery_warranty_months', 'screen_warranty_months',
             'warranty_conditions', 'rack_number'
@@ -112,6 +122,7 @@ class ProductQuickCreateForm(forms.ModelForm):
             'sku': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Auto or Custom'}),
             'barcode': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Scan physical barcode or leave blank (Optional)'}),
             'category': forms.Select(attrs={'class': 'form-select'}),
+            'subcategory': forms.Select(attrs={'class': 'form-select'}),
             'brand': forms.Select(attrs={'class': 'form-select'}),
             'model_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Galaxy A55'}),
             'model_number': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'SM-A556E/DS'}),
@@ -124,6 +135,7 @@ class ProductQuickCreateForm(forms.ModelForm):
             'purchase_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'placeholder': '0.00'}),
             'selling_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
             'wholesale_price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'is_discountable': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'warranty_months': forms.NumberInput(attrs={'class': 'form-control', 'step': '1', 'min': '0'}),
             'rack_number': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Rack-M01'}),
             'requires_imei_tracking': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
@@ -137,6 +149,9 @@ class ProductQuickCreateForm(forms.ModelForm):
         # Make non-essential quick-add fields explicitly optional
         self.fields['purchase_price'].required = False
         self.fields['barcode'].required = False
+        self.fields['is_discountable'].required = False
+        self.fields['subcategory'].required = False
+        self.fields['brand'].required = False
         self.fields['tax_pricing_type'].required = False
         self.fields['is_vat_applicable'].required = False
         self.fields['vat_rate'].required = False
@@ -148,6 +163,7 @@ class ProductQuickCreateForm(forms.ModelForm):
 
         if not self.instance.pk:
             self.fields['purchase_price'].initial = Decimal('0.00')
+            self.fields['is_discountable'].initial = True
 
             if is_vat_shop:
                 self.fields['is_vat_applicable'].initial = True
@@ -172,6 +188,18 @@ class ProductQuickCreateForm(forms.ModelForm):
         if val is None or str(val).strip() == '':
             return Decimal('0.00')
         return val
+
+    def clean_is_discountable(self):
+        """Clean is_discountable checkbox, defaulting to True if unspecified."""
+        val = self.cleaned_data.get('is_discountable')
+        if val is None:
+            return True
+        return bool(val)
+
+    def clean_subcategory(self):
+        """Clean subcategory, ensuring empty choices resolve cleanly to None."""
+        subcat = self.cleaned_data.get('subcategory')
+        return subcat or None
 
     def clean_warranty_months(self):
         """Fallback safely: defaults to 12 for phones or 0 for accessories."""
@@ -264,6 +292,12 @@ class ProductQuickCreateForm(forms.ModelForm):
 
         if not cleaned_data.get('purchase_price'):
             cleaned_data['purchase_price'] = Decimal('0.00')
+
+        if cleaned_data.get('is_discountable') is None:
+            cleaned_data['is_discountable'] = True
+
+        if not cleaned_data.get('subcategory'):
+            cleaned_data['subcategory'] = None
 
         if not cleaned_data.get('tax_pricing_type'):
             cleaned_data['tax_pricing_type'] = 'INCLUSIVE' if is_vat_shop else 'EXEMPT'

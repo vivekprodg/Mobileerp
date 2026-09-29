@@ -4,271 +4,806 @@
 {% block title %}POS Billing Terminal | {{ COMPANY_NAME }}{% endblock %}
 
 {% block extra_head %}
+<!-- Google Fonts & FontAwesome -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <link rel="stylesheet" href="{% static 'css/pos.css' %}">
+
 <style>
 /* ==========================================================================
-   POS WORKSPACE & DUAL-CAMERA SCANNER RETICLE STYLES
+   HISAAV-INSPIRED MINIMALIST POS WORKSPACE FOR MOBILE SOFT
+   Clean White & Soft Slate Canvas with Mobile Soft Royal Navy Accents
    ========================================================================== */
 :root {
-    --pos-surface-dark: #0f172a;
-    --pos-card-dark: #1e293b;
-    --pos-border-dark: #334155;
+    --ms-primary: #1e40af;          /* Mobile Soft Navy Blue */
+    --ms-primary-hover: #1d3557;
+    --ms-primary-light: #eff6ff;
+    --ms-primary-border: #bfdbfe;
+
+    --ms-accent: #f59e0b;           /* Amber / Shortcuts */
+    --ms-accent-light: #fffbeb;
+    --ms-success: #10b981;          /* Emerald Green Cash Pay */
+    --ms-success-hover: #059669;
+    --ms-danger: #ef4444;           /* Red for deletions and deductions */
+
+    --ms-bg-canvas: #f8fafc;
+    --ms-bg-card: #ffffff;
+    --ms-border: #e2e8f0;           /* Soft Hisaav Border */
+    --ms-text-dark: #0f172a;
+    --ms-text-muted: #64748b;
+    --ms-font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --ms-font-mono: 'JetBrains Mono', monospace;
+
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
 }
 
-.pos-workspace-container {
-    height: calc(100vh - var(--erp-header-height, 62px) - 15px);
-    overflow: hidden;
+body {
+    background-color: var(--ms-bg-canvas);
+    color: var(--ms-text-dark);
+    font-family: var(--ms-font-sans);
 }
 
-/* Category Filter Pills */
-.cat-pill {
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 0.78rem;
+.font-mono {
+    font-family: var(--ms-font-mono) !important;
+}
+
+/* Master Fixed Workspace: Zero Outer Scroll */
+.hisaav-pos-wrapper {
+    max-width: 1560px;
+    margin: 0 auto;
+    padding: 10px 18px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+/* Top Meta Navigation & Controls Bar */
+.hisaav-top-bar {
+    background: var(--ms-bg-card);
+    border: 1px solid var(--ms-border);
+    border-radius: var(--radius-md);
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.bill-type-pills {
+    display: inline-flex;
+    background: #f1f5f9;
+    padding: 3px;
+    border-radius: var(--radius-sm);
+    gap: 2px;
+}
+
+.bill-pill-btn {
+    border: none;
+    background: transparent;
+    padding: 5px 14px;
+    font-size: 12px;
     font-weight: 700;
-    border: 1px solid var(--erp-slate-200, #e2e8f0);
-    background: #ffffff;
-    color: var(--erp-slate-600, #475569);
+    color: var(--ms-text-muted);
+    border-radius: 4px;
     cursor: pointer;
     transition: all 0.15s ease;
-    white-space: nowrap;
-    outline: none;
 }
 
-.cat-pill:hover, 
-.cat-pill.active {
-    background-color: var(--erp-primary, #2563eb) !important;
-    color: #ffffff !important;
-    border-color: var(--erp-primary, #2563eb) !important;
-    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+.bill-pill-btn.active {
+    background: var(--ms-primary);
+    color: #ffffff;
+    box-shadow: 0 1px 2px rgba(30, 64, 175, 0.2);
 }
 
-/* Active Invoice Date Banner & Backdate Badges */
-.pos-date-strip {
+.quick-tools-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-tool-outline {
     background: #ffffff;
-    border: 1px solid var(--erp-slate-200, #e2e8f0);
-    border-radius: 10px;
-    padding: 5px 10px;
-}
-
-.date-status-badge-today {
-    background-color: #0f172a;
-    color: #ffffff;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
+    border: 1px solid var(--ms-border);
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 11.5px;
     font-weight: 700;
-    padding: 3px 8px;
-    border-radius: 6px;
+    color: var(--ms-text-dark);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none !important;
 }
 
-.date-status-badge-backdated {
-    background-color: #fef3c7;
-    color: #92400e;
-    border: 1px solid #fde68a;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-    font-weight: 800;
-    padding: 3px 8px;
-    border-radius: 6px;
-    animation: backdateGlow 2s infinite alternate;
+.btn-tool-outline:hover {
+    background: #f8fafc;
+    border-color: var(--ms-text-muted);
 }
 
-@keyframes backdateGlow {
-    from { box-shadow: 0 0 0 rgba(245, 158, 11, 0.2); }
-    to { box-shadow: 0 0 8px rgba(245, 158, 11, 0.5); }
-}
-
-/* Sequential Dual-IMEI Auto-Routing Dynamic Status Banner */
-.dual-imei-scanning-banner {
-    border-radius: 12px;
-    border: 2px solid #2563eb;
-    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-    animation: pulseBorder 1.5s infinite;
-}
-
-@keyframes pulseBorder {
-    0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
-    70% { box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
-}
-
-.imei-slot-badge {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-    padding: 4px 10px;
-    border-radius: 6px;
-}
-
-.imei-slot-active {
-    background-color: #fef08a !important;
-    color: #854d0e !important;
-    border: 1px solid #eab308 !important;
+.bs-date-badge {
+    background: #ffffff;
+    border: 1px solid var(--ms-border);
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
     font-weight: 700;
+    color: var(--ms-text-dark);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 }
 
-.imei-slot-complete {
-    background-color: #dcfce7 !important;
-    color: #166534 !important;
-    border: 1px solid #86efac !important;
+.online-status-dot {
+    width: 8px;
+    height: 8px;
+    background-color: var(--ms-success);
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
 }
 
-/* Cart Table Styling */
-.pos-cart-table thead th {
-    background-color: #f8fafc;
-    color: #64748b;
-    font-size: 0.72rem;
+/* Two-Column Master Grid */
+.hisaav-grid-layout {
+    display: grid;
+    grid-template-columns: 310px 1fr;
+    gap: 16px;
+    align-items: start;
+}
+
+/* Base Card */
+.hisaav-card {
+    background: var(--ms-bg-card);
+    border: 1px solid var(--ms-border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    position: relative;
+}
+
+.hisaav-card-header {
+    font-size: 13px;
     font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 8px 10px;
-    border-bottom: 1px solid #e2e8f0;
+    color: var(--ms-text-dark);
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
-.pos-cart-table tbody tr:hover {
-    background-color: #f8fafc;
+/* Form Groups & Clearable Inputs */
+.hisaav-form-group {
+    margin-bottom: 12px;
+    position: relative;
 }
 
-.pos-cart-table td {
-    padding: 8px 10px;
-    vertical-align: middle;
+.hisaav-label {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--ms-text-muted);
+    margin-bottom: 4px;
 }
 
-/* Hero Payable Display */
-.pos-hero-total-box {
-    background: linear-gradient(145deg, #0f172a 0%, #1e293b 100%);
-    border: 1px solid #334155;
-    border-radius: 14px;
-    color: #ffffff;
+.hisaav-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
 }
 
-/* Flash Visual Effect on Barcode Scan */
-@keyframes scanFlashGreen {
-    0% { background-color: rgba(16, 185, 129, 0.4); }
-    100% { background-color: transparent; }
+.hisaav-input {
+    width: 100%;
+    height: 36px;
+    padding: 0 10px;
+    background: #ffffff;
+    border: 1px solid var(--ms-border);
+    border-radius: var(--radius-sm);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ms-text-dark);
+    outline: none;
+    transition: all 0.15s ease;
 }
 
-.scan-flash {
-    animation: scanFlashGreen 0.4s ease-out;
+.hisaav-input:focus {
+    border-color: var(--ms-primary);
+    box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.12);
+}
+
+.hisaav-input-wrapper input {
+    padding-right: 28px;
+}
+
+.btn-input-clear {
+    position: absolute;
+    right: 8px;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 4px;
+    z-index: 5;
+}
+
+.btn-input-clear:hover {
+    color: var(--ms-danger);
+}
+
+.btn-outline-dashed-patron {
+    width: 100%;
+    padding: 8px;
+    background: var(--ms-primary-light);
+    border: 1px dashed var(--ms-primary);
+    color: var(--ms-primary);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: center;
+}
+
+.btn-outline-dashed-patron:hover {
+    background: #dbeafe;
 }
 
 /* ==========================================================================
-   CAMERA SCANNER VIEWFINDER OVERLAY STYLES
+   FLOATING AUTOCOMPLETE DROPDOWN TRAY STYLING (GRN-INSPIRED)
    ========================================================================== */
-.pos-scanner-modal-body {
-    background-color: #0b1120;
-    position: relative;
-    padding: 0;
-    overflow: hidden;
-    min-height: 380px;
-}
-
-.scanner-video-feed {
-    width: 100%;
-    height: 100%;
-    max-height: 480px;
-    object-fit: cover;
-    display: block;
-}
-
-.scanner-viewfinder-overlay {
+.pos-live-dropdown {
     position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-    padding: 20px;
-}
-
-.scanner-aiming-reticle {
-    width: 260px;
-    height: 160px;
-    border: 2px solid rgba(255, 255, 255, 0.4);
-    border-radius: 16px;
-    position: relative;
-    box-shadow: 0 0 0 9999px rgba(11, 17, 32, 0.65);
-}
-
-.scanner-aiming-reticle::before,
-.scanner-aiming-reticle::after {
-    content: '';
-    position: absolute;
-    width: 24px;
-    height: 24px;
-    border-color: #10b981;
-    border-style: solid;
-}
-
-.scanner-aiming-reticle::before { 
-    top: -2px; 
-    left: -2px; 
-    border-width: 4px 0 0 4px; 
-    border-top-left-radius: 14px; 
-}
-
-.scanner-aiming-reticle::after { 
-    bottom: -2px; 
-    right: -2px; 
-    border-width: 0 4px 4px 0; 
-    border-bottom-right-radius: 14px; 
-}
-
-.scanner-corner-tr { 
-    position: absolute; 
-    top: -2px; 
-    right: -2px; 
-    width: 24px; 
-    height: 24px; 
-    border-top: 4px solid #10b981; 
-    border-right: 4px solid #10b981; 
-    border-top-right-radius: 14px; 
-}
-
-.scanner-corner-bl { 
-    position: absolute; 
-    bottom: -2px; 
-    left: -2px; 
-    width: 24px; 
-    height: 24px; 
-    border-bottom: 4px solid #10b981; 
-    border-left: 4px solid #10b981; 
-    border-bottom-left-radius: 14px; 
-}
-
-.scanner-laser-line {
-    position: absolute;
-    left: 4px;
-    right: 4px;
-    height: 2px;
-    background: linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%);
-    box-shadow: 0 0 8px #10b981;
-    animation: laserScan 2s ease-in-out infinite alternate;
-}
-
-@keyframes laserScan { 
-    0% { top: 8%; opacity: 0.8; } 
-    100% { top: 92%; opacity: 1; } 
-}
-
-.scanner-controls-bar {
-    position: absolute;
-    bottom: 16px;
+    top: calc(100% + 4px);
     left: 0;
     right: 0;
+    z-index: 1070;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: var(--radius-md);
+    max-height: 290px;
+    overflow-y: auto;
+    box-shadow: 0 12px 28px -5px rgba(15, 23, 42, 0.16), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+}
+
+.pos-suggestion-item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    cursor: pointer;
     display: flex;
-    justify-content: center;
+    align-items: center;
+    justify-content: space-between;
+    transition: background-color 0.12s ease;
+    text-decoration: none !important;
+    color: inherit;
+}
+
+.pos-suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.pos-suggestion-item:hover,
+.pos-suggestion-item.active {
+    background-color: #f8fafc;
+}
+
+.pos-suggestion-item.active {
+    border-left: 3px solid var(--ms-primary);
+    background-color: var(--ms-primary-light);
+}
+
+.pos-suggestion-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--ms-text-dark);
+}
+
+.pos-suggestion-subtitle {
+    font-size: 11px;
+    color: var(--ms-text-muted);
+    font-family: var(--ms-font-mono);
+}
+
+.pos-suggestion-badge {
+    font-family: var(--ms-font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+}
+
+/* ==========================================================================
+   TWO-TIER STACKED CARD ARCHITECTURE (WITH EXPANDED DISCOUNT TOGGLE)
+   ========================================================================== */
+.pos-items-card-container {
+    background: var(--ms-bg-card);
+    border: 1px solid var(--ms-border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    margin-bottom: 16px;
+}
+
+.pos-items-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.pos-items-header-title {
+    font-size: 13.5px;
+    font-weight: 800;
+    color: var(--ms-text-dark);
+    letter-spacing: -0.01em;
+}
+
+/* Two-Tier Card Item */
+.item-card {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.item-card:hover, .item-card:focus-within {
+    border-color: #2563eb;
+    box-shadow: 0 2px 5px rgba(37, 99, 235, 0.08);
+}
+
+/* Tier 1: S.N., Product Name/IMEI, Remove Button */
+.tier-top {
+    display: flex;
+    align-items: center;
     gap: 12px;
-    z-index: 10;
+    margin-bottom: 10px;
+    width: 100%;
+}
+
+.item-sn {
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.product-input-wrapper {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+}
+
+.field-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 4px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.input-text {
+    width: 100%;
+    height: 38px;
+    padding: 0 12px;
+    font-size: 13.5px;
+    color: var(--ms-text-dark);
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    outline: none;
+    background: #fff;
+    transition: all 0.15s ease;
+}
+
+.input-text:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.btn-remove {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    font-size: 22px;
+    font-weight: bold;
+    cursor: pointer;
+    width: 32px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: background 0.15s ease;
+}
+
+.btn-remove:hover {
+    background-color: #fee2e2;
+}
+
+/* Tier 2: 6-Column Calculated Inputs Grid (Re-balanced for in-row discount toggle) */
+.tier-bottom {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr 1.5fr 2.4fr 1.1fr 1.8fr;
+    gap: 10px;
+    width: 100%;
+    padding-left: 36px;
+    box-sizing: border-box;
+}
+
+.calc-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.calc-field input,
+.calc-field select {
+    width: 100%;
+    height: 38px;
+    padding: 0 8px;
+    font-size: 13.5px;
+    color: var(--ms-text-dark);
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    outline: none;
+    background: #ffffff;
+    box-sizing: border-box;
+    transition: all 0.15s ease;
+}
+
+.calc-field input:focus,
+.calc-field select:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.calc-field input.readonly {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #334155;
+    font-weight: 600;
+}
+
+.calc-field input.net-amount {
+    background: #f0fdf4;
+    border-color: #86efac;
+    color: #15803d;
+    font-weight: 700;
+    text-align: right;
+    padding-right: 10px;
+}
+
+/* ==========================================================================
+   IN-ROW ITEM DISCOUNT TOGGLE GROUP STYLES (% vs Rs.)
+   ========================================================================== */
+.item-disc-toggle-group .btn {
+    font-size: 11px;
+    font-weight: 800;
+    height: 38px;
+    padding: 0 9px;
+    border-color: #cbd5e1;
+    border-radius: 0;
+}
+
+.item-disc-toggle-group .btn:first-child {
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
+}
+
+.item-disc-toggle-group .btn.active {
+    background-color: var(--ms-text-dark, #0f172a);
+    color: #ffffff;
+    border-color: var(--ms-text-dark, #0f172a);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.15);
+}
+
+.item-disc-symbol {
+    height: 38px;
+    border-color: #cbd5e1;
+    background-color: #f8fafc;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 0;
+}
+
+.calc-field-discount .input-group .form-control {
+    border-top-right-radius: 5px !important;
+    border-bottom-right-radius: 5px !important;
+}
+
+/* Add Item Button Strip */
+.table-add-strip {
+    padding-top: 10px;
+    border-top: 1px solid #f1f5f9;
+}
+
+.btn-add-table-row {
+    background: #ffffff;
+    border: 1px solid var(--ms-primary);
+    color: var(--ms-primary);
+    font-weight: 700;
+    font-size: 12px;
+    padding: 6px 16px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+}
+
+.btn-add-table-row:hover {
+    background: var(--ms-primary-light);
+}
+
+/* Bottom Split: Left Notes / Deductions, Right Financial Summary */
+.hisaav-bottom-split {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 16px;
+    align-items: start;
+}
+
+.hisaav-notes-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.hisaav-textarea {
+    width: 100%;
+    height: 54px;
+    padding: 6px 10px;
+    background: #ffffff;
+    border: 1px solid var(--ms-border);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    outline: none;
+    resize: none;
+    font-family: inherit;
+}
+
+.hisaav-textarea:focus {
+    border-color: var(--ms-primary);
+}
+
+/* ==========================================================================
+   VERTICAL FINANCIAL SUMMARY CARD (WITH INTERACTIVE BILL DISCOUNT)
+   ========================================================================== */
+.hisaav-summary-card {
+    background: var(--ms-bg-card);
+    border: 1px solid var(--ms-border);
+    border-radius: var(--radius-md);
+    padding: 18px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.summary-card-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid #f1f5f9;
+    padding-bottom: 6px;
+}
+
+.summary-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: #f8fafc;
+    border: 1px solid #edf2f7;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+}
+
+.summary-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+}
+
+.summary-value {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #0f172a;
+    font-family: var(--ms-font-mono);
+}
+
+/* Interactive Bill Discount Sub-Row Controls */
+.bill-discount-control-card {
+    background-color: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    margin-top: -2px;
+    margin-bottom: 2px;
+}
+
+.bill-disc-sublabel {
+    font-size: 11px;
+    font-weight: 700;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.bill-disc-toggle-group .btn {
+    font-size: 11px;
+    font-weight: 800;
+    min-height: 28px;
+    padding: 2px 8px;
+}
+
+.bill-disc-toggle-group .btn.active {
+    background-color: var(--ms-primary);
+    color: #ffffff;
+    border-color: var(--ms-primary);
+}
+
+#posBillDiscountInput {
+    height: 28px;
+    padding: 2px 8px;
+    border-radius: 0 4px 4px 0;
+    border: 1px solid #cbd5e1;
+}
+
+#posBillDiscountInput:focus {
+    border-color: var(--ms-primary);
+    box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.12);
+}
+
+/* 13% VAT Highlight Row */
+.summary-row.tax-row {
+    background-color: #eff6ff;
+    border-color: #dbeafe;
+}
+.summary-row.tax-row .summary-label,
+.summary-row.tax-row .summary-value {
+    color: #1d4ed8;
+}
+
+/* Trade-In Deduction Row */
+.summary-row.trade-in-row {
+    background-color: #fff1f2;
+    border-color: #fecdd3;
+}
+.summary-row.trade-in-row .summary-label,
+.summary-row.trade-in-row .summary-value {
+    color: #dc2626;
+}
+
+/* Prominent Total Card */
+.total-box {
+    margin-top: 4px;
+    padding: 12px 14px;
+    background: linear-gradient(135deg, #1e3a8a, #2563eb);
+    color: #ffffff;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 3px 8px rgba(37, 99, 235, 0.2);
+}
+
+.total-label {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #ffffff;
+}
+
+.total-amount {
+    font-size: 21px;
+    font-weight: 800;
+    font-family: var(--ms-font-mono);
+    color: #ffffff;
+}
+
+/* Full Width Emerald Cash Checkout Button */
+.btn-emerald-cash-checkout {
+    width: 100%;
+    height: 42px;
+    background: var(--ms-success);
+    color: #ffffff;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 13.5px;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-top: 4px;
+    transition: all 0.15s ease;
+}
+
+.btn-emerald-cash-checkout:hover {
+    background: var(--ms-success-hover);
+    transform: translateY(-1px);
+}
+
+.payment-sub-split-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.btn-sub-tender {
+    height: 34px;
+    background: #ffffff;
+    border: 1px solid var(--ms-border);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ms-text-dark);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: all 0.15s ease;
+}
+
+.btn-sub-tender:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+}
+
+@media (max-width: 1024px) {
+    .hisaav-grid-layout {
+        grid-template-columns: 1fr;
+    }
+    .hisaav-bottom-split {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-3 py-2 pos-workspace-container d-flex flex-column">
+<div class="hisaav-pos-wrapper">
     {% csrf_token %}
 
-    <!-- Hidden Meta Configuration for JavaScript Engine -->
+    <!-- Hidden Configuration Meta Element (Consumed by pos_engine.js) -->
     <div id="posTaxConfigMeta"
          data-tax-mode="{{ SHOP_TAX_MODE|default:config.tax_system_mode|default:'EXEMPT' }}"
          data-default-vat-rate="{{ DEFAULT_TAX_RATE|default:config.default_vat_rate|default:'0.00' }}"
@@ -278,389 +813,384 @@
          data-today-bs-np="{{ CURRENT_BS_DATE_NP|default:'' }}"
          style="display: none;">
     </div>
-    
-    <!-- Proforma Estimation & White-Label Compliance Notice Bar -->
-    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 py-2 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs flex-shrink-0">
-        <span class="text-truncate">
-            <i class="fas fa-circle-exclamation text-warning me-1"></i>
-            <strong>{{ COMPANY_NAME }} &bull; {{ SYS_CONFIG.bill_header_title|default:BILL_HEADER_TITLE|default:"SALES ESTIMATE" }}:</strong> 
-            {{ SYS_CONFIG.bill_estimate_disclaimer|default:ESTIMATE_DISCLAIMER|default:"Proforma quotation slip for estimation purposes only." }}
-        </span>
-        <div class="d-flex align-items-center gap-2 flex-shrink-0">
-            {% if SYS_CONFIG.enforce_imei_tracking == False or config.enforce_imei_tracking == False or ENFORCE_IMEI_TRACKING == False or enforce_imei_tracking == False %}
-            <span class="badge bg-warning text-dark border border-warning" title="Backlog Mode Active: Mobile phones can be sold without mandatory IMEI tracking">
-                <i class="fas fa-clock-rotate-left me-1"></i> Backlog Mode (IMEI Optional)
-            </span>
-            {% endif %}
-            <span id="posNetworkStatusBadge" class="badge bg-success text-white">
-                <i class="fas fa-wifi me-1"></i> Online
-            </span>
-            <button type="button" class="btn btn-sm btn-outline-primary bg-white text-primary border-primary border-opacity-25 px-2 py-0 fs-2xs fw-bold" id="toggleDualScanModeBtn" title="Toggle Auto Dual-IMEI Scanning">
-                <i class="fas fa-barcode text-primary me-1"></i> Dual-IMEI Scan: <span id="dualScanModeStatusText" class="text-success">AUTO (ON)</span>
-            </button>
-            {% if config.enable_mdms_tracking or ENABLE_MDMS_TRACKING %}
-            <span class="badge bg-success text-white"><i class="fas fa-shield-halved me-1"></i> NTA MDMS Guard</span>
-            {% endif %}
-            <span class="badge bg-primary text-white">{{ active_branch.name|default:STORE_OUTLET_NAME }} ({{ active_branch.code|default:STORE_OUTLET_CODE }})</span>
-            <span class="badge bg-dark text-white font-mono" id="topBarDateBadge">{{ CURRENT_BS_DATE_EN|default:"" }} BS</span>
-        </div>
-    </div>
 
-    <!-- Active Sequential IMEI Scanning Banner -->
-    <div id="dualImeiActivePrompt" class="dual-imei-scanning-banner p-2 mb-2 d-none shadow-sm flex-shrink-0">
-        <div class="d-flex justify-content-between align-items-center">
-            <div class="d-flex align-items-center gap-3">
-                <div class="spinner-grow spinner-grow-sm text-primary" role="status"></div>
-                <div>
-                    <span class="fw-bold text-dark fs-xs" id="dualScanPromptTitle">📱 Dual-SIM Sequential Scan Active:</span>
-                    <strong class="text-primary fs-xs ms-1" id="dualScanPromptModelName">Phone Model</strong>
-                    <div class="d-flex gap-2 align-items-center mt-1">
-                        <span class="imei-slot-badge imei-slot-complete" id="slotBadgeImei1">
-                            <i class="fas fa-check-circle me-1"></i> IMEI 1: <span id="slotValImei1">---</span>
-                        </span>
-                        <i class="fas fa-arrow-right text-muted fs-2xs"></i>
-                        <span class="imei-slot-badge imei-slot-active" id="slotBadgeImei2">
-                            <i class="fas fa-barcode me-1"></i> <strong>SCAN IMEI 2 NOW (Barcode / Box)...</strong>
-                        </span>
-                    </div>
+    <!-- =========================================================================
+         1. TOP BAR: CLEAN WHITE CONTROLS, SHORTCUTS & BIKRAM SAMBAT DATE
+         ========================================================================= -->
+    <header class="hisaav-top-bar">
+        <div style="display: flex; align-items: center; gap: 14px;">
+            <!-- Bill Type Selector (Sales vs Estimates) -->
+            <div class="bill-type-pills">
+                <button type="button" class="bill-pill-btn active" id="btnBillTypeSales">Sales Bill</button>
+                <button type="button" class="bill-pill-btn" id="btnBillTypeEstimate">Estimates</button>
+            </div>
+
+            <!-- Quick Operational Tools -->
+            <div class="quick-tools-strip">
+                <button type="button" class="btn-tool-outline" id="attachRepairPromptBtn" title="Search &amp; Attach Ready Repair Ticket [F7]">
+                    <i class="fas fa-wrench text-primary"></i> Repair [F7]
+                </button>
+                <button type="button" class="btn-tool-outline" id="attachTradeInPromptBtn" data-bs-toggle="modal" data-bs-target="#exchangeModal" title="Attach Old Phone Trade-In Voucher [F6]">
+                    <i class="fas fa-repeat text-warning"></i> Exchange [F6]
+                </button>
+                <button type="button" class="btn-tool-outline" id="posHoldCartBtn" title="Hold Active Bill [F9]">
+                    <i class="fas fa-pause text-muted"></i> Hold [F9]
+                </button>
+                <button type="button" class="btn-tool-outline" id="posRecallHeldCartsBtn" title="Recall Parked Bills [F10]">
+                    <i class="fas fa-folder-open text-muted"></i> Recall [F10]
+                </button>
+            </div>
+        </div>
+
+        <!-- Right Side: Bikram Sambat Date & Outlet Status -->
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="bs-date-badge">
+                <i class="far fa-calendar-check text-primary"></i>
+                <span class="text-muted" style="font-size: 11px;">Bill Date:</span>
+                <span id="displayBillDateBs" class="font-mono text-dark">{{ CURRENT_BS_DATE_EN|default:"2083-06-12" }} BS</span>
+                <button type="button" class="btn btn-link p-0 text-primary text-decoration-none fs-2xs fw-bold ms-1" id="btnChangeBillDate">
+                    Change
+                </button>
+                <button type="button" class="btn btn-link p-0 text-danger text-decoration-none fs-2xs fw-bold ms-1 d-none" id="btnResetTodayDate">
+                    Today
+                </button>
+            </div>
+
+            <!-- Collapsible Datepicker Dropdown Wrapper -->
+            <div class="p-2 bg-white border rounded-3 d-none shadow-sm position-absolute" id="customDatePickerWrapper" style="right: 20px; top: 60px; z-index: 1050; width: 310px;">
+                <div class="d-flex align-items-center gap-2">
+                    <label class="form-label fs-2xs fw-bold text-dark mb-0 text-nowrap">B.S. Date:</label>
+                    <input type="text" 
+                           id="posBillDateBsInput" 
+                           name="bill_date_bs" 
+                           class="form-control form-control-sm font-mono fs-xs nepali-datepicker text-center fw-bold text-primary" 
+                           value="{{ CURRENT_BS_DATE_EN|default:'' }}" 
+                           placeholder="YYYY-MM-DD (BS)" 
+                           autocomplete="off">
+                    <button type="button" class="btn btn-success btn-sm py-0 px-2 fs-2xs fw-bold rounded-pill" id="btnApplyCustomDate">Apply</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" id="btnCancelCustomDate">Cancel</button>
                 </div>
+            </div>
+
+            <div class="bs-date-badge" style="gap: 6px;">
+                <span class="online-status-dot"></span>
+                <span style="font-size: 11px;" id="posNetworkStatusBadge">Online</span>
+            </div>
+
+            <div class="text-muted fs-xs font-mono">
+                {{ active_branch.code|default:STORE_OUTLET_CODE }}
+            </div>
+        </div>
+    </header>
+
+    <!-- Sequential Dual-IMEI Active Banner (Appears dynamically upon scanning handset) -->
+    <div id="dualImeiActivePrompt" class="p-2 bg-primary bg-opacity-10 border border-primary border-opacity-25 rounded-3 d-none shadow-xs">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                <span class="spinner-grow spinner-grow-sm text-primary" role="status"></span>
+                <span class="fw-bold text-dark fs-xs" id="dualScanPromptTitle">📱 Dual-SIM Scan:</span>
+                <strong class="text-primary fs-xs" id="dualScanPromptModelName">Phone Model</strong>
+                <span class="badge bg-success bg-opacity-10 text-success border border-success font-mono fs-2xs" id="slotBadgeImei1">
+                    IMEI 1: <span id="slotValImei1">---</span>
+                </span>
+                <span class="badge bg-warning bg-opacity-10 text-dark border border-warning font-mono fs-2xs" id="slotBadgeImei2">
+                    SCAN IMEI 2 NOW...
+                </span>
             </div>
             <div class="d-flex gap-1">
-                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" id="skipImei2Btn" title="Bypass IMEI 2 for Single-SIM phones">
-                    <i class="fas fa-forward me-1"></i> Single SIM (Skip IMEI 2)
-                </button>
-                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 fs-2xs rounded-pill" id="cancelDualScanBtn" title="Cancel this handset scan">
-                    <i class="fas fa-times me-1"></i> Cancel
-                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" id="skipImei2Btn">Skip IMEI 2</button>
+                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 fs-2xs rounded-pill" id="cancelDualScanBtn">Cancel</button>
             </div>
         </div>
     </div>
 
-    <!-- MAIN POS WORKSPACE -->
-    <div class="row g-2 flex-grow-1 overflow-hidden">
+    <!-- =========================================================================
+         2. MASTER 2-COLUMN WORKSPACE
+         Left: Barcode Scanner & Patron Card
+         Right: Line Items Two-Tier Card Container & Bottom Summary
+         ========================================================================= -->
+    <div class="hisaav-grid-layout">
         
-        <!-- LEFT COLUMN: Product Catalog, Search & Scan (7 Cols) -->
-        <div class="col-12 col-lg-7 d-flex flex-column h-100">
+        <!-- ======================= LEFT COLUMN: SCANNER & PATRON ======================= -->
+        <div style="display: flex; flex-direction: column; gap: 14px;">
             
-            <!-- Fast Search Bar & Barcode Scanner Input with Global Shortcut Indicators -->
-            <div class="card border-0 shadow-sm rounded-4 p-2 bg-white mb-2 flex-shrink-0">
-                <div class="d-flex justify-content-between align-items-center px-1 mb-1 fs-2xs text-muted">
-                    <span class="fw-bold"><i class="fas fa-barcode text-primary me-1"></i> Barcode &amp; Product Search</span>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="badge bg-light text-secondary border font-mono fs-2xs px-2 py-0.5" title="Focus barcode search bar">
-                            <kbd class="bg-white text-dark border me-1">F2</kbd> Product Scan
-                        </span>
-                        <span class="badge bg-light text-secondary border font-mono fs-2xs px-2 py-0.5" title="Launch global universal search">
-                            <kbd class="bg-white text-dark border me-1">Ctrl + K</kbd> Global Search
-                        </span>
+            <!-- Card 1: Fast Barcode & 15-Digit IMEI Scanner (With Instant Zero-Query Dropdown) -->
+            <div class="hisaav-card">
+                <div class="hisaav-form-group mb-0 position-relative" data-search-url="/products/api/search/?mode=pos">
+                    <label class="hisaav-label" for="posProductSearchInput">
+                        <i class="fas fa-barcode text-primary me-1"></i> Scan Barcode / 15-Digit IMEI
+                    </label>
+                    <div class="hisaav-input-wrapper position-relative">
+                        <input type="text" 
+                               id="posProductSearchInput" 
+                               class="hisaav-input font-mono" 
+                               placeholder="Scan product bar code or IMEI..." 
+                               autofocus 
+                               autocomplete="off">
+                        <button type="button" class="btn btn-link p-0 text-primary position-absolute end-0 me-2 border-0" id="posOpenCameraButton" title="Scan with Camera">
+                            <i class="fas fa-camera"></i>
+                        </button>
                     </div>
-                </div>
 
-                <div class="input-group input-group-lg">
-                    <span class="input-group-text bg-primary text-white border-0 py-2">
-                        <i class="fas fa-barcode fs-5"></i>
-                    </span>
-                    <input type="text" 
-                           id="posProductSearchInput" 
-                           class="form-control border-0 bg-light fs-6 font-mono" 
-                           placeholder="Scan 15-Digit IMEI or search phone name, model, storage [F2]..." 
-                           autofocus 
-                           autocomplete="off">
-                    
-                    <!-- 1-TAP CAMERA SCANNER BUTTON -->
-                    <button type="button" class="btn btn-primary px-3 fw-bold d-flex align-items-center gap-1 shadow-sm" id="posOpenCameraButton" title="Scan Barcode / IMEI using Camera or Image">
-                        <i class="fas fa-camera"></i> <span class="d-none d-sm-inline">Camera</span>
-                    </button>
-
-                    <!-- QUICK ACCESSORY ADD BUTTON -->
-                    <button type="button" class="btn btn-outline-secondary px-3 fw-bold d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#quickAddProductModal" title="Quick Add Small Accessory">
-                        <i class="fas fa-plus"></i> <span class="d-none d-md-inline">Item</span>
-                    </button>
+                    <!-- Floating Live Dropdown Tray for Barcode/Product Autocomplete -->
+                    <div id="barcodeSearchDropdown" class="pos-live-dropdown d-none"></div>
                 </div>
             </div>
 
-            <!-- Category Pills: Universal Smart Tabs + Dynamic Database Categories -->
-            <div class="d-flex gap-2 mb-2 overflow-x-auto pb-1 flex-shrink-0" id="categoryPillContainer">
-                <button type="button" class="cat-pill active" data-category-key="ALL">All Items (सबै)</button>
-                <button type="button" class="cat-pill" data-category-key="PHONES">📱 Smartphones</button>
-                <button type="button" class="cat-pill" data-category-key="CHARGERS">🔌 Chargers &amp; Cables</button>
-                <button type="button" class="cat-pill" data-category-key="GLASS_COVER">🛡️ Glass &amp; Covers</button>
-                <button type="button" class="cat-pill" data-category-key="AUDIO">🎧 Earbuds &amp; Audio</button>
-                <button type="button" class="cat-pill" data-category-key="PARTS">🔧 Batteries &amp; Parts</button>
+            <!-- Card 2: Patron / Customer Information Card (Clean Context Binding) -->
+            <div class="hisaav-card position-relative">
+                <div class="hisaav-card-header">
+                    <span>Patron Details</span>
+                    <button type="button" class="btn btn-link p-0 text-primary text-decoration-none fs-2xs fw-bold" id="quickWalkInCustomerBtn">
+                        Walk-in
+                    </button>
+                </div>
 
-                <!-- Dynamic Active Database Categories -->
-                {% if categories %}
-                <span class="border-end border-secondary border-opacity-25 my-1 mx-1 d-inline-block" style="width: 1px; height: 20px;"></span>
-                {% for cat in categories %}
-                <button type="button" class="cat-pill" data-category-id="{{ cat.id }}" data-category-key="{{ cat.name|upper }}" title="{{ cat.name }}">
-                    🏷️ {{ cat.name }}
+                <!-- Hidden Input Bound to Database Customer ID -->
+                <input type="hidden" name="customer_id" id="posCustomerId" value="">
+
+                <!-- Field 1: Patron Name with '×' Clear Button and Floating Dropdown -->
+                <div class="hisaav-form-group position-relative" data-search-url="/customers/api/search/">
+                    <label class="hisaav-label" for="posCustomerInput">Patron Name</label>
+                    <div class="hisaav-input-wrapper position-relative">
+                        <input type="text" 
+                               id="posCustomerInput" 
+                               class="hisaav-input" 
+                               placeholder="Enter or select customer name..." 
+                               value=""
+                               autocomplete="off">
+                        <button type="button" class="btn-input-clear" id="clearCustomerNameBtn" title="Clear customer name">&times;</button>
+                    </div>
+
+                    <!-- Floating Live Dropdown Tray for Customer Suggestions -->
+                    <div id="customerSearchDropdown" class="pos-live-dropdown d-none"></div>
+                </div>
+
+                <!-- Field 2: Patron PAN with '×' Clear Button -->
+                <div class="hisaav-form-group">
+                    <label class="hisaav-label" for="posCustomerPanInput">Patron Pan</label>
+                    <div class="hisaav-input-wrapper">
+                        <input type="text" 
+                               id="posCustomerPanInput" 
+                               class="hisaav-input font-mono" 
+                               placeholder="9-Digit PAN" 
+                               maxlength="15"
+                               autocomplete="off">
+                        <button type="button" class="btn-input-clear" id="clearCustomerPanBtn" title="Clear PAN">&times;</button>
+                    </div>
+                </div>
+
+                <!-- Field 3: Patron Mobile with '×' Clear Button -->
+                <div class="hisaav-form-group">
+                    <label class="hisaav-label" for="posCustomerMobileInput">Patron Mobile</label>
+                    <div class="hisaav-input-wrapper">
+                        <input type="text" 
+                               id="posCustomerMobileInput" 
+                               class="hisaav-input font-mono" 
+                               placeholder="Phone number..." 
+                               value=""
+                               autocomplete="off">
+                        <button type="button" class="btn-input-clear" id="clearCustomerMobileBtn" title="Clear mobile">&times;</button>
+                    </div>
+                </div>
+
+                <!-- Action: Add New Patron -->
+                <button type="button" class="btn-outline-dashed-patron" data-bs-toggle="modal" data-bs-target="#quickAddProductModal">
+                    + Add New Patron
                 </button>
-                {% endfor %}
-                {% endif %}
             </div>
 
-            <!-- Product Cards Grid -->
-            <div class="card border-0 shadow-sm rounded-4 flex-grow-1 bg-white p-2 overflow-y-auto" id="posSearchResultsContainer">
-                <div class="product-grid" id="productGridContainer">
-                    <div class="col-12 text-center py-5 text-muted">
-                        <i class="fas fa-barcode fs-1 text-secondary mb-2 d-block opacity-25"></i>
-                        <span>Ready for hardware barcode scanner or click Camera/Image to scan phone box</span>
+            <!-- Optional Linked Repair Banner (If attached via F7) -->
+            <div id="linkedRepairCard" class="card border border-info bg-info bg-opacity-10 p-2 rounded-3 d-none fs-xs">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="badge bg-info text-white font-mono" id="dispRepairTicketNo">SRV-0001</span>
+                        <strong class="d-block text-dark mt-1" id="dispRepairDevice">Handset Model</strong>
+                    </div>
+                    <div class="text-end">
+                        <span class="font-mono fw-bold text-primary" id="dispRepairFee">Rs. 0.00</span>
+                        <button type="button" class="btn btn-link text-danger p-0 border-0 d-block fs-3xs" id="btnDetachRepairTicket">Detach</button>
                     </div>
                 </div>
             </div>
+
         </div>
 
-        <!-- RIGHT COLUMN: Customer Bill & Checkout Panel (5 Cols) -->
-        <div class="col-12 col-lg-5 d-flex flex-column h-100">
-            <div class="card border-0 shadow-sm rounded-4 bg-white d-flex flex-column h-100 overflow-hidden">
-                
-                <!-- Active Invoice Header (CONFIRMED B.S. INVOICE DATE + BACKDATE CONTROLS) -->
-                <div class="p-2 border-bottom bg-light d-flex flex-column gap-2 flex-shrink-0">
-                    
-                    <!-- 1. B.S. Invoice Date Confirmation Strip -->
-                    <div class="pos-date-strip d-flex align-items-center justify-content-between">
-                        <div class="d-flex align-items-center gap-2 flex-wrap">
-                            <span class="fs-2xs text-muted text-uppercase fw-bold"><i class="far fa-calendar-check text-primary me-1"></i> Bill Date (मिति):</span>
-                            
-                            <!-- Visual B.S. Date Badge (Changes styling if backdated) -->
-                            <span id="activeBsDateBadge" class="date-status-badge-today">
-                                <span id="displayBillDateBs">{{ CURRENT_BS_DATE_EN|default:"" }}</span> BS
-                            </span>
-                            
-                            <span class="text-muted fs-2xs" id="displayBillDateNp">
-                                ({{ CURRENT_BS_DATE_NP|default:"आज" }})
-                            </span>
-                        </div>
-                        
-                        <div class="d-flex align-items-center gap-1">
-                            <!-- Change / Backdate Button -->
-                            <button type="button" 
-                                    class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" 
-                                    id="btnChangeBillDate" 
-                                    title="Verify or Backdate Bill Date in B.S.">
-                                <i class="fas fa-calendar-days text-primary me-1"></i> <span id="changeDateBtnText">Change Date</span>
-                            </button>
-
-                            <!-- 1-Click Reset to Today (Shown only when backdated) -->
-                            <button type="button" 
-                                    class="btn btn-outline-dark btn-sm py-0 px-2 fs-2xs rounded-pill d-none" 
-                                    id="btnResetTodayDate" 
-                                    title="Reset bill date back to today's date">
-                                <i class="fas fa-rotate-left text-danger me-1"></i> Today
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- 2. Hidden Collapsible B.S. Datepicker Input Bar -->
-                    <div class="p-2 bg-white border rounded-3 d-none shadow-xs" id="customDatePickerWrapper">
-                        <div class="d-flex align-items-center gap-2">
-                            <label class="form-label fs-2xs fw-bold text-dark mb-0 text-nowrap">
-                                <i class="fas fa-pencil text-primary me-1"></i> Select B.S. Date:
-                            </label>
-                            
-                            <!-- B.S. Input Field bound to base.html Nepali Datepicker popup -->
-                            <input type="text" 
-                                   id="posBillDateBsInput" 
-                                   name="bill_date_bs" 
-                                   class="form-control form-control-sm font-mono fs-xs nepali-datepicker text-center fw-bold text-primary" 
-                                   value="{{ CURRENT_BS_DATE_EN|default:'' }}" 
-                                   placeholder="YYYY-MM-DD (BS)" 
-                                   style="max-width: 145px;" 
-                                   autocomplete="off">
-
-                            <button type="button" class="btn btn-success btn-sm py-0 px-3 fs-2xs fw-bold rounded-pill" id="btnApplyCustomDate">
-                                <i class="fas fa-check me-1"></i> Apply
-                            </button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" id="btnCancelCustomDate">
-                                Cancel
-                            </button>
-                        </div>
-                        <small class="text-muted fs-2xs mt-1 d-block">
-                            <i class="fas fa-circle-info text-info me-1"></i> Click to pick Nepali date. Authorized starting <strong>2080-04-01 B.S.</strong>
-                        </small>
-                    </div>
-
-                    <!-- 3. Standardized Customer Selection & Operational Shortcuts -->
-                    <div class="d-flex align-items-center justify-content-between gap-2">
-                        <!-- Customer Field managed by POSCustomerManager in pos_engine.js -->
-                        <div class="flex-grow-1 position-relative">
-                            <div class="input-group input-group-sm bg-white rounded-3 border">
-                                <span class="input-group-text bg-transparent border-0 pe-1">
-                                    <i class="fas fa-user text-muted"></i>
-                                </span>
-                                <input type="text" 
-                                       id="posCustomerInput" 
-                                       class="form-control border-0 bg-transparent ps-1" 
-                                       placeholder="Walk-in Customer (click for recent/debtors)"
-                                       autocomplete="off">
-                            </div>
-                        </div>
-
-                        <!-- 9-Digit Tax PAN Field -->
-                        <div class="input-group input-group-sm bg-white rounded-3 border" style="max-width: 130px;">
-                            <span class="input-group-text bg-transparent border-0 font-monospace fs-2xs px-1 text-muted">PAN</span>
-                            <input type="text" id="posCustomerPanInput" class="form-control border-0 font-monospace fs-xs px-1" placeholder="9-Digit" maxlength="15">
-                        </div>
-
-                        <!-- Action Controls: Repair Ticket Attach [F7], Trade-in Exchange, Shortcuts -->
-                        <div class="d-flex gap-1 flex-shrink-0">
-                            <!-- Direct Repair Ticket Search & Link Button -->
-                            <button type="button" 
-                                    class="btn btn-outline-info btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark shadow-xs" 
-                                    id="attachRepairPromptBtn" 
-                                    data-bs-toggle="modal" 
-                                    data-bs-target="#repairTicketSearchModal" 
-                                    title="Search &amp; Attach Ready Repair Ticket [F7]">
-                                <i class="fas fa-wrench text-info me-1"></i> Repair [F7]
-                            </button>
-
-                            <!-- Trade-in Voucher Attach Button -->
-                            <button type="button" 
-                                    class="btn btn-outline-warning btn-sm rounded-pill text-nowrap fs-xs fw-bold text-dark shadow-xs" 
-                                    id="attachTradeInPromptBtn" 
-                                    data-bs-toggle="modal" 
-                                    data-bs-target="#exchangeModal" 
-                                    title="Attach Trade-In Voucher">
-                                <i class="fas fa-repeat text-warning-emphasis me-1"></i> Exchange
-                            </button>
-
-                            <!-- Keyboard Shortcuts Help -->
-                            <button type="button" 
-                                    class="btn btn-outline-dark btn-sm rounded-pill text-nowrap fs-xs shadow-xs" 
-                                    data-bs-toggle="modal" 
-                                    data-bs-target="#shortcutsModal" 
-                                    title="POS Shortcuts">
-                                <i class="fas fa-keyboard"></i>
-                            </button>
-                        </div>
-                    </div>
+        <!-- ======================= RIGHT COLUMN: TWO-TIER ITEMS & FINANCIALS ======================= -->
+        <div>
+            
+            <!-- Two-Tier Stacked Items Card Container -->
+            <div class="pos-items-card-container">
+                <div class="pos-items-header-bar">
+                    <span class="pos-items-header-title">Invoice Items</span>
                 </div>
 
-                <!-- Cart Table Header -->
-                <div class="d-flex justify-content-between text-muted fs-xs fw-bold px-3 py-1 bg-light rounded-0 border-bottom mb-0 flex-shrink-0">
-                    <span style="width: 48%;">Item / Phone</span>
-                    <span style="width: 15%; text-align: center;">Qty</span>
-                    <span style="width: 27%; text-align: right;">Rate</span>
-                    <span style="width: 10%;"></span>
+                <!-- Dynamic Item Cards Stack Container -->
+                <div id="itemsContainer">
+                    <!-- Populated dynamically via pos_engine.js -->
                 </div>
 
-                <!-- Cart Items Scroll Container -->
-                <div class="flex-grow-1 overflow-y-auto p-2" id="cartItemsContainer">
-                    <table class="table table-sm pos-cart-table align-middle mb-0" id="posCartTable">
-                        <tbody id="posCartTableBody">
-                            <tr>
-                                <td colspan="5" class="text-center py-5 text-muted">
-                                    <i class="fas fa-shopping-cart fs-1 opacity-25 d-block mb-2"></i>
-                                    Cart is empty. Scan barcodes or select products to begin.
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Calculations & Grand Total Checkout Panel -->
-                <div class="p-3 border-top bg-light flex-shrink-0">
-                    <div class="d-flex justify-content-between text-xs text-muted mb-1 px-1">
-                        <span>Subtotal (सामानको जम्मा):</span>
-                        <span id="posSubtotalText" class="font-monospace fw-semibold">Rs. 0.00</span>
-                    </div>
-
-                    <div class="d-flex justify-content-between text-xs text-danger mb-1 px-1" id="posTradeInRow" style="display: none;">
-                        <span><i class="fas fa-repeat me-1"></i> Trade-In Credit <small id="posTradeInTag"></small>:</span>
-                        <div class="d-flex align-items-center gap-1">
-                            <span id="posTradeInText" class="font-monospace fw-bold">-Rs. 0.00</span>
-                            <button type="button" class="btn btn-link text-danger p-0 border-0 ms-1 fs-2xs" id="posRemoveTradeInBtn" title="Detach Trade-In Voucher">
-                                <i class="fas fa-times-circle"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    {% if config.tax_system_mode == 'VAT' or SHOP_TAX_MODE == 'VAT' or IS_VAT_MODE %}
-                    <div class="d-flex justify-content-between text-xs text-muted mb-1 px-1" id="posVatRow">
-                        <span id="posVatLabel">Tax / VAT Breakdown ({{ DEFAULT_TAX_RATE }}%):</span>
-                        <span id="posVatText" class="font-monospace fw-semibold">Rs. 0.00</span>
-                    </div>
-                    {% endif %}
-
-                    <!-- DUAL-MODE BILL DISCOUNT UI (PERCENTAGE VS FIXED AMOUNT) -->
-                    <div class="d-flex justify-content-between align-items-center text-xs text-muted mb-2 px-1">
-                        <div class="d-flex align-items-center gap-1">
-                            <span class="fw-semibold text-dark">Bill Discount:</span>
-                            <!-- Interactive Toggle Button Group [% | Rs.] -->
-                            <div class="btn-group btn-group-sm" role="group" id="billDiscountModeToggleGroup" style="height: 24px;">
-                                <button type="button" 
-                                        class="btn btn-primary px-2 py-0 fs-2xs font-mono fw-bold active" 
-                                        id="btnDiscountModePercent"
-                                        title="Percentage Discount (%)">
-                                    %
-                                </button>
-                                <button type="button" 
-                                        class="btn btn-outline-secondary px-2 py-0 fs-2xs font-mono fw-bold" 
-                                        id="btnDiscountModeFixed"
-                                        title="Fixed Cash Amount (Rs.)">
-                                    Rs.
-                                </button>
-                            </div>
-                            <!-- Hidden button preserving legacy script compatibility -->
-                            <button type="button" id="posBillDiscountTypeToggleBtn" class="d-none">%</button>
-                        </div>
-                        
-                        <!-- Dynamic Input Group with Currency / Percent Symbol Badge -->
-                        <div class="input-group input-group-sm" style="width: 110px;">
-                            <span class="input-group-text bg-white border font-mono fs-2xs px-1 text-muted" id="billDiscountSymbolDisplay">%</span>
-                            <input type="number" 
-                                   id="posBillDiscountInput" 
-                                   class="form-control form-control-sm text-end p-0 px-2 border rounded-end font-monospace fs-xs" 
-                                   value="0" 
-                                   min="0" 
-                                   max="100" 
-                                   step="0.5" 
-                                   placeholder="%">
-                        </div>
-                    </div>
-
-                    <!-- Big Payable Total Display Box -->
-                    <div class="pos-hero-total-box p-3 mb-2 d-flex justify-content-between align-items-center shadow-sm">
-                        <div>
-                            <span class="text-uppercase text-white-50 fs-2xs fw-bold d-block" style="letter-spacing: 0.05em;">Payable Grand Total</span>
-                            <span class="fs-xs text-warning"><i class="fas fa-coins me-1"></i> Net Payable (कुल रकम)</span>
-                        </div>
-                        <h3 class="fw-extrabold text-white font-monospace mb-0" id="posGrandTotalText">Rs. 0.00</h3>
-                    </div>
-
-                    <!-- Checkout Actions -->
-                    <div class="row g-1">
-                        <div class="col-4">
-                            <button type="button" class="btn btn-warning btn-sm w-100 py-2 fw-bold text-dark rounded-3 fs-xs shadow-xs" id="posHoldCartBtn" title="Hold Active Cart [F9]">
-                                <i class="fas fa-pause me-1"></i> Hold [F9]
-                            </button>
-                        </div>
-                        <div class="col-4">
-                            <button type="button" class="btn btn-secondary btn-sm w-100 py-2 fw-bold text-white rounded-3 fs-xs shadow-xs" id="posRecallHeldCartsBtn" title="Recall Parked Carts [F10]">
-                                <i class="fas fa-folder-open me-1"></i> Recall [F10]
-                            </button>
-                        </div>
-                        <div class="col-4">
-                            <button type="button" class="btn btn-info btn-sm w-100 py-2 fw-bold text-white rounded-3 fs-xs shadow-xs" id="posSplitPaymentBtn" title="Split Payment [F8]">
-                                <i class="fas fa-layer-group me-1"></i> Split [F8]
-                            </button>
-                        </div>
-                        <div class="col-12 mt-1">
-                            <button type="button" class="btn btn-success btn-lg w-100 py-3 fw-bold rounded-3 fs-5 shadow-sm" id="posDirectCashCheckoutBtn">
-                                <i class="fas fa-money-bill-wave me-2"></i> CASH PAYMENT (नगद भुक्तानी) [F4]
-                            </button>
-                        </div>
-                    </div>
+                <!-- Bottom Add Item Strip -->
+                <div class="table-add-strip">
+                    <button type="button" class="btn-add-table-row" id="btnAddCartRow">
+                        <i class="fas fa-plus"></i> Add
+                    </button>
                 </div>
             </div>
+
+            <!-- ======================= BOTTOM SECTION: SPLIT ======================= -->
+            <div class="hisaav-bottom-split">
+                
+                <!-- Bottom-Left: Deductions, Narration & Bill Terms -->
+                <div class="hisaav-notes-col">
+                    
+                    <!-- Trade-In Deduction Box -->
+                    <div class="hisaav-card p-3" id="posTradeInRow" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="hisaav-label text-danger mb-0" for="trade-in-input">
+                                <i class="fas fa-repeat me-1"></i> Trade-In / Phone Exchange Credit (कटौती Rs.)
+                            </label>
+                            <span class="text-muted font-mono fs-2xs" id="posTradeInTag"></span>
+                        </div>
+                        <div class="hisaav-input-wrapper">
+                            <input type="number" 
+                                   id="trade-in-input" 
+                                   class="hisaav-input font-mono text-danger fw-bold" 
+                                   value="0.00" 
+                                   placeholder="0.00">
+                            <button type="button" class="btn btn-link text-danger p-0 border-0 me-2 position-absolute end-0" id="posRemoveTradeInBtn" title="Detach trade-in">
+                                &times;
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Bill Narration -->
+                    <div class="hisaav-card p-3">
+                        <label class="hisaav-label" for="posBillNarration">Narration</label>
+                        <textarea id="posBillNarration" class="hisaav-textarea" placeholder="Enter remarks or transaction notes..."></textarea>
+                    </div>
+
+                    <!-- Bill Terms -->
+                    <div class="hisaav-card p-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="hisaav-label mb-0" for="posBillTerms">Bill Terms</label>
+                            <small class="text-muted fs-3xs">*Will not be displayed on the Invoice</small>
+                        </div>
+                        <textarea id="posBillTerms" class="hisaav-textarea" placeholder="Internal audit or counter terms..."></textarea>
+                    </div>
+
+                </div>
+
+                <!-- Bottom-Right: Vertical Financial Summary Card -->
+                <div class="hisaav-summary-card">
+                    <div class="summary-card-title">Billing Summary</div>
+
+                    <!-- Vertical Stack of Financial Rows -->
+                    <div class="summary-list">
+                        <!-- Row 1: Sub Total -->
+                        <div class="summary-row">
+                            <span class="summary-label">Sub Total</span>
+                            <span class="summary-value" id="posSubtotalText">0.00</span>
+                        </div>
+
+                        <!-- Row 2: Discount Summary Row -->
+                        <div class="summary-row">
+                            <span class="summary-label">Discount</span>
+                            <span class="summary-value text-danger" id="posDiscountTotalText">0.00</span>
+                        </div>
+
+                        <!-- Interactive Bill Discount Controls (% vs Rs. + Dynamic Symbol + Savings Badge) -->
+                        <div class="bill-discount-control-card">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="bill-disc-sublabel">
+                                    <i class="fas fa-tags text-primary me-1"></i> Bill Discount
+                                </span>
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 font-mono fs-2xs" id="billDiscountSavingsBadge">
+                                    -Rs. 0.00
+                                </span>
+                            </div>
+                            <div class="d-flex align-items-center gap-1">
+                                <!-- Mode Toggle Segmented Buttons -->
+                                <div class="btn-group btn-group-sm bill-disc-toggle-group" role="group">
+                                    <button type="button" class="btn btn-sm btn-dark active font-mono py-0 px-2" id="btnDiscountModePercent" data-mode="PERCENTAGE" title="Percentage Discount (%)">%</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary font-mono py-0 px-2" id="btnDiscountModeFixed" data-mode="AMOUNT" title="Flat Cash Discount (Rs.)">Rs.</button>
+                                </div>
+                                <!-- Input Box with Symbol Display -->
+                                <div class="input-group input-group-sm flex-grow-1">
+                                    <span class="input-group-text bg-light text-muted font-mono fs-2xs py-0 px-1.5" id="billDiscountSymbolDisplay">%</span>
+                                    <input type="number" 
+                                           id="posBillDiscountInput" 
+                                           class="form-control form-control-sm text-end font-mono fs-xs fw-bold" 
+                                           placeholder="0" 
+                                           value="0" 
+                                           min="0" 
+                                           step="any"
+                                           autocomplete="off">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Row 3: Non-Taxable Amount -->
+                        <div class="summary-row">
+                            <span class="summary-label">Non-Tax</span>
+                            <span class="summary-value" id="posNonTaxableText">0.00</span>
+                        </div>
+
+                        <!-- Row 4: Taxable Amount -->
+                        <div class="summary-row">
+                            <span class="summary-label">Taxable</span>
+                            <span class="summary-value" id="posTaxableText">0.00</span>
+                        </div>
+
+                        <!-- Row 5: Dedicated 13% VAT Highlight Row -->
+                        <div class="summary-row tax-row" id="posVatRow">
+                            <span class="summary-label">Tax (13% VAT)</span>
+                            <span class="summary-value" id="posVatText">Rs. 0.00</span>
+                        </div>
+
+                        <!-- Trade-In Deduction Row -->
+                        <div class="summary-row trade-in-row" id="posTradeInSummaryRow" style="display: none;">
+                            <span class="summary-label text-danger">Trade-In Credit</span>
+                            <span class="summary-value text-danger" id="posTradeInText">-Rs. 0.00</span>
+                        </div>
+                    </div>
+
+                    <!-- Prominent Total Card -->
+                    <div class="total-box">
+                        <span class="total-label">Total</span>
+                        <span class="total-amount" id="posGrandTotalText">Rs. 0.00</span>
+                    </div>
+
+                    <!-- Full-Width Emerald Cash Payment Button -->
+                    <button type="button" class="btn-emerald-cash-checkout" id="posDirectCashCheckoutBtn">
+                        💵 CASH PAYMENT (नगद भुक्तानी) [F4]
+                    </button>
+
+                    <!-- Secondary Payment Splits -->
+                    <div class="payment-sub-split-grid">
+                        <button type="button" class="btn-sub-tender" id="posCreditPayBtn" title="Customer Udhaari">
+                            Credit (उधारो)
+                        </button>
+                        <button type="button" class="btn-sub-tender" id="posSplitPaymentBtn" title="Split / FonePay / QR [F8]">
+                            Split / QR [F8]
+                        </button>
+                    </div>
+
+                </div>
+
+            </div>
+
         </div>
 
     </div>
+
 </div>
 
 <!-- =========================================================================
-     MODAL 1: SMART DUAL-IMEI SELECTOR MODAL (AUTO-FILLS SECONDARY IMEI)
+     3. PRESERVED OPERATIONAL MODALS (REPRESENTING EXISTING BACKEND WORKFLOWS)
      ========================================================================= -->
+
+<!-- MODAL 1: SMART DUAL-IMEI SELECTOR MODAL -->
 <div class="modal fade" id="imeiCaptureModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4">
@@ -672,20 +1202,17 @@
             </div>
             <div class="modal-body p-3">
                 <p class="fs-xs fw-bold text-dark mb-2" id="imeiModalPhoneName">Phone Model</p>
-                
                 <div class="mb-3">
                     <label class="form-label fs-2xs text-uppercase fw-bold text-muted mb-1">Pick Available In-Stock Handset:</label>
                     <select id="modalInStockSelect" class="form-select form-select-sm font-mono">
                         <option value="">-- Choose from In-Stock Phone Boxes --</option>
                     </select>
                 </div>
-
                 <div class="p-3 bg-light rounded-3 border mb-2">
                     <div class="mb-2">
                         <label class="form-label fs-xs fw-bold text-dark mb-1">Primary IMEI 1 (SIM 1):</label>
                         <input type="text" id="modalInputImei1" class="form-control font-mono fs-sm" placeholder="Scan or enter IMEI 1...">
                     </div>
-
                     <div>
                         <label class="form-label fs-xs fw-bold text-dark mb-1">
                             Secondary IMEI 2: 
@@ -698,7 +1225,6 @@
             <div class="modal-footer bg-light py-2 px-3 d-flex justify-content-between">
                 <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
                 <div class="d-flex gap-2">
-                    <!-- Skip IMEI Button dynamically unhidden by pos_engine.js in Backlog Mode -->
                     <button type="button" class="btn btn-outline-warning btn-sm px-3 rounded-pill fw-bold d-none" id="skipImeiModalBtn" title="Sell Handset without Serial/IMEI in Backlog Mode">
                         <i class="fas fa-forward me-1"></i> Skip IMEI (Backlog)
                     </button>
@@ -711,9 +1237,7 @@
     </div>
 </div>
 
-<!-- =========================================================================
-     MODAL 2: UPGRADED OLD PHONE TRADE-IN / BUY-BACK VOUCHER ATTACH MODAL
-     ========================================================================= -->
+<!-- MODAL 2: TRADE-IN BUY-BACK VOUCHER ATTACH MODAL -->
 <div class="modal fade" id="exchangeModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
@@ -725,11 +1249,9 @@
                         <small class="text-dark-50 fs-2xs">Search active trade-in inspection voucher to apply credit deduction</small>
                     </div>
                 </div>
-                <button type="button" class="btn-close btn-close-modal" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            
             <div class="modal-body p-3 bg-light">
-                <!-- Search Box for Unattached Vouchers -->
                 <div class="card border-0 shadow-xs rounded-3 p-3 bg-white mb-3">
                     <label class="form-label fs-xs fw-bold text-dark mb-1">
                         <i class="fas fa-search text-warning-emphasis me-1"></i> Search Active Trade-In Vouchers:
@@ -738,8 +1260,8 @@
                         <span class="input-group-text bg-light border"><i class="fas fa-ticket-simple text-muted"></i></span>
                         <input type="text" 
                                id="tradeInVoucherSearchInput" 
-                               class="form-control border font-monospace" 
-                               placeholder="Search Voucher # (e.g. EXC-MAIN-...), Customer Phone 98XXXXXXXX, or IMEI..." 
+                               class="form-control border font-mono" 
+                               placeholder="Search Voucher # (e.g. EXC-MAIN-...), Customer Phone, or IMEI..." 
                                autocomplete="off">
                         <button type="button" class="btn btn-outline-secondary" id="clearTradeInSearchBtn" style="display: none;">
                             <i class="fas fa-times"></i>
@@ -748,15 +1270,13 @@
                             Browse Recent
                         </button>
                     </div>
-                    <!-- Live Search Dropdown -->
                     <div id="tradeInSearchResultsDropdown" class="list-group shadow mt-1 rounded-3 border overflow-hidden" style="display: none; max-height: 240px; overflow-y: auto; z-index: 1060;"></div>
                 </div>
 
-                <!-- Selected Voucher Highlight Container -->
                 <div id="selectedVoucherCard" class="card border-2 border-warning bg-warning bg-opacity-10 rounded-3 p-3 d-none mb-3">
                     <div class="d-flex justify-content-between align-items-start mb-2">
                         <div>
-                            <span class="badge bg-warning text-dark font-monospace fw-bold fs-xs" id="dispVoucherNumber">EXC-000000</span>
+                            <span class="badge bg-warning text-dark font-mono fw-bold fs-xs" id="dispVoucherNumber">EXC-000000</span>
                             <span class="badge bg-dark text-white fs-2xs ms-1" id="dispConditionGrade">GRADE B</span>
                             <span class="badge bg-success bg-opacity-10 text-success border border-success fs-2xs ms-1" id="dispMdmsBadge">MDMS OK</span>
                         </div>
@@ -769,40 +1289,29 @@
                         <div class="col-6">
                             <span class="text-muted d-block fs-2xs">Device Traded-In:</span>
                             <strong class="text-dark" id="dispDeviceModel">Brand &amp; Model</strong>
-                            <small class="text-muted d-block font-monospace" id="dispDeviceSpecs">128GB - Black</small>
+                            <small class="text-muted d-block font-mono" id="dispDeviceSpecs">128GB - Black</small>
                         </div>
                         <div class="col-6">
                             <span class="text-muted d-block fs-2xs">Customer Details:</span>
                             <strong class="text-dark" id="dispCustomerName">Customer Name</strong>
-                            <small class="text-muted d-block font-monospace" id="dispCustomerPhone">98XXXXXXXX</small>
+                            <small class="text-muted d-block font-mono" id="dispCustomerPhone">98XXXXXXXX</small>
                         </div>
                         <div class="col-12 mt-2 pt-2 border-top border-warning border-opacity-25 d-flex justify-content-between align-items-center">
                             <div>
                                 <span class="text-muted fs-2xs d-block">Handset Primary IMEI:</span>
-                                <span class="font-monospace text-dark fw-bold" id="dispDeviceImei">35XXXXXXXXXXXXX</span>
+                                <span class="font-mono text-dark fw-bold" id="dispDeviceImei">35XXXXXXXXXXXXX</span>
                             </div>
                             <div class="text-end">
                                 <span class="text-muted fs-2xs d-block">Agreed Buy-Back Valuation:</span>
-                                <h5 class="fw-extrabold text-danger font-monospace mb-0" id="dispTradeInAmount">Rs. 0.00</h5>
+                                <h5 class="fw-extrabold text-danger font-mono mb-0" id="dispTradeInAmount">Rs. 0.00</h5>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Hidden Input Fields Transmitting Verified Voucher Data to POS Checkout -->
                 <input type="hidden" id="selectedTradeInVoucherId" name="trade_in_voucher_id" value="">
                 <input type="hidden" id="selectedTradeInVoucherNumber" value="">
                 <input type="hidden" id="selectedTradeInVoucherAmount" value="0.00">
-
-                <!-- Helper Notice & Direct Intake Wizard Launcher -->
-                <div class="d-flex justify-content-between align-items-center p-2 bg-white rounded-3 border fs-xs">
-                    <span class="text-muted">
-                        <i class="fas fa-info-circle text-primary me-1"></i> Device not evaluated yet?
-                    </span>
-                    <a href="{% url 'sales:trade_in_wizard' %}" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill fw-bold fs-2xs">
-                        <i class="fas fa-plus-circle me-1"></i> New Diagnostic Intake &rarr;
-                    </a>
-                </div>
             </div>
 
             <div class="modal-footer bg-white py-2 px-3 d-flex justify-content-between">
@@ -815,9 +1324,7 @@
     </div>
 </div>
 
-<!-- =========================================================================
-     MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL
-     ========================================================================= -->
+<!-- MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL -->
 <div class="modal fade" id="receiptModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
@@ -829,7 +1336,7 @@
             </div>
             
             <div class="modal-body p-3 bg-light text-center">
-                <div class="thermal-receipt-preview text-start" id="thermalReceiptContent">
+                <div class="thermal-receipt-preview text-start" id="thermalReceiptContent" style="width: 290px; margin: 0 auto; background: #fff; padding: 14px; border: 1px dashed #cbd5e1; font-family: monospace; font-size: 11px;">
                     <div class="text-center fw-bold fs-6">{{ COMPANY_NAME|upper }}</div>
                     {% if COMPANY_NAME_NP %}
                     <div class="text-center" style="font-size: 10px;">{{ COMPANY_NAME_NP }}</div>
@@ -848,9 +1355,7 @@
                     <div>Customer: <span id="recCustomer">Walk-in Customer</span></div>
                     
                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
-                    
                     <div id="recItemsContainer"></div>
-
                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
 
                     <div class="d-flex justify-content-between">
@@ -861,10 +1366,6 @@
                         <span>Exchange Credit:</span>
                         <strong id="recExchange">-Rs. 0.00</strong>
                     </div>
-                    <div class="d-flex justify-content-between" id="recDiscountRow" style="display: none;">
-                        <span>Discount:</span>
-                        <strong id="recDiscount">-Rs. 0.00</strong>
-                    </div>
                     <div class="d-flex justify-content-between fw-bold" style="font-size: 13px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2px 0; margin-top: 2px;">
                         <span>GRAND TOTAL:</span>
                         <span id="recGrandTotal">Rs. 0.00</span>
@@ -872,12 +1373,6 @@
                     <div class="d-flex justify-content-between mt-1">
                         <span>Payment Mode:</span>
                         <strong id="recPayMode">CASH</strong>
-                    </div>
-
-                    <div style="border-top: 1px dashed #000; margin: 6px 0;"></div>
-                    <div class="text-center" style="font-size: 8.5px;">
-                        * Exchange possible within 7 days with this slip.<br>
-                        *** Thank You For Visiting! ***
                     </div>
                 </div>
             </div>
@@ -887,126 +1382,61 @@
                     Next Bill
                 </button>
                 <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold shadow-sm" id="printThermalReceiptModalBtn">
-                    <i class="fas fa-print me-1"></i> Print 80mm Slip
+                    <i class="fas fa-print me-1"></i> Print Slip
                 </button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- ==========================================================================
-     MODAL 4: SUPERVISOR MANAGER OVERRIDE PIN & REASON AUTHORIZATION MODAL
-     ========================================================================== -->
+<!-- MODAL 4: SUPERVISOR MANAGER OVERRIDE PIN MODAL -->
 <div class="modal fade" id="posManagerPinModal" tabindex="-1" aria-labelledby="posManagerPinModalLabel" aria-hidden="true" data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
             <div class="modal-header bg-dark text-white border-0 py-2 px-3">
-                <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-warning text-dark p-2 rounded-circle"><i class="fas fa-key"></i></span>
-                    <div>
-                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posManagerPinModalLabel">Supervisor Override Authorization</h6>
-                        <small class="text-white-50 fs-2xs">Manager PIN &amp; Commercial Justification</small>
-                    </div>
-                </div>
+                <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posManagerPinModalLabel">Supervisor Override PIN</h6>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closePinModalBtn" aria-label="Close"></button>
             </div>
-            <div class="modal-body p-4">
-                <p class="fs-xs text-muted text-center mb-3" id="posPinModalReasonText">
-                    This action requires Supervisor authorization PIN.
-                </p>
-
-                <!-- Supervisor Numeric PIN Input -->
-                <div class="mb-3 text-center">
-                    <label class="form-label fs-xs fw-bold text-dark mb-1">Enter 4-6 Digit Manager PIN <span class="text-danger">*</span></label>
+            <div class="modal-body p-4 text-center">
+                <p class="fs-xs text-muted mb-3" id="posPinModalReasonText">Supervisor authorization PIN is required.</p>
+                <div class="mb-3">
                     <input type="password" id="posManagerPinInput" 
-                           class="form-control form-control-lg text-center font-monospace fw-bold fs-4 letter-spacing-lg" 
+                           class="form-control form-control-lg text-center font-mono fw-bold fs-4" 
                            placeholder="••••" maxlength="6" autocomplete="new-password">
                 </div>
-
-                <!-- Commercial Justification Dropdown Selection -->
-                <div class="mb-3">
-                    <label class="form-label fs-xs fw-bold text-dark mb-1">Commercial Justification / Reason <span class="text-danger">*</span></label>
-                    <select id="posDiscountReasonSelect" class="form-select form-select-sm fw-semibold">
-                        <option value="CUSTOMER_NEGOTIATION" selected>Customer Negotiation</option>
-                        <option value="COMPETITIVE_PRICE">Competitive Price Match</option>
-                        <option value="LOYALTY_REWARD">Loyalty Customer Reward</option>
-                        <option value="CLEARANCE_SALE">Clearance / Old Stock</option>
-                        <option value="DAMAGED_PACKAGING">Packaging Damage</option>
-                        <option value="MANAGEMENT_SPECIAL">Management Special Approval</option>
-                        <option value="OTHER">Other</option>
-                    </select>
-                </div>
-
-                <!-- Optional Free-Text Remarks Input -->
-                <div class="mb-3 d-none" id="posDiscountReasonNotesContainer">
-                    <label class="form-label fs-2xs fw-bold text-muted mb-1">Justification Details / Remarks <span class="text-danger">*</span></label>
-                    <input type="text" id="posDiscountReasonNotes" class="form-control form-control-sm" placeholder="Please specify other reason...">
-                </div>
-
-                <!-- Hidden Input Synced for POS Engine Payload Extraction -->
-                <input type="hidden" id="posDiscountReasonInput" name="discount_reason" value="CUSTOMER_NEGOTIATION">
-
                 <div id="posPinErrorAlert" class="alert alert-danger p-2 fs-2xs d-none mb-0"></div>
             </div>
             <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
                 <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="submitManagerPinBtn">
-                    <i class="fas fa-check-circle me-1"></i> Authorize
-                </button>
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="submitManagerPinBtn">Authorize</button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- ==========================================================================
-     MODAL 5: POS LIVE CAMERA & IMAGE SCANNER POPUP MODAL
-     ========================================================================== -->
+<!-- MODAL 5: POS LIVE CAMERA SCANNER MODAL -->
 <div class="modal fade" id="posCameraScannerModal" tabindex="-1" aria-labelledby="posCameraScannerModalLabel" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden bg-dark text-white">
             <div class="modal-header border-bottom border-secondary border-opacity-25 py-2 px-3 bg-dark">
-                <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-success p-2 rounded-circle"><i class="fas fa-camera"></i></span>
-                    <div>
-                        <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posCameraScannerModalLabel">Camera / Picture Barcode &amp; IMEI Scanner</h6>
-                        <small class="text-white-50 fs-2xs">Aim camera or pick mobile box image from PC</small>
-                    </div>
-                </div>
+                <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posCameraScannerModalLabel">Camera Barcode &amp; IMEI Scanner</h6>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" id="closePosCameraScannerBtn"></button>
             </div>
-            
-            <div class="modal-body pos-scanner-modal-body">
-                <video id="posCameraFeedVideo" class="scanner-video-feed" playsinline autoplay muted></video>
-                
-                <div class="scanner-viewfinder-overlay">
-                    <div class="scanner-aiming-reticle">
-                        <div class="scanner-corner-tr"></div>
-                        <div class="scanner-corner-bl"></div>
-                        <div class="scanner-laser-line"></div>
-                    </div>
-                </div>
-
-                <div class="scanner-controls-bar flex-wrap">
-                    <label class="btn btn-primary btn-sm rounded-pill px-3 py-1 bg-opacity-90 fs-xs fw-bold shadow-sm" style="cursor: pointer;">
+            <div class="modal-body p-0 position-relative" style="min-height: 320px; background: #000;">
+                <video id="posCameraFeedVideo" style="width: 100%; height: 320px; object-fit: cover;" playsinline autoplay muted></video>
+                <div class="position-absolute bottom-0 start-0 end-0 p-3 d-flex justify-content-center gap-2 z-3">
+                    <label class="btn btn-primary btn-sm rounded-pill px-3 py-1 fs-xs fw-bold shadow-sm" style="cursor: pointer;">
                         <i class="fas fa-image me-1"></i> Pick Box Picture
                         <input type="file" id="posModalImageFileInput" accept="image/*" style="display: none;">
                     </label>
-                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="posTorchToggleBtn" style="display: none;">
-                        <i class="fas fa-bolt me-1 text-warning"></i> Flashlight
-                    </button>
-                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 bg-opacity-75 border border-secondary text-white fs-xs" id="posSwitchLensBtn">
+                    <button type="button" class="btn btn-dark btn-sm rounded-pill px-3 py-1 border border-secondary text-white fs-xs" id="posSwitchLensBtn">
                         <i class="fas fa-camera-rotate me-1 text-info"></i> Switch Lens
                     </button>
                 </div>
             </div>
-
             <div class="modal-footer border-top border-secondary border-opacity-25 py-2 px-3 bg-dark d-flex justify-content-between align-items-center">
-                <div class="fs-2xs text-white-50" id="posCameraStatusText">
-                    <i class="fas fa-circle-notch fa-spin me-1 text-success"></i> Scanner Active (15 FPS)
-                </div>
-                <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 py-1 fs-xs" data-bs-dismiss="modal">
-                    Close Scanner
-                </button>
+                <div class="fs-2xs text-white-50" id="posCameraStatusText">Aim barcode inside camera</div>
+                <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 py-1 fs-xs" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
@@ -1022,430 +1452,129 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<!-- Core POS & Hardware Scripts -->
+<!-- Hardware & POS Client Scripts -->
 <script src="{% static 'js/barcode_scanner_listener.js' %}"></script>
 <script src="{% static 'js/camera_barcode_scanner.js' %}"></script>
 <script src="{% static 'js/pos_engine.js' %}"></script>
 
 <script>
 /**
- * POS Interactive Controls, Nepali Date Controller & Clean Event Listeners
+ * Hisaav Layout Integration, Customer Context Propagation & Authoritative Event Routing
  */
 document.addEventListener('DOMContentLoaded', () => {
-    // =========================================================================
-    // 1. ONLINE / OFFLINE CONNECTIVITY LISTENERS
-    // =========================================================================
-    const netStatusBadge = document.getElementById('posNetworkStatusBadge');
-    window.addEventListener('online', () => {
-        if (netStatusBadge) {
-            netStatusBadge.className = 'badge bg-success text-white';
-            netStatusBadge.innerHTML = '<i class="fas fa-wifi me-1"></i> Online';
-        }
-    });
-    window.addEventListener('offline', () => {
-        if (netStatusBadge) {
-            netStatusBadge.className = 'badge bg-danger text-white';
-            netStatusBadge.innerHTML = '<i class="fas fa-triangle-exclamation me-1"></i> Offline Mode';
-        }
-    });
-
-    // =========================================================================
-    // 2. REPAIR TICKET SEARCH MODAL TRIGGER & SHORTCUT
-    // =========================================================================
-    const attachRepairPromptBtn = document.getElementById('attachRepairPromptBtn');
-
-    function openRepairTicketModal() {
-        const repairModalEl = document.getElementById('repairTicketSearchModal') || 
-                              document.getElementById('repairSearchModal') || 
-                              document.getElementById('repairTicketModal');
-        if (repairModalEl) {
-            const modalInstance = bootstrap.Modal.getOrCreateInstance(repairModalEl);
-            modalInstance.show();
-        } else if (window.smartPos && typeof window.smartPos.openRepairModal === 'function') {
-            window.smartPos.openRepairModal();
-        }
-    }
-
-    if (attachRepairPromptBtn) {
-        attachRepairPromptBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            openRepairTicketModal();
-        });
-    }
-
-    // =========================================================================
-    // 3. SAFE ATTACHMENT OF RECALL, SPLIT & RECEIPT BUTTON HANDLERS
-    // =========================================================================
-    const recallBtn = document.getElementById('posRecallHeldCartsBtn');
-    if (recallBtn) {
-        recallBtn.addEventListener('click', () => {
-            if (window.smartPos && window.smartPos.holdCartManager && typeof window.smartPos.holdCartManager.openRecallModal === 'function') {
-                window.smartPos.holdCartManager.openRecallModal();
-            } else {
-                const heldModal = document.getElementById('holdBillsModal');
-                if (heldModal) bootstrap.Modal.getOrCreateInstance(heldModal).show();
+    // 1. One-Click Clear Buttons for Patron Fields
+    const clearNameBtn = document.getElementById('clearCustomerNameBtn');
+    const custNameInput = document.getElementById('posCustomerInput');
+    const custIdInput = document.getElementById('posCustomerId');
+    if (clearNameBtn && custNameInput) {
+        clearNameBtn.addEventListener('click', () => {
+            custNameInput.value = '';
+            if (custIdInput) custIdInput.value = '';
+            custNameInput.focus();
+            if (window.smartPos && window.smartPos.customerManager) {
+                window.smartPos.customerManager.clearCustomer(false);
             }
         });
     }
 
-    const splitBtn = document.getElementById('posSplitPaymentBtn');
-    if (splitBtn) {
-        splitBtn.addEventListener('click', () => {
-            if (window.smartPos && typeof window.smartPos.openSplitPaymentModal === 'function') {
-                window.smartPos.openSplitPaymentModal();
-            } else {
-                const splitModal = document.getElementById('splitPaymentModal');
-                if (splitModal) bootstrap.Modal.getOrCreateInstance(splitModal).show();
-            }
-        });
-    }
-
-    const printReceiptBtn = document.getElementById('printThermalReceiptModalBtn');
-    if (printReceiptBtn) {
-        printReceiptBtn.addEventListener('click', () => {
-            window.print();
-        });
-    }
-
-    // =========================================================================
-    // 4. ROBUST MULTI-FORMAT TRADE-IN VOUCHER LOOKUP
-    // =========================================================================
-    const voucherSearchInput = document.getElementById('tradeInVoucherSearchInput');
-    const clearSearchBtn = document.getElementById('clearTradeInSearchBtn');
-    const voucherDropdown = document.getElementById('tradeInSearchResultsDropdown');
-    const btnBrowseVouchers = document.getElementById('btnBrowseAvailableVouchers');
-    const selectedVoucherCard = document.getElementById('selectedVoucherCard');
-    const btnDetachVoucher = document.getElementById('btnDetachTradeInVoucher');
-    const applyVoucherBtn = document.getElementById('applyTradeInVoucherBtn');
-
-    const hidVoucherId = document.getElementById('selectedTradeInVoucherId');
-    const hidVoucherNo = document.getElementById('selectedTradeInVoucherNumber');
-    const hidVoucherAmt = document.getElementById('selectedTradeInVoucherAmount');
-
-    const posTradeInRow = document.getElementById('posTradeInRow');
-    const posTradeInTag = document.getElementById('posTradeInTag');
-    const posTradeInText = document.getElementById('posTradeInText');
-    const posRemoveTradeInBtn = document.getElementById('posRemoveTradeInBtn');
-
-    let voucherDebounce = null;
-    let currentlySelectedVoucher = null;
-
-    function renderVoucherSearchResults(vouchers) {
-        if (!vouchers || !vouchers.length) {
-            voucherDropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs">No available or unattached trade-in vouchers found.</div>';
-            voucherDropdown.style.display = 'block';
-            return;
-        }
-
-        voucherDropdown.innerHTML = vouchers.map(v => {
-            const valAmt = Number(v.final_trade_in_value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            return `
-                <button type="button" class="list-group-item list-group-item-action py-2 px-3 border-bottom d-flex justify-content-between align-items-center select-tradein-item-btn"
-                        data-id="${v.id}"
-                        data-voucher="${v.voucher_number}"
-                        data-model="${v.brand_name} ${v.model_name}"
-                        data-specs="${v.storage_capacity || ''} ${v.color_variant || ''}"
-                        data-imei="${v.imei_1 || ''}"
-                        data-grade="${v.recommended_condition_grade || 'USED_GRADE_B'}"
-                        data-customer="${v.customer_name || 'Walk-in'}"
-                        data-phone="${v.customer_phone || ''}"
-                        data-amount="${v.final_trade_in_value || 0}">
-                    <div>
-                        <div class="fw-bold font-monospace fs-xs text-primary">
-                            <i class="fas fa-ticket-simple me-1"></i> ${v.voucher_number}
-                            <span class="badge bg-light text-dark border ms-1 font-sans fs-2xs">${v.brand_name} ${v.model_name}</span>
-                        </div>
-                        <small class="text-muted fs-2xs">
-                            Customer: <strong>${v.customer_name || 'Walk-in'}</strong> (${v.customer_phone || 'No phone'}) 
-                            &bull; IMEI: <span class="font-monospace">${v.imei_1 || 'N/A'}</span>
-                        </small>
-                    </div>
-                    <div class="text-end">
-                        <span class="badge bg-danger bg-opacity-10 text-danger font-monospace fs-xs">Rs. ${valAmt}</span>
-                        <small class="text-primary d-block fs-2xs fw-bold">Select &rarr;</small>
-                    </div>
-                </button>
-            `;
-        }).join('');
-
-        voucherDropdown.style.display = 'block';
-
-        voucherDropdown.querySelectorAll('.select-tradein-item-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                selectTradeInVoucher({
-                    id: btn.dataset.id,
-                    voucher_number: btn.dataset.voucher,
-                    model_name: btn.dataset.model,
-                    specs: btn.dataset.specs,
-                    imei: btn.dataset.imei,
-                    grade: btn.dataset.grade,
-                    customer: btn.dataset.customer,
-                    phone: btn.dataset.phone,
-                    amount: btn.dataset.amount
-                });
-            });
-        });
-    }
-
-    function fetchTradeInVouchers(query = '') {
-        voucherDropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-2 text-warning"></i>Searching active vouchers...</div>';
-        voucherDropdown.style.display = 'block';
-
-        let url = '/sales/api/trade-in/lookup/';
-        if (query) {
-            if (query.toUpperCase().startsWith('EXC-')) {
-                url += `?voucher=${encodeURIComponent(query)}&q=${encodeURIComponent(query)}`;
-            } else {
-                url += `?q=${encodeURIComponent(query)}`;
-            }
-        }
-
-        fetch(url)
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'error') {
-                    voucherDropdown.innerHTML = `<div class="p-3 text-center text-danger fs-xs"><i class="fas fa-triangle-exclamation me-1"></i>${data.error || 'Voucher not found or invalid.'}</div>`;
-                    return;
-                }
-
-                let results = [];
-                if (Array.isArray(data)) {
-                    results = data;
-                } else if (data && Array.isArray(data.results)) {
-                    results = data.results;
-                } else if (data && (data.voucher_number || data.id)) {
-                    results = [data];
-                } else if (data && data.voucher && (data.voucher.voucher_number || data.voucher.id)) {
-                    results = [data.voucher];
-                }
-
-                renderVoucherSearchResults(results);
-            })
-            .catch(err => {
-                console.error('[TradeInLookup] Error:', err);
-                voucherDropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Error querying trade-in vouchers.</div>';
-            });
-    }
-
-    function selectTradeInVoucher(v) {
-        currentlySelectedVoucher = v;
-        hidVoucherId.value = v.id;
-        hidVoucherNo.value = v.voucher_number;
-        hidVoucherAmt.value = v.amount;
-
-        document.getElementById('dispVoucherNumber').innerText = v.voucher_number;
-        document.getElementById('dispDeviceModel').innerText = v.model_name;
-        document.getElementById('dispDeviceSpecs').innerText = v.specs || 'Standard Spec';
-        document.getElementById('dispDeviceImei').innerText = v.imei || 'Not Specified';
-        document.getElementById('dispCustomerName').innerText = v.customer || 'Walk-in Customer';
-        document.getElementById('dispCustomerPhone').innerText = v.phone || '-';
-        document.getElementById('dispConditionGrade').innerText = v.grade;
-        
-        const numAmt = Number(v.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        document.getElementById('dispTradeInAmount').innerText = `-Rs. ${numAmt}`;
-
-        selectedVoucherCard.classList.remove('d-none');
-        applyVoucherBtn.disabled = false;
-        voucherDropdown.style.display = 'none';
-        if (voucherSearchInput) voucherSearchInput.value = v.voucher_number;
-    }
-
-    function detachTradeInVoucher() {
-        currentlySelectedVoucher = null;
-        hidVoucherId.value = '';
-        hidVoucherNo.value = '';
-        hidVoucherAmt.value = '0.00';
-
-        selectedVoucherCard.classList.add('d-none');
-        applyVoucherBtn.disabled = true;
-        if (voucherSearchInput) voucherSearchInput.value = '';
-        if (clearSearchBtn) clearSearchBtn.style.display = 'none';
-
-        if (posTradeInRow) posTradeInRow.style.display = 'none';
-        if (posTradeInTag) posTradeInTag.innerText = '';
-        if (posTradeInText) posTradeInText.innerText = '-Rs. 0.00';
-
-        if (window.smartPos && window.smartPos.cart) {
-            window.smartPos.cart.tradeInVoucherId = null;
-            window.smartPos.cart.tradeInCreditAmount = 0;
-            if (typeof window.smartPos.cart.calculateTotals === 'function') {
-                window.smartPos.cart.calculateTotals();
-            }
-        }
-    }
-
-    if (voucherSearchInput) {
-        voucherSearchInput.addEventListener('input', function() {
-            const q = this.value.trim();
-            if (clearSearchBtn) clearSearchBtn.style.display = q ? 'block' : 'none';
-
-            clearTimeout(voucherDebounce);
-            if (q.length < 2) {
-                voucherDropdown.style.display = 'none';
-                return;
-            }
-
-            voucherDebounce = setTimeout(() => {
-                fetchTradeInVouchers(q);
-            }, 250);
-        });
-    }
-
-    if (clearSearchBtn) {
-        clearSearchBtn.addEventListener('click', () => {
-            voucherSearchInput.value = '';
-            clearSearchBtn.style.display = 'none';
-            voucherDropdown.style.display = 'none';
-            voucherSearchInput.focus();
-        });
-    }
-
-    if (btnBrowseVouchers) {
-        btnBrowseVouchers.addEventListener('click', () => fetchTradeInVouchers(''));
-    }
-
-    if (btnDetachVoucher) {
-        btnDetachVoucher.addEventListener('click', detachTradeInVoucher);
-    }
-
-    if (posRemoveTradeInBtn) {
-        posRemoveTradeInBtn.addEventListener('click', detachTradeInVoucher);
-    }
-
-    if (applyVoucherBtn) {
-        applyVoucherBtn.addEventListener('click', () => {
-            if (!currentlySelectedVoucher) return;
-
-            const vAmt = parseFloat(currentlySelectedVoucher.amount) || 0;
-            if (posTradeInRow) posTradeInRow.style.display = 'flex';
-            if (posTradeInTag) posTradeInTag.innerText = `(${currentlySelectedVoucher.voucher_number})`;
-            if (posTradeInText) posTradeInText.innerText = `-Rs. ${vAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
+    const clearPanBtn = document.getElementById('clearCustomerPanBtn');
+    const custPanInput = document.getElementById('posCustomerPanInput');
+    if (clearPanBtn && custPanInput) {
+        clearPanBtn.addEventListener('click', () => {
+            custPanInput.value = '';
             if (window.smartPos && window.smartPos.cart) {
-                window.smartPos.cart.tradeInVoucherId = parseInt(currentlySelectedVoucher.id, 10);
-                window.smartPos.cart.tradeInCreditAmount = vAmt;
-                window.smartPos.cart.tradeInVoucherNumber = currentlySelectedVoucher.voucher_number;
-                if (typeof window.smartPos.cart.calculateTotals === 'function') {
-                    window.smartPos.cart.calculateTotals();
-                }
-            }
-
-            const exchangeModalEl = document.getElementById('exchangeModal');
-            if (exchangeModalEl) {
-                bootstrap.Modal.getInstance(exchangeModalEl).hide();
-            }
-
-            if (window.smartPos && typeof window.smartPos.showNotification === 'function') {
-                window.smartPos.showNotification(`Trade-In voucher ${currentlySelectedVoucher.voucher_number} attached. Rs. ${vAmt} credit applied.`, 'success');
+                window.smartPos.cart.customerPan = '';
             }
         });
     }
 
-    document.addEventListener('click', (e) => {
-        if (voucherSearchInput && !voucherSearchInput.contains(e.target) && !voucherDropdown.contains(e.target)) {
-            voucherDropdown.style.display = 'none';
-        }
-    });
+    const clearMobileBtn = document.getElementById('clearCustomerMobileBtn');
+    const custMobileInput = document.getElementById('posCustomerMobileInput');
+    if (clearMobileBtn && custMobileInput) {
+        clearMobileBtn.addEventListener('click', () => {
+            custMobileInput.value = '';
+            if (window.smartPos && window.smartPos.cart) {
+                window.smartPos.cart.customerPhone = '';
+            }
+        });
+    }
 
-    // =========================================================================
-    // 5. ACTIVE INVOICE NEPALI B.S. DATE CONTROLLER & BACKDATING ENGINE
-    // =========================================================================
-    const taxMetaEl = document.getElementById('posTaxConfigMeta');
-    const todayBsDate = taxMetaEl ? (taxMetaEl.dataset.todayBs || '{{ CURRENT_BS_DATE_EN }}') : '{{ CURRENT_BS_DATE_EN }}';
-    const todayBsNpDate = taxMetaEl ? (taxMetaEl.dataset.todayBsNp || '{{ CURRENT_BS_DATE_NP }}') : '{{ CURRENT_BS_DATE_NP }}';
-    const canBackdate = taxMetaEl ? (taxMetaEl.dataset.canBackdate === 'true') : false;
+    // Manual input synchronization into smartPos.cart
+    if (custPanInput) {
+        custPanInput.addEventListener('input', (e) => {
+            if (window.smartPos && window.smartPos.cart) {
+                window.smartPos.cart.customerPan = e.target.value.trim();
+            }
+        });
+    }
 
-    let activeInvoiceBsDate = todayBsDate;
-    let isInvoiceBackdated = false;
+    if (custMobileInput) {
+        custMobileInput.addEventListener('input', (e) => {
+            if (window.smartPos && window.smartPos.cart) {
+                window.smartPos.cart.customerPhone = e.target.value.trim();
+            }
+        });
+    }
 
-    const displayBillDateBs = document.getElementById('displayBillDateBs');
-    const displayBillDateNp = document.getElementById('displayBillDateNp');
-    const activeBsDateBadge = document.getElementById('activeBsDateBadge');
-    const topBarDateBadge = document.getElementById('topBarDateBadge');
+    if (custNameInput) {
+        custNameInput.addEventListener('input', (e) => {
+            // If the user manually edits the name, reset the bound customer ID unless selected from dropdown
+            if (custIdInput) {
+                if (window.smartPos && window.smartPos.customerManager && window.smartPos.customerManager.selectedCustomer) {
+                    if (window.smartPos.customerManager.selectedCustomer.name !== e.target.value) {
+                        custIdInput.value = '';
+                        window.smartPos.customerManager.selectedCustomer = null;
+                        if (window.smartPos.cart) window.smartPos.cart.clearCustomer();
+                    }
+                } else {
+                    custIdInput.value = '';
+                }
+            }
+        });
+    }
+
+    // 2. Quick 'Walk-in' Click Trigger
+    const quickWalkInBtn = document.getElementById('quickWalkInCustomerBtn');
+    if (quickWalkInBtn) {
+        quickWalkInBtn.addEventListener('click', () => {
+            if (custNameInput) custNameInput.value = 'Walk-in Customer';
+            if (custPanInput) custPanInput.value = '-';
+            if (custMobileInput) custMobileInput.value = '-';
+            if (custIdInput) custIdInput.value = '';
+            if (window.smartPos && window.smartPos.customerManager) {
+                window.smartPos.customerManager.setWalkInCustomer();
+            }
+        });
+    }
+
+    // 3. Bill Date B.S. Controller
     const btnChangeBillDate = document.getElementById('btnChangeBillDate');
-    const btnResetTodayDate = document.getElementById('btnResetTodayDate');
     const customDatePickerWrapper = document.getElementById('customDatePickerWrapper');
-    const posBillDateBsInput = document.getElementById('posBillDateBsInput');
     const btnApplyCustomDate = document.getElementById('btnApplyCustomDate');
     const btnCancelCustomDate = document.getElementById('btnCancelCustomDate');
-    const recBillDate = document.getElementById('recBillDate');
-
-    function updateConfirmedBillDateUI(newBsDate) {
-        activeInvoiceBsDate = newBsDate;
-        isInvoiceBackdated = (newBsDate !== todayBsDate);
-
-        if (displayBillDateBs) displayBillDateBs.innerText = newBsDate;
-        if (topBarDateBadge) topBarDateBadge.innerText = `${newBsDate} BS`;
-        if (recBillDate) recBillDate.innerText = `${newBsDate} BS`;
-
-        if (activeBsDateBadge) {
-            if (isInvoiceBackdated) {
-                activeBsDateBadge.className = 'date-status-badge-backdated';
-                activeBsDateBadge.innerHTML = `<i class="fas fa-clock-rotate-left me-1"></i> Backdated: ${newBsDate} BS`;
-                if (displayBillDateNp) displayBillDateNp.innerText = '(मिति परिवर्तन)';
-                if (btnResetTodayDate) btnResetTodayDate.classList.remove('d-none');
-            } else {
-                activeBsDateBadge.className = 'date-status-badge-today';
-                activeBsDateBadge.innerHTML = `<span id="displayBillDateBs">${newBsDate}</span> BS`;
-                if (displayBillDateNp) displayBillDateNp.innerText = `(${todayBsNpDate || 'आज'})`;
-                if (btnResetTodayDate) btnResetTodayDate.classList.add('d-none');
-            }
-        }
-    }
+    const posBillDateBsInput = document.getElementById('posBillDateBsInput');
+    const displayBillDateBs = document.getElementById('displayBillDateBs');
+    const btnResetTodayDate = document.getElementById('btnResetTodayDate');
 
     if (btnChangeBillDate && customDatePickerWrapper) {
-        btnChangeBillDate.addEventListener('click', async () => {
-            if (customDatePickerWrapper.classList.contains('d-none')) {
-                if (!canBackdate) {
-                    if (window.smartPos && window.smartPos.checkout) {
-                        const pin = await window.smartPos.checkout.promptForManagerPin(
-                            "Supervisor PIN authorization is required to backdate sales estimates."
-                        );
-                        if (!pin) {
-                            if (window.smartPos) window.smartPos.showNotification("Backdating cancelled: Supervisor PIN required.", "warning");
-                            return;
-                        }
-                    }
+        btnChangeBillDate.addEventListener('click', () => {
+            customDatePickerWrapper.classList.toggle('d-none');
+            if (!customDatePickerWrapper.classList.contains('d-none') && posBillDateBsInput) {
+                posBillDateBsInput.focus();
+                if (window.initNepaliDatepickers) {
+                    window.initNepaliDatepickers(customDatePickerWrapper);
                 }
-
-                customDatePickerWrapper.classList.remove('d-none');
-                if (posBillDateBsInput) {
-                    posBillDateBsInput.focus();
-                    if (window.initNepaliDatepickers) {
-                        window.initNepaliDatepickers(customDatePickerWrapper);
-                    }
-                }
-            } else {
-                customDatePickerWrapper.classList.add('d-none');
             }
         });
     }
 
     if (btnApplyCustomDate && posBillDateBsInput) {
         btnApplyCustomDate.addEventListener('click', () => {
-            const chosenDate = posBillDateBsInput.value.trim();
-            if (!chosenDate || !/^\d{4}[-/]\d{2}[-/]\d{2}$/.test(chosenDate)) {
-                alert('Please enter a valid Nepali date in format YYYY-MM-DD (e.g. 2080-04-01).');
-                posBillDateBsInput.focus();
-                return;
-            }
-
-            const cleanYear = parseInt(chosenDate.substring(0, 4), 10);
-            if (cleanYear < 2080 || cleanYear > 2095) {
-                alert('Bills can only be created between 2080 BS and 2095 BS.');
-                posBillDateBsInput.focus();
-                return;
-            }
-
-            const normalizedDate = chosenDate.replace('/', '-');
-            updateConfirmedBillDateUI(normalizedDate);
-            customDatePickerWrapper.classList.add('d-none');
-
-            if (window.smartPos) {
-                window.smartPos.showNotification(
-                    isInvoiceBackdated ? `Invoice active date set to ${normalizedDate} BS (Backdated).` : `Invoice date restored to today (${normalizedDate} BS).`,
-                    isInvoiceBackdated ? 'warning' : 'success'
-                );
+            const val = posBillDateBsInput.value.trim();
+            if (val) {
+                if (displayBillDateBs) displayBillDateBs.innerText = `${val} BS`;
+                customDatePickerWrapper.classList.add('d-none');
+                if (btnResetTodayDate) btnResetTodayDate.classList.remove('d-none');
             }
         });
     }
@@ -1453,320 +1582,129 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnCancelCustomDate && customDatePickerWrapper) {
         btnCancelCustomDate.addEventListener('click', () => {
             customDatePickerWrapper.classList.add('d-none');
-            if (posBillDateBsInput) posBillDateBsInput.value = activeInvoiceBsDate;
         });
     }
 
     if (btnResetTodayDate) {
         btnResetTodayDate.addEventListener('click', () => {
-            updateConfirmedBillDateUI(todayBsDate);
-            if (posBillDateBsInput) posBillDateBsInput.value = todayBsDate;
-            customDatePickerWrapper.classList.add('d-none');
-            if (window.smartPos) window.smartPos.showNotification(`Invoice date reset to today (${todayBsDate} BS).`, 'info');
+            const todayBs = '{{ CURRENT_BS_DATE_EN|default:"2083-06-12" }}';
+            if (displayBillDateBs) displayBillDateBs.innerText = `${todayBs} BS`;
+            if (posBillDateBsInput) posBillDateBsInput.value = todayBs;
+            btnResetTodayDate.classList.add('d-none');
         });
     }
 
-    if (window.smartPos && window.smartPos.checkout) {
-        const originalBuildPayload = window.smartPos.checkout.buildPayload.bind(window.smartPos.checkout);
-        window.smartPos.checkout.buildPayload = function(payments) {
-            const payload = originalBuildPayload(payments);
-            if (activeInvoiceBsDate) {
-                payload.bill_date_bs = activeInvoiceBsDate;
+    // 4. In-Row Line Item Discount Toggle Controller (% vs Rs.)
+    const itemsContainer = document.getElementById('itemsContainer');
+    if (itemsContainer) {
+        itemsContainer.addEventListener('click', (e) => {
+            const modeBtn = e.target.closest('.item-disc-mode-btn');
+            if (!modeBtn) return;
+
+            e.preventDefault();
+            const calcField = modeBtn.closest('.calc-field-discount');
+            if (!calcField) return;
+
+            const mode = modeBtn.dataset.mode;
+            const toggleGroup = calcField.querySelector('.item-disc-toggle-group');
+            const hiddenType = calcField.querySelector('.cart-item-disc-type');
+            const symbolSpan = calcField.querySelector('.item-disc-symbol');
+            const discountInput = calcField.querySelector('.cart-disc-input');
+
+            if (toggleGroup) {
+                toggleGroup.querySelectorAll('.item-disc-mode-btn').forEach(btn => {
+                    btn.classList.remove('active', 'btn-dark');
+                    btn.classList.add('btn-outline-secondary');
+                });
+                modeBtn.classList.remove('btn-outline-secondary');
+                modeBtn.classList.add('active', 'btn-dark');
             }
-            if (hidVoucherId && hidVoucherId.value) {
-                payload.trade_in_voucher_id = parseInt(hidVoucherId.value, 10);
+
+            if (hiddenType) hiddenType.value = mode;
+            if (symbolSpan) symbolSpan.innerText = (mode === 'AMOUNT') ? 'Rs.' : '%';
+
+            if (discountInput) {
+                let currentVal = parseFloat(discountInput.value) || 0;
+                if (mode === 'PERCENTAGE') {
+                    if (currentVal > 100) discountInput.value = '100';
+                    discountInput.max = '100';
+                } else {
+                    discountInput.removeAttribute('max');
+                }
+                discountInput.dispatchEvent(new Event('input', { bubbles: true }));
+                discountInput.dispatchEvent(new Event('change', { bubbles: true }));
             }
-            return payload;
-        };
+        });
     }
 
-    // =========================================================================
-    // 6. GLOBAL SHORTCUTS: F2 (PRODUCT SCAN), F7 (REPAIR SEARCH), CTRL+K
-    // =========================================================================
-    const searchInput = document.getElementById('posProductSearchInput');
+    // 5. Hotkeys [F4] Cash, [F6] Exchange, [F7] Repair, [F8] Split Modal, [F9] Hold, [F10] Recall
     window.addEventListener('keydown', (e) => {
-        if (e.key === 'F2') {
+        if (e.key === 'F4') {
             e.preventDefault();
-            if (searchInput) {
-                searchInput.focus();
-                searchInput.select();
+            if (window.smartPos && window.smartPos.checkout) {
+                window.smartPos.checkout.processDirectCash();
+            } else {
+                const cashBtn = document.getElementById('posDirectCashCheckoutBtn');
+                if (cashBtn) cashBtn.click();
             }
-        }
-        if (e.key === 'F7') {
+        } else if (e.key === 'F6') {
             e.preventDefault();
-            openRepairTicketModal();
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            const excBtn = document.getElementById('attachTradeInPromptBtn');
+            if (excBtn) excBtn.click();
+        } else if (e.key === 'F7') {
             e.preventDefault();
-            if (typeof window.openGlobalSearchModal === 'function') {
-                window.openGlobalSearchModal();
-            } else if (searchInput) {
-                searchInput.focus();
-                searchInput.select();
+            const repBtn = document.getElementById('attachRepairPromptBtn');
+            if (repBtn) repBtn.click();
+        } else if (e.key === 'F8') {
+            e.preventDefault();
+            // Call openSplitPaymentModal() directly to ensure calculations initialize
+            if (window.smartPos && typeof window.smartPos.openSplitPaymentModal === 'function') {
+                window.smartPos.openSplitPaymentModal();
+            } else {
+                const splitBtn = document.getElementById('posSplitPaymentBtn');
+                if (splitBtn) splitBtn.click();
+            }
+        } else if (e.key === 'F9') {
+            e.preventDefault();
+            if (window.smartPos && window.smartPos.holdCartManager) {
+                window.smartPos.holdCartManager.holdCurrentCart();
+            }
+        } else if (e.key === 'F10') {
+            e.preventDefault();
+            if (window.smartPos && window.smartPos.holdCartManager) {
+                window.smartPos.holdCartManager.openRecallModal();
             }
         }
     });
 
-    // =========================================================================
-    // 7. DUAL-MODE BILL DISCOUNT SWITCH [% | Rs.] CONTROLS
-    // =========================================================================
-    const btnDiscountPercent = document.getElementById('btnDiscountModePercent');
-    const btnDiscountFixed = document.getElementById('btnDiscountModeFixed');
-    const billDiscountSymbol = document.getElementById('billDiscountSymbolDisplay');
-    const billDiscountInput = document.getElementById('posBillDiscountInput');
-
-    function syncBillDiscountUI(mode) {
-        const isFixed = (mode === 'FIXED' || mode === 'AMOUNT');
-
-        if (btnDiscountPercent && btnDiscountFixed) {
-            if (isFixed) {
-                btnDiscountPercent.classList.remove('btn-primary', 'active');
-                btnDiscountPercent.classList.add('btn-outline-secondary');
-                btnDiscountFixed.classList.remove('btn-outline-secondary');
-                btnDiscountFixed.classList.add('btn-primary', 'active');
+    // 6. Split Button: Route directly to window.smartPos.openSplitPaymentModal()
+    const splitBtn = document.getElementById('posSplitPaymentBtn');
+    if (splitBtn) {
+        splitBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (window.smartPos && typeof window.smartPos.openSplitPaymentModal === 'function') {
+                window.smartPos.openSplitPaymentModal();
             } else {
-                btnDiscountFixed.classList.remove('btn-primary', 'active');
-                btnDiscountFixed.classList.add('btn-outline-secondary');
-                btnDiscountPercent.classList.remove('btn-outline-secondary');
-                btnDiscountPercent.classList.add('btn-primary', 'active');
+                const splitModal = document.getElementById('splitPaymentModal');
+                if (splitModal && typeof bootstrap !== 'undefined') {
+                    bootstrap.Modal.getOrCreateInstance(splitModal).show();
+                }
             }
-        }
+        });
+    }
 
-        if (billDiscountSymbol) {
-            billDiscountSymbol.innerText = isFixed ? 'Rs.' : '%';
-        }
-
-        if (billDiscountInput) {
-            billDiscountInput.placeholder = isFixed ? 'Rs.' : '%';
-            if (isFixed) {
-                billDiscountInput.removeAttribute('max');
-                billDiscountInput.step = '1';
+    const recallBtn = document.getElementById('posRecallHeldCartsBtn');
+    if (recallBtn) {
+        recallBtn.addEventListener('click', () => {
+            if (window.smartPos && window.smartPos.holdCartManager) {
+                window.smartPos.holdCartManager.openRecallModal();
             } else {
-                billDiscountInput.max = '100';
-                billDiscountInput.step = '0.5';
-                if (parseFloat(billDiscountInput.value) > 100) {
-                    billDiscountInput.value = '100';
+                const heldModal = document.getElementById('holdBillsModal');
+                if (heldModal && typeof bootstrap !== 'undefined') {
+                    bootstrap.Modal.getOrCreateInstance(heldModal).show();
                 }
             }
-        }
-    }
-
-    function setBillDiscountMode(mode) {
-        if (!window.smartPos || !window.smartPos.cart) return;
-
-        if (window.smartPos.cart.billDiscountType !== mode) {
-            window.smartPos.cart.toggleBillDiscountType();
-        }
-
-        syncBillDiscountUI(window.smartPos.cart.billDiscountType || mode);
-    }
-
-    if (btnDiscountPercent) {
-        btnDiscountPercent.addEventListener('click', () => setBillDiscountMode('PERCENTAGE'));
-    }
-
-    if (btnDiscountFixed) {
-        btnDiscountFixed.addEventListener('click', () => setBillDiscountMode('FIXED'));
-    }
-
-    if (window.smartPos && window.smartPos.cart) {
-        syncBillDiscountUI(window.smartPos.cart.billDiscountType || 'PERCENTAGE');
-    }
-
-    // =========================================================================
-    // 8. SUPERVISOR OVERRIDE MODAL: DISCOUNT REASON DROPDOWN & NOTES SYNC
-    // =========================================================================
-    const reasonSelect = document.getElementById('posDiscountReasonSelect');
-    const reasonNotesContainer = document.getElementById('posDiscountReasonNotesContainer');
-    const reasonNotesInput = document.getElementById('posDiscountReasonNotes');
-    const reasonHiddenInput = document.getElementById('posDiscountReasonInput');
-    const submitPinBtn = document.getElementById('submitManagerPinBtn');
-
-    function syncDiscountReason() {
-        if (!reasonSelect || !reasonHiddenInput) return;
-
-        const selectedVal = reasonSelect.value;
-        const notesVal = reasonNotesInput ? reasonNotesInput.value.trim() : '';
-        let finalReason = selectedVal;
-
-        if (selectedVal === 'OTHER') {
-            finalReason = notesVal ? `OTHER: ${notesVal}` : 'OTHER';
-        } else if (notesVal) {
-            finalReason = `${selectedVal} (${notesVal})`;
-        }
-
-        reasonHiddenInput.value = finalReason;
-
-        if (window.smartPos && window.smartPos.cart) {
-            window.smartPos.cart.billDiscountReason = finalReason;
-        }
-    }
-
-    if (reasonSelect && reasonNotesContainer) {
-        reasonSelect.addEventListener('change', () => {
-            if (reasonSelect.value === 'OTHER') {
-                reasonNotesContainer.classList.remove('d-none');
-                if (reasonNotesInput) reasonNotesInput.focus();
-            } else {
-                reasonNotesContainer.classList.add('d-none');
-            }
-            syncDiscountReason();
         });
-    }
-
-    if (reasonNotesInput) {
-        reasonNotesInput.addEventListener('input', syncDiscountReason);
-    }
-
-    if (submitPinBtn) {
-        submitPinBtn.addEventListener('click', (e) => {
-            syncDiscountReason();
-
-            if (reasonSelect && reasonSelect.value === 'OTHER' && reasonNotesInput && !reasonNotesInput.value.trim()) {
-                const errAlert = document.getElementById('posPinErrorAlert');
-                if (errAlert) {
-                    errAlert.innerText = 'Please specify justification notes when selecting "Other".';
-                    errAlert.classList.remove('d-none');
-                }
-                e.stopImmediatePropagation();
-                return false;
-            }
-        }, true);
-    }
-
-    // =========================================================================
-    // 9. CAMERA BARCODE SCANNER INTEGRATION
-    // =========================================================================
-    const openCameraBtn = document.getElementById('posOpenCameraButton');
-    const cameraModalEl = document.getElementById('posCameraScannerModal');
-    const videoEl = document.getElementById('posCameraFeedVideo');
-    const torchBtn = document.getElementById('posTorchToggleBtn');
-    const switchLensBtn = document.getElementById('posSwitchLensBtn');
-    const statusText = document.getElementById('posCameraStatusText');
-    const fileInput = document.getElementById('posModalImageFileInput');
-    
-    let posCameraScannerInstance = null;
-    let cameraModalInstance = null;
-
-    if (cameraModalEl) {
-        cameraModalInstance = new bootstrap.Modal(cameraModalEl);
-    }
-
-    if (openCameraBtn && cameraModalEl && videoEl) {
-        posCameraScannerInstance = new CameraBarcodeScanner({
-            facingMode: 'environment',
-            cooldown: 1200
-        });
-
-        openCameraBtn.addEventListener('click', () => {
-            cameraModalInstance.show();
-        });
-
-        cameraModalEl.addEventListener('shown.bs.modal', async () => {
-            if (statusText) {
-                statusText.innerHTML = '<i class="fas fa-circle-notch fa-spin me-1 text-success"></i> Starting camera sensor...';
-            }
-
-            await posCameraScannerInstance.start(
-                videoEl,
-                (scannedCode) => {
-                    if (statusText) {
-                        statusText.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> Scanned: <strong>${scannedCode}</strong>`;
-                    }
-                    
-                    if (window.smartPos) {
-                        window.smartPos.handleDirectImeiOrBarcodeScan(scannedCode);
-                    }
-
-                    setTimeout(() => {
-                        cameraModalInstance.hide();
-                    }, 400);
-                },
-                (err) => {
-                    if (statusText) {
-                        statusText.innerHTML = `<i class="fas fa-triangle-exclamation text-danger me-1"></i> ${err.message}`;
-                    }
-                }
-            );
-
-            if (posCameraScannerInstance.hasTorch && torchBtn) {
-                torchBtn.style.display = 'inline-flex';
-            } else if (torchBtn) {
-                torchBtn.style.display = 'none';
-            }
-
-            if (statusText) {
-                statusText.innerHTML = '<i class="fas fa-check text-success me-1"></i> Ready &bull; Align barcode or pick image';
-            }
-        });
-
-        cameraModalEl.addEventListener('hidden.bs.modal', () => {
-            if (posCameraScannerInstance) {
-                posCameraScannerInstance.stop();
-            }
-            if (window.smartPos && window.smartPos.catalogService && window.smartPos.catalogService.searchInput) {
-                window.smartPos.catalogService.searchInput.focus();
-            }
-        });
-
-        if (fileInput) {
-            fileInput.addEventListener('change', async (e) => {
-                if (e.target.files && e.target.files[0]) {
-                    const file = e.target.files[0];
-                    if (statusText) statusText.innerHTML = '<i class="fas fa-spinner fa-spin me-1 text-warning"></i> Reading box picture...';
-                    
-                    try {
-                        const code = await posCameraScannerInstance.decodeFromImageFile(file);
-                        if (statusText) statusText.innerHTML = `<i class="fas fa-check-circle text-success me-1"></i> Decoded: <strong>${code}</strong>`;
-                        
-                        if (window.smartPos) {
-                            window.smartPos.handleDirectImeiOrBarcodeScan(code);
-                        }
-
-                        setTimeout(() => {
-                            cameraModalInstance.hide();
-                        }, 400);
-                    } catch (err) {
-                        alert(err.message);
-                        if (statusText) statusText.innerHTML = `<i class="fas fa-triangle-exclamation text-danger me-1"></i> ${err.message}`;
-                    }
-                    fileInput.value = '';
-                }
-            });
-        }
-
-        if (torchBtn) {
-            torchBtn.addEventListener('click', async () => {
-                const state = await posCameraScannerInstance.toggleTorch();
-                torchBtn.classList.toggle('btn-warning', state);
-                torchBtn.classList.toggle('btn-dark', !state);
-            });
-        }
-
-        if (switchLensBtn) {
-            switchLensBtn.addEventListener('click', async () => {
-                await posCameraScannerInstance.switchCamera();
-            });
-        }
-    }
-
-    // =========================================================================
-    // 10. MODAL CLOSE & RESET FOCUS LISTENERS
-    // =========================================================================
-    const finishReceiptBtn = document.getElementById('finishReceiptBtn');
-    const closeReceiptBtn = document.getElementById('closeReceiptBtn');
-    [finishReceiptBtn, closeReceiptBtn].forEach(btn => {
-        if (btn) {
-            btn.addEventListener('click', () => {
-                if (window.smartPos && window.smartPos.catalogService && window.smartPos.catalogService.searchInput) {
-                    setTimeout(() => window.smartPos.catalogService.searchInput.focus(), 300);
-                }
-            });
-        }
-    });
-
-    if (searchInput) {
-        searchInput.focus();
     }
 });
 </script>

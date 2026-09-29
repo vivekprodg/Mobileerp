@@ -957,6 +957,7 @@ class ProductDetailView(LoginRequiredMixin, DetailView):
         context['stock_levels'] = self.object.branch_stocks.select_related('branch')
         context['batches'] = self.object.batches.select_related('branch').order_by('-purchase_date')
         context['conversions'] = self.object.unit_conversions.all()
+        context['conversion_form'] = UnitConversionForm()
         context['price_tiers'] = self.object.price_tiers.all().order_by('min_quantity')
         context['tracked_units'] = self.object.tracked_instances.select_related('branch').prefetch_related('component_warranties')[:50]
         context['recent_movements'] = self.object.movement_logs.select_related('branch', 'user')[:20]
@@ -986,6 +987,14 @@ class ProductDetailView(LoginRequiredMixin, DetailView):
 
         context['service_tickets'] = adapted_service_tickets
         return context
+
+    def post(self, request, *args, **kwargs):
+        """
+        Fallback in case modal form posts directly to product detail URL.
+        Delegates processing to ProductUnitConversionCreateView.
+        """
+        self.object = self.get_object()
+        return ProductUnitConversionCreateView.as_view()(request, pk=self.object.pk, *args, **kwargs)
 
 class ProductCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
     model = Product
@@ -1181,6 +1190,70 @@ class ProductStockAdjustmentView(LoginRequiredMixin, UserPassesTestMixin, View):
                 messages.error(request, str(e))
         else:
             messages.error(request, "Invalid adjustment form values.")
+
+        return redirect('inventory:product_detail', pk=product.pk)
+
+# ==============================================================================
+# PACKAGING UNIT CONVERSION VIEW (POINT 5)
+# ==============================================================================
+class ProductUnitConversionCreateView(LoginRequiredMixin, UserPassesTestMixin, View):
+    """
+    Processes new packaging unit conversions (e.g. 1 Box = 50 Pieces) submitted
+    from the Product Detail page modal.
+    """
+    def test_func(self):
+        return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER', 'STAFF']
+
+    def post(self, request, pk, *args, **kwargs):
+        product = get_object_or_404(Product, pk=pk)
+        form = UnitConversionForm(request.POST)
+
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    conversion = form.save(commit=False)
+                    conversion.product = product
+
+                    # Handle unique_together = ('product', 'unit_name')
+                    existing = UnitConversion.objects.filter(
+                        product=product,
+                        unit_name__iexact=conversion.unit_name
+                    ).first()
+
+                    if existing:
+                        existing.conversion_factor = conversion.conversion_factor
+                        existing.selling_price_per_unit = conversion.selling_price_per_unit
+                        existing.barcode = conversion.barcode
+                        existing.save()
+                        conversion = existing
+                    else:
+                        conversion.save()
+
+                    AuditLog.objects.create(
+                        user=request.user,
+                        branch=getattr(request, 'active_branch', None) or Branch.get_default_main_branch(),
+                        action_type='CREATE',
+                        module='PackagingUnitConversion',
+                        object_repr=f"{product.name} - {conversion.unit_name}",
+                        ip_address=request.META.get('REMOTE_ADDR'),
+                        details={
+                            'product_id': product.id,
+                            'unit_name': conversion.unit_name,
+                            'conversion_factor': str(conversion.conversion_factor),
+                            'selling_price': str(conversion.selling_price_per_unit) if conversion.selling_price_per_unit else None,
+                            'barcode': conversion.barcode
+                        }
+                    )
+
+                messages.success(
+                    request,
+                    f"Packaging unit '{conversion.unit_name}' (1 {conversion.unit_name} = {conversion.conversion_factor} {product.base_unit.code}) saved successfully."
+                )
+            except Exception as e:
+                messages.error(request, f"Error saving packaging unit: {str(e)}")
+        else:
+            errors = "; ".join([f"{f}: {e[0]}" for f, e in form.errors.items()])
+            messages.error(request, f"Failed to save packaging unit: {errors}")
 
         return redirect('inventory:product_detail', pk=product.pk)
 

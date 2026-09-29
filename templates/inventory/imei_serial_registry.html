@@ -136,13 +136,13 @@
         </form>
     </div>
 
-    <!-- IMEI Instances Table -->
+    <!-- IMEI & Serial Instances Table -->
     <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
         <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
             <h6 class="fw-bold text-dark mb-0">
-                <i class="fas fa-list-check text-secondary me-2"></i> Handset Device Instances
+                <i class="fas fa-list-check text-secondary me-2"></i> Handset &amp; Serial Device Instances
             </h6>
-            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:items|length }} Handset Records</span>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:items|length }} Registered Records</span>
         </div>
 
         <div class="table-responsive">
@@ -153,6 +153,7 @@
                         <th>Outlet Branch</th>
                         <th>Primary IMEI 1</th>
                         <th>Secondary IMEI 2</th>
+                        <th>Serial Number</th>
                         <th>Dual-SIM Status</th>
                         <th>Condition &amp; MDMS</th>
                         <th>Stock Status</th>
@@ -175,9 +176,13 @@
                         </td>
 
                         <td>
-                            <span class="imei-code-badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">
-                                {{ item.imei_1|default:"-" }}
-                            </span>
+                            {% if item.imei_1 %}
+                                <span class="imei-code-badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">
+                                    {{ item.imei_1 }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted fs-xs font-monospace">-</span>
+                            {% endif %}
                         </td>
 
                         <td>
@@ -187,6 +192,17 @@
                                 </span>
                             {% else %}
                                 <span class="text-muted fs-xs font-monospace">---</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Dedicated Serial Number Column -->
+                        <td>
+                            {% if item.serial_number %}
+                                <span class="imei-code-badge bg-dark bg-opacity-10 text-dark border border-secondary border-opacity-25 fw-semibold">
+                                    {{ item.serial_number }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted fs-xs font-monospace">-</span>
                             {% endif %}
                         </td>
 
@@ -209,6 +225,10 @@
                             <div>
                                 {% if item.mdms_status == 'REGISTERED_OFFICIAL' %}
                                     <span class="badge bg-success bg-opacity-10 text-success fs-2xs"><i class="fas fa-check me-1"></i>MDMS OK</span>
+                                {% elif item.mdms_status == 'INDIVIDUAL_CUSTOMS_PAID' %}
+                                    <span class="badge bg-info bg-opacity-10 text-info fs-2xs">Customs Paid</span>
+                                {% elif item.mdms_status == 'EXEMPT' %}
+                                    <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs">Exempt</span>
                                 {% else %}
                                     <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs"><i class="fas fa-triangle-exclamation me-1"></i>Gray</span>
                                 {% endif %}
@@ -216,7 +236,7 @@
                         </td>
 
                         <td>
-                            <span class="badge bg-{% if item.status == 'IN_STOCK' %}success{% elif item.status == 'SOLD' %}secondary{% else %}danger{% endif %} fs-2xs px-2 py-1">
+                            <span class="badge bg-{% if item.status == 'IN_STOCK' %}success{% elif item.status == 'SOLD' %}secondary{% elif item.status == 'UNDER_SERVICE' %}warning text-dark{% else %}danger{% endif %} fs-2xs px-2 py-1">
                                 {{ item.get_status_display }}
                             </span>
                         </td>
@@ -237,7 +257,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center py-5 text-muted">
+                        <td colspan="10" class="text-center py-5 text-muted">
                             <i class="fas fa-barcode fs-1 text-secondary opacity-25 d-block mb-2"></i>
                             No IMEI or Serial records found matching your query.
                         </td>

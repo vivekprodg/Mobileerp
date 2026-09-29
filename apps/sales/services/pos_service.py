@@ -6,40 +6,31 @@ Core Capabilities & Architectural Safeguards:
    - grand_total strictly represents the full merchandise gross sales value + applicable tax.
    - trade_in_discount_amount is treated exclusively as a tender settlement offset (barter payment),
      protecting statutory revenue reporting and customer spend analytics from distortion.
-2. Dynamic Master Switch Sensitive IMEI Allocation:
+2. Intelligent Customer Resolution for Credit Purchases:
+   - In _process_payments_and_udhaari, when a credit sale is initiated without an explicit customer_id,
+     the system automatically attempts resolution via Phone number, 9-digit PAN (via Customer.resolve_or_create_by_pan),
+     or business name before raising a validation error.
+3. Itemized Audit Description in CustomerUdhaariLedger:
+   - Multi-tender payments (Cash, FonePay, eSewa, Cards, Bank, Trade-In) are compiled into an itemized
+     audit summary stored directly in CustomerUdhaariLedger.remarks.
+4. Prevention of Double-Accounting of Credit:
+   - estimate.paid_amount strictly captures genuine monetary tenders.
+   - estimate.due_amount strictly equals the unpaid balance / credit tender.
+   - Non-monetary credit transactions are isolated so General Ledger auto-posting does not double-debit AR (1210).
+5. Dynamic Master Switch Sensitive IMEI Allocation:
    - When enforce_imei_tracking is OFF (Backlog Mode): Mobile phones can be sold without IMEIs,
      deducting directly from shelf stock and depleting FIFO batches like standard accessories.
    - When enforce_imei_tracking is ON (Strict Mode): Enforces strict 15-digit IMEI verification.
    - Transition Safety Guard: Seamlessly registers and sells backlog shelf stock when scanned with
      a live physical IMEI in Strict Mode without throwing "Stock Not Found" crashes.
-3. Unified Excess Trade-In Settlement (ITEM 20 Resolution):
-   - In _process_payments_and_udhaari, duplicate inline customer ledger manipulation has been
-     completely removed and routed authoritatively through TradeInValuationEngine.settle_excess_trade_in_credit.
-4. Trade-In Cash Return Guard (Cash Refund Scam Prevention):
+6. Unified Excess Trade-In Settlement:
+   - Routed authoritatively through TradeInValuationEngine.settle_excess_trade_in_credit.
+7. Trade-In Cash Return Guard (Cash Refund Scam Prevention):
    - In process_sales_return, if an invoice utilized a trade-in exchange credit, cash refunds are
-     strictly capped to the net physical cash tendered on that invoice. Any remaining balance is
-     automatically converted to customer store credit (with walk-in safety validation).
-5. Non-Serialized FIFO Landed Cost & ProductBatch Restoration:
-   - Returning non-serialized accessories increments or recreates the ProductBatch record alongside
-     BranchStock, maintaining exact FIFO landed cost valuation for future sales.
-6. General Ledger Double-Entry Integration for Trade-In Devices:
-   - In _post_gl_sales_estimate, trade-in exchange vouchers are explicitly packaged into the payment
-     tender payload transmitted to AutoPostingService, debiting Inventory Asset and crediting Trade-In Clearing.
-7. Fractional Paisa Round-Off Offset Absorption:
-   - In _finalize_estimate_totals, calculates the exact difference between the sum of pre-tax bases + taxes
-     versus the gross merchandise payable, absorbing penny rounding variances cleanly into estimate.round_off.
-8. Safe Customer Account Lookups & Cash-Only Zero Credit Limit Guard (Issue 11):
-   - All direct Customer queries handle deactivated, deleted, or null attributes gracefully.
-   - Customers with a credit limit of 0.00 (Cash-Only) or exceeded balances strictly require Manager PIN
-     override authorization whenever an unpaid credit balance (due_amount > 0) is requested.
-9. Comprehensive Atomic Bill Cancellation with Payroll Commission Safeguards:
+     strictly capped to the net physical cash tendered on that invoice.
+8. Comprehensive Atomic Bill Cancellation with Payroll Commission Safeguards:
    - Blocks voiding of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
    - Restores sold physical merchandise stock, batches, serials, and voids active device warranties.
-   - Reverses linked Trade-In Buy-Back handsets and Repair Tickets with full General Ledger rollback.
-10. Standard Component Warranty String & Accessory Zero-Warranty Handling:
-   - Formats phone line item warranty summary to cleanly state:
-     "Device: 12M | Battery: 6M | Screen: 3M (Physical Damage Excluded)".
-   - Automatically sets accessories with 0 warranty months to cleanly state "No Warranty".
 """
 
 import re
@@ -191,14 +182,36 @@ class SalesPOSService:
             target_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
             target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
 
-        # 2. Resolve Customer Profile & Tier (Safe Lookup)
+        # 2. Resolve Customer Profile & Tier (Safe Lookup with Fallback)
         customer_type = 'RETAIL'
-        if customer_id:
-            customer_record = Customer.objects.filter(id=customer_id, is_active=True).first()
+        resolved_customer_id = customer_id
+        if resolved_customer_id:
+            customer_record = Customer.objects.filter(id=resolved_customer_id, is_active=True).first()
             if customer_record:
                 customer_type = customer_record.customer_type
             elif not is_historical_import:
-                raise ValidationError(f"Selected customer (ID {customer_id}) is inactive or no longer exists.")
+                raise ValidationError(f"Selected customer (ID {resolved_customer_id}) is inactive or no longer exists.")
+        else:
+            # Check if customer can be identified by PAN or Phone upfront
+            clean_pan = re.sub(r'\D', '', str(customer_pan or '').strip())
+            clean_phone = str(customer_phone or '').strip()
+            clean_name = str(customer_name or '').strip()
+
+            if len(clean_pan) == 9:
+                cust_obj, _ = Customer.resolve_or_create_by_pan(
+                    name=clean_name,
+                    pan=clean_pan,
+                    phone=clean_phone if (clean_phone and clean_phone != '-') else None,
+                    branch=branch
+                )
+                if cust_obj:
+                    resolved_customer_id = cust_obj.id
+                    customer_type = cust_obj.customer_type
+            elif clean_phone and clean_phone not in ['-', '9800000000', '']:
+                cust_by_phone = Customer.objects.filter(phone_number=clean_phone, is_active=True).first()
+                if cust_by_phone:
+                    resolved_customer_id = cust_by_phone.id
+                    customer_type = cust_by_phone.customer_type
 
         # 3. Validate Trade-In Voucher (if attached)
         trade_in_voucher, trade_in_credit_amt = cls._validate_trade_in_voucher(branch, trade_in_voucher_id)
@@ -322,7 +335,7 @@ class SalesPOSService:
             bill_date_ad=target_date_ad,
             bill_date_bs=target_date_bs,
             fiscal_year=target_fiscal_year,
-            customer_id=customer_id,
+            customer_id=resolved_customer_id,
             customer_name_manual=customer_name,
             customer_phone_manual=customer_phone,
             customer_pan=customer_pan,
@@ -341,7 +354,7 @@ class SalesPOSService:
             is_vat_applicable=is_shop_vat_registered
         )
 
-        # 8. Process Line Items, Taxes, COGS & Inventory (Consults Master Switch & Safety Guard)
+        # 8. Process Line Items, Taxes, COGS & Inventory
         calc_result = cls._process_lines_and_inventory(
             estimate=estimate,
             branch=branch,
@@ -377,7 +390,10 @@ class SalesPOSService:
             branch=branch,
             cashier=cashier,
             payments=payments,
-            customer_id=customer_id,
+            customer_id=resolved_customer_id,
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            customer_pan=customer_pan,
             trade_in_voucher=trade_in_voucher,
             excess_trade_in_credit=excess_trade_in_credit,
             manager_override_user=manager_override_user,
@@ -863,17 +879,6 @@ class SalesPOSService:
         cashier,
         is_historical: bool = False
     ) -> Tuple[Decimal, Optional[ItemInstance], Optional[str], Optional[date], str]:
-        """
-        Allocates stock and landed costs consulting SystemConfiguration.enforce_imei_tracking:
-        - When enforce_imei_tracking is OFF (Backlog Mode): If a phone is sold without an IMEI,
-          bypasses the mandatory IMEI error and deducts directly from shelf stock and FIFO batches.
-        - When enforce_imei_tracking is ON (Strict Mode): Mandates an active 15-digit IMEI.
-        - Transition Safety Guard: If in Strict Mode and cashier sells a backlog phone with a physical
-          scanned IMEI not yet in DB, registers the ItemInstance on the fly against available shelf stock.
-        - Formats the line item warranty summary string to cleanly state:
-          "Device: 12M | Battery: 6M | Screen: 3M (Physical Damage Excluded)" for phones.
-        - Accessories (where warranty is 0) cleanly state "No Warranty".
-        """
         if is_historical:
             return Decimal('0.00'), None, None, None, "Historical Migration - Stock & Warranty Unaltered"
 
@@ -885,7 +890,6 @@ class SalesPOSService:
         is_phone = product.requires_imei_tracking
         has_warranty = bool(product.warranty_months and product.warranty_months > 0)
 
-        # Baseline default warranty summary
         if has_warranty:
             warranty_summary = f"{product.warranty_months}M General Warranty"
         else:
@@ -902,11 +906,9 @@ class SalesPOSService:
         # SERIALIZED PHONE ALLOCATION LOGIC
         # ---------------------------------------------------------------------
         if is_phone and (enforce_imei or has_imeis):
-            # In Strict Mode, an IMEI is strictly required
             if not has_imeis and enforce_imei:
                 raise ValidationError(f"Primary 15-Digit IMEI is strictly required for smartphone '{product.name}'.")
 
-            # 1. Search for existing registered active in-stock handset
             if clean_imei_1:
                 item_instance = ItemInstance.objects.select_for_update().filter(
                     Q(imei_1=clean_imei_1) | Q(imei_2=clean_imei_1),
@@ -921,12 +923,11 @@ class SalesPOSService:
                     status='IN_STOCK'
                 ).first()
 
-            # 2. Transition Safety Guard: Handle Backlog Stock Sold with Live IMEI
+            # Transition Safety Guard: Handle Backlog Stock Sold with Live IMEI
             if not item_instance:
                 b_stock = BranchStock.objects.filter(branch=branch, product=product).first()
                 avail_stock = b_stock.available_quantity if b_stock else Decimal('0.000')
 
-                # If shelf stock exists from backlog purchase, or negative stock allowed, or in Backlog Mode:
                 if avail_stock >= base_units or allow_negative or not enforce_imei:
                     item_instance = ItemInstance.objects.create(
                         product=product,
@@ -976,8 +977,6 @@ class SalesPOSService:
                 custom_warranty_months=product.warranty_months
             )
 
-            # Format the line item warranty summary string to cleanly state:
-            # "Device: 12M | Battery: 6M | Screen: 3M (Physical Damage Excluded)"
             comp_map = {}
             for cw in created_warranties:
                 c_type = (cw.component_type or '').upper()
@@ -1011,7 +1010,6 @@ class SalesPOSService:
                 body_m = product.warranty_months or 12
                 warranty_summary = f"Device: {body_m}M | Battery: 6M | Screen: 3M (Physical Damage Excluded)"
 
-            # Deplete any FIFO ProductBatch created during backlog purchase
             cls._deplete_fifo_batch_if_exists(product, branch, base_units)
 
         # ---------------------------------------------------------------------
@@ -1028,7 +1026,6 @@ class SalesPOSService:
                     body_m = product.warranty_months or 12
                     warranty_summary = f"Device: {body_m}M | Battery: 6M | Screen: 3M (Physical Damage Excluded)"
             else:
-                # Accessories with 0 warranty cleanly state "No Warranty"
                 warranty_summary = "No Warranty"
 
         # Deduct physical warehouse shelf stock
@@ -1049,10 +1046,6 @@ class SalesPOSService:
 
     @staticmethod
     def _deplete_fifo_batches(product: Product, branch: Branch, base_units: Decimal) -> Tuple[Decimal, Optional[str]]:
-        """
-        Depletes active FIFO inventory batches and computes weighted average cost.
-        Used for non-serialized accessories and phones sold without IMEIs in Backlog Mode.
-        """
         available_batches = ProductBatch.objects.select_for_update().filter(
             product=product, branch=branch, is_depleted=False
         ).order_by('purchase_date', 'created_at')
@@ -1086,7 +1079,6 @@ class SalesPOSService:
 
     @staticmethod
     def _deplete_fifo_batch_if_exists(product: Product, branch: Branch, base_units: Decimal) -> None:
-        """Safely decrements any existing FIFO ProductBatch created during backlog purchase."""
         batches = ProductBatch.objects.select_for_update().filter(
             product=product, branch=branch, is_depleted=False
         ).order_by('purchase_date', 'created_at')
@@ -1165,6 +1157,9 @@ class SalesPOSService:
             user=cashier
         )
 
+    # =========================================================================
+    # MULTI-TENDER PAYMENTS, UDHAARI & CUSTOMER AUTO-RESOLUTION
+    # =========================================================================
     @classmethod
     def _process_payments_and_udhaari(
         cls,
@@ -1173,12 +1168,20 @@ class SalesPOSService:
         cashier,
         payments: list,
         customer_id: Optional[int],
+        customer_name: str = "",
+        customer_phone: str = "",
+        customer_pan: str = "",
         trade_in_voucher: Optional[PhoneExchangeTradeIn] = None,
         excess_trade_in_credit: Decimal = Decimal('0.00'),
         manager_override_user=None,
         is_historical: bool = False,
         **kwargs
     ) -> List[SalesPaymentTransaction]:
+        """
+        Processes payment distributions, resolves customer accounts intelligently,
+        builds an itemized multi-tender description in CustomerUdhaariLedger, and
+        strictly prevents double-accounting of credit sales.
+        """
         effective_trade_in_tender = Decimal('0.00')
         if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > Decimal('0.00'):
             effective_trade_in_tender = min(estimate.grand_total, estimate.trade_in_discount_amount)
@@ -1187,8 +1190,10 @@ class SalesPOSService:
 
         total_real_paid = Decimal('0.00')
         credit_tendered = Decimal('0.00')
+        real_payment_lines = []
         created_transactions: List[SalesPaymentTransaction] = []
 
+        # 1. Parse Payments & Separate Genuine Monetary Tenders from Credit
         for pay in payments:
             pay_mode = str(pay.get('mode') or pay.get('payment_mode') or '').upper().strip()
             raw_amt = pay.get('amount', 0)
@@ -1199,20 +1204,73 @@ class SalesPOSService:
             except (InvalidOperation, ValueError, TypeError):
                 amt = Decimal('0.00')
 
+            raw_ref = (
+                pay.get('transaction_ref') or pay.get('trace_id') or pay.get('approval_code') or
+                pay.get('txn_id') or pay.get('reference') or pay.get('reference_number') or
+                pay.get('auth_code') or pay.get('cheque_number') or pay.get('cheque_no') or
+                pay.get('ref') or ''
+            )
+            clean_ref = str(raw_ref).strip() if raw_ref else ''
+
             if amt > Decimal('0.00'):
-                if pay_mode == 'CREDIT':
+                if pay_mode in ['CREDIT', 'UDHAARI']:
                     credit_tendered += amt
                 else:
                     total_real_paid += amt
+                    real_payment_lines.append({
+                        'mode': pay_mode,
+                        'amount': amt,
+                        'ref': clean_ref
+                    })
 
         tentative_due = max(Decimal('0.00'), net_customer_payable - total_real_paid)
+        is_credit_sale = (tentative_due > Decimal('0.00') or credit_tendered > Decimal('0.00'))
 
-        if (tentative_due > Decimal('0.00') or credit_tendered > Decimal('0.00')) and not customer_id and not is_historical:
-            raise ValidationError(
-                "Credit sales (Udhaari) require a registered customer profile. "
-                "Please select or register a customer before completing this sale."
-            )
+        # 2. Intelligent Customer Resolution for Credit Purchases
+        # If customer_id is missing, attempt resolution by Phone, PAN, or Name before rejecting
+        if is_credit_sale and not is_historical:
+            if not customer_id:
+                resolved_cust = None
+                clean_phone = str(customer_phone or '').strip()
+                clean_pan = re.sub(r'\D', '', str(customer_pan or '').strip())
+                clean_name = str(customer_name or '').strip()
 
+                # A. Try searching by phone number (Unique index in Customer model)
+                if clean_phone and clean_phone not in ['-', '9800000000', '']:
+                    resolved_cust = Customer.objects.filter(phone_number=clean_phone, is_active=True).first()
+
+                # B. Try resolving or creating via 9-digit IRD PAN
+                if not resolved_cust and len(clean_pan) == 9:
+                    resolved_cust, _ = Customer.resolve_or_create_by_pan(
+                        name=clean_name,
+                        pan=clean_pan,
+                        phone=clean_phone if (clean_phone and clean_phone != '-') else None,
+                        branch=branch
+                    )
+
+                # C. Try searching by exact name if not generic
+                generic_terms = ['walk-in customer', 'walk-in', 'walk in', 'cash customer', 'खुदरा ग्राहक', '', '-']
+                if not resolved_cust and clean_name and clean_name.lower() not in generic_terms:
+                    resolved_cust = Customer.objects.filter(name__iexact=clean_name, is_active=True).first()
+
+                # Update estimate customer linkage if resolved
+                if resolved_cust:
+                    customer_id = resolved_cust.id
+                    estimate.customer = resolved_cust
+                    estimate.customer_id = resolved_cust.id
+                    estimate.customer_name_manual = resolved_cust.name
+                    if resolved_cust.phone_number:
+                        estimate.customer_phone_manual = resolved_cust.phone_number
+                    if resolved_cust.pan_number:
+                        estimate.customer_pan = resolved_cust.pan_number
+                    estimate.save(update_fields=['customer', 'customer_name_manual', 'customer_phone_manual', 'customer_pan', 'updated_at'])
+                else:
+                    raise ValidationError(
+                        "Credit sales (Customer Udhaari) strictly require selecting or registering a customer profile. "
+                        "Please select an existing customer or provide a valid mobile number / PAN."
+                    )
+
+        # 3. Credit Limit & Cash-Only Guard (Safe Customer Lookup)
         if customer_id and not is_historical:
             customer = Customer.objects.select_for_update().filter(id=customer_id, is_active=True).first()
             if not customer:
@@ -1268,6 +1326,7 @@ class SalesPOSService:
                         }
                     )
 
+        # 4. Create Payment Transactions (Credit Tracked for Reference)
         for pay in payments:
             pay_mode = str(pay.get('mode') or pay.get('payment_mode') or '').upper().strip()
             raw_amt = pay.get('amount', 0)
@@ -1278,30 +1337,19 @@ class SalesPOSService:
             except (InvalidOperation, ValueError, TypeError):
                 amt = Decimal('0.00')
 
-            raw_ref = (
-                pay.get('transaction_ref') or
-                pay.get('trace_id') or
-                pay.get('approval_code') or
-                pay.get('txn_id') or
-                pay.get('reference') or
-                pay.get('reference_number') or
-                pay.get('auth_code') or
-                pay.get('cheque_number') or
-                pay.get('cheque_no') or
-                pay.get('ref') or
-                ''
-            )
-            clean_ref = str(raw_ref).strip() if raw_ref else ''
+            clean_ref = str(pay.get('transaction_ref') or pay.get('trace_id') or pay.get('ref') or '').strip()
 
             if amt > Decimal('0.00'):
                 tx = SalesPaymentTransaction.objects.create(
                     estimate=estimate,
                     payment_mode=pay_mode,
                     amount=amt,
-                    transaction_ref=clean_ref or None
+                    transaction_ref=clean_ref or None,
+                    notes='Credit / Udhaari Reference' if pay_mode in ['CREDIT', 'UDHAARI'] else None
                 )
                 created_transactions.append(tx)
 
+        # 5. Prevent Double-Accounting: Paid Amount Strictly Equals Real Monetary Tenders
         estimate.paid_amount = total_real_paid
         estimate.due_amount = tentative_due
 
@@ -1321,6 +1369,7 @@ class SalesPOSService:
         estimate.change_returned = monetary_change
         estimate.save(update_fields=['paid_amount', 'due_amount', 'change_returned', 'payment_status', 'updated_at'])
 
+        # 6. Settle Excess Trade-In Credit if Present
         if excess_trade_in_credit > Decimal('0.00') and not is_historical and trade_in_voucher:
             TradeInValuationEngine.settle_excess_trade_in_credit(
                 estimate=estimate,
@@ -1329,6 +1378,7 @@ class SalesPOSService:
                 user=cashier
             )
 
+        # 7. Post Sub-Ledger Entry with Itemized Audit Description in CustomerUdhaariLedger
         if customer_id and not is_historical:
             customer = Customer.objects.select_for_update().filter(id=customer_id, is_active=True).first()
             if customer:
@@ -1339,6 +1389,25 @@ class SalesPOSService:
                     customer.total_spent += estimate.grand_total
                     customer.save(update_fields=['current_credit_balance', 'total_spent', 'updated_at'])
 
+                    # Compile Itemized Multi-Tender Payment Description
+                    paid_parts = []
+                    for rp in real_payment_lines:
+                        ref_info = f" Ref: {rp['ref']}" if rp['ref'] else ""
+                        paid_parts.append(f"Rs. {rp['amount']:,.2f} ({rp['mode']}{ref_info})")
+
+                    if estimate.has_trade_in_exchange and effective_trade_in_tender > Decimal('0.00'):
+                        trade_ref = f" Ref: {estimate.trade_in_voucher_reference}" if estimate.trade_in_voucher_reference else ""
+                        paid_parts.append(f"Rs. {effective_trade_in_tender:,.2f} (Trade-In Buyback{trade_ref})")
+
+                    paid_summary = ", ".join(paid_parts) if paid_parts else "None (Full Credit)"
+
+                    itemized_remarks = (
+                        f"Bill Total: Rs. {estimate.grand_total:,.2f} | "
+                        f"Paid: {paid_summary} | "
+                        f"Balance Due (Udhaari): Rs. {estimate.due_amount:,.2f} "
+                        f"on estimate {estimate.estimate_number}"
+                    )
+
                     CustomerUdhaariLedger.objects.create(
                         customer=customer,
                         branch=branch,
@@ -1347,8 +1416,8 @@ class SalesPOSService:
                         previous_balance=prev_bal,
                         resulting_balance=new_bal,
                         reference_invoice=estimate.estimate_number,
-                        payment_mode='CREDIT',
-                        remarks=f"POS credit purchase on estimate {estimate.estimate_number}",
+                        payment_mode='OTHER',
+                        remarks=itemized_remarks,
                         recorded_by=cashier
                     )
                 else:
@@ -1364,6 +1433,10 @@ class SalesPOSService:
         cashier,
         payment_transactions: Optional[List[SalesPaymentTransaction]] = None
     ) -> None:
+        """
+        Dispatches double-entry voucher to AutoPostingService, ensuring that credit transactions
+        are excluded from monetary payment lines to prevent double-debiting Accounts Receivable (1210).
+        """
         from apps.accounting.services.auto_posting import AutoPostingService
 
         if payment_transactions is None:
@@ -1371,8 +1444,15 @@ class SalesPOSService:
                 SalesPaymentTransaction.objects.filter(estimate=estimate).order_by('id')
             )
 
+        # Pass only genuine monetary payment lines to GL posting (Exclude CREDIT)
         payment_details = []
+        monetary_transactions = []
+
         for ptx in payment_transactions:
+            if ptx.payment_mode.upper() in ['CREDIT', 'UDHAARI']:
+                continue
+
+            monetary_transactions.append(ptx)
             ref_str = ptx.transaction_ref or ""
             payment_details.append({
                 'id': ptx.id,
@@ -1409,14 +1489,14 @@ class SalesPOSService:
             if 'payment_details' in sig.parameters:
                 call_kwargs['payment_details'] = payment_details
             if 'payment_transactions' in sig.parameters:
-                call_kwargs['payment_transactions'] = payment_transactions
+                call_kwargs['payment_transactions'] = monetary_transactions
             if 'payments' in sig.parameters:
                 call_kwargs['payments'] = payment_details
             if 'trade_in_amount' in sig.parameters:
                 call_kwargs['trade_in_amount'] = estimate.trade_in_discount_amount
             if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
                 call_kwargs['payment_details'] = payment_details
-                call_kwargs['payment_transactions'] = payment_transactions
+                call_kwargs['payment_transactions'] = monetary_transactions
                 call_kwargs['trade_in_amount'] = estimate.trade_in_discount_amount
                 call_kwargs['trade_in_voucher_reference'] = estimate.trade_in_voucher_reference
 
@@ -1424,7 +1504,7 @@ class SalesPOSService:
 
             cls._enrich_voucher_payment_narrations(
                 estimate=estimate,
-                payment_transactions=payment_transactions,
+                payment_transactions=monetary_transactions,
                 result_voucher=result_voucher
             )
 

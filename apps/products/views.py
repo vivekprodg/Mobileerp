@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.generic import TemplateView, View, FormView
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -9,8 +9,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.inventory.models import (
-    Product, BranchStock, ProductCategory, Brand, UnitOfMeasurement,
-    ProductComponentWarrantyRule
+    Product, BranchStock, ProductCategory, ProductSubCategory, Brand, UnitOfMeasurement,
+    ProductComponentWarrantyRule, UnitConversion
 )
 from apps.inventory.services import InventoryService
 from apps.products.models import BarcodeLabelTemplate, ProductPriceTier
@@ -48,6 +48,7 @@ class ProductQuickCreateModalView(LoginRequiredMixin, UserPassesTestMixin, View)
     """
     AJAX endpoint for instant product addition at the POS counter and catalog modals.
     - Barcode is completely optional and never auto-generated if blank.
+    - Subcategory is explicitly saved and returned in the JSON confirmation payload.
     - Synchronized Multi-Component Warranty Engine:
       * When registered as a serialized phone (or with warranty > 0), the product's overall
         warranty_months field is explicitly synchronized to the Handset Body rule (default 12M).
@@ -222,8 +223,11 @@ class ProductQuickCreateModalView(LoginRequiredMixin, UserPassesTestMixin, View)
                         details={
                             'sku': product.sku,
                             'barcode': product.barcode or "None",
+                            'category': product.category.name if product.category else "",
+                            'subcategory': product.subcategory.name if product.subcategory else "",
                             'initial_stock': str(initial_stock),
                             'requires_imei': product.requires_imei_tracking,
+                            'is_discountable': product.is_discountable,
                             'warranty_body': body_warranty,
                             'warranty_battery': battery_warranty,
                             'warranty_screen': screen_warranty
@@ -235,17 +239,24 @@ class ProductQuickCreateModalView(LoginRequiredMixin, UserPassesTestMixin, View)
                 else:
                     warranty_summary_str = "No Warranty"
 
+                # Standardized Response Payload returning newly assigned subcategory details
                 resp_payload = {
                     'status': 'success',
                     'product_id': product.id,
                     'name': product.name,
                     'sku': product.sku,
                     'barcode': product.barcode or '',
+                    'model_name': product.model_name or '',
+                    'model_number': product.model_number or '',
                     'selling_price': f"{product.selling_price:.2f}",
                     'cost_price': f"{product.purchase_price:.2f}",
+                    'wholesale_price': f"{product.wholesale_price:.2f}" if product.wholesale_price else '',
                     'unit': product.base_unit.code if product.base_unit else 'PCS',
                     'category_id': product.category_id,
                     'category_name': product.category.name if product.category else '',
+                    'subcategory_id': product.subcategory_id,
+                    'subcategory_name': product.subcategory.name if product.subcategory else '',
+                    'is_discountable': product.is_discountable,
                     'warranty_months': body_warranty,
                     'warranty_summary': warranty_summary_str,
                     'requires_imei': product.requires_imei_tracking
@@ -276,4 +287,52 @@ class ProductPriceTierManagerView(LoginRequiredMixin, UserPassesTestMixin, View)
             messages.success(request, f"Price tier for '{product.name}' saved successfully.")
         else:
             messages.error(request, "Failed to save price tier. Please verify input values.")
+        return redirect(reverse('inventory:product_detail', kwargs={'pk': product.id}))
+
+class ProductUnitConversionManagerView(LoginRequiredMixin, UserPassesTestMixin, View):
+    """Manages packaging unit conversions (e.g. 1 Box = 50 Pieces)."""
+
+    def test_func(self):
+        return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER']
+
+    def post(self, request, product_id, *args, **kwargs):
+        product = get_object_or_404(Product, id=product_id)
+        unit_name = request.POST.get('unit_name', '').strip()
+        conversion_factor = request.POST.get('conversion_factor', '1')
+        selling_price_per_unit = request.POST.get('selling_price_per_unit', '').strip() or None
+        barcode = request.POST.get('barcode', '').strip() or None
+
+        if not unit_name:
+            messages.error(request, "Packaging unit name is required.")
+            return redirect(reverse('inventory:product_detail', kwargs={'pk': product.id}))
+
+        try:
+            factor = Decimal(str(conversion_factor))
+            if factor <= Decimal('0.000'):
+                raise ValueError()
+        except (ValueError, TypeError, InvalidOperation):
+            messages.error(request, "Conversion factor must be a valid positive number greater than zero.")
+            return redirect(reverse('inventory:product_detail', kwargs={'pk': product.id}))
+
+        price = None
+        if selling_price_per_unit:
+            try:
+                price = Decimal(str(selling_price_per_unit))
+            except (ValueError, TypeError, InvalidOperation):
+                price = None
+
+        if barcode and UnitConversion.objects.filter(barcode=barcode).exclude(product=product, unit_name=unit_name).exists():
+            messages.error(request, f"Barcode '{barcode}' is already in use by another packaging unit.")
+            return redirect(reverse('inventory:product_detail', kwargs={'pk': product.id}))
+
+        UnitConversion.objects.update_or_create(
+            product=product,
+            unit_name=unit_name,
+            defaults={
+                'conversion_factor': factor,
+                'selling_price_per_unit': price,
+                'barcode': barcode,
+            }
+        )
+        messages.success(request, f"Packaging unit '{unit_name}' (1 {unit_name} = {factor} {product.base_unit.code}) saved successfully.")
         return redirect(reverse('inventory:product_detail', kwargs={'pk': product.id}))

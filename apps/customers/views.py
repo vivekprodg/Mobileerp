@@ -10,11 +10,11 @@ Capabilities:
    - Sub-ledger entry creation prior to balance adjustment.
    - Synchronous, unswallowed double-entry GL receipt voucher posting.
    - Balance cache recalculation strictly from ledger entries upon posting success.
-4. Unified Customer Search API:
-   - When query string is empty, returns the top 15 most recently active customers or debtors.
-   - Partial matching across name, phone number, and PAN.
-   - Adheres to the Unified Search JSON Contract (id, title, subtitle, badge, extra_data).
-   - Backwards compatible with POS auto-complete.
+4. Unified Customer Search API (CustomerSearchAPIView):
+   - Zero-Query Instant Population: When `q` is empty, immediately returns the top active customers and debtors.
+   - Progressive Character Matching: Real-time partial matching across Name, Mobile number, PAN, Alternate Phone, and Email (v -> vi -> viv).
+   - High-Visibility Badges: Displays outstanding debt balance, PAN status, and customer category.
+   - Full compatibility with both POS auto-complete dropdowns and standard contextual search.
 """
 
 import logging
@@ -308,11 +308,33 @@ class CustomerUdhaariPaymentView(LoginRequiredMixin, UserPassesTestMixin, View):
             messages.error(request, "Invalid payment submission. Please verify the amount.")
             return redirect('customers:customer_detail', pk=pk)
 
+# =============================================================================
+# 4. UNIFIED ZERO-QUERY & REAL-TIME AUTOCOMPLETE CUSTOMER SEARCH API
+# =============================================================================
 class CustomerSearchAPIView(LoginRequiredMixin, View):
+    """
+    Unified High-Performance Customer Search & Autocomplete API.
+    
+    Capabilities:
+    1. Zero-Query Instant Population:
+       - When `q` is empty, immediately returns up to 15-20 active customers,
+         prioritizing customers with outstanding debt (Udhaari) followed by recently active patrons.
+    2. Progressive Letter Matching (v -> vi -> viv):
+       - Matches partial strings across Name, Mobile Phone, Alternate Phone, and Tax PAN.
+    3. Comprehensive Response Envelope:
+       - Supplies title, subtitle, badges (Due amount, PAN, Tier), and extra_data dictionary
+         for complete auto-fill compatibility with the POS billing counter.
+    """
+
     def get(self, request, *args, **kwargs):
         q = request.GET.get('q', '').strip()
         customer_type = request.GET.get('type', '').strip()
         has_debt = request.GET.get('has_debt', '').strip()
+
+        try:
+            limit = max(1, min(int(request.GET.get('limit', 15)), 50))
+        except (ValueError, TypeError):
+            limit = 15
 
         qs = Customer.objects.filter(is_active=True).select_related('preferred_branch')
 
@@ -322,19 +344,24 @@ class CustomerSearchAPIView(LoginRequiredMixin, View):
         if has_debt in ['1', 'true', 'True']:
             qs = qs.filter(current_credit_balance__gt=Decimal('0.00'))
 
+        # 1. Progressive Letter Matching (v -> vi -> viv)
         if q:
             cust_filter = (
                 Q(name__icontains=q) |
                 Q(phone_number__icontains=q)
             )
+            if hasattr(Customer, 'alt_phone_number'):
+                cust_filter |= Q(alt_phone_number__icontains=q)
             if hasattr(Customer, 'pan_number'):
                 cust_filter |= Q(pan_number__icontains=q)
             if hasattr(Customer, 'email'):
                 cust_filter |= Q(email__icontains=q)
 
-            qs = qs.filter(cust_filter).order_by('-current_credit_balance', 'name')[:25]
+            qs = qs.filter(cust_filter).order_by('-current_credit_balance', 'name')[:limit]
+
+        # 2. Zero-Query Instant Population (Returns Top Debtors & Recent Patrons)
         else:
-            qs = qs.order_by('-current_credit_balance', '-updated_at')[:15]
+            qs = qs.order_by('-current_credit_balance', '-updated_at', 'name')[:limit]
 
         results = []
         for c in qs:
@@ -342,40 +369,51 @@ class CustomerSearchAPIView(LoginRequiredMixin, View):
             c_type_display = c.get_customer_type_display() if hasattr(c, 'get_customer_type_display') else c_type
             pan = getattr(c, 'pan_number', '') or ''
             phone = getattr(c, 'phone_number', '') or ''
+            alt_phone = getattr(c, 'alt_phone_number', '') or ''
             addr = getattr(c, 'address', '') or ''
             email = getattr(c, 'email', '') or ''
             bal = getattr(c, 'current_credit_balance', Decimal('0.00'))
-            limit = getattr(c, 'credit_limit', Decimal('0.00'))
+            limit_val = getattr(c, 'credit_limit', Decimal('0.00'))
 
             if bal > Decimal('0.00'):
                 badge = f"Due: Rs. {bal:,.2f}"
                 badge_color = 'danger'
+                badge_class = 'bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25'
             elif pan:
                 badge = f"PAN: {pan}"
                 badge_color = 'primary'
+                badge_class = 'bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25'
             else:
                 badge = c_type_display
-                badge_color = 'secondary'
+                badge_color = 'success'
+                badge_class = 'bg-success bg-opacity-10 text-success border border-success border-opacity-25'
 
-            subtitle_parts = [f"Ph: {phone}"]
+            subtitle_parts = []
+            if phone:
+                subtitle_parts.append(f"Ph: {phone}")
             if pan:
                 subtitle_parts.append(f"PAN: {pan}")
             if bal > Decimal('0.00'):
                 subtitle_parts.append(f"Due: Rs. {bal:,.2f}")
             elif addr:
-                subtitle_parts.append(addr[:30])
-            subtitle = " | ".join(subtitle_parts)
+                subtitle_parts.append(addr[:28])
+
+            subtitle = " | ".join(subtitle_parts) if subtitle_parts else "Registered Customer"
 
             extra_data = {
-                'credit_balance': str(bal),
-                'credit_limit': str(limit),
-                'pan_number': pan,
+                'id': c.id,
+                'name': c.name,
+                'phone': phone,
                 'phone_number': phone,
+                'alt_phone': alt_phone,
+                'pan': pan,
+                'pan_number': pan,
                 'address': addr,
                 'email': email,
+                'credit_balance': str(bal),
+                'credit_limit': str(limit_val),
                 'customer_type': c_type,
                 'customer_type_display': c_type_display,
-                'wholesale_or_retail_badge': c_type_display,
                 'preferred_branch_id': c.preferred_branch_id if getattr(c, 'preferred_branch_id', None) else None,
                 'preferred_branch_name': c.preferred_branch.name if getattr(c, 'preferred_branch', None) else '',
             }
@@ -383,19 +421,21 @@ class CustomerSearchAPIView(LoginRequiredMixin, View):
             results.append({
                 'id': c.id,
                 'title': c.name,
-                'subtitle': subtitle,
-                'badge': badge,
-                'badge_color': badge_color,
-                'extra_data': extra_data,
-                'text': f"{c.name} ({phone})" if phone else c.name,
                 'name': c.name,
                 'phone': phone,
                 'pan': pan,
                 'address': addr,
                 'email': email,
-                'customer_type': c_type,
+                'subtitle': subtitle,
+                'badge': badge,
+                'badge_color': badge_color,
+                'badge_class': badge_class,
                 'credit_balance': str(bal),
-                'credit_limit': str(limit),
+                'credit_limit': str(limit_val),
+                'customer_type': c_type,
+                'customer_type_display': c_type_display,
+                'text': f"{c.name} ({phone})" if phone else c.name,
+                'extra_data': extra_data
             })
 
         return JsonResponse({

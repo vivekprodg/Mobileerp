@@ -152,6 +152,13 @@ class ProductForm(forms.ModelForm):
         widget=make_text_input(placeholder='Scan physical EAN/UPC or leave blank (Optional)'),
         help_text=_("Optional: Scan the manufacturer barcode or leave completely blank.")
     )
+    is_discountable = forms.BooleanField(
+        required=False,
+        initial=True,
+        label=_("Allow Cashier Discount"),
+        widget=make_checkbox(),
+        help_text=_("Uncheck this to lock discounts and prohibit cashiers from discounting this product.")
+    )
 
     class Meta:
         model = Product
@@ -171,7 +178,7 @@ class ProductForm(forms.ModelForm):
             'wifi_spec', 'bluetooth_version', 'nfc_available', 'gps_capabilities',
             'size_dimension', 'base_unit',
             # 4. Pricing & Taxes
-            'purchase_price', 'selling_price', 'wholesale_price', 'max_discount_percent',
+            'purchase_price', 'selling_price', 'wholesale_price', 'is_discountable', 'max_discount_percent',
             'tax_pricing_type', 'is_vat_applicable', 'vat_rate',
             # 5. Inventory & Warehouse
             'inventory_tracking_type', 'requires_imei_tracking', 'requires_serial_tracking',
@@ -231,6 +238,7 @@ class ProductForm(forms.ModelForm):
             'purchase_price': make_number_input(step="0.01", min_val=0, placeholder='0.00'),
             'selling_price': make_number_input(step="0.01", min_val=0, placeholder='0.00'),
             'wholesale_price': make_number_input(step="0.01", min_val=0, placeholder='0.00'),
+            'is_discountable': make_checkbox(),
             'max_discount_percent': make_number_input(step="0.5", min_val=0, max_val=100, placeholder='10.0'),
             'tax_pricing_type': make_select(),
             'vat_rate': make_number_input(step="0.01", min_val=0, max_val=100, placeholder='0.00'),
@@ -255,9 +263,11 @@ class ProductForm(forms.ModelForm):
         self.fields['barcode'].required = False
         self.fields['purchase_price'].required = False
         self.fields['warranty_months'].required = False
+        self.fields['is_discountable'].required = False
 
         if not self.instance.pk:
             self.fields['purchase_price'].initial = Decimal('0.00')
+            self.fields['is_discountable'].initial = True
 
             config = SystemConfiguration.get_solo()
             if config.tax_system_mode == 'VAT':

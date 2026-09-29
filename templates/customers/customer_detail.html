@@ -1,22 +1,68 @@
 {% extends "core/base.html" %}
+{% load humanize static %}
 
-{% block title %}{{ customer.name }} | Udhaari Ledger{% endblock %}
+{% block title %}{{ customer.name }} | Udhaari Ledger &amp; Customer Profile{% endblock %}
+
+{% block extra_head %}
+<style>
+.customer-summary-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
+    border-radius: 16px;
+    box-shadow: var(--erp-shadow-xs, 0 1px 3px rgba(15, 23, 42, 0.04));
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.customer-summary-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--erp-shadow-sm, 0 4px 6px -1px rgba(0, 0, 0, 0.06));
+}
+
+.subledger-remarks-box {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-left: 3px solid #3b82f6;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    max-width: 440px;
+    word-break: break-word;
+}
+
+.fs-2xs { font-size: 0.6875rem !important; }
+.fs-3xs { font-size: 0.625rem !important; }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4">
+<div class="container-fluid px-3 px-md-4 py-4">
+
+    <!-- Header Actions & Navigation -->
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
                 <h4 class="fw-bold text-dark mb-0">{{ customer.name }}</h4>
-                <span class="badge bg-light text-dark border">{{ customer.get_customer_type_display }}</span>
+                <span class="badge bg-light text-dark border fs-2xs">{{ customer.get_customer_type_display }}</span>
+                {% if customer.pan_number %}
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 font-monospace fs-2xs">
+                        PAN: {{ customer.pan_number }}
+                    </span>
+                {% endif %}
             </div>
-            <p class="text-muted fs-xs mb-0">Phone: <strong>{{ customer.phone_number }}</strong> | PAN: <strong>{{ customer.pan_number|default:"N/A" }}</strong></p>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Phone: <strong class="font-monospace text-dark">{{ customer.phone_number }}</strong>
+                {% if customer.alt_phone_number %}&bull; Alt: <span class="font-monospace">{{ customer.alt_phone_number }}</span>{% endif %}
+                {% if customer.address %}&bull; Address: <span>{{ customer.address }}</span>{% endif %}
+                {% if customer.preferred_branch %}&bull; Branch: <span>{{ customer.preferred_branch.name }}</span>{% endif %}
+            </p>
         </div>
-        <div class="d-flex gap-2 flex-wrap">
+
+        <div class="d-flex gap-2 flex-wrap align-items-center">
             <!-- 1-Click Link to Full Party Confirmation Ledger -->
-            <a href="{% url 'accounting:party_ledger' %}?party_type=CUSTOMER&party_id={{ customer.id }}&fiscal_year={{ active_fiscal_year|default:'2083/84' }}" 
+            <a href="{% url 'accounting:party_ledger' %}?party_type=CUSTOMER&amp;party_id={{ customer.id }}&amp;fiscal_year={{ active_fiscal_year|default:'2083/84' }}" 
                class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
-                <i class="fas fa-file-invoice-dollar me-1"></i> Statement / Balance Confirmation
+                <i class="fas fa-file-invoice-dollar me-1"></i> Statement / Confirmation Letter
             </a>
 
             <!-- Gated: Only Store Owners, Managers, or Accountants can record Udhaari repayments -->
@@ -25,8 +71,9 @@
                 <i class="fas fa-hand-holding-dollar me-1"></i> Receive Repayment
             </button>
             {% endif %}
+
             <a href="{% url 'customers:customer_edit' customer.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
-                <i class="fas fa-edit"></i> Edit
+                <i class="fas fa-edit me-1"></i> Edit
             </a>
             <a href="{% url 'customers:customer_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
                 &larr; Back to Directory
@@ -34,63 +81,161 @@
         </div>
     </div>
 
-    <!-- Outstanding Debt Summary Card -->
+    <!-- Outstanding Debt Summary Cards (Balanced 3-Column Layout) -->
     <div class="row g-3 mb-4">
+        <!-- 1. Current Outstanding Debt -->
         <div class="col-12 col-md-4">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-danger bg-opacity-10 border border-danger border-opacity-25 h-100">
-                <span class="text-danger fw-bold fs-xs text-uppercase">Current Outstanding Udhaari</span>
-                <h3 class="fw-bold text-danger mt-1 mb-0 font-monospace">Rs. {{ customer.current_credit_balance|floatformat:2 }}</h3>
-                <small class="text-muted">Limit: Rs. {{ customer.credit_limit|floatformat:2 }}</small>
+            <div class="customer-summary-card p-3 h-100 border-start border-danger border-4 {% if customer.current_credit_balance > 0 %}bg-danger bg-opacity-10 border-danger border-opacity-25{% endif %}">
+                <span class="text-danger fw-bold fs-2xs text-uppercase tracking-wider d-block">Current Outstanding Udhaari</span>
+                <h3 class="fw-bold text-danger mt-1 mb-0 font-monospace">Rs. {{ customer.current_credit_balance|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs d-block mt-1">
+                    Allowed Limit: <strong class="font-monospace">Rs. {{ customer.credit_limit|floatformat:2|intcomma }}</strong>
+                </small>
             </div>
         </div>
+
+        <!-- 2. Cumulative Lifetime Spend -->
         <div class="col-12 col-md-4">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100">
-                <span class="text-muted fw-semibold fs-xs text-uppercase">Cumulative Lifetime Spend</span>
-                <h3 class="fw-bold text-dark mt-1 mb-0 font-monospace">Rs. {{ customer.total_spent|floatformat:2 }}</h3>
-                <small class="text-muted">Across all visits &amp; branches</small>
+            <div class="customer-summary-card p-3 h-100 border-start border-primary border-4">
+                <span class="text-muted fw-bold fs-2xs text-uppercase tracking-wider d-block">Cumulative Lifetime Spend</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0 font-monospace">Rs. {{ customer.total_spent|floatformat:2|intcomma }}</h3>
+                <small class="text-muted fs-2xs d-block mt-1">Total purchases across all store visits</small>
+            </div>
+        </div>
+
+        <!-- 3. Account Tier & Credit Terms -->
+        <div class="col-12 col-md-4">
+            <div class="customer-summary-card p-3 h-100 border-start border-info border-4">
+                <span class="text-muted fw-bold fs-2xs text-uppercase tracking-wider d-block">Account Tier &amp; Credit Terms</span>
+                <h3 class="fw-bold text-dark mt-1 mb-0 fs-5">{{ customer.get_customer_type_display }}</h3>
+                <small class="text-muted fs-2xs d-block mt-1">
+                    {% if customer.credit_limit > 0 %}
+                        Credit facility enabled &bull; Max limit: Rs. {{ customer.credit_limit|floatformat:2|intcomma }}
+                    {% else %}
+                        Standard cash-only account (0.00 credit limit)
+                    {% endif %}
+                </small>
             </div>
         </div>
     </div>
 
-    <!-- Ledger Entries -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
-        <div class="p-3 border-bottom bg-light d-flex align-items-center justify-content-between">
-            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-book-open text-primary me-2"></i> Account Udhaari Statement (Recent Transactions)</h6>
-            <a href="{% url 'accounting:party_ledger' %}?party_type=CUSTOMER&party_id={{ customer.id }}&fiscal_year={{ active_fiscal_year|default:'2083/84' }}" class="btn btn-link btn-sm text-decoration-none p-0 fw-bold fs-xs">
+    <!-- Ledger Entries with Itemized Payment Breakdown -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-2">
+            <div>
+                <h6 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-book-open text-primary me-2"></i> Account Udhaari Statement (Recent Sub-Ledger Entries)
+                </h6>
+                <small class="text-muted fs-2xs">Complete audit trail of sales invoices, cash/wallet collections, and balance adjustments</small>
+            </div>
+            <a href="{% url 'accounting:party_ledger' %}?party_type=CUSTOMER&amp;party_id={{ customer.id }}&amp;fiscal_year={{ active_fiscal_year|default:'2083/84' }}" class="btn btn-link btn-sm text-decoration-none p-0 fw-bold fs-xs text-primary">
                 View Full Multi-Year Ledger &rarr;
             </a>
         </div>
+
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 fs-sm">
-                <thead class="bg-light text-muted text-uppercase fs-xs">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
                     <tr>
-                        <th class="ps-4">Date &amp; Time</th>
-                        <th>Type</th>
-                        <th>Reference / Bill No</th>
-                        <th>Debit (Bought)</th>
-                        <th>Credit (Paid)</th>
-                        <th>Resulting Balance</th>
-                        <th>Recorded By</th>
+                        <th class="ps-4" style="width: 150px;">Date &amp; Time</th>
+                        <th style="width: 140px;">Type</th>
+                        <th>Reference &amp; Itemized Breakdown</th>
+                        <th class="text-end" style="width: 140px;">Debit (Bought)</th>
+                        <th class="text-end" style="width: 140px;">Credit (Paid)</th>
+                        <th class="text-end" style="width: 150px;">Resulting Balance</th>
+                        <th class="text-center" style="width: 130px;">Recorded By</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for entry in ledger_entries %}
                     <tr>
-                        <td class="ps-4 text-nowrap">{{ entry.created_at|date:"Y-m-d H:i" }}</td>
+                        <!-- 1. Timestamp -->
+                        <td class="ps-4 text-nowrap font-monospace fs-xs">
+                            {{ entry.created_at|date:"Y-m-d H:i" }}
+                        </td>
+
+                        <!-- 2. Entry Type Badge -->
                         <td>
-                            <span class="badge bg-{% if entry.entry_type == 'DEBIT' %}danger{% elif entry.entry_type == 'CREDIT' %}success{% else %}info{% endif %}">
-                                {{ entry.get_entry_type_display }}
+                            {% if entry.entry_type == 'DEBIT' %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-2xs fw-bold px-2 py-1">
+                                    <i class="fas fa-arrow-up me-1"></i> UDHAARI (+)
+                                </span>
+                            {% elif entry.entry_type == 'CREDIT' %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs fw-bold px-2 py-1">
+                                    <i class="fas fa-arrow-down me-1"></i> REPAYMENT (-)
+                                </span>
+                            {% else %}
+                                <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 fs-2xs fw-bold px-2 py-1">
+                                    <i class="fas fa-scale-balanced me-1"></i> ADJUSTMENT
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 3. Reference Invoice & Itemized Payment Breakdown -->
+                        <td>
+                            <div class="d-flex align-items-center gap-1.5 flex-wrap">
+                                <code class="fw-bold font-monospace fs-xs text-primary">{{ entry.reference_invoice|default:"-" }}</code>
+                                
+                                {% if entry.payment_mode and entry.payment_mode != 'OTHER' %}
+                                    <span class="badge bg-light text-dark border fs-3xs font-monospace">
+                                        <i class="fas fa-wallet me-1 text-muted"></i>{{ entry.get_payment_mode_display }}
+                                    </span>
+                                {% endif %}
+
+                                {% if entry.branch %}
+                                    <span class="badge bg-light text-secondary border fs-3xs">
+                                        {{ entry.branch.code }}
+                                    </span>
+                                {% endif %}
+                            </div>
+
+                            <!-- Itemized Payment Breakdown Sub-Line -->
+                            {% if entry.remarks %}
+                                <div class="subledger-remarks-box mt-1.5 font-monospace text-secondary">
+                                    <i class="fas fa-circle-info text-primary me-1"></i>{{ entry.remarks }}
+                                </div>
+                            {% endif %}
+                        </td>
+
+                        <!-- 4. Debit (Purchases Added to Debt) -->
+                        <td class="text-end fw-bold font-monospace">
+                            {% if entry.entry_type == 'DEBIT' %}
+                                <span class="text-danger">Rs. {{ entry.amount|floatformat:2|intcomma }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 5. Credit (Repayments Deducted from Debt) -->
+                        <td class="text-end fw-bold font-monospace">
+                            {% if entry.entry_type == 'CREDIT' %}
+                                <span class="text-success">Rs. {{ entry.amount|floatformat:2|intcomma }}</span>
+                            {% elif entry.entry_type == 'ADJUSTMENT' %}
+                                <span class="text-info">Rs. {{ entry.amount|floatformat:2|intcomma }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 6. Resulting Outstanding Debt Balance -->
+                        <td class="text-end fw-bold font-monospace fs-xs">
+                            <span class="{% if entry.resulting_balance > 0 %}text-danger{% else %}text-success{% endif %}">
+                                Rs. {{ entry.resulting_balance|floatformat:2|intcomma }}
                             </span>
                         </td>
-                        <td><code>{{ entry.reference_invoice|default:"-" }}</code></td>
-                        <td class="fw-bold text-danger font-monospace">{% if entry.entry_type == 'DEBIT' %}Rs. {{ entry.amount|floatformat:2 }}{% else %}-{% endif %}</td>
-                        <td class="fw-bold text-success font-monospace">{% if entry.entry_type == 'CREDIT' %}Rs. {{ entry.amount|floatformat:2 }}{% else %}-{% endif %}</td>
-                        <td class="fw-bold text-dark font-monospace">Rs. {{ entry.resulting_balance|floatformat:2 }}</td>
-                        <td>{{ entry.recorded_by.username|default:"System" }}</td>
+
+                        <!-- 7. Recorded By Staff User -->
+                        <td class="text-center text-muted fs-xs">
+                            <i class="fas fa-user-circle me-1 opacity-50"></i>{{ entry.recorded_by.username|default:"System" }}
+                        </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="7" class="text-center py-4 text-muted">No transactions on ledger yet.</td>
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            <i class="fas fa-book-open fs-2 opacity-25 d-block mb-2"></i>
+                            <div class="fw-bold fs-xs text-dark mb-1">No Sub-Ledger Entries Recorded Yet</div>
+                            <div class="fs-2xs">Transactions will appear automatically upon counter billing or debt collection.</div>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -99,63 +244,107 @@
     </div>
 </div>
 
-<!-- Modal: Receive Payment (Only rendered for authorized roles) -->
+<!-- =========================================================================
+     MODAL: RECEIVE CUSTOMER UDHAARI REPAYMENT
+     ========================================================================= -->
 {% if IS_OWNER or IS_MANAGER or IS_ACCOUNTANT or user.is_superuser %}
-<div class="modal fade" id="repayModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="repayModal" tabindex="-1" aria-labelledby="repayModalLabel" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
             <form action="{% url 'customers:customer_payment' customer.pk %}" method="post" id="repaymentForm" novalidate>
                 {% csrf_token %}
-                <div class="modal-header bg-success text-white border-0 py-3">
-                    <h5 class="modal-title fs-6 fw-bold"><i class="fas fa-hand-holding-dollar me-2"></i> Receive Udhaari Payment</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                
+                <div class="modal-header bg-success text-white border-0 py-3 px-4">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-white text-success p-2 rounded-circle fs-6 shadow-xs"><i class="fas fa-hand-holding-dollar"></i></span>
+                        <div>
+                            <h5 class="modal-title fs-6 fw-bold mb-0" id="repayModalLabel">Receive Udhaari Debt Repayment</h5>
+                            <small class="text-white-50 fs-2xs">Customer: <strong>{{ customer.name }}</strong> (Due: Rs. {{ customer.current_credit_balance|floatformat:2|intcomma }})</small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
+
                 <div class="modal-body p-4">
+                    <!-- Current Outstanding Banner -->
+                    <div class="p-3 bg-light rounded-3 border d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Current Outstanding Debt</span>
+                            <h4 class="fw-bold text-danger font-monospace mb-0">Rs. {{ customer.current_credit_balance|floatformat:2|intcomma }}</h4>
+                        </div>
+                        <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 fs-2xs fw-bold" id="payFullDebtBtn">
+                            Pay Full Due
+                        </button>
+                    </div>
+
+                    <!-- Repayment Amount -->
                     <div class="mb-3">
-                        <label class="form-label fw-semibold fs-xs">Repayment Amount (NPR) <span class="text-danger">*</span></label>
+                        <label class="form-label fw-bold text-dark fs-xs mb-1">
+                            Repayment Amount (NPR) <span class="text-danger">*</span>
+                        </label>
                         {{ payment_form.amount }}
+                        {% if payment_form.amount.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ payment_form.amount.errors|striptags }}</div>
+                        {% endif %}
                     </div>
 
                     <!-- Destination Account Standard Contextual Autocomplete Picker -->
                     <div class="mb-3">
-                        <label class="form-label fw-semibold fs-xs">
-                            Destination Account (Cash Drawer / Bank / Digital Wallet) <span class="text-danger">*</span>
+                        <label class="form-label fw-bold text-dark fs-xs mb-1">
+                            Destination Ledger Account (Cash / Bank / Digital Wallet) <span class="text-danger">*</span>
                         </label>
                         <div class="contextual-search-wrapper"
                              id="repayDestinationAccountWrapper"
                              data-search-url="/accounting/api/accounts/search/?category=PAYMENT"
                              data-search-type="account"
-                             data-placeholder="Search Cash, Bank, or Wallet account..."
+                             data-placeholder="Search Cash float, Bank, or Wallet account..."
                              data-initial-id="{{ payment_form.destination_account.value|default:'' }}">
                             <input type="hidden" name="destination_account" id="id_destination_account" value="{{ payment_form.destination_account.value|default:'' }}" required>
                             <input type="text" class="form-control contextual-search-input async-search-input"
                                    id="repay_destination_account_display"
-                                   placeholder="Search Cash, Bank, or Wallet account..."
+                                   data-search-url="/accounting/api/accounts/search/?category=PAYMENT"
+                                   placeholder="Search Cash float, Bank, or Wallet account..."
                                    autocomplete="off">
                         </div>
                         {% if payment_form.destination_account.errors %}
-                        <div class="text-danger fs-2xs mt-1">{{ payment_form.destination_account.errors }}</div>
+                            <div class="text-danger fs-2xs mt-1">{{ payment_form.destination_account.errors|striptags }}</div>
+                        {% endif %}
+                        <small class="text-muted fs-2xs mt-1 d-block">Source account where collection is debited in General Ledger.</small>
+                    </div>
+
+                    <!-- Payment Mode -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark fs-xs mb-1">Payment Mode <span class="text-danger">*</span></label>
+                        {{ payment_form.payment_mode }}
+                        {% if payment_form.payment_mode.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ payment_form.payment_mode.errors|striptags }}</div>
                         {% endif %}
                     </div>
 
+                    <!-- Reference Invoice / Slip No -->
                     <div class="mb-3">
-                        <label class="form-label fw-semibold fs-xs">Payment Mode</label>
-                        {{ payment_form.payment_mode }}
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold fs-xs">Reference Receipt / Transaction No</label>
+                        <label class="form-label fw-bold text-dark fs-xs mb-1">Reference Receipt / Transaction Code</label>
                         {{ payment_form.reference_invoice }}
+                        {% if payment_form.reference_invoice.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ payment_form.reference_invoice.errors|striptags }}</div>
+                        {% endif %}
                     </div>
 
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold fs-xs">Remarks</label>
+                    <!-- Remarks -->
+                    <div class="mb-0">
+                        <label class="form-label fw-bold text-dark fs-xs mb-1">Collection Remarks / Notes</label>
                         {{ payment_form.remarks }}
+                        {% if payment_form.remarks.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ payment_form.remarks.errors|striptags }}</div>
+                        {% endif %}
                     </div>
                 </div>
-                <div class="modal-footer bg-light border-0">
-                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-success btn-sm px-4 rounded-pill fw-bold">Post Payment</button>
+
+                <div class="modal-footer bg-light border-0 py-3 px-4 d-flex justify-content-between align-items-center">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success btn-sm px-4 rounded-pill fw-bold shadow-sm" id="submitRepayBtn">
+                        <i class="fas fa-check-circle me-1"></i> Post Repayment &amp; Clear Debt
+                    </button>
                 </div>
             </form>
         </div>
@@ -165,8 +354,22 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const repayWrapper = document.getElementById('repayDestinationAccountWrapper');
-    const paymentModeSelect = document.querySelector('[name="payment_mode"]');
+    const paymentModeSelect = document.querySelector('#repaymentForm [name="payment_mode"]');
+    const payFullDebtBtn = document.getElementById('payFullDebtBtn');
+    const amountInput = document.querySelector('#repaymentForm [name="amount"]');
+    const currentDue = parseFloat("{{ customer.current_credit_balance|default:'0' }}") || 0;
 
+    // Quick full repayment button
+    if (payFullDebtBtn && amountInput) {
+        payFullDebtBtn.addEventListener('click', () => {
+            if (currentDue > 0) {
+                amountInput.value = currentDue.toFixed(2);
+                amountInput.focus();
+            }
+        });
+    }
+
+    // Synchronize payment mode dropdown based on selected destination account
     if (repayWrapper && paymentModeSelect) {
         repayWrapper.addEventListener('item-selected', (e) => {
             const acc = e.detail;
@@ -179,8 +382,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 paymentModeSelect.value = 'CASH';
             } else if (tag === 'BANK' || title.includes('BANK')) {
                 paymentModeSelect.value = 'BANK_TRANSFER';
-            } else if (tag === 'FONEPAY' || tag === 'ESEWA' || tag === 'KHALTI' || title.includes('WALLET') || title.includes('QR')) {
-                paymentModeSelect.value = 'WALLET';
+            } else if (tag === 'FONEPAY' || title.includes('FONEPAY') || title.includes('QR')) {
+                paymentModeSelect.value = 'FONEPAY';
+            } else if (tag === 'ESEWA' || title.includes('ESEWA')) {
+                paymentModeSelect.value = 'ESEWA';
+            } else if (tag === 'KHALTI' || title.includes('KHALTI')) {
+                paymentModeSelect.value = 'KHALTI';
+            } else if (tag.includes('CARD') || title.includes('CARD') || title.includes('POS')) {
+                paymentModeSelect.value = 'CARD';
             }
         });
     }

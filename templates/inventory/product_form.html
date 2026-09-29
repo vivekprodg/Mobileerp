@@ -668,45 +668,85 @@
                                 &bull; <strong>Exclusive:</strong> Adds tax on top during checkout<br>
                                 &bull; <strong>Exempt:</strong> 0% Tax Non-VAT Mode
                             </small>
+                            {% if form.tax_pricing_type.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.tax_pricing_type.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
                         <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Default NTA MDMS Status</label>
                             {{ form.default_mdms_status }}
+                            {% if form.default_mdms_status.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.default_mdms_status.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
                         <div class="col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Purchase Cost Price (NPR)</label>
                             {{ form.purchase_price }}
+                            {% if form.purchase_price.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.purchase_price.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
                         <div class="col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Selling Price / Counter MRP (NPR) <span class="text-danger">*</span></label>
                             {{ form.selling_price }}
+                            {% if form.selling_price.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.selling_price.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
                         <div class="col-md-4">
                             <label class="form-label fw-bold text-dark fs-xs">Wholesale Price (NPR)</label>
                             {{ form.wholesale_price }}
+                            {% if form.wholesale_price.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.wholesale_price.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
-                        <div class="col-md-4">
+                        <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Max Cashier Discount (%)</label>
                             {{ form.max_discount_percent }}
+                            <small class="text-muted fs-2xs mt-1 d-block">Maximum percentage discount cashier can apply without manager PIN.</small>
+                            {% if form.max_discount_percent.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.max_discount_percent.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
-                        <div class="col-md-4">
+                        <!-- POINT 3: THE ALLOW CASHIER DISCOUNT TOGGLE SWITCH -->
+                        <div class="col-md-6 d-flex align-items-center">
+                            <div class="form-check form-switch mt-3 pt-1">
+                                {{ form.is_discountable }}
+                                <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.is_discountable.id_for_label }}">
+                                    Allow Cashier Discount (छुट दिने अनुमति)
+                                </label>
+                                <small class="text-muted fs-2xs d-block">Uncheck to lock price and prohibit cashiers from discounting this product.</small>
+                            </div>
+                            {% if form.is_discountable.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.is_discountable.errors|striptags }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Applicable VAT / Tax Rate (%)</label>
                             {{ form.vat_rate }}
+                            {% if form.vat_rate.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.vat_rate.errors|striptags }}</div>
+                            {% endif %}
                         </div>
 
-                        <div class="col-md-4 d-flex align-items-end">
-                            <div class="form-check form-switch pb-2">
+                        <div class="col-md-6 d-flex align-items-center">
+                            <div class="form-check form-switch mt-3 pt-1">
                                 {{ form.is_vat_applicable }}
-                                <label class="form-check-label fw-semibold fs-xs" for="{{ form.is_vat_applicable.id_for_label }}">
-                                    Enable Tax Calculation
+                                <label class="form-check-label fw-bold text-dark fs-xs" for="{{ form.is_vat_applicable.id_for_label }}">
+                                    Enable Tax Calculation (कर गणना सक्रिय)
                                 </label>
+                                <small class="text-muted fs-2xs d-block">Check if standard Nepal VAT or tax applies to this product.</small>
                             </div>
+                            {% if form.is_vat_applicable.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ form.is_vat_applicable.errors|striptags }}</div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -820,10 +860,6 @@
                     <label class="form-label fw-bold fs-xs text-dark">Category Name <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="quickCatName" placeholder="e.g. Smartphones, Audio, Power Banks" required>
                 </div>
-                <div class="form-check form-switch mb-3">
-                    <input class="form-check-input" type="checkbox" id="quickCatIsMobile" checked>
-                    <label class="form-check-label fw-semibold fs-xs" for="quickCatIsMobile">Contains Mobile Phones / IMEI Tracked Items</label>
-                </div>
                 <div id="quickCatError" class="text-danger fs-2xs d-none"></div>
             </div>
             <div class="modal-footer bg-light border-0">
@@ -894,8 +930,8 @@
                     <input type="text" class="form-control" id="quickUnitName" placeholder="e.g. Pieces, Box, Pack" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label fw-bold text-dark fs-xs">Symbol / Code</label>
-                    <input type="text" class="form-control font-monospace" id="quickUnitCode" placeholder="e.g. PCS, BOX, SET">
+                    <label class="form-label fw-bold text-dark fs-xs">Symbol / Code <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control font-monospace text-uppercase" id="quickUnitCode" placeholder="e.g. PCS, BOX, SET" required>
                 </div>
                 <div id="quickUnitError" class="text-danger fs-2xs d-none"></div>
             </div>
@@ -926,7 +962,7 @@
 
 <script>
 /**
- * Product Form Behavioral Controller with Bidirectional Warranty Synchronization & Smart Condition Text Reset
+ * Product Form Behavioral Controller with Corrected API Endpoints, Field Mappings & Discount Toggles
  */
 document.addEventListener('DOMContentLoaded', () => {
     const categoryWrapper = document.getElementById('categorySearchWrapper');
@@ -937,6 +973,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const mobilePanels = document.querySelectorAll('.mobile-feature-panel');
     const mobileIndicator = document.getElementById('mobileSpecsIndicator');
     const overallWarrantyInput = document.querySelector('[name="warranty_months"]') || document.getElementById('id_warranty_months');
+
+    // POINT 3: DISCOUNTABLE INTERACTIVE TOGGLE CONTROLLER
+    const discountableToggle = document.getElementById('{{ form.is_discountable.id_for_label }}') || document.querySelector('[name="is_discountable"]');
+    const maxDiscountInput = document.getElementById('{{ form.max_discount_percent.id_for_label }}') || document.querySelector('[name="max_discount_percent"]');
+
+    function syncDiscountableState() {
+        if (!discountableToggle || !maxDiscountInput) return;
+        if (!discountableToggle.checked) {
+            maxDiscountInput.style.backgroundColor = '#f1f5f9';
+            maxDiscountInput.style.opacity = '0.6';
+            maxDiscountInput.readOnly = true;
+        } else {
+            maxDiscountInput.style.backgroundColor = '';
+            maxDiscountInput.style.opacity = '1';
+            maxDiscountInput.readOnly = false;
+        }
+    }
+
+    if (discountableToggle) {
+        discountableToggle.addEventListener('change', syncDiscountableState);
+        syncDiscountableState();
+    }
 
     const standardDefectExclusion = "Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found.";
     const consumableAccessoryText = "No warranty for consumable accessory.";
@@ -992,12 +1050,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentText = (condInput.value || '').trim();
 
         if (months > 0) {
-            // If condition text is empty or stuck on the "consumable accessory" warning, reset to the genuine manufacturer defect clause
             if (!currentText || currentText.toLowerCase().includes('consumable') || currentText.toLowerCase().includes('no warranty')) {
                 condInput.value = standardDefectExclusion;
             }
         } else {
-            // Zero months warranty
             if (!currentText || currentText.toLowerCase().includes('genuine manufacturing defects')) {
                 condInput.value = consumableAccessoryText;
             }
@@ -1035,7 +1091,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // 1-Click Smartphone Preset Handler
     if (btnPresetPhone) {
         btnPresetPhone.addEventListener('click', () => {
-            // Row 0: Handset Body & Motherboard (12M)
             if (warrantyRows[0]) {
                 const typeSelect = warrantyRows[0].querySelector('select[name$="-component_type"]');
                 const nameInput = warrantyRows[0].querySelector('input[name$="-component_name"]');
@@ -1048,7 +1103,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (condInput) condInput.value = standardDefectExclusion;
             }
 
-            // Row 1: Internal Battery (6M)
             if (warrantyRows[1]) {
                 const typeSelect = warrantyRows[1].querySelector('select[name$="-component_type"]');
                 const nameInput = warrantyRows[1].querySelector('input[name$="-component_name"]');
@@ -1061,7 +1115,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (condInput) condInput.value = standardDefectExclusion;
             }
 
-            // Row 2: Screen / Display Panel (3M)
             if (warrantyRows[2]) {
                 const typeSelect = warrantyRows[2].querySelector('select[name$="-component_type"]');
                 const nameInput = warrantyRows[2].querySelector('input[name$="-component_name"]');
@@ -1074,18 +1127,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (condInput) condInput.value = standardDefectExclusion;
             }
 
-            // Synchronize Overall Warranty input in Tab 5 to 12
             if (overallWarrantyInput) {
                 overallWarrantyInput.value = 12;
             }
 
-            // Check IMEI tracking
             if (imeiCheckbox && !imeiCheckbox.checked) {
                 imeiCheckbox.checked = true;
                 evaluateMobileDisplay();
             }
 
-            // Flash visual confirmation
             warrantyRows.forEach(row => {
                 row.style.borderColor = '#10b981';
                 setTimeout(() => row.style.borderColor = '', 1200);
@@ -1105,12 +1155,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => row.style.borderColor = '', 1200);
             });
 
-            // Zero out Overall Warranty input in Tab 5
             if (overallWarrantyInput) {
                 overallWarrantyInput.value = 0;
             }
 
-            // Uncheck IMEI tracking for accessories
             if (imeiCheckbox && imeiCheckbox.checked) {
                 imeiCheckbox.checked = false;
                 evaluateMobileDisplay();
@@ -1191,7 +1239,7 @@ document.addEventListener('DOMContentLoaded', () => {
     evaluateMobileDisplay();
 
     // =========================================================================
-    // 4. QUICK-ADD MODAL SUBMISSIONS WITH STANDARDIZED COMPONENT SELECTION
+    // 4. QUICK-ADD MODAL SUBMISSIONS WITH CORRECTED API ROUTES & FIELD MAPPINGS
     // =========================================================================
     function triggerComponentSelection(wrapperEl, item) {
         if (!wrapperEl || !item) return;
@@ -1235,7 +1283,6 @@ document.addEventListener('DOMContentLoaded', () => {
         saveQuickCatBtn.addEventListener('click', async () => {
             const nameInput = document.getElementById('quickCatName');
             const name = nameInput ? nameInput.value.trim() : '';
-            const isMobile = document.getElementById('quickCatIsMobile')?.checked;
             const errEl = document.getElementById('quickCatError');
 
             if (!name) {
@@ -1244,14 +1291,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             try {
-                const res = await fetch('/inventory/api/categories/create/', {
+                const res = await fetch('/inventory/api/categories/quick-create/', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
-                    body: JSON.stringify({ name: name, is_mobile: isMobile })
+                    body: JSON.stringify({ name: name })
                 });
                 const data = await res.json();
-                if (res.ok && (data.id || data.pk)) {
-                    triggerComponentSelection(categoryWrapper, data);
+                const savedCategory = data.category || data;
+                if (res.ok && (savedCategory.id || savedCategory.pk)) {
+                    triggerComponentSelection(categoryWrapper, savedCategory);
                     bootstrap.Modal.getInstance(document.getElementById('quickAddCategoryModal'))?.hide();
                     if (nameInput) nameInput.value = '';
                     if (errEl) errEl.classList.add('d-none');
@@ -1278,15 +1326,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            if (!catId) {
+                if (errEl) { errEl.innerText = 'Please select a parent category first.'; errEl.classList.remove('d-none'); }
+                return;
+            }
+
             try {
-                const res = await fetch('/inventory/api/subcategories/create/', {
+                const res = await fetch('/inventory/api/subcategories/quick-create/', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
-                    body: JSON.stringify({ name: name, category_id: catId || null })
+                    body: JSON.stringify({ name: name, category_id: catId })
                 });
                 const data = await res.json();
-                if (res.ok && (data.id || data.pk)) {
-                    triggerComponentSelection(subcategoryWrapper, data);
+                const savedSubcat = data.subcategory || data;
+                if (res.ok && (savedSubcat.id || savedSubcat.pk)) {
+                    triggerComponentSelection(subcategoryWrapper, savedSubcat);
                     bootstrap.Modal.getInstance(document.getElementById('quickAddSubcategoryModal'))?.hide();
                     if (nameInput) nameInput.value = '';
                     if (errEl) errEl.classList.add('d-none');
@@ -1313,14 +1367,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             try {
-                const res = await fetch('/inventory/api/brands/create/', {
+                const res = await fetch('/inventory/api/brands/quick-create/', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
                     body: JSON.stringify({ name: name })
                 });
                 const data = await res.json();
-                if (res.ok && (data.id || data.pk)) {
-                    triggerComponentSelection(brandWrapper, data);
+                const savedBrand = data.brand || data;
+                if (res.ok && (savedBrand.id || savedBrand.pk)) {
+                    triggerComponentSelection(brandWrapper, savedBrand);
                     bootstrap.Modal.getInstance(document.getElementById('quickAddBrandModal'))?.hide();
                     if (nameInput) nameInput.value = '';
                     if (errEl) errEl.classList.add('d-none');
@@ -1340,7 +1395,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const nameInput = document.getElementById('quickUnitName');
             const name = nameInput ? nameInput.value.trim() : '';
             const codeInput = document.getElementById('quickUnitCode');
-            const code = codeInput ? codeInput.value.trim() : '';
+            const code = codeInput ? codeInput.value.trim().toUpperCase() : '';
             const errEl = document.getElementById('quickUnitError');
 
             if (!name) {
@@ -1348,15 +1403,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            if (!code) {
+                if (errEl) { errEl.innerText = 'Unit short code is required.'; errEl.classList.remove('d-none'); }
+                return;
+            }
+
             try {
-                const res = await fetch('/inventory/api/units/create/', {
+                const res = await fetch('/inventory/api/units/quick-create/', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
-                    body: JSON.stringify({ name: name, symbol: code })
+                    body: JSON.stringify({ name: name, code: code })
                 });
                 const data = await res.json();
-                if (res.ok && (data.id || data.pk)) {
-                    triggerComponentSelection(unitWrapper, data);
+                const savedUnit = data.unit || data;
+                if (res.ok && (savedUnit.id || savedUnit.pk)) {
+                    triggerComponentSelection(unitWrapper, savedUnit);
                     bootstrap.Modal.getInstance(document.getElementById('quickAddUnitModal'))?.hide();
                     if (nameInput) nameInput.value = '';
                     if (codeInput) codeInput.value = '';

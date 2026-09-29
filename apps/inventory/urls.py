@@ -1,7 +1,8 @@
 from django.urls import path
 from apps.inventory.views import (
     ProductListView, ProductDetailView, ProductCreateView, ProductUpdateView,
-    ProductStockAdjustmentView, CategoryListView, CategoryCreateView,
+    ProductStockAdjustmentView, ProductUnitConversionCreateView,
+    CategoryListView, CategoryCreateView,
     CategoryUpdateView, CategoryQuickCreateAPIView, CategorySearchAPIView,
     SubCategoryQuickCreateAPIView, SubCategorySearchAPIView,
     BrandListView, BrandCreateView, BrandUpdateView, BrandQuickCreateAPIView, BrandSearchAPIView,
@@ -20,6 +21,8 @@ urlpatterns = [
     path('<int:pk>/', ProductDetailView.as_view(), name='product_detail'),
     path('<int:pk>/edit/', ProductUpdateView.as_view(), name='product_edit'),
     path('<int:pk>/adjust-stock/', ProductStockAdjustmentView.as_view(), name='product_stock_adjust'),
+    path('<int:pk>/add-conversion/', ProductUnitConversionCreateView.as_view(), name='product_add_conversion'),
+    path('<int:pk>/conversion/add/', ProductUnitConversionCreateView.as_view(), name='product_unit_conversion_create'),
 
     # Central IMEI & Serial Registry (Section 7)
     path('imei-registry/', ItemInstanceListView.as_view(), name='imei_registry'),

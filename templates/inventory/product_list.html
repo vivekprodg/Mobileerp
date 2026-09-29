@@ -1210,7 +1210,7 @@
 </div>
 
 <!-- =========================================================
-     1. QUICK ADD PRODUCT MODAL (CLEAN SINGLE WARRANTY INPUT)
+     1. QUICK ADD PRODUCT MODAL (COMPLETE WITH BARCODE, MODEL NUMBER & WHOLESALE PRICE)
      ========================================================= -->
 <div class="inv-modal-overlay" id="addProductModal">
     <div class="inv-modal">
@@ -1232,22 +1232,35 @@
             <input type="hidden" name="vat_rate" value="{{ DEFAULT_TAX_RATE|default:'0.00' }}">
 
             <div class="inv-form-grid">
+                <!-- 1. PRODUCT NAME (FULL WIDTH) -->
                 <div class="inv-form-group full">
                     <label class="inv-form-label">Product Name *</label>
                     <input class="inv-form-input" name="name" required placeholder="e.g. Samsung Galaxy A55 5G">
                 </div>
 
+                <!-- 2. MODEL NAME & MODEL NUMBER -->
                 <div class="inv-form-group">
                     <label class="inv-form-label">Model Name</label>
                     <input class="inv-form-input" name="model_name" placeholder="e.g. Galaxy A55">
                 </div>
 
                 <div class="inv-form-group">
+                    <label class="inv-form-label">Model Number (मोडेल नम्बर)</label>
+                    <input class="inv-form-input" name="model_number" placeholder="e.g. SM-A556E/DS">
+                </div>
+
+                <!-- 3. SKU CODE & PHYSICAL BOX BARCODE -->
+                <div class="inv-form-group">
                     <label class="inv-form-label">SKU Code (Auto if blank)</label>
                     <input class="inv-form-input" name="sku" placeholder="e.g. SAM-A55-256">
                 </div>
 
-                <!-- 1. CATEGORY ASYNC CONTEXTUAL SEARCH -->
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Barcode (Scan physical box or leave blank)</label>
+                    <input class="inv-form-input font-monospace" name="barcode" placeholder="Scan physical barcode or leave blank">
+                </div>
+
+                <!-- 4. CATEGORY ASYNC CONTEXTUAL SEARCH -->
                 <div class="inv-form-group">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="inv-form-label mb-0">Category *</label>
@@ -1269,7 +1282,7 @@
                     </div>
                 </div>
 
-                <!-- 2. SUBCATEGORY ASYNC CONTEXTUAL SEARCH (CHAINED) -->
+                <!-- 5. SUBCATEGORY ASYNC CONTEXTUAL SEARCH (CHAINED) -->
                 <div class="inv-form-group">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="inv-form-label mb-0">Sub-Category</label>
@@ -1291,7 +1304,7 @@
                     </div>
                 </div>
 
-                <!-- 3. BRAND ASYNC CONTEXTUAL SEARCH -->
+                <!-- 6. BRAND & NETWORK TYPE -->
                 <div class="inv-form-group">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="inv-form-label mb-0">Brand</label>
@@ -1314,6 +1327,16 @@
                 </div>
 
                 <div class="inv-form-group">
+                    <label class="inv-form-label">Network Type</label>
+                    <select class="inv-form-input" name="network_type">
+                        <option value="5G">5G / LTE</option>
+                        <option value="4G">4G / VoLTE</option>
+                        <option value="WIFI_ONLY">Wi-Fi Only</option>
+                    </select>
+                </div>
+
+                <!-- 7. RAM & STORAGE -->
+                <div class="inv-form-group">
                     <label class="inv-form-label">RAM (e.g. 8GB)</label>
                     <input class="inv-form-input" name="ram" placeholder="e.g. 8GB">
                 </div>
@@ -1323,42 +1346,12 @@
                     <input class="inv-form-input" name="internal_storage" placeholder="e.g. 256GB">
                 </div>
 
+                <!-- 8. COLOR & BASE ATOMIC UNIT -->
                 <div class="inv-form-group">
                     <label class="inv-form-label">Color / Finish</label>
                     <input class="inv-form-input" name="color_variant" placeholder="e.g. Awesome Navy">
                 </div>
 
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Network Type</label>
-                    <select class="inv-form-input" name="network_type">
-                        <option value="5G">5G / LTE</option>
-                        <option value="4G">4G / VoLTE</option>
-                        <option value="WIFI_ONLY">Wi-Fi Only</option>
-                    </select>
-                </div>
-
-                <!-- COST PRICE PRE-FILLED WITH 0.00 TO PREVENT SUBMISSION VALIDATION ERRORS -->
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Cost Price (NPR)</label>
-                    <input class="inv-form-input" type="number" step="0.01" min="0" name="purchase_price" placeholder="0.00" value="0.00">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Selling Price / MRP *</label>
-                    <input class="inv-form-input" type="number" step="0.01" min="0" name="selling_price" required placeholder="0.00">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Opening Stock Quantity</label>
-                    <input class="inv-form-input" type="number" step="1" min="0" name="initial_stock" value="0">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Rack Location</label>
-                    <input class="inv-form-input" name="rack_number" placeholder="e.g. Rack-M01">
-                </div>
-
-                <!-- 4. BASE ATOMIC UNIT ASYNC CONTEXTUAL SEARCH -->
                 <div class="inv-form-group">
                     <div class="d-flex justify-content-between align-items-center mb-1">
                         <label class="inv-form-label mb-0">Base Atomic Unit *</label>
@@ -1380,16 +1373,51 @@
                     </div>
                 </div>
 
-                <!-- SERIALIZED PHONE CHECKBOX -->
-                <div class="inv-form-group full">
-                    <label class="d-flex align-items-center gap-2 inv-form-label mt-1 pointer">
-                        <input type="checkbox" name="requires_imei_tracking" id="quickAddRequiresImei" value="true" checked>
-                        <span class="fw-bold text-dark">Track Unique 15-Digit IMEI Numbers (Smartphones/Tablets)</span>
-                    </label>
-                    <small class="text-muted fs-2xs">Check for smartphones to enable Phone, Battery &amp; Screen warranties. Uncheck for standard accessories.</small>
+                <!-- 9. PRICING: COST PRICE, SELLING PRICE & WHOLESALE PRICE -->
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Cost Price (NPR)</label>
+                    <input class="inv-form-input font-monospace" type="number" step="0.01" min="0" name="purchase_price" placeholder="0.00" value="0.00">
                 </div>
 
-                <!-- 5. MULTI-COMPONENT WARRANTY BREAKDOWN SECTION -->
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Selling Price / Counter MRP *</label>
+                    <input class="inv-form-input font-monospace" type="number" step="0.01" min="0" name="selling_price" required placeholder="0.00">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Wholesale Price (थोक मूल्य NPR)</label>
+                    <input class="inv-form-input font-monospace" type="number" step="0.01" min="0" name="wholesale_price" placeholder="0.00">
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="inv-form-label">Opening Stock Quantity</label>
+                    <input class="inv-form-input font-monospace" type="number" step="1" min="0" name="initial_stock" value="0">
+                </div>
+
+                <!-- 10. RACK LOCATION -->
+                <div class="inv-form-group full">
+                    <label class="inv-form-label">Rack / Shelf Location</label>
+                    <input class="inv-form-input" name="rack_number" placeholder="e.g. Rack-M01, Shelf-B">
+                </div>
+
+                <!-- 11. CHECKBOXES: SERIALIZED PHONE & DISCOUNT PERMISSION -->
+                <div class="inv-form-group">
+                    <label class="d-flex align-items-center gap-2 inv-form-label mt-1 pointer">
+                        <input type="checkbox" name="requires_imei_tracking" id="quickAddRequiresImei" value="true" checked>
+                        <span class="fw-bold text-dark">Track 15-Digit IMEIs (Smartphones)</span>
+                    </label>
+                    <small class="text-muted fs-2xs">Check for smartphones to enable Phone, Battery &amp; Screen warranties.</small>
+                </div>
+
+                <div class="inv-form-group">
+                    <label class="d-flex align-items-center gap-2 inv-form-label mt-1 pointer">
+                        <input type="checkbox" name="is_discountable" id="quickAddIsDiscountable" value="true" checked>
+                        <span class="fw-bold text-dark">Allow Cashier Discount (छुट अनुमति)</span>
+                    </label>
+                    <small class="text-muted fs-2xs">Uncheck to lock price and prohibit cashiers from discounting this item.</small>
+                </div>
+
+                <!-- 12. MULTI-COMPONENT WARRANTY BREAKDOWN SECTION -->
                 <div class="inv-form-group full">
                     <div class="p-3 rounded-3 border" style="background: #f8fafc; border-color: #e2e8f0 !important;" id="warrantyConfigCard">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1402,7 +1430,7 @@
                         </div>
 
                         <div class="row g-2">
-                            <!-- 1. Handset / Motherboard Warranty (SINGLE AUTHORITATIVE INPUT) -->
+                            <!-- 1. Handset / Motherboard Warranty -->
                             <div class="col-12 col-md-4">
                                 <label class="inv-form-label fs-2xs">
                                     Handset / Motherboard (ह्यान्डसेट)
@@ -1753,7 +1781,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const imeiCheck = document.getElementById('quickAddRequiresImei');
 
     function syncWarrantyPreset() {
-        if (!imeCheck) return;
+        if (!imeiCheck) return;
         const isPhone = imeiCheck.checked;
 
         if (isPhone) {
@@ -2108,6 +2136,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const purchasePriceInput = quickProductForm.querySelector('[name="purchase_price"]');
             if (purchasePriceInput && (!purchasePriceInput.value || purchasePriceInput.value.trim() === '')) {
                 purchasePriceInput.value = '0.00';
+            }
+
+            // Ensure wholesale price defaults safely if left blank
+            const wholesalePriceInput = quickProductForm.querySelector('[name="wholesale_price"]');
+            if (wholesalePriceInput && (!wholesalePriceInput.value || wholesalePriceInput.value.trim() === '')) {
+                const sellingPriceInput = quickProductForm.querySelector('[name="selling_price"]');
+                wholesalePriceInput.value = sellingPriceInput && sellingPriceInput.value ? sellingPriceInput.value : '0.00';
             }
 
             const formData = new FormData(quickProductForm);

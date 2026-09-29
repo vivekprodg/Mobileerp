@@ -236,8 +236,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Set Selected Product
     function setSelectedProduct(item) {
+        const resolvedName = item.name || item.title || item.text || 'Product';
         hiddenProductId.value = item.id;
-        searchInput.value = item.name;
+        searchInput.value = resolvedName;
         clearBtn.classList.remove('d-none');
         badge.classList.remove('d-none');
         dropdown.classList.add('d-none');
@@ -245,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const barcodeVal = (item.extra_data && item.extra_data.barcode) ? item.extra_data.barcode : (item.barcode || item.sku || `PROD-${item.id}`);
         const priceVal = (item.extra_data && item.extra_data.selling_price) ? item.extra_data.selling_price : (item.selling_price || item.price || 0);
 
-        updatePreview(item.name, priceVal, barcodeVal);
+        updatePreview(resolvedName, priceVal, barcodeVal);
     }
 
     // Render items into dropdown
@@ -268,14 +269,15 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.type = 'button';
             btn.className = 'search-item-btn';
             
+            const resolvedName = item.name || item.title || item.text || 'Product';
             const barcode = (item.extra_data && item.extra_data.barcode) || item.barcode || item.sku || 'No Barcode';
             const price = (item.extra_data && item.extra_data.selling_price) || item.selling_price || item.price || 0;
-            const model = (item.extra_data && item.extra_data.model) || item.model || '';
+            const model = (item.extra_data && item.extra_data.model) || item.model_name || item.model || '';
 
             btn.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <strong class="text-dark fs-xs d-block">${item.name}</strong>
+                        <strong class="text-dark fs-xs d-block">${resolvedName}</strong>
                         <span class="text-muted fs-2xs font-monospace">
                             <i class="fas fa-barcode me-1"></i>${barcode} ${model ? '&bull; ' + model : ''}
                         </span>

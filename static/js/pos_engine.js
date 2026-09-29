@@ -1,38 +1,33 @@
 /**
- * POS Counter Terminal & Parked Bill Engine
- * High-Performance Decoupled Architecture with Zero-Query Customer Lookup & Repair Bridge
+ * POS Counter Terminal & Billing Engine (Hisaav Minimalist Architecture)
+ * File: static/js/pos_engine.js
  *
  * Core Capabilities:
- * 1. Master Configuration Toggle (`enforce_imei_tracking`):
- *    - Respects `data-enforce-imei` from `#posTaxConfigMeta`.
- *    - Backlog Mode (OFF): Phone cards add straight to the cart with editable quantities without forcing
- *      the blocking IMEI modal; provides a "Skip / Sell without IMEI" option if modal is opened.
- *    - Strict Mode (ON): Strictly mandates 1-to-1 IMEI selection, validates serial collisions, and locks quantity to 1.
- * 2. Zero-Query Customer Discovery (POSCustomerManager):
- *    - Automatically shows top 15 recent customers and outstanding debtors on input focus/click.
- *    - Standardized JSON contract consumption: { title, subtitle, badge, badge_class, extra_data }.
- * 3. Decoupled Product Catalog Service (POSCatalogService):
- *    - Isolated catalog state, debounced server querying, and multi-attribute classification.
- *    - Provides allLoadedProducts and initialProducts pools for non-serialized service item resolution.
- * 4. Unified Workshop Repair Ticket Handover Bridge (POSRepairTicketManager & POSCheckout):
- *    - repair_ticket_id is an official, built-in first-class property of POSCheckout and SmartPOSEngine.
- *    - Eliminates fragile monkey-patching of buildPayload across script execution timings.
- *    - Non-serialized repair services explicitly flag requires_imei = false and bypass device serial prompts.
- * 5. Authoritative Parked Bill API URL & Snapshot Persistence (POSHoldCartManager):
- *    - Standardized API endpoint pointing strictly to /pos/api/hold-carts/ (matching apps/pos/urls.py).
- *    - Preserves customer_pan, trade_in_voucher_id, trade_in_credit_amount, and repair_ticket_id across hold/recall cycles.
- * 6. Explicit Item Discount Types:
- *    - Three discrete modes: NONE, PERCENTAGE (%), and AMOUNT (Rs.).
- *    - Real-time mathematical concession percentage against line gross with supervisor limit badges.
- * 7. Dual-Mode Bill-Level Discounts:
- *    - Proportional allocation across discountable items (inclusive/exclusive VAT safe).
- * 8. Strict Walk-In Credit (Udhaari) Guard:
- *    - Enforces registered customer profile for any transaction with outstanding balance or credit.
- * 9. Salted Manager PIN Overrides & Emergency Offline Queue (IndexedDB `pending_sales`).
+ * 1. Zero-Query Instant Suggestions on Click/Focus:
+ *    - Barcode / 15-Digit IMEI Box: Immediately opens live suggestions with top/recent products.
+ *    - Patron Details Box: Immediately opens live suggestions with recent customers and debtors.
+ *    - Two-Tier Card Product Box: Immediately opens live catalog suggestions under the active row.
+ * 2. Letter-by-Letter Real-Time Autocomplete Filtering:
+ *    - Instant debounced querying on each keystroke (v -> vi -> viv).
+ *    - Highlights search terms, displays prices, available stock, tax status, and dual-IMEIs.
+ * 3. Smooth Keyboard Arrow Navigation:
+ *    - Seamlessly navigate suggestions using ArrowDown, ArrowUp, Enter, and Escape across all search trays.
+ * 4. Interactive In-Row & Whole-Bill Discount Controls (% vs Flat Rs.):
+ *    - Dual-mode segmented toggle buttons with real-time math recalculation.
+ *    - Instant VAT recalculation based on reduced taxable base upon every keystroke.
+ *    - Live savings badge updates showing rupee deductions and effective percentage.
+ * 5. Multi-Tender Split Payment & Udhaari Allocation Engine [F8]:
+ *    - Authoritative modal initialization pulling exact grand total to #splitModalPayableTotal.
+ *    - Dynamic real-time remaining balance calculations across all payment modes.
+ *    - Automatic Customer Udhaari allocation for remaining unpaid balances.
+ *    - Strict customer verification preventing anonymous credit debt.
+ * 6. Full Accounting & POS Terminal Parity:
+ *    - Exact JSON payload assembly for /sales/api/checkout/ supporting Cash [F4], Credit, and Split [F8].
+ *    - Full preservation of Trade-In Exchange [F6], Repair Handovers [F7], and Hold/Recall Carts [F9/F10].
  */
 
 // ============================================================================
-// 0. GLOBAL SECURITY & DOM UTILITIES
+// 0. GLOBAL SECURITY, FORMATTING & UTILITIES
 // ============================================================================
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
@@ -42,6 +37,26 @@ function escapeHtml(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+function escapeRegex(text) {
+    if (!text) return '';
+    return String(text).replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+}
+
+function highlightMatch(fullText, query) {
+    if (!query || !fullText) return escapeHtml(fullText);
+    const escaped = escapeHtml(fullText);
+    const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
+    return escaped.replace(regex, '<span class="text-primary fw-extrabold text-decoration-underline">$1</span>');
+}
+
+function formatCurrencyNPR(num) {
+    const val = Number(num) || 0;
+    return 'Rs. ' + val.toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
 }
 
 function getCsrfToken() {
@@ -61,7 +76,7 @@ function generateUUID() {
 }
 
 // ============================================================================
-// 1. WEB AUDIO FEEDBACK CHIME SYNTHESIZER
+// 1. WEB AUDIO FEEDBACK SYNTHESIZER
 // ============================================================================
 class POSAudioSynthesizer {
     static play(type = 'success') {
@@ -88,125 +103,69 @@ class POSAudioSynthesizer {
             osc.start();
             osc.stop(ctx.currentTime + 0.09);
         } catch (e) {
-            // AudioContext autoplay policies silently ignored
+            // AudioContext policy handled gracefully
         }
     }
 }
 
 // ============================================================================
-// 2. CUSTOMER & UDHAARI MANAGEMENT MODULE (ZERO-QUERY DROPDOWN & CONTRACT)
+// 2. PATRON / CUSTOMER MANAGEMENT (ZERO-QUERY & LETTER-BY-LETTER AUTOCOMPLETE)
 // ============================================================================
 class POSCustomerManager {
     constructor(engine) {
         this.engine = engine;
         this.searchApiUrl = '/customers/api/search/';
-        this.customerInput = document.getElementById('posCustomerInput') || document.getElementById('customerSelect');
-        this.customerPanInput = document.getElementById('posCustomerPanInput');
+
+        // Bind Customer Inputs
+        this.customerInput = document.getElementById('posCustomerInput') || document.getElementById('cust-name');
+        this.customerIdInput = document.getElementById('posCustomerId');
+        this.customerPanInput = document.getElementById('posCustomerPanInput') || document.getElementById('cust-pan');
+        this.customerMobileInput = document.getElementById('posCustomerMobileInput') || document.getElementById('cust-mobile');
+        this.dropdownEl = document.getElementById('customerSearchDropdown');
+
+        // Clear Buttons (×)
+        this.clearNameBtn = document.getElementById('clearCustomerNameBtn');
+        this.clearPanBtn = document.getElementById('clearCustomerPanBtn');
+        this.clearMobileBtn = document.getElementById('clearCustomerMobileBtn');
+
+        // Quick Walk-In Button
+        this.quickWalkInBtn = document.getElementById('quickWalkInCustomerBtn');
+
         this.selectedCustomer = null;
         this.debounceTimer = null;
-        this.searchResults = [];
-        this.highlightedIndex = -1;
-        this.isFetchingZeroQuery = false;
+        this.currentResults = [];
+        this.activeIndex = -1;
 
-        this.createDropdownElement();
-        this.createSelectedBadgeElement();
         this.initEvents();
     }
 
-    createDropdownElement() {
-        if (!this.customerInput || this.customerInput.tagName === 'SELECT') return;
-        const parent = this.customerInput.closest('.input-group') || this.customerInput.parentElement;
-        if (parent) {
-            parent.classList.add('position-relative');
-            this.dropdownEl = document.createElement('div');
-            this.dropdownEl.id = 'posCustomerSearchDropdown';
-            this.dropdownEl.className = 'dropdown-menu shadow-lg border bg-white p-1 w-100 rounded-3';
-            this.dropdownEl.style.cssText = 'position: absolute; top: 100%; left: 0; right: 0; z-index: 1055; max-height: 320px; overflow-y: auto; display: none; margin-top: 4px;';
-            parent.appendChild(this.dropdownEl);
-        }
-    }
-
-    createSelectedBadgeElement() {
-        if (!this.customerInput || this.customerInput.tagName === 'SELECT') return;
-        const parent = this.customerInput.closest('.input-group') || this.customerInput.parentElement;
-        if (parent) {
-            this.selectedBadgeEl = document.createElement('div');
-            this.selectedBadgeEl.id = 'posSelectedCustomerChip';
-            this.selectedBadgeEl.className = 'd-none align-items-center gap-2 bg-success bg-opacity-10 border border-success border-opacity-25 px-2 py-1 rounded-pill fs-xs text-dark w-100';
-            this.selectedBadgeEl.innerHTML = `
-                <i class="fas fa-user-check text-success ms-1"></i>
-                <span class="fw-bold text-truncate flex-grow-1" id="selectedCustomerChipName">Customer Name</span>
-                <span class="badge bg-danger bg-opacity-10 text-danger fs-2xs d-none font-monospace" id="selectedCustomerUdhaariBadge">Rs. 0.00 Due</span>
-                <button type="button" class="btn btn-link text-muted p-0 me-1 border-0" id="clearSelectedCustomerBtn" title="Remove customer from bill" style="line-height: 1;">
-                    <i class="fas fa-times-circle text-danger"></i>
-                </button>
-            `;
-            parent.parentElement.insertBefore(this.selectedBadgeEl, parent);
-        }
-    }
-
     initEvents() {
-        if (this.customerInput && this.customerInput.tagName !== 'SELECT') {
-            this.customerInput.addEventListener('focus', () => {
-                if (!this.selectedCustomer) {
-                    const query = this.customerInput.value.trim();
-                    this.search(query, true);
-                }
+        if (this.clearNameBtn && this.customerInput) {
+            this.clearNameBtn.addEventListener('click', () => {
+                this.customerInput.value = '';
+                if (this.customerIdInput) this.customerIdInput.value = '';
+                this.customerInput.focus();
+                this.clearCustomer(false);
             });
+        }
 
-            this.customerInput.addEventListener('click', () => {
-                if (!this.selectedCustomer && (!this.dropdownEl || this.dropdownEl.style.display === 'none')) {
-                    const query = this.customerInput.value.trim();
-                    this.search(query, true);
-                }
+        if (this.clearPanBtn && this.customerPanInput) {
+            this.clearPanBtn.addEventListener('click', () => {
+                this.customerPanInput.value = '';
+                this.engine.cart.customerPan = '';
             });
+        }
 
-            this.customerInput.addEventListener('input', (e) => {
-                const query = e.target.value.trim();
-                clearTimeout(this.debounceTimer);
-
-                if (this.selectedCustomer && this.selectedCustomer.name !== query) {
-                    this.clearCustomer(false);
-                }
-
-                this.debounceTimer = setTimeout(() => {
-                    this.search(query, query.length === 0);
-                }, 180);
+        if (this.clearMobileBtn && this.customerMobileInput) {
+            this.clearMobileBtn.addEventListener('click', () => {
+                this.customerMobileInput.value = '';
+                this.engine.cart.customerPhone = '';
             });
+        }
 
-            this.customerInput.addEventListener('keydown', (e) => {
-                if (!this.dropdownEl || this.dropdownEl.style.display === 'none') return;
-
-                if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    this.navigateDropdown(1);
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    this.navigateDropdown(-1);
-                } else if (e.key === 'Enter') {
-                    if (this.highlightedIndex >= 0 && this.searchResults[this.highlightedIndex]) {
-                        e.preventDefault();
-                        this.selectCustomer(this.searchResults[this.highlightedIndex]);
-                    }
-                } else if (e.key === 'Escape') {
-                    this.hideDropdown();
-                }
-            });
-        } else if (this.customerInput && this.customerInput.tagName === 'SELECT') {
-            this.customerInput.addEventListener('change', (e) => {
-                const opt = e.target.options[e.target.selectedIndex];
-                if (opt && opt.value) {
-                    this.selectCustomer({
-                        id: opt.value,
-                        name: opt.text,
-                        phone: opt.dataset.phone || '',
-                        pan: opt.dataset.pan || '',
-                        customer_type: opt.dataset.type || 'RETAIL',
-                        credit_balance: opt.dataset.debt || 0
-                    });
-                } else {
-                    this.clearCustomer(true);
-                }
+        if (this.quickWalkInBtn) {
+            this.quickWalkInBtn.addEventListener('click', () => {
+                this.setWalkInCustomer();
             });
         }
 
@@ -216,838 +175,664 @@ class POSCustomerManager {
             });
         }
 
-        if (this.dropdownEl) {
-            this.dropdownEl.addEventListener('click', (e) => {
-                const itemEl = e.target.closest('[data-customer-index]');
-                if (itemEl) {
-                    const idx = parseInt(itemEl.dataset.customerIndex, 10);
-                    if (this.searchResults[idx]) {
-                        this.selectCustomer(this.searchResults[idx]);
+        if (this.customerMobileInput) {
+            this.customerMobileInput.addEventListener('input', (e) => {
+                this.engine.cart.customerPhone = e.target.value.trim();
+            });
+        }
+
+        if (this.customerInput) {
+            this.customerInput.addEventListener('focus', () => {
+                const val = this.customerInput.value.trim();
+                this.fetchAndRenderCustomers(val);
+            });
+
+            this.customerInput.addEventListener('click', () => {
+                if (this.dropdownEl && this.dropdownEl.classList.contains('d-none')) {
+                    const val = this.customerInput.value.trim();
+                    this.fetchAndRenderCustomers(val);
+                }
+            });
+
+            this.customerInput.addEventListener('input', (e) => {
+                const query = e.target.value.trim();
+                if (this.customerIdInput) this.customerIdInput.value = '';
+
+                clearTimeout(this.debounceTimer);
+                this.debounceTimer = setTimeout(() => {
+                    this.fetchAndRenderCustomers(query);
+                }, 150);
+            });
+
+            this.customerInput.addEventListener('keydown', (e) => {
+                if (!this.dropdownEl || this.dropdownEl.classList.contains('d-none')) return;
+
+                const items = this.dropdownEl.querySelectorAll('.pos-suggestion-item');
+                if (!items.length) return;
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    this.activeIndex = (this.activeIndex + 1) % items.length;
+                    this.updateActiveItem(items);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    this.activeIndex = (this.activeIndex - 1 + items.length) % items.length;
+                    this.updateActiveItem(items);
+                } else if (e.key === 'Enter') {
+                    if (this.activeIndex >= 0 && this.currentResults[this.activeIndex]) {
+                        e.preventDefault();
+                        this.selectCustomer(this.currentResults[this.activeIndex]);
                     }
+                } else if (e.key === 'Escape') {
+                    this.closeDropdown();
                 }
             });
         }
 
         document.addEventListener('click', (e) => {
             if (this.dropdownEl && !this.dropdownEl.contains(e.target) && e.target !== this.customerInput) {
-                this.hideDropdown();
+                this.closeDropdown();
             }
         });
-
-        const clearBtn = document.getElementById('clearSelectedCustomerBtn');
-        if (clearBtn) {
-            clearBtn.addEventListener('click', () => {
-                this.clearCustomer(true);
-            });
-        }
     }
 
-    async search(query = '', isZeroQuery = false) {
-        try {
-            let url = `${this.searchApiUrl}?`;
-            if (isZeroQuery || !query) {
-                url += 'limit=15&include_debtors=true&recent=true';
-            } else {
-                url += `q=${encodeURIComponent(query)}&limit=15`;
-            }
-
-            const response = await fetch(url);
-            if (!response.ok) return;
-            const data = await response.json();
-            this.searchResults = data.results || [];
-            this.renderDropdown(isZeroQuery);
-        } catch (err) {
-            console.error('[POSCustomerManager] Customer lookup error:', err);
-        }
-    }
-
-    renderDropdown(isZeroQuery = false) {
+    async fetchAndRenderCustomers(query = '') {
         if (!this.dropdownEl) return;
 
-        if (this.searchResults.length === 0) {
-            this.dropdownEl.innerHTML = `
-                <div class="px-3 py-3 text-muted fs-xs text-center">
-                    <i class="fas fa-user-slash me-1 opacity-50"></i> No registered customers found.
-                </div>
-            `;
-            this.showDropdown();
-            return;
-        }
+        try {
+            this.dropdownEl.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1 text-primary"></i> Loading customers...</div>';
+            this.dropdownEl.classList.remove('d-none');
 
-        this.highlightedIndex = -1;
-        const headerHtml = isZeroQuery ? `
-            <div class="px-2 py-1 bg-light border-bottom text-muted fs-2xs fw-bold text-uppercase d-flex justify-content-between">
-                <span><i class="fas fa-history me-1"></i> Recent & Debtors</span>
-                <span>Top 15</span>
-            </div>
-        ` : '';
+            const url = query ? `${this.searchApiUrl}?q=${encodeURIComponent(query)}&limit=15` : `${this.searchApiUrl}?limit=15`;
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('Search failed');
 
-        const itemsHtml = this.searchResults.map((c, idx) => {
-            const extra = c.extra_data || {};
-            const name = c.title || extra.name || c.name || 'Unknown Customer';
-            const subtitle = c.subtitle || `${extra.phone || c.phone || 'No phone'} ${extra.pan || c.pan ? '• PAN: ' + (extra.pan || c.pan) : ''}`;
-            const debt = parseFloat(extra.credit_balance !== undefined ? extra.credit_balance : (c.credit_balance || 0));
-            const custType = extra.customer_type || c.customer_type || 'RETAIL';
+            const data = await resp.json();
+            this.currentResults = data.results || (Array.isArray(data) ? data : []);
+            this.activeIndex = -1;
 
-            let badgeHtml = '';
-            if (c.badge) {
-                const bClass = c.badge_class || (debt > 0 ? 'bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25' : 'bg-success bg-opacity-10 text-success');
-                badgeHtml = `<span class="badge ${bClass} fs-2xs px-2 py-1 font-monospace">${escapeHtml(c.badge)}</span>`;
-            } else if (debt > 0) {
-                badgeHtml = `<span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-2xs px-2 py-1 font-monospace">Due: Rs. ${debt.toFixed(2)}</span>`;
-            } else {
-                badgeHtml = `<span class="badge bg-success bg-opacity-10 text-success fs-2xs px-1">Clear</span>`;
+            if (this.currentResults.length === 0) {
+                this.dropdownEl.innerHTML = `
+                    <div class="p-3 text-center text-muted fs-xs">
+                        <i class="fas fa-user-slash text-secondary opacity-50 d-block mb-1"></i>
+                        No customer found matching "<strong>${escapeHtml(query)}</strong>"
+                    </div>`;
+                return;
             }
 
-            const typeTag = custType === 'WHOLESALE' 
-                ? '<span class="badge bg-info text-dark fs-3xs px-1">WHOLESALE</span>' 
-                : (custType === 'VIP' ? '<span class="badge bg-warning text-dark fs-3xs px-1">VIP</span>' : '');
+            let html = '';
+            this.currentResults.forEach((c, idx) => {
+                const extra = c.extra_data || {};
+                const name = c.name || extra.name || c.title || 'Customer';
+                const phone = c.phone || extra.phone_number || extra.phone || '';
+                const pan = c.pan || extra.pan_number || extra.pan || '';
+                const dueBalance = parseFloat(c.credit_balance || extra.credit_balance || 0);
 
-            return `
-                <div class="dropdown-item p-2 rounded-2 pointer d-flex justify-content-between align-items-center border-bottom border-light customer-search-item" 
-                     data-customer-index="${idx}" role="button" tabindex="0">
-                    <div class="d-flex flex-column text-truncate pe-2">
-                        <div class="fw-bold text-dark fs-xs d-flex align-items-center gap-1 text-truncate">
-                            <span class="text-truncate">${escapeHtml(name)}</span>
-                            ${typeTag}
+                let badgeHtml = '';
+                if (dueBalance > 0) {
+                    badgeHtml = `<span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 pos-suggestion-badge">Due: Rs. ${dueBalance.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>`;
+                } else if (pan) {
+                    badgeHtml = `<span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 pos-suggestion-badge">PAN: ${escapeHtml(pan)}</span>`;
+                } else {
+                    badgeHtml = `<span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 pos-suggestion-badge">Clear</span>`;
+                }
+
+                html += `
+                    <div class="pos-suggestion-item" data-index="${idx}">
+                        <div>
+                            <div class="pos-suggestion-title">${highlightMatch(name, query)}</div>
+                            <div class="pos-suggestion-subtitle">
+                                <span class="font-mono">${phone ? highlightMatch(phone, query) : 'No Phone'}</span>
+                                ${pan ? ` &bull; PAN: ${highlightMatch(pan, query)}` : ''}
+                            </div>
                         </div>
-                        <div class="text-muted fs-2xs font-monospace mt-1 text-truncate">
-                            ${escapeHtml(subtitle)}
+                        <div class="text-end ps-2">
+                            ${badgeHtml}
                         </div>
                     </div>
-                    <div class="text-end ps-2 flex-shrink-0">
-                        ${badgeHtml}
-                    </div>
-                </div>
-            `;
-        }).join('');
+                `;
+            });
 
-        this.dropdownEl.innerHTML = headerHtml + itemsHtml;
-        this.showDropdown();
-    }
+            this.dropdownEl.innerHTML = html;
 
-    navigateDropdown(direction) {
-        const items = this.dropdownEl.querySelectorAll('.customer-search-item');
-        if (!items.length) return;
+            this.dropdownEl.querySelectorAll('.pos-suggestion-item').forEach(itemEl => {
+                itemEl.addEventListener('click', () => {
+                    const idx = parseInt(itemEl.dataset.index, 10);
+                    if (this.currentResults[idx]) {
+                        this.selectCustomer(this.currentResults[idx]);
+                    }
+                });
+            });
 
-        if (this.highlightedIndex >= 0 && items[this.highlightedIndex]) {
-            items[this.highlightedIndex].classList.remove('active', 'bg-light');
-        }
-
-        this.highlightedIndex += direction;
-        if (this.highlightedIndex < 0) this.highlightedIndex = items.length - 1;
-        if (this.highlightedIndex >= items.length) this.highlightedIndex = 0;
-
-        const target = items[this.highlightedIndex];
-        if (target) {
-            target.classList.add('active', 'bg-light');
-            target.scrollIntoView({ block: 'nearest' });
+        } catch (err) {
+            console.warn('[POSCustomerManager] Search error:', err);
+            this.dropdownEl.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Search unavailable</div>';
         }
     }
 
-    showDropdown() {
-        if (this.dropdownEl) this.dropdownEl.style.display = 'block';
+    updateActiveItem(items) {
+        items.forEach((item, idx) => {
+            if (idx === this.activeIndex) {
+                item.classList.add('active');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('active');
+            }
+        });
     }
 
-    hideDropdown() {
-        if (this.dropdownEl) this.dropdownEl.style.display = 'none';
-        this.highlightedIndex = -1;
+    closeDropdown() {
+        if (this.dropdownEl) {
+            this.dropdownEl.classList.add('d-none');
+            this.activeIndex = -1;
+        }
+    }
+
+    setWalkInCustomer() {
+        if (this.customerInput) this.customerInput.value = 'Walk-in Customer';
+        if (this.customerPanInput) this.customerPanInput.value = '-';
+        if (this.customerMobileInput) this.customerMobileInput.value = '-';
+        if (this.customerIdInput) this.customerIdInput.value = '';
+
+        this.selectCustomer({
+            id: null,
+            name: 'Walk-in Customer',
+            phone: '-',
+            pan: '-',
+            customer_type: 'RETAIL',
+            credit_balance: 0
+        });
     }
 
     selectCustomer(rawItem) {
         const extra = rawItem.extra_data || {};
         const customer = {
-            id: rawItem.id || extra.id,
-            name: extra.name || rawItem.title || rawItem.name,
-            phone: extra.phone || rawItem.phone || '',
-            pan: extra.pan || rawItem.pan || '',
-            customer_type: extra.customer_type || rawItem.customer_type || 'RETAIL',
-            credit_balance: parseFloat(extra.credit_balance !== undefined ? extra.credit_balance : (rawItem.credit_balance || 0))
+            id: rawItem.id || extra.id || null,
+            name: rawItem.name || extra.name || rawItem.title || 'Walk-in Customer',
+            phone: rawItem.phone || extra.phone_number || extra.phone || '',
+            pan: rawItem.pan || extra.pan_number || extra.pan || '',
+            customer_type: rawItem.customer_type || extra.customer_type || 'RETAIL',
+            credit_balance: parseFloat(rawItem.credit_balance !== undefined ? rawItem.credit_balance : (extra.credit_balance || 0))
         };
 
         this.selectedCustomer = customer;
-        this.hideDropdown();
-
         this.engine.cart.setCustomer(customer);
 
         if (this.customerInput) {
-            if (this.customerInput.tagName === 'SELECT') {
-                this.customerInput.value = customer.id;
-            } else {
-                this.customerInput.value = customer.name;
-            }
+            this.customerInput.value = customer.name;
+        }
+        if (this.customerIdInput) {
+            this.customerIdInput.value = customer.id || '';
+        }
+        if (this.customerPanInput) {
+            this.customerPanInput.value = customer.pan || '-';
+            this.engine.cart.customerPan = customer.pan || '';
+        }
+        if (this.customerMobileInput) {
+            this.customerMobileInput.value = customer.phone || '-';
+            this.engine.cart.customerPhone = customer.phone || '';
         }
 
-        if (this.customerPanInput && customer.pan) {
-            this.customerPanInput.value = customer.pan;
-            this.engine.cart.customerPan = customer.pan;
-        }
-
-        const parentGroup = this.customerInput ? this.customerInput.closest('.input-group') : null;
-        if (parentGroup && this.selectedBadgeEl) {
-            parentGroup.classList.add('d-none');
-            this.selectedBadgeEl.classList.remove('d-none');
-            this.selectedBadgeEl.classList.add('d-flex');
-
-            const nameEl = document.getElementById('selectedCustomerChipName');
-            if (nameEl) {
-                nameEl.innerText = `${customer.name} (${customer.phone || 'No phone'})`;
-            }
-
-            const udhaariBadge = document.getElementById('selectedCustomerUdhaariBadge');
-            const debt = customer.credit_balance || 0;
-            if (udhaariBadge) {
-                if (debt > 0) {
-                    udhaariBadge.innerText = `Udhaari: Rs. ${debt.toFixed(2)}`;
-                    udhaariBadge.classList.remove('d-none');
-                } else {
-                    udhaariBadge.classList.add('d-none');
-                }
-            }
-        }
-
-        this.engine.showNotification(`Customer "${customer.name}" linked to POS bill.`, 'success');
+        this.closeDropdown();
+        POSAudioSynthesizer.play('success');
+        this.engine.showNotification(`Customer "${customer.name}" linked to bill.`, 'success');
     }
 
-    clearCustomer(clearInput = true) {
+    clearCustomer(clearInputs = true) {
         this.selectedCustomer = null;
         this.engine.cart.clearCustomer();
 
-        if (clearInput && this.customerInput) {
-            this.customerInput.value = '';
+        if (clearInputs) {
+            if (this.customerInput) this.customerInput.value = '';
+            if (this.customerIdInput) this.customerIdInput.value = '';
+            if (this.customerPanInput) this.customerPanInput.value = '';
+            if (this.customerMobileInput) this.customerMobileInput.value = '';
+            if (this.customerInput) this.customerInput.focus();
         }
-
-        if (clearInput && this.customerPanInput) {
-            this.customerPanInput.value = '';
-        }
-
-        const parentGroup = this.customerInput ? this.customerInput.closest('.input-group') : null;
-        if (parentGroup && this.selectedBadgeEl) {
-            parentGroup.classList.remove('d-none');
-            this.selectedBadgeEl.classList.remove('d-flex');
-            this.selectedBadgeEl.classList.add('d-none');
-        }
-
-        if (clearInput && this.customerInput && this.customerInput.tagName !== 'SELECT') {
-            this.customerInput.focus();
-        }
+        this.closeDropdown();
     }
 }
 
 // ============================================================================
-// 3. WORKSHOP REPAIR TICKET LOOKUP & ATTACHMENT BRIDGE
-// ============================================================================
-class POSRepairTicketManager {
-    constructor(engine) {
-        this.engine = engine;
-        this.searchApiUrl = '/repairs/api/search/';
-        this.modalEl = document.getElementById('repairTicketSearchModal') || document.getElementById('posRepairLookupModal');
-        this.ensureModalExists();
-        this.initEvents();
-    }
-
-    ensureModalExists() {
-        if (document.getElementById('repairTicketSearchModal') || document.getElementById('posRepairLookupModal')) {
-            this.modalEl = document.getElementById('repairTicketSearchModal') || document.getElementById('posRepairLookupModal');
-            return;
-        }
-
-        const modalDiv = document.createElement('div');
-        modalDiv.id = 'repairTicketSearchModal';
-        modalDiv.className = 'modal fade';
-        modalDiv.tabIndex = -1;
-        modalDiv.setAttribute('data-bs-backdrop', 'static');
-        modalDiv.innerHTML = `
-            <div class="modal-dialog modal-dialog-centered modal-lg">
-                <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-                    <div class="modal-header bg-dark text-white border-0 py-3 px-4">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="badge bg-primary p-2 rounded-circle"><i class="fas fa-wrench"></i></span>
-                            <div>
-                                <h6 class="modal-title fs-sm fw-bold text-white mb-0">Attach Workshop Repair Ticket</h6>
-                                <small class="text-white-50 fs-3xs">Search by Ticket #, Customer, Phone, or IMEI</small>
-                            </div>
-                        </div>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body p-3 bg-light">
-                        <div class="input-group mb-3 shadow-sm rounded-3 overflow-hidden">
-                            <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
-                            <input type="text" id="posRepairTicketSearchInput" class="form-control border-start-0" 
-                                   placeholder="Enter ticket #, customer name, phone, or IMEI..." autocomplete="off">
-                            <button class="btn btn-primary px-3 fw-bold" type="button" id="posExecuteRepairSearchBtn">Search</button>
-                        </div>
-                        <div class="bg-white border rounded-3 p-1" style="max-height: 340px; overflow-y: auto;" id="posRepairTicketResultsContainer">
-                            <div class="text-center py-4 text-muted fs-xs">
-                                <i class="fas fa-tools fs-2 d-block mb-2 opacity-25"></i>
-                                Loading repair tickets ready for pickup...
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modalDiv);
-        this.modalEl = modalDiv;
-    }
-
-    initEvents() {
-        const attachBtn = document.getElementById('attachRepairPromptBtn') || document.getElementById('posAttachRepairBtn');
-        if (attachBtn) {
-            attachBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.openModal();
-            });
-        }
-    }
-
-    openModal() {
-        const modalDom = document.getElementById('repairTicketSearchModal') || this.modalEl;
-        if (!modalDom) return;
-        const modal = bootstrap.Modal.getOrCreateInstance(modalDom);
-        modal.show();
-        setTimeout(() => {
-            const input = document.getElementById('repairTicketSearchInput') || document.getElementById('posRepairTicketSearchInput');
-            if (input) input.focus();
-        }, 250);
-    }
-
-    attachTicketToCart(ticket) {
-        this.engine.repairTicketId = ticket.id;
-        if (this.engine.checkout) {
-            this.engine.checkout.repairTicketId = ticket.id;
-        }
-        window.activeRepairTicketId = ticket.id;
-        window.activeRepairTicket = ticket;
-
-        if (ticket.customer_name) {
-            this.engine.customerManager.selectCustomer({
-                id: ticket.customer_id || null,
-                name: ticket.customer_name,
-                phone: ticket.customer_phone || '',
-                pan: ticket.customer_pan || '',
-                customer_type: 'RETAIL',
-                credit_balance: 0
-            });
-        }
-
-        let serviceProduct = null;
-        const catalogPool = this.engine.catalogService 
-            ? (this.engine.catalogService.allLoadedProducts || this.engine.catalogService.initialProducts || [])
-            : [];
-
-        if (Array.isArray(catalogPool) && catalogPool.length > 0) {
-            serviceProduct = catalogPool.find(p => 
-                p.sku === 'REPAIR-SERVICE' || 
-                p.is_service === true ||
-                (p.name && p.name.toLowerCase().includes('repair')) || 
-                (p.name && p.name.toLowerCase().includes('service'))
-            );
-            if (!serviceProduct) {
-                serviceProduct = catalogPool.find(p => !p.requires_imei && !p.requires_imei_tracking);
-            }
-        }
-
-        const resolvedProdId = serviceProduct ? (serviceProduct.id || serviceProduct.product_id) : null;
-
-        this.engine.cart.addItem({
-            product_id: resolvedProdId,
-            category_name: 'REPAIR SERVICE',
-            name: `Repair Service: ${ticket.device_name || ticket.device_model || 'Device'} (${ticket.ticket_number})`,
-            unit_price: ticket.payable_amount || ticket.total_amount || 0,
-            price: ticket.payable_amount || ticket.total_amount || 0,
-            official_unit_price: ticket.payable_amount || ticket.total_amount || 0,
-            quantity: 1,
-            discount_type: 'NONE',
-            discount_value: 0,
-            is_discountable: false,
-            requires_imei: false,
-            requires_imei_tracking: false,
-            imei_1: '',
-            imei_number: '',
-            repair_ticket_id: ticket.id,
-            is_repair_service: true
-        });
-
-        const container = document.querySelector('.pos-workspace-container') || document.querySelector('.container-fluid');
-        if (container) {
-            const oldBanner = document.getElementById('linkedRepairBanner');
-            if (oldBanner) oldBanner.remove();
-
-            const banner = document.createElement('div');
-            banner.id = 'linkedRepairBanner';
-            banner.className = 'alert alert-info py-1 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs shadow-sm';
-            banner.innerHTML = `
-                <span><i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>${escapeHtml(ticket.ticket_number)}</strong> (${escapeHtml(ticket.device_name || ticket.device_model || 'Device')}) &bull; Rs. ${(ticket.payable_amount || ticket.total_amount || 0).toFixed(2)}</span>
-                <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); window.smartPos.repairTicketId=null;"></button>
-            `;
-            container.prepend(banner);
-        }
-
-        const modalDom = document.getElementById('repairTicketSearchModal') || this.modalEl;
-        if (modalDom) {
-            const modal = bootstrap.Modal.getInstance(modalDom);
-            if (modal) modal.hide();
-        }
-
-        this.engine.showNotification(`Repair Ticket ${ticket.ticket_number} attached to bill.`, 'success');
-        POSAudioSynthesizer.play('second');
-    }
-}
-
-// ============================================================================
-// 4. DECOUPLED PRODUCT CATALOG & SEARCH SERVICE
-// ============================================================================
-class POSCatalogService {
-    constructor(engine) {
-        this.engine = engine;
-        this.initialProducts = [];
-        this.allLoadedProducts = [];
-        this.currentCategory = 'ALL';
-        this.currentCategoryId = null;
-        this.searchDebounceTimer = null;
-
-        this.searchInput = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
-        this.clearSearchBtn = document.getElementById('clearSearchBtn');
-        this.categoryPills = document.querySelectorAll('.cat-pill');
-        this.productGrid = document.getElementById('productGridContainer') || document.getElementById('posSearchResultsContainer');
-
-        this.initEvents();
-    }
-
-    initEvents() {
-        if (this.searchInput) {
-            this.searchInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    clearTimeout(this.searchDebounceTimer);
-                    this.engine.handleDirectImeiOrBarcodeScan(this.searchInput.value.trim());
-                }
-            });
-
-            this.searchInput.addEventListener('input', (e) => {
-                const val = e.target.value;
-                const cleanVal = val.trim();
-                if (cleanVal.length >= 14 && /^\d+$/.test(cleanVal)) {
-                    clearTimeout(this.searchDebounceTimer);
-                    this.engine.handleDirectImeiOrBarcodeScan(cleanVal);
-                } else {
-                    this.handleSearchInput(val);
-                }
-            });
-        }
-
-        if (this.clearSearchBtn) {
-            this.clearSearchBtn.addEventListener('click', () => {
-                clearTimeout(this.searchDebounceTimer);
-                if (this.searchInput) this.searchInput.value = '';
-                this.allLoadedProducts = [...(this.initialProducts || [])];
-                this.filterCatalogBySearch('');
-                if (this.searchInput) this.searchInput.focus();
-            });
-        }
-
-        this.categoryPills.forEach(pill => {
-            pill.addEventListener('click', () => {
-                this.categoryPills.forEach(p => p.classList.remove('active'));
-                pill.classList.add('active');
-
-                if (pill.dataset.categoryId) {
-                    this.currentCategoryId = parseInt(pill.dataset.categoryId, 10);
-                    this.currentCategory = pill.dataset.categoryKey || '';
-                } else {
-                    this.currentCategoryId = null;
-                    this.currentCategory = pill.dataset.categoryKey || 'ALL';
-                }
-
-                const currentQuery = this.searchInput ? this.searchInput.value.trim() : '';
-                if (currentQuery) {
-                    this.handleSearchInput(currentQuery);
-                } else {
-                    this.filterCatalogByCategory();
-                }
-            });
-        });
-    }
-
-    async loadInitialCatalog() {
-        try {
-            const customerType = this.engine.cart.customerType || 'RETAIL';
-            const resp = await fetch(`/products/api/search/?top_selling=true&limit=24&customer_type=${customerType}`);
-            if (!resp.ok) throw new Error('Could not load catalog');
-            const data = await resp.json();
-            this.initialProducts = data.results || [];
-            this.allLoadedProducts = [...this.initialProducts];
-            this.renderCatalog(this.allLoadedProducts);
-        } catch (err) {
-            console.warn('[POSCatalogService] Initial load fallback:', err);
-            if (this.productGrid) {
-                this.productGrid.innerHTML = `
-                    <div class="col-12 text-center py-5 text-muted">
-                        <i class="fas fa-barcode fs-2 mb-2 d-block opacity-25"></i>
-                        Scan an IMEI or barcode to add items directly to the bill.
-                    </div>
-                `;
-            }
-        }
-    }
-
-    handleSearchInput(val) {
-        clearTimeout(this.searchDebounceTimer);
-        const cleanVal = (val || '').trim();
-
-        if (!cleanVal) {
-            this.allLoadedProducts = [...(this.initialProducts || [])];
-            this.filterCatalogBySearch('');
-            return;
-        }
-
-        this.filterCatalogBySearch(cleanVal.toLowerCase());
-
-        this.searchDebounceTimer = setTimeout(() => {
-            this.performOnlineCatalogSearch(cleanVal);
-        }, 220);
-    }
-
-    async performOnlineCatalogSearch(query) {
-        if (!query || query.length < 2) return;
-        try {
-            const customerType = this.engine.cart.customerType || 'RETAIL';
-            let url = `/products/api/search/?q=${encodeURIComponent(query)}&customer_type=${customerType}`;
-            if (this.currentCategoryId) {
-                url += `&category_id=${this.currentCategoryId}`;
-            }
-
-            const resp = await fetch(url);
-            if (!resp.ok) return;
-            const data = await resp.json();
-            const results = data.results || [];
-
-            if (this.searchInput && this.searchInput.value.trim().toLowerCase() === query.toLowerCase()) {
-                this.allLoadedProducts = results;
-                this.filterCatalogBySearch(query.toLowerCase());
-            }
-        } catch (err) {
-            console.error('[POSCatalogService] Server search error:', err);
-        }
-    }
-
-    async filterCatalogByCategory() {
-        if (this.currentCategory === 'ALL' && !this.currentCategoryId) {
-            this.allLoadedProducts = [...(this.initialProducts || [])];
-            this.renderCatalog(this.allLoadedProducts);
-            return;
-        }
-
-        const localMatches = this.getMatchingCatalogProducts('', this.initialProducts || []);
-        if (localMatches.length > 0) {
-            this.allLoadedProducts = [...(this.initialProducts || [])];
-            this.renderCatalog(localMatches);
-            return;
-        }
-
-        try {
-            const customerType = this.engine.cart.customerType || 'RETAIL';
-            let url = `/products/api/search/?limit=24&customer_type=${customerType}`;
-            if (this.currentCategoryId) {
-                url += `&category_id=${this.currentCategoryId}`;
-            } else if (this.currentCategory) {
-                url += `&category=${encodeURIComponent(this.currentCategory)}`;
-            }
-
-            const resp = await fetch(url);
-            if (!resp.ok) return;
-            const data = await resp.json();
-            const results = data.results || [];
-            this.allLoadedProducts = results;
-            this.renderCatalog(results);
-        } catch (err) {
-            console.error('[POSCatalogService] Category search error:', err);
-            this.renderCatalog([]);
-        }
-    }
-
-    isPhoneProduct(p) {
-        if (!p) return false;
-        if (p.is_repair_service || p.repair_ticket_id) return false;
-        if (p.category_key === 'PHONES') return true;
-        if (p.requires_imei === true || p.match_type === 'IMEI') return true;
-        if ((p.ram && String(p.ram).trim() !== '') || (p.storage && String(p.storage).trim() !== '')) return true;
-
-        const text = `${p.name || ''} ${p.model_name || ''} ${p.specs || ''} ${p.category_name || ''} ${p.brand_name || ''}`.toLowerCase();
-        const phoneKeywords = [
-            'iphone', 'galaxy', 'redmi', 'poco', 'realme', 'oneplus', 'pixel',
-            'oppo', 'vivo', 'infinix', 'tecno', 'honor', 'motorola', 'nokia',
-            'xperia', 'smartphone', 'mobile', 'phone', 'ह्यान्डसेट', 'स्मार्टफोन'
-        ];
-        if (phoneKeywords.some(kw => text.includes(kw))) return true;
-
-        const phoneRegex = /\b(1[1-6]|se)\s+(128|256|512|64|32|1tb)\b|\b(1[1-6])\s+(pro|plus|max|promax|ultra)\b|\b\d{1,2}\s+\d{2,4}\s+(black|blue|pink|white|green|gold|silver|titanium|yellow|purple)\b/i;
-        return phoneRegex.test(text);
-    }
-
-    getMatchingCatalogProducts(query = '', sourceList = null) {
-        const cleanQuery = query.toLowerCase().trim();
-        const listToFilter = sourceList || this.allLoadedProducts;
-
-        return listToFilter.filter(p => {
-            let matchesCat = false;
-
-            if (this.currentCategoryId) {
-                matchesCat = (p.category_id && parseInt(p.category_id, 10) === this.currentCategoryId);
-            } else if (this.currentCategory === 'ALL') {
-                matchesCat = true;
-            } else if (this.currentCategory === 'PHONES') {
-                matchesCat = this.isPhoneProduct(p);
-            } else if (this.currentCategory === 'CHARGERS') {
-                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
-                matchesCat = (p.category_key === 'CHARGERS') || ['charger', 'cable', 'adapter', 'power', 'chrg', 'चार्जर', 'केबल', 'type-c', 'lightning'].some(k => text.includes(k));
-            } else if (this.currentCategory === 'GLASS_COVER') {
-                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
-                matchesCat = (p.category_key === 'GLASS_COVER') || ['glass', 'cover', 'case', 'tempered', 'protector', 'कभर', 'ग्लास', 'गिलास', 'screen guard', 'skin'].some(k => text.includes(k));
-            } else if (this.currentCategory === 'AUDIO') {
-                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
-                matchesCat = (p.category_key === 'AUDIO') || ['audio', 'earbud', 'headphone', 'airpod', 'neckband', 'speaker', 'earphone', 'tws', 'handsfree', 'एयरबड्स', 'हेडफोन'].some(k => text.includes(k));
-            } else if (this.currentCategory === 'PARTS') {
-                const text = `${p.name || ''} ${p.category_name || ''} ${p.specs || ''}`.toLowerCase();
-                matchesCat = (p.category_key === 'PARTS') || p.is_spare_part === true || ['part', 'spare', 'battery', 'display', 'screen replacement', 'touch panel', 'मर्मत', 'पार्ट्स'].some(k => text.includes(k));
-            } else {
-                matchesCat = (p.category_key === this.currentCategory || (p.category_name && p.category_name.toUpperCase() === this.currentCategory));
-            }
-
-            const matchesQuery = cleanQuery === '' || 
-                (p.name && p.name.toLowerCase().includes(cleanQuery)) || 
-                (p.brand_name && p.brand_name.toLowerCase().includes(cleanQuery)) || 
-                (p.model_name && p.model_name.toLowerCase().includes(cleanQuery)) ||
-                (p.specs && p.specs.toLowerCase().includes(cleanQuery)) ||
-                (p.sku && p.sku.toLowerCase().includes(cleanQuery)) ||
-                (p.barcode && p.barcode.toLowerCase().includes(cleanQuery)) ||
-                (p.imei_1 && p.imei_1.toLowerCase().includes(cleanQuery)) ||
-                (p.imei_2 && p.imei_2.toLowerCase().includes(cleanQuery));
-
-            return matchesCat && matchesQuery;
-        });
-    }
-
-    filterCatalogBySearch(query = '') {
-        const filtered = this.getMatchingCatalogProducts(query);
-        this.renderCatalog(filtered);
-    }
-
-    renderCatalog(products) {
-        if (!this.productGrid) return;
-        this.productGrid.innerHTML = '';
-
-        if (products.length === 0) {
-            this.productGrid.innerHTML = `
-                <div class="col-12 text-center py-5 text-muted">
-                    <i class="fas fa-search fs-2 opacity-25 d-block mb-2"></i>
-                    No products matched your search.
-                </div>
-            `;
-            return;
-        }
-
-        products.forEach(prod => {
-            const isPhone = this.isPhoneProduct(prod);
-            let avatarClass = prod.avatar_class || (isPhone ? 'avatar-phone' : 'avatar-part');
-            let iconClass = prod.icon_class || (isPhone ? 'fas fa-mobile-screen' : 'fas fa-box');
-
-            if (isPhone && (!prod.avatar_class || prod.avatar_class === 'avatar-phone')) {
-                const brand = (prod.brand_name || '').toLowerCase();
-                const name = (prod.name || '').toLowerCase();
-                if (brand.includes('apple') || name.includes('iphone')) {
-                    iconClass = 'fab fa-apple';
-                } else if (brand.includes('samsung') || name.includes('galaxy')) {
-                    iconClass = 'fas fa-mobile-screen';
-                } else {
-                    iconClass = 'fas fa-mobile-screen-button';
-                }
-                avatarClass = 'avatar-phone';
-            }
-
-            const card = document.createElement('div');
-            card.className = 'product-card';
-            card.onclick = () => this.engine.handleProductCardClick(prod);
-
-            const displaySpecs = prod.specs || (prod.ram && prod.storage ? `${prod.ram}/${prod.storage}` : '');
-
-            // In Backlog Mode, phones display as standard non-blocking units
-            let badgeHtml = '';
-            if (isPhone) {
-                if (this.engine.enforceImei) {
-                    badgeHtml = '<span class="badge bg-primary bg-opacity-10 text-primary fs-2xs ms-1">IMEI</span>';
-                } else {
-                    badgeHtml = '<span class="badge bg-warning bg-opacity-10 text-warning-emphasis fs-2xs ms-1">Handset</span>';
-                }
-            }
-
-            card.innerHTML = `
-                <div>
-                    <div class="d-flex align-items-center gap-2 mb-2">
-                        <div class="cat-icon-avatar ${avatarClass}">
-                            <i class="${iconClass}"></i>
-                        </div>
-                        <div class="text-truncate">
-                            <span class="badge bg-light text-dark border fs-2xs">${escapeHtml(prod.brand_name || 'Generic')}</span>
-                            ${badgeHtml}
-                        </div>
-                    </div>
-                    <div class="fw-bold text-dark fs-sm text-truncate" title="${escapeHtml(prod.name)}">${escapeHtml(prod.name)}</div>
-                    <small class="text-muted fs-2xs d-block text-truncate mt-1">${escapeHtml(displaySpecs)}</small>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
-                    <span class="fw-bold font-mono text-primary fs-xs">Rs. ${parseFloat(prod.price || prod.selling_price || 0).toLocaleString()}</span>
-                    <span class="badge bg-light text-muted border fs-2xs">${parseInt(prod.available_stock || 0)} in stock</span>
-                </div>
-            `;
-            this.productGrid.appendChild(card);
-        });
-    }
-}
-
-// ============================================================================
-// 5. CART & PRICING ENGINE MODULE (EXPLICIT NONE, %, AND AMOUNT (Rs.) MODES)
+// 3. TWO-TIER STACKED CARD CART & REAL-TIME CALCULATION ENGINE
 // ============================================================================
 class POSCart {
     constructor(engine) {
         this.engine = engine;
         this.items = [];
+
         this.customer = null;
         this.customerPhone = '';
         this.customerPan = '';
         this.customerType = 'RETAIL';
 
-        this.billDiscountType = 'PERCENTAGE';
-        this.billDiscountValue = 0;
-        this.billDiscountPercent = 0;
-        this.billDiscountReason = '';
         this.activeCartIdempotencyKey = generateUUID();
 
-        this.cartTableBody = document.getElementById('posCartTableBody') || document.getElementById('cartItemsContainer');
-        this.subtotalText = document.getElementById('posSubtotalText') || document.getElementById('billSubtotalText');
+        // Whole-Bill Discount State Tracking (% vs Rs.)
+        this.billDiscountType = 'PERCENTAGE';  // 'PERCENTAGE' or 'AMOUNT'
+        this.billDiscountValue = 0;           // Raw input typed by cashier
+        this.billDiscountAmount = 0;          // Calculated deduction
+        this.billDiscountPercent = 0;         // Effective percentage
+
+        // Bind Two-Tier Card Container & Controls
+        this.container = document.getElementById('itemsContainer') || document.getElementById('posCartTableBody');
+        this.addRowBtn = document.getElementById('btnAddCartRow');
+
+        // Summary Fields
+        this.subtotalText = document.getElementById('posSubtotalText');
+        this.discountText = document.getElementById('posDiscountTotalText');
+        this.nonTaxableText = document.getElementById('posNonTaxableText');
+        this.taxableText = document.getElementById('posTaxableText');
         this.vatText = document.getElementById('posVatText');
         this.vatRow = document.getElementById('posVatRow');
-        this.grandTotalText = document.getElementById('posGrandTotalText') || document.getElementById('billGrandTotalText');
+
+        // Interactive Bill Discount Controls
+        this.btnDiscountPercent = document.getElementById('btnDiscountModePercent');
+        this.btnDiscountFixed = document.getElementById('btnDiscountModeFixed');
+        this.billDiscountInput = document.getElementById('posBillDiscountInput');
+        this.billDiscountSymbol = document.getElementById('billDiscountSymbolDisplay');
+        this.billDiscountSavingsBadge = document.getElementById('billDiscountSavingsBadge');
+
+        // Trade-In Display & Input
+        this.tradeInInput = document.getElementById('trade-in-input');
+        this.tradeInText = document.getElementById('posTradeInText');
+        this.tradeInSummaryRow = document.getElementById('posTradeInSummaryRow');
+        this.removeTradeInBtn = document.getElementById('posRemoveTradeInBtn');
+
+        // Grand Total Display
+        this.grandTotalText = document.getElementById('posGrandTotalText');
+
+        // Narration & Terms Inputs
+        this.narrationInput = document.getElementById('posBillNarration');
+        this.termsInput = document.getElementById('posBillTerms');
 
         this.initBillDiscountControls();
-        this.bindEvents();
+        this.initEvents();
     }
 
     initBillDiscountControls() {
-        const discInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
-        if (!discInput) return;
-
-        const parent = discInput.parentElement;
-        if (parent && !document.getElementById('posBillDiscountTypeToggleBtn')) {
-            const labelSpan = parent.querySelector('span');
-            if (labelSpan) {
-                labelSpan.innerHTML = `<span>Bill Discount:</span>`;
-            }
-
-            const group = document.createElement('div');
-            group.className = 'input-group input-group-sm';
-            group.style.width = '135px';
-
-            const toggleBtn = document.createElement('button');
-            toggleBtn.type = 'button';
-            toggleBtn.id = 'posBillDiscountTypeToggleBtn';
-            toggleBtn.className = 'btn btn-outline-secondary px-2 py-0 fw-bold fs-2xs font-mono';
-            toggleBtn.innerText = this.billDiscountType === 'AMOUNT' ? 'Rs.' : '%';
-            toggleBtn.title = 'Toggle between Percentage (%) and Cash Amount (Rs.)';
-
-            discInput.parentNode.insertBefore(group, discInput);
-            group.appendChild(toggleBtn);
-            group.appendChild(discInput);
-
-            discInput.style.width = '';
-            discInput.classList.add('flex-grow-1', 'text-end', 'font-mono');
-            discInput.placeholder = this.billDiscountType === 'AMOUNT' ? 'Rs.' : '%';
-
-            toggleBtn.addEventListener('click', () => {
-                this.toggleBillDiscountType();
+        if (this.btnDiscountPercent) {
+            this.btnDiscountPercent.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.setBillDiscountMode('PERCENTAGE');
             });
         }
-    }
 
-    toggleBillDiscountType() {
-        this.billDiscountType = this.billDiscountType === 'AMOUNT' ? 'PERCENTAGE' : 'AMOUNT';
-        const toggleBtn = document.getElementById('posBillDiscountTypeToggleBtn');
-        if (toggleBtn) {
-            toggleBtn.innerText = this.billDiscountType === 'AMOUNT' ? 'Rs.' : '%';
-            toggleBtn.classList.toggle('btn-primary', this.billDiscountType === 'AMOUNT');
-            toggleBtn.classList.toggle('btn-outline-secondary', this.billDiscountType !== 'AMOUNT');
+        if (this.btnDiscountFixed) {
+            this.btnDiscountFixed.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.setBillDiscountMode('AMOUNT');
+            });
         }
 
-        const discInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
-        if (discInput) {
-            if (this.billDiscountType === 'PERCENTAGE') {
-                discInput.max = '100';
-                discInput.step = '0.5';
-                discInput.placeholder = '%';
-                if (parseFloat(discInput.value) > 100) discInput.value = '100';
+        if (this.billDiscountInput) {
+            this.billDiscountInput.addEventListener('input', (e) => {
+                let val = parseFloat(e.target.value);
+                if (isNaN(val) || val < 0) val = 0;
+
+                if (this.billDiscountType === 'PERCENTAGE' && val > 100) {
+                    val = 100;
+                    e.target.value = '100';
+                }
+
+                this.billDiscountValue = val;
+                this.recalculateTotals();
+            });
+        }
+
+        this.syncBillDiscountUI();
+    }
+
+    setBillDiscountMode(mode) {
+        const normalized = (mode === 'AMOUNT' || mode === 'FIXED') ? 'AMOUNT' : 'PERCENTAGE';
+        if (this.billDiscountType === normalized) {
+            this.syncBillDiscountUI();
+            return;
+        }
+
+        this.billDiscountType = normalized;
+
+        if (this.billDiscountType === 'PERCENTAGE') {
+            if (this.billDiscountValue > 100) {
+                this.billDiscountValue = 0;
+                if (this.billDiscountInput) this.billDiscountInput.value = '0';
+            }
+        }
+
+        this.syncBillDiscountUI();
+        this.recalculateTotals();
+    }
+
+    syncBillDiscountUI() {
+        const isFixed = (this.billDiscountType === 'AMOUNT');
+
+        if (this.btnDiscountPercent && this.btnDiscountFixed) {
+            if (isFixed) {
+                this.btnDiscountPercent.classList.remove('active', 'btn-dark');
+                this.btnDiscountPercent.classList.add('btn-outline-secondary');
+                this.btnDiscountFixed.classList.remove('btn-outline-secondary');
+                this.btnDiscountFixed.classList.add('active', 'btn-dark');
             } else {
-                discInput.removeAttribute('max');
-                discInput.step = '1';
-                discInput.placeholder = 'Rs.';
+                this.btnDiscountFixed.classList.remove('active', 'btn-dark');
+                this.btnDiscountFixed.classList.add('btn-outline-secondary');
+                this.btnDiscountPercent.classList.remove('btn-outline-secondary');
+                this.btnDiscountPercent.classList.add('active', 'btn-dark');
             }
-            this.billDiscountValue = Math.max(0, parseFloat(discInput.value) || 0);
         }
 
-        this.render();
+        if (this.billDiscountSymbol) {
+            this.billDiscountSymbol.innerText = isFixed ? 'Rs.' : '%';
+        }
+
+        if (this.billDiscountInput) {
+            this.billDiscountInput.placeholder = isFixed ? '0.00' : '0';
+            if (isFixed) {
+                this.billDiscountInput.removeAttribute('max');
+                this.billDiscountInput.step = '1';
+            } else {
+                this.billDiscountInput.max = '100';
+                this.billDiscountInput.step = '0.5';
+            }
+        }
     }
 
-    bindEvents() {
-        if (this.cartTableBody) {
-            this.cartTableBody.addEventListener('change', (e) => {
-                const qtyInput = e.target.closest('.cart-qty-input');
-                if (qtyInput) {
-                    const idx = parseInt(qtyInput.dataset.cartIndex, 10);
-                    this.updateQuantity(idx, qtyInput.value);
-                    return;
-                }
-
-                const priceInput = e.target.closest('.cart-price-input');
-                if (priceInput) {
-                    const idx = parseInt(priceInput.dataset.cartIndex, 10);
-                    this.updatePrice(idx, priceInput.value);
-                    return;
-                }
-
-                const discInput = e.target.closest('.cart-disc-input');
-                if (discInput) {
-                    const idx = parseInt(discInput.dataset.cartIndex, 10);
-                    this.updateItemDiscount(idx, discInput.value, true);
-                    return;
-                }
-            });
-
-            this.cartTableBody.addEventListener('input', (e) => {
-                const discInput = e.target.closest('.cart-disc-input');
-                if (discInput) {
-                    const idx = parseInt(discInput.dataset.cartIndex, 10);
-                    this.updateItemDiscount(idx, discInput.value, false);
-                    return;
-                }
-            });
-
-            this.cartTableBody.addEventListener('click', (e) => {
-                const removeBtn = e.target.closest('.cart-remove-btn');
-                if (removeBtn) {
-                    const idx = parseInt(removeBtn.dataset.cartIndex, 10);
-                    this.removeItem(idx);
-                    return;
-                }
-
-                const modeBtn = e.target.closest('.cart-disc-mode-btn');
-                if (modeBtn) {
-                    const idx = parseInt(modeBtn.dataset.cartIndex, 10);
-                    const mode = modeBtn.dataset.mode;
-                    this.setItemDiscountMode(idx, mode);
-                    return;
-                }
+    initEvents() {
+        if (this.addRowBtn) {
+            this.addRowBtn.addEventListener('click', () => {
+                this.addEmptyRow();
             });
         }
+
+        if (this.container) {
+            this.container.addEventListener('input', (e) => {
+                const target = e.target;
+                const card = target.closest('.item-card');
+                if (!card) return;
+
+                const idx = parseInt(card.dataset.index, 10);
+                if (isNaN(idx) || !this.items[idx]) return;
+
+                if (target.classList.contains('cart-qty-input') || target.classList.contains('calc-qty')) {
+                    this.items[idx].quantity = Math.max(1, parseFloat(target.value) || 1);
+                    this.updateRowCalculations(idx);
+                } else if (target.classList.contains('cart-price-input') || target.classList.contains('calc-rate')) {
+                    this.items[idx].unit_price = Math.max(0, parseFloat(target.value) || 0);
+                    this.updateRowCalculations(idx);
+                } else if (target.classList.contains('cart-disc-input') || target.classList.contains('calc-discount')) {
+                    let dVal = Math.max(0, parseFloat(target.value) || 0);
+                    if (this.items[idx].discount_type === 'PERCENTAGE' && dVal > 100) {
+                        dVal = 100;
+                        target.value = '100';
+                    }
+                    this.items[idx].discount_value = dVal;
+                    this.updateRowCalculations(idx);
+                } else if (target.classList.contains('product-name-input')) {
+                    this.items[idx].name = target.value;
+                }
+            });
+
+            this.container.addEventListener('change', (e) => {
+                const target = e.target;
+                const card = target.closest('.item-card');
+                if (!card) return;
+
+                const idx = parseInt(card.dataset.index, 10);
+                if (isNaN(idx) || !this.items[idx]) return;
+
+                if (target.classList.contains('cart-tax-select') || target.classList.contains('calc-tax')) {
+                    this.items[idx].tax_type = target.value;
+                    this.recalculateTotals();
+                }
+            });
+
+            this.container.addEventListener('click', (e) => {
+                const modeBtn = e.target.closest('.item-disc-mode-btn');
+                if (modeBtn) {
+                    e.preventDefault();
+                    const card = modeBtn.closest('.item-card');
+                    if (!card) return;
+
+                    const idx = parseInt(card.dataset.index, 10);
+                    if (isNaN(idx) || !this.items[idx]) return;
+
+                    const newMode = modeBtn.dataset.mode;
+                    this.items[idx].discount_type = newMode;
+
+                    if (newMode === 'PERCENTAGE' && this.items[idx].discount_value > 100) {
+                        this.items[idx].discount_value = 100;
+                    }
+
+                    const toggleGroup = card.querySelector('.item-disc-toggle-group');
+                    if (toggleGroup) {
+                        toggleGroup.querySelectorAll('.item-disc-mode-btn').forEach(btn => {
+                            if (btn.dataset.mode === newMode) {
+                                btn.classList.add('active', 'btn-dark');
+                                btn.classList.remove('btn-outline-secondary');
+                            } else {
+                                btn.classList.remove('active', 'btn-dark');
+                                btn.classList.add('btn-outline-secondary');
+                            }
+                        });
+                    }
+
+                    const symbolSpan = card.querySelector('.item-disc-symbol');
+                    if (symbolSpan) {
+                        symbolSpan.innerText = (newMode === 'AMOUNT') ? 'Rs.' : '%';
+                    }
+
+                    const discInput = card.querySelector('.cart-disc-input');
+                    if (discInput) {
+                        discInput.value = this.items[idx].discount_value || 0;
+                        if (newMode === 'PERCENTAGE') {
+                            discInput.max = '100';
+                        } else {
+                            const qty = Math.max(0, parseFloat(this.items[idx].quantity) || 0);
+                            const rate = Math.max(0, parseFloat(this.items[idx].unit_price) || 0);
+                            discInput.max = (qty * rate).toString();
+                        }
+                    }
+
+                    this.updateRowCalculations(idx);
+                    return;
+                }
+
+                const deleteBtn = e.target.closest('.cart-remove-btn, .btn-remove');
+                if (deleteBtn) {
+                    const card = deleteBtn.closest('.item-card');
+                    if (card) {
+                        const idx = parseInt(card.dataset.index, 10);
+                        if (!isNaN(idx)) {
+                            this.removeItem(idx);
+                        }
+                    }
+                }
+            });
+
+            this.initTableRowAutocomplete();
+        }
+
+        if (this.tradeInInput) {
+            this.tradeInInput.addEventListener('input', () => {
+                this.recalculateTotals();
+            });
+        }
+
+        if (this.removeTradeInBtn) {
+            this.removeTradeInBtn.addEventListener('click', () => {
+                if (this.tradeInInput) this.tradeInInput.value = '0.00';
+                this.recalculateTotals();
+            });
+        }
+    }
+
+    initTableRowAutocomplete() {
+        let activeRowDropdown = null;
+        let rowDebounceTimer = null;
+        let activeRowSuggestionIdx = -1;
+        let currentRowResults = [];
+
+        const closeAllRowDropdowns = () => {
+            document.querySelectorAll('.row-product-search-dropdown').forEach(d => {
+                d.classList.add('d-none');
+                d.innerHTML = '';
+            });
+            activeRowDropdown = null;
+            activeRowSuggestionIdx = -1;
+            currentRowResults = [];
+        };
+
+        this.container.addEventListener('focusin', (e) => {
+            const input = e.target.closest('.product-name-input');
+            if (!input) return;
+
+            const card = input.closest('.item-card');
+            const wrapper = input.closest('.product-input-wrapper') || input.parentElement;
+            const dropdown = wrapper ? wrapper.querySelector('.row-product-search-dropdown') : null;
+            if (!dropdown) return;
+
+            closeAllRowDropdowns();
+            activeRowDropdown = dropdown;
+            fetchRowProducts(input.value.trim(), dropdown, parseInt(card.dataset.index, 10));
+        });
+
+        this.container.addEventListener('input', (e) => {
+            const input = e.target.closest('.product-name-input');
+            if (!input) return;
+
+            const card = input.closest('.item-card');
+            const wrapper = input.closest('.product-input-wrapper') || input.parentElement;
+            const dropdown = wrapper ? wrapper.querySelector('.row-product-search-dropdown') : null;
+            if (!dropdown) return;
+
+            activeRowDropdown = dropdown;
+            clearTimeout(rowDebounceTimer);
+            rowDebounceTimer = setTimeout(() => {
+                fetchRowProducts(input.value.trim(), dropdown, parseInt(card.dataset.index, 10));
+            }, 150);
+        });
+
+        this.container.addEventListener('keydown', (e) => {
+            const input = e.target.closest('.product-name-input');
+            if (!input || !activeRowDropdown || activeRowDropdown.classList.contains('d-none')) return;
+
+            const card = input.closest('.item-card');
+            const items = activeRowDropdown.querySelectorAll('.pos-suggestion-item');
+            if (!items.length) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeRowSuggestionIdx = (activeRowSuggestionIdx + 1) % items.length;
+                updateActiveRowItem(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeRowSuggestionIdx = (activeRowSuggestionIdx - 1 + items.length) % items.length;
+                updateActiveRowItem(items);
+            } else if (e.key === 'Enter') {
+                if (activeRowSuggestionIdx >= 0 && currentRowResults[activeRowSuggestionIdx]) {
+                    e.preventDefault();
+                    selectRowProduct(currentRowResults[activeRowSuggestionIdx], parseInt(card.dataset.index, 10));
+                }
+            } else if (e.key === 'Escape') {
+                closeAllRowDropdowns();
+            }
+        });
+
+        const updateActiveRowItem = (items) => {
+            items.forEach((item, idx) => {
+                if (idx === activeRowSuggestionIdx) {
+                    item.classList.add('active');
+                    item.scrollIntoView({ block: 'nearest' });
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        };
+
+        const fetchRowProducts = async (query, dropdown, rowIdx) => {
+            try {
+                dropdown.innerHTML = '<div class="p-2 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1 text-primary"></i> Querying catalog...</div>';
+                dropdown.classList.remove('d-none');
+
+                const url = query ? `/products/api/search/?mode=simple&q=${encodeURIComponent(query)}&limit=15` : `/products/api/search/?mode=simple&limit=15`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('Search failed');
+
+                const data = await res.json();
+                currentRowResults = data.results || (Array.isArray(data) ? data : []);
+                activeRowSuggestionIdx = -1;
+
+                if (!currentRowResults.length) {
+                    dropdown.innerHTML = `<div class="p-2 text-center text-muted fs-xs">No matching products found.</div>`;
+                    return;
+                }
+
+                let html = '';
+                currentRowResults.forEach((p, idx) => {
+                    const price = parseFloat(p.price || p.selling_price || 0);
+                    const stock = parseFloat(p.available_stock || 0);
+                    const isImei = Boolean(p.requires_imei || p.requires_imei_tracking);
+
+                    html += `
+                        <div class="pos-suggestion-item py-1.5 px-2" data-index="${idx}">
+                            <div class="text-truncate pe-2">
+                                <div class="pos-suggestion-title fs-xs">${highlightMatch(p.name, query)}</div>
+                                <div class="pos-suggestion-subtitle fs-2xs">
+                                    SKU: ${escapeHtml(p.sku || 'N/A')} &bull; Stock: <strong>${stock}</strong>
+                                    ${isImei ? '<span class="badge bg-primary bg-opacity-10 text-primary ms-1 font-mono">IMEI</span>' : ''}
+                                </div>
+                            </div>
+                            <div class="text-end font-mono fw-bold fs-xs text-primary">
+                                Rs. ${price.toLocaleString('en-IN', {minimumFractionDigits: 2})}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                dropdown.innerHTML = html;
+
+                dropdown.querySelectorAll('.pos-suggestion-item').forEach(itemEl => {
+                    itemEl.addEventListener('click', () => {
+                        const idx = parseInt(itemEl.dataset.index, 10);
+                        if (currentRowResults[idx]) {
+                            selectRowProduct(currentRowResults[idx], rowIdx);
+                        }
+                    });
+                });
+
+            } catch (err) {
+                dropdown.innerHTML = `<div class="p-2 text-center text-danger fs-xs">Failed to load products</div>`;
+            }
+        };
+
+        const selectRowProduct = (item, rowIdx) => {
+            if (!this.items[rowIdx]) return;
+
+            const price = parseFloat(item.price || item.selling_price || 0);
+            const isVatApplicable = item.is_vat_applicable !== false && item.tax_pricing_type !== 'EXEMPT';
+
+            this.items[rowIdx].product_id = item.id || item.product_id;
+            this.items[rowIdx].name = item.name || item.title;
+            this.items[rowIdx].unit_price = price;
+            this.items[rowIdx].tax_type = isVatApplicable ? '13%' : 'No';
+            this.items[rowIdx].requires_imei = Boolean(item.requires_imei || item.requires_imei_tracking);
+            this.items[rowIdx].imei_1 = item.imei_1 || '';
+
+            closeAllRowDropdowns();
+            POSAudioSynthesizer.play('success');
+            this.render();
+
+            const cards = this.container.querySelectorAll('.item-card');
+            if (cards[rowIdx]) {
+                const qtyInput = cards[rowIdx].querySelector('.cart-qty-input') || cards[rowIdx].querySelector('.calc-qty');
+                if (qtyInput) qtyInput.focus();
+            }
+        };
+
+        document.addEventListener('click', (e) => {
+            if (activeRowDropdown && !activeRowDropdown.contains(e.target) && !e.target.classList.contains('product-name-input')) {
+                closeAllRowDropdowns();
+            }
+        });
     }
 
     renewIdempotencyKey() {
@@ -1059,7 +844,6 @@ class POSCart {
         this.customerPhone = customer.phone || '';
         this.customerPan = customer.pan || this.customerPan || '';
         this.customerType = customer.customer_type || 'RETAIL';
-        this.render();
     }
 
     clearCustomer() {
@@ -1067,7 +851,38 @@ class POSCart {
         this.customerPhone = '';
         this.customerPan = '';
         this.customerType = 'RETAIL';
+    }
+
+    addEmptyRow() {
+        this.items.push({
+            id: Date.now() + Math.random(),
+            product_id: null,
+            item_instance_id: null,
+            name: '',
+            quantity: 1,
+            unit_price: 0,
+            discount_type: 'PERCENTAGE',
+            discount_value: 0,
+            discount_percent: 0,
+            tax_type: '13%',
+            requires_imei: false,
+            imei_1: '',
+            imei_2: '',
+            secondary_imei: '',
+            unit_code: 'Pcs',
+            is_discountable: true,
+            is_repair_service: false,
+            repair_ticket_id: null
+        });
+
         this.render();
+
+        const cards = this.container.querySelectorAll('.item-card');
+        const lastCard = cards[cards.length - 1];
+        if (lastCard) {
+            const nameInp = lastCard.querySelector('.product-name-input');
+            if (nameInp) nameInp.focus();
+        }
     }
 
     addItem(product) {
@@ -1075,44 +890,31 @@ class POSCart {
 
         const enforceImei = this.engine ? this.engine.enforceImei : true;
         const isRepair = Boolean(product.is_repair_service || product.repair_ticket_id);
-        const isPhone = !isRepair && Boolean(product.requires_imei || product.match_type === 'IMEI' || (this.engine.catalogService && this.engine.catalogService.isPhoneProduct(product)));
+        const isPhone = !isRepair && Boolean(product.requires_imei || product.match_type === 'IMEI');
 
-        const incomingImei1 = (product.imei_1 || product.imei1 || product.imei_number || '').trim();
+        const incomingImei1 = (product.imei_1 || product.imei1 || product.imei_number || product.imei || '').trim();
         const incomingImei2 = (product.imei_2 || product.imei2 || product.secondary_imei || '').trim();
-
-        // Serialized handset definition:
-        // In Strict Mode (enforceImei = true), all phones require 1-to-1 tracking and locks quantity.
-        // In Backlog Mode (enforceImei = false), an item is serialized ONLY if an actual IMEI was scanned/entered.
         const isSerializedHandset = !isRepair && (enforceImei ? isPhone : Boolean(incomingImei1));
 
-        // 1. Dual-IMEI Collision Check (Guards unique physical serials in cart)
         if (incomingImei1 || incomingImei2) {
             const duplicateItem = this.items.find(existingItem => {
-                const existingImei1 = (existingItem.imei_number || existingItem.imei_1 || existingItem.imei1 || '').trim();
-                const existingImei2 = (existingItem.secondary_imei || existingItem.imei_2 || existingItem.imei2 || '').trim();
+                const existingImei1 = (existingItem.imei_1 || existingItem.imei_number || '').trim();
+                const existingImei2 = (existingItem.imei_2 || existingItem.secondary_imei || '').trim();
 
-                const imei1Collision = incomingImei1 && (
-                    (existingImei1 && existingImei1 === incomingImei1) ||
-                    (existingImei2 && existingImei2 === incomingImei1)
-                );
-
-                const imei2Collision = incomingImei2 && (
-                    (existingImei1 && existingImei1 === incomingImei2) ||
-                    (existingImei2 && existingImei2 === incomingImei2)
-                );
+                const imei1Collision = incomingImei1 && (existingImei1 === incomingImei1 || existingImei2 === incomingImei1);
+                const imei2Collision = incomingImei2 && (existingImei1 === incomingImei2 || existingImei2 === incomingImei2);
 
                 return imei1Collision || imei2Collision;
             });
 
             if (duplicateItem) {
                 const matchedImei = incomingImei1 || incomingImei2;
-                this.engine.showNotification(`Handset with IMEI "${matchedImei}" is already added to the active cart.`, 'warning');
+                this.engine.showNotification(`Handset with IMEI "${matchedImei}" is already in the bill.`, 'warning');
                 POSAudioSynthesizer.play('error');
                 return;
             }
         }
 
-        // 2. Price Resolution
         let rawPrice = 0;
         if (product.unit_price !== undefined && product.unit_price !== null && !isNaN(parseFloat(product.unit_price))) {
             rawPrice = parseFloat(product.unit_price);
@@ -1123,106 +925,65 @@ class POSCart {
         }
 
         const extractedPrice = Math.max(0, rawPrice);
-        const extractedCatalogPrice = (product.official_unit_price !== undefined && product.official_unit_price !== null && !isNaN(parseFloat(product.official_unit_price)))
-            ? parseFloat(product.official_unit_price)
-            : ((product.catalog_price !== undefined && product.catalog_price !== null && !isNaN(parseFloat(product.catalog_price)))
-                ? parseFloat(product.catalog_price)
-                : extractedPrice);
-
-        const extractedCostPrice = (product.cost_price !== undefined && product.cost_price !== null && !isNaN(parseFloat(product.cost_price)))
-            ? parseFloat(product.cost_price)
-            : 0;
-
         const extractedQuantity = (product.quantity !== undefined && product.quantity !== null && parseFloat(product.quantity) > 0)
             ? parseFloat(product.quantity)
             : 1;
 
-        // 3. Discount Initialization
-        let discountType = 'NONE';
-        const rawDiscType = String(product.discount_type || '').toUpperCase().trim();
-        if (rawDiscType === 'AMOUNT' || rawDiscType === 'FIXED') {
-            discountType = 'AMOUNT';
-        } else if (rawDiscType === 'PERCENTAGE') {
-            discountType = 'PERCENTAGE';
+        let taxType = '13%';
+        if (product.is_vat_applicable === false || product.tax_pricing_type === 'EXEMPT') {
+            taxType = 'No';
         }
 
-        let discountValue = 0;
-        if (product.discount_value !== undefined && product.discount_value !== null && !isNaN(parseFloat(product.discount_value))) {
-            discountValue = Math.max(0, parseFloat(product.discount_value));
-        } else if (product.discount_percent !== undefined && product.discount_percent !== null && !isNaN(parseFloat(product.discount_percent))) {
-            discountValue = Math.max(0, parseFloat(product.discount_percent));
+        let discountType = 'PERCENTAGE';
+        if (product.discount_type) {
+            const rawType = String(product.discount_type).toUpperCase().trim();
+            if (rawType === 'AMOUNT' || rawType === 'FIXED') {
+                discountType = 'AMOUNT';
+            } else if (rawType === 'PERCENTAGE') {
+                discountType = 'PERCENTAGE';
+            }
         }
+        let discountValue = parseFloat(product.discount_value) || 0;
 
-        if (discountValue > 0 && discountType === 'NONE') {
-            discountType = 'PERCENTAGE';
-        }
-
-        const isDiscountable = isRepair ? false : (product.is_discountable !== undefined ? Boolean(product.is_discountable) : true);
-        const maxDiscountPercent = product.max_discount_percent !== undefined ? parseFloat(product.max_discount_percent) : 10;
-        const conversionId = product.package_conversion_id || product.conversion_id || product.unit_conversion_id || null;
-
-        if (!isDiscountable) {
-            discountType = 'NONE';
-            discountValue = 0;
-        }
-
-        // 4. Group Non-Serialized Items (Accessories or Backlog Phones without IMEIs)
-        const nonImeiMatch = (!isSerializedHandset && !isRepair)
-            ? this.items.find(i => 
-                (i.product_id === (product.product_id || product.id)) && 
-                ((i.conversion_id || null) === conversionId) &&
-                !i.imei_1 && !i.imei_number
-            )
+        const existingNonImei = (!isSerializedHandset && !isRepair)
+            ? this.items.find(i => (i.product_id === (product.product_id || product.id)) && !i.imei_1)
             : null;
 
-        if (nonImeiMatch) {
-            nonImeiMatch.quantity += extractedQuantity;
+        if (existingNonImei) {
+            existingNonImei.quantity += extractedQuantity;
+            this.engine.showNotification(`Incremented ${existingNonImei.name} (Qty: ${existingNonImei.quantity}).`, 'info');
         } else {
-            const taxMode = this.engine.isVatMode ? (product.tax_pricing_type || 'INCLUSIVE') : 'EXEMPT';
-            const vatRate = this.engine.isVatMode ? (parseFloat(product.vat_rate) || this.engine.defaultVatRate || 0) : 0;
-
-            let warrantyTerms = product.warranty_terms || `${product.warranty_months || 12}M Warranty`;
-            if (product.component_warranty_rules && product.component_warranty_rules.length > 0) {
-                warrantyTerms = product.component_warranty_rules.map(r => `${r.component_name}: ${r.warranty_months}M`).join(' | ');
-            }
-
-            this.items.push({
+            const newItemObj = {
+                id: Date.now() + Math.random(),
                 product_id: product.product_id || product.id,
-                category_id: product.category_id || null,
-                category_name: product.category_name || (isRepair ? 'REPAIR SERVICE' : ''),
                 item_instance_id: product.item_instance_id || null,
                 name: product.name,
-                unit_price: extractedPrice,
-                price: extractedPrice,
-                official_unit_price: extractedCatalogPrice,
-                catalog_price: extractedCatalogPrice,
-                cost_price: extractedCostPrice,
                 quantity: extractedQuantity,
-                unit_code: product.unit_code || 'Pcs',
+                unit_price: extractedPrice,
                 discount_type: discountType,
                 discount_value: discountValue,
                 discount_percent: discountType === 'PERCENTAGE' ? discountValue : 0,
-                is_discountable: isDiscountable,
-                max_discount_percent: maxDiscountPercent,
-                tax_pricing_type: taxMode,
-                vat_rate: vatRate,
+                tax_type: taxType,
                 requires_imei: isSerializedHandset,
-                requires_imei_tracking: isSerializedHandset,
                 imei_1: incomingImei1,
-                imei1: incomingImei1,
-                imei_number: incomingImei1,
                 imei_2: incomingImei2,
-                imei2: incomingImei2,
                 secondary_imei: incomingImei2,
-                mdms_status: product.mdms_status || product.default_mdms_status || 'REGISTERED_OFFICIAL',
-                warranty_months: isRepair ? 0 : (product.warranty_months || 12),
-                warranty_terms: isRepair ? 'Repair Service Labor / Parts' : warrantyTerms,
-                conversion_id: conversionId,
-                repair_ticket_id: product.repair_ticket_id || null,
-                is_repair_service: isRepair
-            });
+                unit_code: product.unit_code || 'Pcs',
+                is_discountable: product.is_discountable !== false,
+                is_repair_service: isRepair,
+                repair_ticket_id: product.repair_ticket_id || null
+            };
+
+            if (this.items.length === 1 && !this.items[0].name && this.items[0].unit_price === 0) {
+                this.items[0] = newItemObj;
+            } else {
+                this.items.push(newItemObj);
+            }
+
+            this.engine.showNotification(`Added ${product.name} to bill.`, 'success');
         }
 
+        POSAudioSynthesizer.play('success');
         this.render();
     }
 
@@ -1231,165 +992,10 @@ class POSCart {
             const removed = this.items.splice(index, 1)[0];
             if (removed && removed.is_repair_service) {
                 this.engine.repairTicketId = null;
-                if (this.engine.checkout) {
-                    this.engine.checkout.repairTicketId = null;
-                }
-                window.activeRepairTicketId = null;
-                window.activeRepairTicket = null;
-                const repairBanner = document.getElementById('linkedRepairBanner');
-                if (repairBanner) repairBanner.remove();
+                const repairCard = document.getElementById('linkedRepairCard');
+                if (repairCard) repairCard.classList.add('d-none');
             }
             this.render();
-        }
-    }
-
-    updateQuantity(index, quantity) {
-        const val = parseFloat(quantity);
-        if (this.items[index]) {
-            this.items[index].quantity = val > 0 ? val : 1;
-            if (this.items[index].discount_type === 'AMOUNT') {
-                const lineGross = this.items[index].quantity * (this.items[index].unit_price || 0);
-                if (this.items[index].discount_value > lineGross) {
-                    this.items[index].discount_value = lineGross;
-                }
-            }
-            this.render();
-        }
-    }
-
-    updatePrice(index, price) {
-        const val = parseFloat(price);
-        if (this.items[index] && !isNaN(val) && val >= 0) {
-            this.items[index].unit_price = val;
-            this.items[index].price = val;
-            if (this.items[index].discount_type === 'AMOUNT') {
-                const lineGross = this.items[index].quantity * val;
-                if (this.items[index].discount_value > lineGross) {
-                    this.items[index].discount_value = lineGross;
-                }
-            }
-            this.render();
-        }
-    }
-
-    setItemDiscountMode(index, mode) {
-        if (!this.items[index]) return;
-        if (this.items[index].is_discountable === false) {
-            this.engine.showNotification('This item is designated as non-discountable.', 'warning');
-            return;
-        }
-
-        const validModes = ['NONE', 'PERCENTAGE', 'AMOUNT'];
-        const normalizedMode = validModes.includes(mode) ? mode : 'NONE';
-        const price = (this.items[index].unit_price !== undefined) ? this.items[index].unit_price : (this.items[index].price || 0);
-        const lineGross = this.items[index].quantity * price;
-
-        this.items[index].discount_type = normalizedMode;
-
-        if (normalizedMode === 'NONE') {
-            this.items[index].discount_value = 0;
-            this.items[index].discount_percent = 0;
-        } else if (normalizedMode === 'PERCENTAGE') {
-            const currentVal = parseFloat(this.items[index].discount_value) || 0;
-            this.items[index].discount_value = Math.min(100, Math.max(0, currentVal));
-            this.items[index].discount_percent = this.items[index].discount_value;
-        } else if (normalizedMode === 'AMOUNT') {
-            const currentVal = parseFloat(this.items[index].discount_value) || 0;
-            this.items[index].discount_value = Math.min(lineGross, Math.max(0, currentVal));
-            this.items[index].discount_percent = lineGross > 0 ? ((this.items[index].discount_value / lineGross) * 100) : 0;
-        }
-
-        this.render();
-    }
-
-    updateItemDiscount(index, discountVal, shouldFullRender = true) {
-        let num = parseFloat(discountVal);
-        if (isNaN(num) || num < 0) num = 0;
-
-        if (this.items[index]) {
-            if (this.items[index].is_discountable === false) {
-                this.items[index].discount_type = 'NONE';
-                this.items[index].discount_value = 0;
-                this.items[index].discount_percent = 0;
-                if (shouldFullRender) this.render();
-                return;
-            }
-
-            const type = this.items[index].discount_type || 'NONE';
-            const price = (this.items[index].unit_price !== undefined) ? this.items[index].unit_price : (this.items[index].price || 0);
-            const lineGross = this.items[index].quantity * price;
-
-            if (type === 'NONE') {
-                this.items[index].discount_value = 0;
-                this.items[index].discount_percent = 0;
-            } else if (type === 'PERCENTAGE') {
-                num = Math.min(100, Math.max(0, num));
-                this.items[index].discount_value = num;
-                this.items[index].discount_percent = num;
-            } else if (type === 'AMOUNT') {
-                num = Math.min(lineGross, Math.max(0, num));
-                this.items[index].discount_value = num;
-                this.items[index].discount_percent = lineGross > 0 ? ((num / lineGross) * 100) : 0;
-            }
-
-            if (shouldFullRender) {
-                this.render();
-            } else {
-                this.updateLiveRowCalculations(index);
-                this.refreshSummaryDisplays();
-            }
-        }
-    }
-
-    updateLiveRowCalculations(index) {
-        const item = this.items[index];
-        if (!item) return;
-
-        const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
-        const lineGross = item.quantity * price;
-        const type = item.discount_type || 'NONE';
-        const val = parseFloat(item.discount_value) || 0;
-
-        let lineDisc = 0;
-        let effectivePct = 0;
-
-        if (item.is_discountable !== false && type !== 'NONE') {
-            if (type === 'AMOUNT') {
-                lineDisc = Math.min(val, lineGross);
-                effectivePct = lineGross > 0 ? ((lineDisc / lineGross) * 100) : 0;
-            } else {
-                effectivePct = Math.min(100, Math.max(0, val));
-                lineDisc = lineGross * (effectivePct / 100);
-            }
-        }
-
-        const lineTotal = Math.max(0, lineGross - lineDisc);
-        const allowedThreshold = item.max_discount_percent !== undefined ? parseFloat(item.max_discount_percent) : 10;
-        const supervisorLimit = this.engine.supervisorThreshold || 10;
-        const effectiveLimit = Math.min(allowedThreshold, supervisorLimit);
-        const exceedsLimit = effectivePct > effectiveLimit;
-
-        const totalEl = document.getElementById(`cartLineTotal_${index}`);
-        if (totalEl) totalEl.innerText = `Rs. ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-        const detailEl = document.getElementById(`cartDiscDetail_${index}`);
-        if (detailEl) {
-            if (lineDisc > 0) {
-                const perUnitDisc = item.quantity > 0 ? (lineDisc / item.quantity) : 0;
-                let text = '';
-                if (item.quantity > 1) {
-                    text = `<span class="text-danger font-mono fs-2xs">-Rs. ${lineDisc.toFixed(2)} line discount (Rs. ${perUnitDisc.toFixed(2)}/unit) &bull; Effective: <strong>${effectivePct.toFixed(2)}%</strong></span>`;
-                } else {
-                    text = `<span class="text-danger font-mono fs-2xs">-Rs. ${lineDisc.toFixed(2)} &bull; Effective: <strong>${effectivePct.toFixed(2)}%</strong></span>`;
-                }
-
-                if (exceedsLimit) {
-                    text += ` <span class="badge bg-warning text-dark border border-warning fs-2xs px-1 py-0 ms-1" title="Exceeds allowed ${effectiveLimit}% limit - Manager PIN required at checkout"><i class="fas fa-key me-1"></i>PIN Required (&gt;${effectiveLimit}%)</span>`;
-                }
-                detailEl.innerHTML = text;
-            } else {
-                detailEl.innerHTML = '';
-            }
         }
     }
 
@@ -1397,394 +1003,353 @@ class POSCart {
         this.items = [];
         this.billDiscountType = 'PERCENTAGE';
         this.billDiscountValue = 0;
+        this.billDiscountAmount = 0;
         this.billDiscountPercent = 0;
-        this.billDiscountReason = '';
-
-        const discInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
-        if (discInput) discInput.value = '0';
-        const toggleBtn = document.getElementById('posBillDiscountTypeToggleBtn');
-        if (toggleBtn) toggleBtn.innerText = '%';
+        if (this.billDiscountInput) this.billDiscountInput.value = '0';
+        this.syncBillDiscountUI();
 
         this.renewIdempotencyKey();
+        if (this.tradeInInput) this.tradeInInput.value = '0.00';
+        if (this.narrationInput) this.narrationInput.value = '';
+        if (this.termsInput) this.termsInput.value = '';
         this.render();
     }
 
-    calculateTotals() {
-        let subtotal = 0;
+    updateRowCalculations(idx) {
+        const item = this.items[idx];
+        if (!item) return;
+
+        const qty = Math.max(0, parseFloat(item.quantity) || 0);
+        const rate = Math.max(0, parseFloat(item.unit_price) || 0);
+        const gross = qty * rate;
+
+        let lineDisc = 0;
+        let effectivePct = 0;
+
+        if (item.is_discountable !== false) {
+            const discVal = Math.max(0, parseFloat(item.discount_value) || 0);
+            const discType = item.discount_type || 'PERCENTAGE';
+
+            if (discType === 'PERCENTAGE') {
+                effectivePct = Math.min(100, discVal);
+                lineDisc = gross * (effectivePct / 100);
+            } else {
+                lineDisc = Math.min(gross, discVal);
+                effectivePct = gross > 0 ? (lineDisc / gross) * 100 : 0;
+            }
+            item.discount_percent = effectivePct;
+        } else {
+            item.discount_percent = 0;
+            item.discount_value = 0;
+        }
+
+        const netLine = Math.max(0, gross - lineDisc);
+
+        const cards = this.container.querySelectorAll('.item-card');
+        const card = cards[idx];
+        if (card) {
+            const grossEl = card.querySelector('.row-gross-amount') || card.querySelector('.calc-amount');
+            const netEl = card.querySelector('.row-net-amount') || card.querySelector('.calc-net');
+            const badgeEl = card.querySelector('.line-disc-savings-badge');
+
+            if (grossEl) grossEl.value = gross.toFixed(2);
+            if (netEl) netEl.value = netLine.toFixed(2);
+
+            if (badgeEl) {
+                if (lineDisc > 0) {
+                    badgeEl.style.display = 'inline-block';
+                    badgeEl.innerText = `-Rs. ${lineDisc.toFixed(2)}`;
+                } else {
+                    badgeEl.style.display = 'none';
+                }
+            }
+        }
+
+        this.recalculateTotals();
+    }
+
+    recalculateTotals() {
+        let subTotal = 0;
         let itemDiscountTotal = 0;
 
         for (const item of this.items) {
-            const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
-            const lineGross = item.quantity * price;
+            const qty = Math.max(0, parseFloat(item.quantity) || 0);
+            const rate = Math.max(0, parseFloat(item.unit_price) || 0);
+            const gross = qty * rate;
 
             let lineDisc = 0;
             if (item.is_discountable !== false) {
-                const discType = item.discount_type || 'NONE';
-                const discVal = Math.max(0, parseFloat(item.discount_value !== undefined ? item.discount_value : (item.discount_percent || 0)) || 0);
-
-                if (discType === 'AMOUNT' || discType === 'FIXED') {
-                    lineDisc = Math.min(discVal, lineGross);
-                } else if (discType === 'PERCENTAGE') {
-                    const pct = Math.min(100, discVal);
-                    lineDisc = lineGross * (pct / 100);
+                const discVal = Math.max(0, parseFloat(item.discount_value) || 0);
+                const discType = item.discount_type || 'PERCENTAGE';
+                if (discType === 'PERCENTAGE') {
+                    lineDisc = gross * (Math.min(100, discVal) / 100);
+                } else {
+                    lineDisc = Math.min(gross, discVal);
                 }
             }
 
-            subtotal += lineGross;
+            subTotal += gross;
             itemDiscountTotal += lineDisc;
         }
 
-        const netAfterItemDisc = Math.max(0, subtotal - itemDiscountTotal);
+        const netAfterItemDisc = Math.max(0, subTotal - itemDiscountTotal);
 
+        // Whole-Bill Discount Calculation
         let billDiscountAmt = 0;
-        const billDiscType = this.billDiscountType || 'PERCENTAGE';
-        const billDiscVal = Math.max(0, parseFloat(this.billDiscountValue) || 0);
+        let effectiveBillPct = 0;
+        const rawBillInput = Math.max(0, parseFloat(this.billDiscountValue) || 0);
 
-        if (billDiscType === 'AMOUNT' || billDiscType === 'FIXED') {
-            billDiscountAmt = Math.min(billDiscVal, netAfterItemDisc);
-        } else {
-            const billPct = Math.min(100, billDiscVal);
-            billDiscountAmt = netAfterItemDisc * (billPct / 100);
+        if (netAfterItemDisc > 0 && rawBillInput > 0) {
+            if (this.billDiscountType === 'PERCENTAGE') {
+                effectiveBillPct = Math.min(100, rawBillInput);
+                billDiscountAmt = netAfterItemDisc * (effectiveBillPct / 100);
+            } else {
+                billDiscountAmt = Math.min(rawBillInput, netAfterItemDisc);
+                effectiveBillPct = (billDiscountAmt / netAfterItemDisc) * 100;
+            }
         }
 
-        this.billDiscountPercent = netAfterItemDisc > 0 ? ((billDiscountAmt / netAfterItemDisc) * 100) : 0;
+        this.billDiscountAmount = billDiscountAmt;
+        this.billDiscountPercent = effectiveBillPct;
 
-        let taxableTotal = 0;
-        let nonTaxableTotal = 0;
-        let totalVat = 0;
-        let exclusiveVatToAdd = 0;
+        // Proportional allocation of bill discount to taxable and non-taxable lines
+        let taxableAmount = 0;
+        let nonTaxableAmount = 0;
 
         for (const item of this.items) {
-            const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
-            const lineGross = item.quantity * price;
+            const qty = Math.max(0, parseFloat(item.quantity) || 0);
+            const rate = Math.max(0, parseFloat(item.unit_price) || 0);
+            const gross = qty * rate;
 
             let lineDisc = 0;
             if (item.is_discountable !== false) {
-                const discType = item.discount_type || 'NONE';
-                const discVal = Math.max(0, parseFloat(item.discount_value !== undefined ? item.discount_value : (item.discount_percent || 0)) || 0);
-                if (discType === 'AMOUNT' || discType === 'FIXED') {
-                    lineDisc = Math.min(discVal, lineGross);
-                } else if (discType === 'PERCENTAGE') {
-                    lineDisc = lineGross * (Math.min(100, discVal) / 100);
-                }
-            }
-
-            const lineNet = Math.max(0, lineGross - lineDisc);
-
-            let lineBillDisc = 0;
-            if (netAfterItemDisc > 0 && billDiscountAmt > 0) {
-                lineBillDisc = billDiscountAmt * (lineNet / netAfterItemDisc);
-            }
-
-            const netLinePayable = Math.max(0, lineNet - lineBillDisc);
-            const taxMode = item.tax_pricing_type || 'EXEMPT';
-            const rate = this.engine.isVatMode ? (parseFloat(item.vat_rate) || 0) : 0;
-
-            if (this.engine.isVatMode && rate > 0) {
-                if (taxMode === 'EXCLUSIVE') {
-                    const baseTaxable = netLinePayable;
-                    const vatAmt = baseTaxable * (rate / 100);
-                    taxableTotal += baseTaxable;
-                    totalVat += vatAmt;
-                    exclusiveVatToAdd += vatAmt;
-                } else if (taxMode === 'INCLUSIVE') {
-                    const divisor = 1 + (rate / 100);
-                    const baseTaxable = netLinePayable / divisor;
-                    const vatAmt = netLinePayable - baseTaxable;
-                    taxableTotal += baseTaxable;
-                    totalVat += vatAmt;
+                const discVal = Math.max(0, parseFloat(item.discount_value) || 0);
+                const discType = item.discount_type || 'PERCENTAGE';
+                if (discType === 'PERCENTAGE') {
+                    lineDisc = gross * (Math.min(100, discVal) / 100);
                 } else {
-                    nonTaxableTotal += netLinePayable;
+                    lineDisc = Math.min(gross, discVal);
                 }
+            }
+
+            const lineNet = Math.max(0, gross - lineDisc);
+            const lineBillDisc = netAfterItemDisc > 0 ? (billDiscountAmt * (lineNet / netAfterItemDisc)) : 0;
+            const finalLinePayable = Math.max(0, lineNet - lineBillDisc);
+
+            if (item.tax_type === '13%') {
+                taxableAmount += finalLinePayable;
             } else {
-                nonTaxableTotal += netLinePayable;
+                nonTaxableAmount += finalLinePayable;
             }
         }
 
-        const tradeInCredit = this.engine.tradeInManager.getCreditAmount();
-        const grossPayable = (subtotal - itemDiscountTotal - billDiscountAmt) + exclusiveVatToAdd;
-        const netAfterTradeIn = Math.max(0, grossPayable - tradeInCredit);
-        const grandTotal = Math.round(netAfterTradeIn);
+        const vatAmount = taxableAmount * 0.13;
+
+        let tradeInCredit = 0;
+        if (this.tradeInInput) {
+            tradeInCredit = Math.max(0, parseFloat(this.tradeInInput.value) || 0);
+        } else if (this.engine.tradeInManager) {
+            tradeInCredit = this.engine.tradeInManager.getCreditAmount();
+        }
+
+        const payableTotal = Math.max(0, (taxableAmount + vatAmount + nonTaxableAmount) - tradeInCredit);
+        const grandTotal = Math.round(payableTotal);
+        const combinedDiscount = itemDiscountTotal + billDiscountAmt;
+
+        if (this.subtotalText) {
+            this.subtotalText.innerText = subTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        if (this.discountText) {
+            this.discountText.innerText = combinedDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        if (this.billDiscountSavingsBadge) {
+            if (billDiscountAmt <= 0) {
+                this.billDiscountSavingsBadge.innerText = '-Rs. 0.00';
+            } else if (this.billDiscountType === 'PERCENTAGE') {
+                this.billDiscountSavingsBadge.innerText = `-Rs. ${billDiscountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            } else {
+                this.billDiscountSavingsBadge.innerText = `-Rs. ${billDiscountAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Eff. ${effectiveBillPct.toFixed(1)}%)`;
+            }
+        }
+        if (this.nonTaxableText) {
+            this.nonTaxableText.innerText = nonTaxableAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        if (this.taxableText) {
+            this.taxableText.innerText = taxableAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        if (this.vatText) {
+            this.vatText.innerText = formatCurrencyNPR(vatAmount);
+        }
+
+        if (this.tradeInText) {
+            this.tradeInText.innerText = `-Rs. ${tradeInCredit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        if (this.tradeInSummaryRow) {
+            this.tradeInSummaryRow.style.display = tradeInCredit > 0 ? 'flex' : 'none';
+        }
+
+        if (this.grandTotalText) {
+            this.grandTotalText.innerText = formatCurrencyNPR(grandTotal);
+        }
 
         return {
-            subtotal,
+            subTotal,
             itemDiscountTotal,
             billDiscountAmt,
-            totalDiscount: itemDiscountTotal + billDiscountAmt,
+            billDiscountPercent: effectiveBillPct,
+            totalDiscount: combinedDiscount,
+            taxableAmount,
+            nonTaxableAmount,
+            vatAmount,
             tradeInCredit,
-            taxableTotal,
-            nonTaxableTotal,
-            totalVat,
-            exclusiveVatToAdd,
             grandTotal
         };
     }
 
-    refreshSummaryDisplays() {
-        const totals = this.calculateTotals();
-        if (this.subtotalText) this.subtotalText.innerText = `Rs. ${totals.subtotal.toFixed(2)}`;
-        if (this.grandTotalText) this.grandTotalText.innerText = `Rs. ${totals.grandTotal.toFixed(2)}`;
-
-        if (this.engine.isVatMode && totals.totalVat > 0) {
-            if (this.vatRow) this.vatRow.style.display = 'flex';
-            if (this.vatText) this.vatText.innerText = `Rs. ${totals.totalVat.toFixed(2)}`;
-        } else if (this.vatRow) {
-            this.vatRow.style.display = 'none';
-        }
-
-        this.engine.tradeInManager.updateUi(totals.tradeInCredit);
-    }
-
     render() {
-        if (!this.cartTableBody) return;
-        const isSimpleDivContainer = this.cartTableBody.tagName === 'DIV';
+        if (!this.container) return;
+        this.container.innerHTML = '';
 
         if (this.items.length === 0) {
-            if (isSimpleDivContainer) {
-                this.cartTableBody.innerHTML = `
-                    <div class="text-center py-5 text-muted">
-                        <i class="fas fa-shopping-cart fs-1 opacity-25 d-block mb-2"></i>
-                        <span class="fs-xs">Cart is empty. Scan an IMEI or select a product to begin.</span>
-                    </div>
-                `;
-            } else {
-                this.cartTableBody.innerHTML = `
-                    <tr>
-                        <td colspan="5" class="text-center py-5 text-muted">
-                            <i class="fas fa-shopping-cart fs-1 opacity-25 d-block mb-2"></i>
-                            Cart is empty. Scan barcodes or select products to begin.
-                        </td>
-                    </tr>
-                `;
-            }
-        } else {
-            const supervisorLimit = this.engine.supervisorThreshold || 10;
-
-            if (isSimpleDivContainer) {
-                this.cartTableBody.innerHTML = this.items.map((item, idx) => {
-                    const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
-                    const lineGross = item.quantity * price;
-                    const type = item.discount_type || 'NONE';
-                    const val = parseFloat(item.discount_value) || 0;
-
-                    let lineDisc = 0;
-                    let effectivePct = 0;
-
-                    if (item.is_discountable !== false && type !== 'NONE') {
-                        if (type === 'AMOUNT') {
-                            lineDisc = Math.min(val, lineGross);
-                            effectivePct = lineGross > 0 ? ((lineDisc / lineGross) * 100) : 0;
-                        } else {
-                            effectivePct = Math.min(100, Math.max(0, val));
-                            lineDisc = lineGross * (effectivePct / 100);
-                        }
-                    }
-
-                    const lineTotal = Math.max(0, lineGross - lineDisc);
-                    const primaryImei = item.imei_number || item.imei_1 || item.imei1 || '';
-                    const secondaryImei = item.secondary_imei || item.imei_2 || item.imei2 || '';
-                    const isDiscountDisabled = item.is_discountable === false;
-
-                    const allowedLimit = Math.min(
-                        item.max_discount_percent !== undefined ? parseFloat(item.max_discount_percent) : 10,
-                        supervisorLimit
-                    );
-                    const exceedsLimit = effectivePct > allowedLimit;
-                    const perUnitDisc = item.quantity > 0 ? (lineDisc / item.quantity) : 0;
-
-                    // Quantity is readonly ONLY if the line has a specific IMEI or in strict mode
-                    const isQtyLocked = Boolean(item.requires_imei && (this.engine.enforceImei || primaryImei));
-
-                    return `
-                        <div class="cart-row p-2 border-bottom">
-                            <div class="d-flex align-items-center justify-content-between mb-1">
-                                <div style="width: 50%;">
-                                    <strong class="text-dark fs-xs d-block text-truncate" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong>
-                                    ${primaryImei ? `
-                                        <div class="d-flex flex-wrap gap-1 mt-1">
-                                            <span class="badge bg-primary bg-opacity-10 text-primary font-mono" style="font-size: 8.5px;">
-                                                SIM 1: ${escapeHtml(primaryImei)}
-                                            </span>
-                                            ${secondaryImei ? `
-                                                <span class="badge bg-info bg-opacity-10 text-info font-mono" style="font-size: 8.5px;">
-                                                    SIM 2: ${escapeHtml(secondaryImei)}
-                                                </span>
-                                            ` : ''}
-                                        </div>
-                                    ` : ''}
-                                </div>
-                                <div style="width: 15%;" class="text-center font-mono fs-xs">
-                                    <input type="number" class="form-control form-control-sm text-center p-0 font-mono cart-qty-input fs-xs" 
-                                           data-cart-index="${idx}" value="${item.quantity}" min="1" ${isQtyLocked ? 'readonly' : ''}>
-                                </div>
-                                <div style="width: 25%;" class="text-end font-mono fs-xs fw-bold text-dark" id="cartLineTotal_${idx}">
-                                    Rs. ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </div>
-                                <div style="width: 10%;" class="text-end">
-                                    <button type="button" class="btn btn-link text-danger p-0 border-0 cart-remove-btn" data-cart-index="${idx}">
-                                        <i class="fas fa-times-circle"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div class="d-flex align-items-center justify-content-between pt-1 mt-1 border-top border-light flex-wrap gap-1">
-                                <span class="text-muted fs-2xs fw-semibold">Discount:</span>
-                                <div class="d-flex align-items-center gap-1">
-                                    ${isDiscountDisabled ? `
-                                        <span class="badge bg-secondary bg-opacity-10 text-secondary border fs-2xs" title="Non-Discountable Item">
-                                            <i class="fas fa-ban me-1"></i>No Disc
-                                        </span>
-                                    ` : `
-                                        <div class="btn-group btn-group-sm" role="group" style="height: 22px;">
-                                            <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'NONE' ? 'btn-dark active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="NONE" title="No Discount">None</button>
-                                            <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'PERCENTAGE' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="PERCENTAGE" title="Percentage (%)">%</button>
-                                            <button type="button" class="btn btn-xs py-0 px-1 font-mono fs-2xs cart-disc-mode-btn ${type === 'AMOUNT' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="AMOUNT" title="Fixed Amount (Rs.)">Rs.</button>
-                                        </div>
-
-                                        ${type !== 'NONE' ? `
-                                            <div class="input-group input-group-sm" style="width: 95px; height: 22px;">
-                                                <span class="input-group-text p-0 px-1 fs-2xs font-mono bg-light text-muted">${type === 'AMOUNT' ? 'Rs.' : '%'}</span>
-                                                <input type="number" 
-                                                       class="form-control form-control-sm text-end p-0 px-1 cart-disc-input font-mono fs-2xs" 
-                                                       data-cart-index="${idx}"
-                                                       value="${val}"
-                                                       min="0"
-                                                       ${type === 'PERCENTAGE' ? 'max="100" step="0.5"' : `max="${lineGross}" step="1"`}>
-                                            </div>
-                                        ` : ''}
-                                    `}
-                                </div>
-                            </div>
-
-                            <div class="d-flex justify-content-end align-items-center mt-1" id="cartDiscDetail_${idx}">
-                                ${lineDisc > 0 ? `
-                                    <span class="text-danger font-mono fs-2xs">
-                                        -Rs. ${lineDisc.toFixed(2)} ${item.quantity > 1 ? `(Rs. ${perUnitDisc.toFixed(2)}/unit)` : ''} &bull; Effective: <strong>${effectivePct.toFixed(2)}%</strong>
-                                    </span>
-                                    ${exceedsLimit ? `
-                                        <span class="badge bg-warning text-dark border border-warning fs-2xs px-1 py-0 ms-1" title="Exceeds allowed ${effectiveLimit}% limit - Manager PIN required at checkout">
-                                            <i class="fas fa-key me-1"></i>PIN Req
-                                        </span>
-                                    ` : ''}
-                                ` : ''}
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            } else {
-                this.cartTableBody.innerHTML = this.items.map((item, idx) => {
-                    const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
-                    const lineGross = item.quantity * price;
-                    const type = item.discount_type || 'NONE';
-                    const val = parseFloat(item.discount_value) || 0;
-
-                    let lineDisc = 0;
-                    let effectivePct = 0;
-
-                    if (item.is_discountable !== false && type !== 'NONE') {
-                        if (type === 'AMOUNT') {
-                            lineDisc = Math.min(val, lineGross);
-                            effectivePct = lineGross > 0 ? ((lineDisc / lineGross) * 100) : 0;
-                        } else {
-                            effectivePct = Math.min(100, Math.max(0, val));
-                            lineDisc = lineGross * (effectivePct / 100);
-                        }
-                    }
-
-                    const lineTotal = Math.max(0, lineGross - lineDisc);
-                    const primaryImei = item.imei_number || item.imei_1 || item.imei1 || '';
-                    const secondaryImei = item.secondary_imei || item.imei_2 || item.imei2 || '';
-                    const isDiscountDisabled = item.is_discountable === false;
-
-                    const allowedLimit = Math.min(
-                        item.max_discount_percent !== undefined ? parseFloat(item.max_discount_percent) : 10,
-                        supervisorLimit
-                    );
-                    const exceedsLimit = effectivePct > allowedLimit;
-                    const perUnitDisc = item.quantity > 0 ? (lineDisc / item.quantity) : 0;
-
-                    // Quantity is readonly ONLY if the line has a specific IMEI or in strict mode
-                    const isQtyLocked = Boolean(item.requires_imei && (this.engine.enforceImei || primaryImei));
-
-                    return `
-                        <tr class="scan-flash">
-                            <td>
-                                <strong class="text-dark fs-xs">${escapeHtml(item.name)}</strong>
-                                <div class="d-flex flex-wrap align-items-center gap-1 mt-1">
-                                    ${primaryImei ? `<span class="badge bg-primary bg-opacity-10 text-primary font-monospace fs-2xs"><i class="fas fa-barcode me-1"></i>SIM 1: ${escapeHtml(primaryImei)}</span>` : ''}
-                                    ${secondaryImei ? `<span class="badge bg-info bg-opacity-10 text-info font-monospace fs-2xs"><i class="fas fa-barcode me-1"></i>SIM 2: ${escapeHtml(secondaryImei)}</span>` : ''}
-                                </div>
-                                
-                                <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
-                                    <span class="text-muted fs-2xs fw-semibold">Disc:</span>
-                                    ${isDiscountDisabled ? `
-                                        <span class="badge bg-secondary bg-opacity-10 text-secondary border fs-2xs" title="Non-Discountable Item">
-                                            <i class="fas fa-ban me-1"></i>No Disc
-                                        </span>
-                                    ` : `
-                                        <div class="btn-group btn-group-sm" role="group" style="height: 22px;">
-                                            <button type="button" class="btn btn-xs py-0 px-2 font-mono fs-2xs cart-disc-mode-btn ${type === 'NONE' ? 'btn-dark active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="NONE" title="No Discount">None</button>
-                                            <button type="button" class="btn btn-xs py-0 px-2 font-mono fs-2xs cart-disc-mode-btn ${type === 'PERCENTAGE' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="PERCENTAGE" title="Percentage (%)">%</button>
-                                            <button type="button" class="btn btn-xs py-0 px-2 font-mono fs-2xs cart-disc-mode-btn ${type === 'AMOUNT' ? 'btn-primary active' : 'btn-outline-secondary'}" data-cart-index="${idx}" data-mode="AMOUNT" title="Fixed Amount (Rs.)">Rs.</button>
-                                        </div>
-
-                                        ${type !== 'NONE' ? `
-                                            <div class="input-group input-group-sm" style="width: 105px; height: 22px;">
-                                                <span class="input-group-text p-0 px-1 fs-2xs font-mono bg-light text-muted">${type === 'AMOUNT' ? 'Rs.' : '%'}</span>
-                                                <input type="number" 
-                                                       class="form-control form-control-sm text-end p-0 px-1 cart-disc-input font-mono fs-2xs" 
-                                                       data-cart-index="${idx}"
-                                                       value="${val}"
-                                                       min="0"
-                                                       ${type === 'PERCENTAGE' ? 'max="100" step="0.5"' : `max="${lineGross}" step="1"`}>
-                                            </div>
-                                        ` : ''}
-                                    `}
-                                </div>
-
-                                <div class="mt-1" id="cartDiscDetail_${idx}">
-                                    ${lineDisc > 0 ? `
-                                        <span class="text-danger font-mono fs-2xs">
-                                            -Rs. ${lineDisc.toFixed(2)} ${item.quantity > 1 ? `(Rs. ${perUnitDisc.toFixed(2)}/unit)` : ''} &bull; Effective: <strong>${effectivePct.toFixed(2)}%</strong>
-                                        </span>
-                                        ${exceedsLimit ? `
-                                            <span class="badge bg-warning text-dark border border-warning fs-2xs px-1 py-0 ms-1" title="Exceeds allowed ${effectiveLimit}% limit - Manager PIN required at checkout">
-                                                <i class="fas fa-key me-1"></i>PIN Req (&gt;${effectiveLimit}%)
-                                            </span>
-                                        ` : ''}
-                                    ` : ''}
-                                </div>
-                            </td>
-                            <td class="text-center" style="width: 75px;">
-                                <input type="number" class="form-control form-control-sm text-center p-1 cart-qty-input font-monospace"
-                                       data-cart-index="${idx}"
-                                       value="${item.quantity}" min="1" ${isQtyLocked ? 'readonly' : ''}>
-                            </td>
-                            <td class="text-end" style="width: 105px;">
-                                <input type="number" step="0.01" class="form-control form-control-sm text-end p-1 cart-price-input font-monospace"
-                                       data-cart-index="${idx}"
-                                       value="${price.toFixed(2)}">
-                            </td>
-                            <td class="text-end fw-bold font-monospace fs-xs" id="cartLineTotal_${idx}">
-                                Rs. ${lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td class="text-center" style="width: 30px;">
-                                <button type="button" class="btn btn-link text-danger p-0 border-0 cart-remove-btn" data-cart-index="${idx}">
-                                    <i class="fas fa-trash-can"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-            }
+            this.container.innerHTML = `
+                <div class="text-center py-5 text-muted bg-white rounded-3 border">
+                    <i class="fas fa-barcode fs-2 d-block mb-2 opacity-25"></i>
+                    <span>Scan an IMEI, box barcode, or click <strong>+ Add</strong> to start billing.</span>
+                </div>
+            `;
+            this.recalculateTotals();
+            return;
         }
 
-        this.refreshSummaryDisplays();
+        this.items.forEach((item, idx) => {
+            const qty = Math.max(1, parseFloat(item.quantity) || 1);
+            const rate = Math.max(0, parseFloat(item.unit_price) || 0);
+            const gross = qty * rate;
+
+            let lineDisc = 0;
+            if (item.is_discountable !== false) {
+                const discVal = Math.max(0, parseFloat(item.discount_value) || 0);
+                if (item.discount_type === 'PERCENTAGE') {
+                    lineDisc = gross * (Math.min(100, discVal) / 100);
+                } else {
+                    lineDisc = Math.min(gross, discVal);
+                }
+            }
+
+            const netLine = Math.max(0, gross - lineDisc);
+            const primaryImei = item.imei_1 || item.imei_number || '';
+            const card = document.createElement('div');
+            card.className = 'item-card';
+            card.id = `item-row-${idx + 1}`;
+            card.dataset.index = idx;
+
+            card.innerHTML = `
+                <!-- Tier 1: Identification & Deletion -->
+                <div class="tier-top">
+                    <span class="item-sn">${idx + 1}</span>
+                    <div class="product-input-wrapper position-relative">
+                        <label class="field-label">PRODUCT NAME / IMEI</label>
+                        <input type="hidden" class="row-product-id" value="${item.product_id || ''}">
+                        <input type="text" 
+                               class="input-text product-name-input" 
+                               value="${escapeHtml(item.name)}" 
+                               placeholder="Type product name or scan IMEI..." 
+                               autocomplete="off">
+                        <div class="row-product-search-dropdown pos-live-dropdown d-none"></div>
+                        ${primaryImei ? `<div class="text-muted font-mono row-imei-display mt-1" style="font-size: 11px;">IMEI: <strong>${escapeHtml(primaryImei)}</strong></div>` : ''}
+                    </div>
+                    <button type="button" class="btn-remove cart-remove-btn" title="Remove line">&times;</button>
+                </div>
+
+                <!-- Tier 2: 6 Roomy Edge-to-Edge Calculations With In-Row Discount Toggle -->
+                <div class="tier-bottom">
+                    <div class="calc-field">
+                        <label class="field-label">QUANTITY</label>
+                        <input type="number" 
+                               class="calc-qty cart-qty-input font-mono text-center" 
+                               value="${qty}" 
+                               min="1">
+                    </div>
+                    <div class="calc-field">
+                        <label class="field-label">RATE (Rs.)</label>
+                        <input type="number" 
+                               step="0.01" 
+                               class="calc-rate cart-price-input font-mono text-end" 
+                               value="${rate.toFixed(2)}">
+                    </div>
+                    <div class="calc-field">
+                        <label class="field-label">AMOUNT</label>
+                        <input type="text" 
+                               class="calc-amount readonly row-gross-amount font-mono text-end" 
+                               value="${gross.toFixed(2)}" 
+                               readonly>
+                    </div>
+
+                    <!-- Line Discount with Interactive % and Rs. Toggle Buttons -->
+                    <div class="calc-field calc-field-discount">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="field-label mb-0">DISCOUNT</label>
+                            <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 font-mono line-disc-savings-badge" id="lineDiscountBadge-${idx + 1}" style="font-size: 9px; padding: 1px 4px; ${lineDisc > 0 ? '' : 'display: none;'}">
+                                -Rs. ${lineDisc.toFixed(2)}
+                            </span>
+                        </div>
+                        <div class="d-flex align-items-center gap-1">
+                            <input type="hidden" class="cart-item-disc-type" value="${item.discount_type || 'PERCENTAGE'}">
+                            <div class="btn-group btn-group-sm item-disc-toggle-group" role="group">
+                                <button type="button" 
+                                        class="btn btn-sm ${item.discount_type === 'PERCENTAGE' ? 'btn-dark active' : 'btn-outline-secondary'} font-mono py-0 px-2 item-disc-mode-btn mode-percent" 
+                                        data-index="${idx}" 
+                                        data-mode="PERCENTAGE" 
+                                        title="Percentage (%)">%</button>
+                                <button type="button" 
+                                        class="btn btn-sm ${item.discount_type === 'AMOUNT' ? 'btn-dark active' : 'btn-outline-secondary'} font-mono py-0 px-2 item-disc-mode-btn mode-fixed" 
+                                        data-index="${idx}" 
+                                        data-mode="AMOUNT" 
+                                        title="Flat Cash (Rs.)">Rs.</button>
+                            </div>
+                            <div class="input-group input-group-sm flex-grow-1">
+                                <span class="input-group-text bg-light text-muted font-mono fs-2xs py-0 px-1.5 item-disc-symbol">
+                                    ${item.discount_type === 'AMOUNT' ? 'Rs.' : '%'}
+                                </span>
+                                <input type="number" 
+                                       step="any" 
+                                       class="form-control form-control-sm text-end font-mono fs-xs fw-bold calc-discount cart-disc-input" 
+                                       data-index="${idx}"
+                                       placeholder="0" 
+                                       value="${item.discount_value || 0}" 
+                                       min="0"
+                                       ${item.discount_type === 'PERCENTAGE' ? 'max="100"' : `max="${gross}"`}
+                                       autocomplete="off">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="calc-field">
+                        <label class="field-label">TAX</label>
+                        <select class="calc-tax cart-tax-select">
+                            <option value="13%" ${item.tax_type === '13%' ? 'selected' : ''}>13%</option>
+                            <option value="No" ${item.tax_type === 'No' ? 'selected' : ''}>No</option>
+                        </select>
+                    </div>
+                    <div class="calc-field">
+                        <label class="field-label">NET AMOUNT</label>
+                        <input type="text" 
+                               class="calc-net readonly net-amount row-net-amount font-mono" 
+                               value="${netLine.toFixed(2)}" 
+                               readonly>
+                    </div>
+                </div>
+            `;
+
+            this.container.appendChild(card);
+        });
+
+        this.recalculateTotals();
     }
 }
 
 // ============================================================================
-// 6. TRADE-IN & EXCHANGE MANAGER MODULE
+// 4. TRADE-IN / BUY-BACK VOUCHER ATTACHMENT MANAGER
 // ============================================================================
 class POSTradeInManager {
     constructor(engine) {
@@ -1794,8 +1359,8 @@ class POSTradeInManager {
         this.creditAmount = 0;
         this.tradeInDetails = null;
 
-        this.row = document.getElementById('posTradeInRow') || document.getElementById('exchangeDiscountRow');
-        this.text = document.getElementById('posTradeInText') || document.getElementById('billExchangeText');
+        this.row = document.getElementById('posTradeInRow');
+        this.text = document.getElementById('posTradeInText');
         this.tag = document.getElementById('posTradeInTag');
     }
 
@@ -1808,7 +1373,9 @@ class POSTradeInManager {
         this.voucherNumber = 'EXCHANGE-DIRECT';
         this.creditAmount = Math.max(0, parseFloat(value) || 0);
         this.tradeInDetails = { model: modelName, value: this.creditAmount };
-        this.engine.cart.render();
+        const tradeInInp = document.getElementById('trade-in-input');
+        if (tradeInInp) tradeInInp.value = this.creditAmount.toFixed(2);
+        this.engine.cart.recalculateTotals();
     }
 
     async attachByVoucherNumber(voucherNum) {
@@ -1821,13 +1388,18 @@ class POSTradeInManager {
                 return;
             }
             const data = await resp.json();
-            this.voucherId = data.id;
-            this.voucherNumber = data.voucher_number;
-            this.creditAmount = parseFloat(data.final_trade_in_value || 0);
-            this.tradeInDetails = { model: `${data.brand_name} ${data.model_name}`, value: this.creditAmount };
+            const voucher = data.voucher || (Array.isArray(data.results) ? data.results[0] : data);
+
+            this.voucherId = voucher.id;
+            this.voucherNumber = voucher.voucher_number;
+            this.creditAmount = parseFloat(voucher.final_trade_in_value || voucher.amount || 0);
+            this.tradeInDetails = { model: `${voucher.brand_name || ''} ${voucher.model_name || ''}`.trim(), value: this.creditAmount };
+
+            const tradeInInp = document.getElementById('trade-in-input');
+            if (tradeInInp) tradeInInp.value = this.creditAmount.toFixed(2);
 
             this.engine.showNotification(`Trade-In voucher ${this.voucherNumber} attached (Credit: Rs. ${this.creditAmount.toFixed(2)}).`, 'success');
-            this.engine.cart.render();
+            this.engine.cart.recalculateTotals();
         } catch (err) {
             console.error('[POSTradeInManager] Error attaching voucher:', err);
             this.engine.showNotification('Failed to look up trade-in voucher.', 'danger');
@@ -1839,23 +1411,14 @@ class POSTradeInManager {
         this.voucherNumber = '';
         this.creditAmount = 0;
         this.tradeInDetails = null;
-        this.engine.cart.render();
-    }
-
-    updateUi(credit) {
-        if (!this.row) return;
-        if (credit > 0) {
-            this.row.style.display = 'flex';
-            if (this.text) this.text.innerText = `-Rs. ${credit.toFixed(2)}`;
-            if (this.tag) this.tag.innerText = this.voucherNumber ? `(${this.voucherNumber})` : '';
-        } else {
-            this.row.style.display = 'none';
-        }
+        const tradeInInp = document.getElementById('trade-in-input');
+        if (tradeInInp) tradeInInp.value = '0.00';
+        this.engine.cart.recalculateTotals();
     }
 }
 
 // ============================================================================
-// 7. PARKED BILL / HOLD CART MANAGER MODULE (F9 / F10)
+// 5. PARKED BILL / HOLD CART MANAGER MODULE (F9 / F10)
 // ============================================================================
 class POSHoldCartManager {
     constructor(engine) {
@@ -1893,56 +1456,49 @@ class POSHoldCartManager {
 
     async holdCurrentCart() {
         if (this.engine.cart.items.length === 0) {
-            this.engine.showNotification('Cannot hold an empty cart.', 'warning');
+            this.engine.showNotification('Cannot hold an empty bill.', 'warning');
             return;
         }
 
-        const totals = this.engine.cart.calculateTotals();
-        const customerName = this.engine.customerManager.selectedCustomer
-            ? this.engine.customerManager.selectedCustomer.name
-            : (document.getElementById('posCustomerInput')?.value.trim() || 'Walk-in Customer');
-
-        const customerPhone = this.engine.cart.customerPhone || '';
-        const notes = prompt('Enter a short note for this held cart (optional):') || 'Held at counter';
+        const totals = this.engine.cart.calculateTotals ? this.engine.cart.calculateTotals() : this.engine.cart.recalculateTotals();
+        const customerName = document.getElementById('posCustomerInput')?.value.trim() || 'Walk-in Customer';
+        const customerPhone = document.getElementById('posCustomerMobileInput')?.value.trim() || '';
+        const customerPan = document.getElementById('posCustomerPanInput')?.value.trim() || '';
+        const notes = prompt('Enter a short note for this held bill (optional):') || 'Held at counter';
 
         const serializedItems = this.engine.cart.items.map(item => ({
-            ...item,
-            unit_price: (item.unit_price !== undefined) ? item.unit_price : (item.price || 0),
-            price: (item.unit_price !== undefined) ? item.unit_price : (item.price || 0),
-            official_unit_price: item.official_unit_price || item.catalog_price || item.unit_price,
-            discount_type: item.discount_type || 'NONE',
-            discount_value: item.discount_value !== undefined ? parseFloat(item.discount_value) : (item.discount_percent || 0),
+            product_id: item.product_id,
+            name: item.name,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            discount_type: item.discount_type || 'PERCENTAGE',
+            discount_value: item.discount_value || 0,
+            discount_input_value: item.discount_value || 0,
             discount_percent: item.discount_percent || 0,
-            is_discountable: item.is_discountable !== false,
-            requires_imei: Boolean(item.requires_imei && (this.engine.enforceImei || item.imei_1))
+            tax_type: item.tax_type || '13%',
+            requires_imei: Boolean(item.requires_imei),
+            imei_1: item.imei_1 || '',
+            imei_2: item.imei_2 || '',
+            is_repair_service: Boolean(item.is_repair_service),
+            repair_ticket_id: item.repair_ticket_id || null
         }));
 
-        const activeRepairId = this.engine.repairTicketId || 
-                               (this.engine.checkout ? this.engine.checkout.repairTicketId : null) || 
-                               window.activeRepairTicketId || 
-                               null;
-        const activeTradeInId = this.engine.tradeInManager ? this.engine.tradeInManager.voucherId : null;
-        const activeTradeInNo = this.engine.tradeInManager ? this.engine.tradeInManager.voucherNumber : '';
-        const activeTradeInAmt = this.engine.tradeInManager ? this.engine.tradeInManager.creditAmount : 0;
-        const activePan = this.engine.cart.customerPan || 
-                          (this.engine.customerManager && this.engine.customerManager.selectedCustomer ? this.engine.customerManager.selectedCustomer.pan : '') || 
-                          document.getElementById('posCustomerPanInput')?.value.trim() || 
-                          '';
+        const tradeInDeduction = parseFloat(document.getElementById('trade-in-input')?.value) || 0;
 
         const payload = {
             cart: serializedItems,
-            subtotal: totals.subtotal,
+            subtotal: totals.subTotal,
             customer_name: customerName,
             customer_phone: customerPhone,
-            customer_pan: activePan,
-            bill_discount_type: this.engine.cart.billDiscountType || 'PERCENTAGE',
-            bill_discount_value: this.engine.cart.billDiscountValue || 0,
-            bill_discount_percent: this.engine.cart.billDiscountPercent || 0,
-            discount_reason: this.engine.cart.billDiscountReason || '',
-            trade_in_voucher_id: activeTradeInId,
-            trade_in_voucher_number: activeTradeInNo,
-            trade_in_credit_amount: activeTradeInAmt,
-            repair_ticket_id: activeRepairId ? parseInt(activeRepairId, 10) : null,
+            customer_pan: customerPan,
+            bill_discount_type: this.engine.cart.billDiscountType,
+            bill_discount_input_value: this.engine.cart.billDiscountValue,
+            bill_discount_value: this.engine.cart.billDiscountValue,
+            bill_discount_amount: totals.billDiscountAmt,
+            bill_discount_percent: totals.billDiscountPercent,
+            discount_percent: totals.billDiscountPercent,
+            trade_in_voucher_id: this.engine.tradeInManager ? this.engine.tradeInManager.voucherId : null,
+            trade_in_credit_amount: tradeInDeduction,
             notes: notes
         };
 
@@ -1958,22 +1514,15 @@ class POSHoldCartManager {
 
             const data = await resp.json();
             if (resp.ok && data.status === 'success') {
-                this.engine.showNotification(`Cart parked successfully (${data.hold_reference}).`, 'success');
+                this.engine.showNotification(`Bill parked successfully (${data.hold_reference}).`, 'success');
                 this.engine.cart.clear();
                 this.engine.customerManager.clearCustomer(true);
-                this.engine.tradeInManager.remove();
-                this.engine.repairTicketId = null;
-                if (this.engine.checkout) this.engine.checkout.repairTicketId = null;
-                window.activeRepairTicketId = null;
-                window.activeRepairTicket = null;
-                const repairBanner = document.getElementById('linkedRepairBanner');
-                if (repairBanner) repairBanner.remove();
             } else {
-                this.engine.showNotification(data.error || 'Failed to hold cart.', 'danger');
+                this.engine.showNotification(data.error || 'Failed to hold bill.', 'danger');
             }
         } catch (err) {
             console.error('[POSHoldCartManager] Hold error:', err);
-            this.engine.showNotification('Network error while holding cart.', 'danger');
+            this.engine.showNotification('Network error while holding bill.', 'danger');
         }
     }
 
@@ -1990,14 +1539,14 @@ class POSHoldCartManager {
         this.tableBody.innerHTML = `
             <tr>
                 <td colspan="6" class="text-center py-4 text-muted">
-                    <span class="spinner-border spinner-border-sm me-2 text-primary"></span> Loading parked carts...
+                    <span class="spinner-border spinner-border-sm me-2 text-primary"></span> Loading parked bills...
                 </td>
             </tr>
         `;
 
         try {
             const resp = await fetch(this.apiUrl);
-            if (!resp.ok) throw new Error('Failed to fetch held carts');
+            if (!resp.ok) throw new Error('Failed to fetch held bills');
             const data = await resp.json();
             const carts = data.held_carts || [];
 
@@ -2006,7 +1555,7 @@ class POSHoldCartManager {
                     <tr>
                         <td colspan="6" class="text-center py-4 text-muted">
                             <i class="fas fa-pause-circle fs-3 d-block mb-2 opacity-25"></i>
-                            No parked carts currently on hold.
+                            No parked bills currently on hold.
                         </td>
                     </tr>
                 `;
@@ -2019,19 +1568,19 @@ class POSHoldCartManager {
 
                 return `
                     <tr>
-                        <td class="ps-4 font-monospace fw-bold text-primary">${escapeHtml(c.hold_reference)}</td>
+                        <td class="ps-4 font-mono fw-bold text-primary">${escapeHtml(c.hold_reference)}</td>
                         <td>
                             <strong>${escapeHtml(c.customer_name || 'Walk-in')}</strong>
-                            ${c.customer_phone ? `<small class="text-muted d-block font-monospace">${escapeHtml(c.customer_phone)}</small>` : ''}
+                            ${c.customer_phone ? `<small class="text-muted d-block font-mono">${escapeHtml(c.customer_phone)}</small>` : ''}
                         </td>
                         <td><span class="badge bg-light text-dark border">${itemCount} Items</span></td>
-                        <td class="font-monospace fw-bold">Rs. ${parseFloat(c.subtotal || 0).toFixed(2)}</td>
+                        <td class="font-mono fw-bold">Rs. ${parseFloat(c.subtotal || 0).toFixed(2)}</td>
                         <td class="text-muted fs-xs">${createdTime}</td>
                         <td class="text-end pe-4">
                             <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 recall-held-cart-btn me-1" data-hold-ref="${escapeHtml(c.hold_reference)}">
                                 <i class="fas fa-play me-1"></i> Recall
                             </button>
-                            <button type="button" class="btn btn-outline-danger btn-sm rounded-circle p-1 delete-held-cart-btn" data-hold-ref="${escapeHtml(c.hold_reference)}" title="Discard Cart">
+                            <button type="button" class="btn btn-outline-danger btn-sm rounded-circle p-1 delete-held-cart-btn" data-hold-ref="${escapeHtml(c.hold_reference)}" title="Discard">
                                 <i class="fas fa-trash-can"></i>
                             </button>
                         </td>
@@ -2042,7 +1591,7 @@ class POSHoldCartManager {
             this.tableBody.innerHTML = `
                 <tr>
                     <td colspan="6" class="text-center py-4 text-danger">
-                        <i class="fas fa-exclamation-triangle me-1"></i> Error loading held carts.
+                        <i class="fas fa-exclamation-triangle me-1"></i> Error loading held bills.
                     </td>
                 </tr>
             `;
@@ -2053,7 +1602,7 @@ class POSHoldCartManager {
         try {
             const resp = await fetch(`${this.apiUrl}${encodeURIComponent(reference)}/`);
             if (!resp.ok) {
-                this.engine.showNotification('Could not retrieve parked cart.', 'danger');
+                this.engine.showNotification('Could not retrieve parked bill.', 'danger');
                 return;
             }
             const data = await resp.json();
@@ -2063,86 +1612,37 @@ class POSHoldCartManager {
                 this.engine.cart.clear();
 
                 items.forEach(item => {
-                    let dType = 'NONE';
-                    if (item.discount_type === 'AMOUNT' || item.discount_type === 'FIXED') {
-                        dType = 'AMOUNT';
-                    } else if (item.discount_type === 'PERCENTAGE') {
-                        dType = 'PERCENTAGE';
-                    }
-
                     this.engine.cart.addItem({
                         ...item,
-                        discount_type: dType,
-                        discount_value: item.discount_value !== undefined ? item.discount_value : (item.discount_percent || 0),
-                        is_discountable: item.is_discountable !== false
+                        unit_price: item.unit_price || item.price || 0,
+                        discount_value: item.discount_value || item.discount_amount || 0,
+                        tax_type: item.tax_type || (item.tax_pricing_type === 'EXEMPT' ? 'No' : '13%')
                     });
                 });
 
-                let billDiscType = (data.cart_payload && data.cart_payload.bill_discount_type) ? data.cart_payload.bill_discount_type : 'PERCENTAGE';
-                if (billDiscType === 'FIXED') billDiscType = 'AMOUNT';
+                const billDiscType = (data.cart_payload && data.cart_payload.bill_discount_type) || data.bill_discount_type || 'PERCENTAGE';
+                const billDiscVal = (data.cart_payload && data.cart_payload.bill_discount_value !== undefined)
+                    ? data.cart_payload.bill_discount_value
+                    : (data.bill_discount_value !== undefined ? data.bill_discount_value : (data.discount_percent || 0));
 
-                const billDiscVal = (data.cart_payload && data.cart_payload.bill_discount_value !== undefined) ? data.cart_payload.bill_discount_value : (data.discount_percent || 0);
-
-                this.engine.cart.billDiscountType = billDiscType;
+                this.engine.cart.billDiscountType = (billDiscType === 'AMOUNT' || billDiscType === 'FIXED') ? 'AMOUNT' : 'PERCENTAGE';
                 this.engine.cart.billDiscountValue = parseFloat(billDiscVal) || 0;
-                this.engine.cart.billDiscountReason = (data.cart_payload && data.cart_payload.discount_reason) ? data.cart_payload.discount_reason : '';
-
-                const discInput = document.getElementById('posBillDiscountInput') || document.getElementById('billDiscountInput');
-                if (discInput) discInput.value = this.engine.cart.billDiscountValue;
-                const toggleBtn = document.getElementById('posBillDiscountTypeToggleBtn');
-                if (toggleBtn) {
-                    toggleBtn.innerText = this.engine.cart.billDiscountType === 'AMOUNT' ? 'Rs.' : '%';
-                    toggleBtn.classList.toggle('btn-primary', this.engine.cart.billDiscountType === 'AMOUNT');
-                    toggleBtn.classList.toggle('btn-outline-secondary', this.engine.cart.billDiscountType !== 'AMOUNT');
+                if (this.engine.cart.billDiscountInput) {
+                    this.engine.cart.billDiscountInput.value = this.engine.cart.billDiscountValue;
                 }
+                this.engine.cart.syncBillDiscountUI();
 
                 if (data.customer_name && data.customer_name !== 'Walk-in' && data.customer_name !== 'Walk-in Customer') {
                     const custInput = document.getElementById('posCustomerInput');
                     if (custInput) custInput.value = data.customer_name;
-                    if (data.customer_phone) this.engine.cart.customerPhone = data.customer_phone;
-                }
-
-                const repairId = (data.cart_payload && data.cart_payload.repair_ticket_id) || data.repair_ticket_id || null;
-                if (repairId) {
-                    const parsedRepairId = parseInt(repairId, 10);
-                    this.engine.repairTicketId = parsedRepairId;
-                    if (this.engine.checkout) {
-                        this.engine.checkout.repairTicketId = parsedRepairId;
+                    if (data.customer_phone) {
+                        const mobInput = document.getElementById('posCustomerMobileInput');
+                        if (mobInput) mobInput.value = data.customer_phone;
                     }
-                    window.activeRepairTicketId = parsedRepairId;
-
-                    const container = document.querySelector('.pos-workspace-container') || document.querySelector('.container-fluid');
-                    if (container) {
-                        const oldBanner = document.getElementById('linkedRepairBanner');
-                        if (oldBanner) oldBanner.remove();
-
-                        const banner = document.createElement('div');
-                        banner.id = 'linkedRepairBanner';
-                        banner.className = 'alert alert-info py-1 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs shadow-sm';
-                        banner.innerHTML = `
-                            <span><i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>#${parsedRepairId}</strong> (Restored from Parked Cart)</span>
-                            <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); window.smartPos.repairTicketId=null;"></button>
-                        `;
-                        container.prepend(banner);
+                    if (data.customer_pan) {
+                        const panInput = document.getElementById('posCustomerPanInput');
+                        if (panInput) panInput.value = data.customer_pan;
                     }
-                }
-
-                const tradeInId = (data.cart_payload && data.cart_payload.trade_in_voucher_id) || data.trade_in_voucher_id || null;
-                const tradeInNo = (data.cart_payload && data.cart_payload.trade_in_voucher_number) || '';
-                const tradeInAmt = parseFloat((data.cart_payload && data.cart_payload.trade_in_credit_amount) || 0) || 0;
-
-                if (tradeInId && this.engine.tradeInManager) {
-                    this.engine.tradeInManager.voucherId = parseInt(tradeInId, 10);
-                    this.engine.tradeInManager.voucherNumber = tradeInNo || `EXC-${tradeInId}`;
-                    this.engine.tradeInManager.creditAmount = tradeInAmt;
-                    this.engine.tradeInManager.updateUi(tradeInAmt);
-                }
-
-                const pan = (data.cart_payload && data.cart_payload.customer_pan) || data.customer_pan || '';
-                if (pan) {
-                    this.engine.cart.customerPan = pan;
-                    const panInp = document.getElementById('posCustomerPanInput');
-                    if (panInp) panInp.value = pan;
                 }
 
                 await fetch(`${this.apiUrl}${encodeURIComponent(reference)}/`, {
@@ -2157,33 +1657,33 @@ class POSHoldCartManager {
                 }
 
                 this.engine.cart.render();
-                this.engine.showNotification(`Restored held cart ${reference} with accurate pricing and discounts.`, 'success');
+                this.engine.showNotification(`Restored held bill ${reference}.`, 'success');
             }
         } catch (err) {
             console.error('[POSHoldCartManager] Recall error:', err);
-            this.engine.showNotification('Error restoring cart.', 'danger');
+            this.engine.showNotification('Error restoring bill.', 'danger');
         }
     }
 
     async deleteHeldCart(reference) {
-        if (!confirm(`Permanently delete held cart ${reference}?`)) return;
+        if (!confirm(`Permanently delete held bill ${reference}?`)) return;
         try {
             const resp = await fetch(`${this.apiUrl}${encodeURIComponent(reference)}/`, {
                 method: 'DELETE',
                 headers: { 'X-CSRFToken': getCsrfToken() }
             });
             if (resp.ok) {
-                this.engine.showNotification(`Deleted held cart ${reference}.`, 'info');
+                this.engine.showNotification(`Deleted held bill ${reference}.`, 'info');
                 await this.loadHeldCarts();
             }
         } catch (err) {
-            this.engine.showNotification('Error deleting cart.', 'danger');
+            this.engine.showNotification('Error deleting bill.', 'danger');
         }
     }
 }
 
 // ============================================================================
-// 8. CHECKOUT, OVERRIDE PIN & OFFLINE ENGINE
+// 6. CHECKOUT, OVERRIDE PIN & SPLIT PAYMENT SUBMISSION
 // ============================================================================
 class POSCheckout {
     constructor(engine) {
@@ -2191,128 +1691,26 @@ class POSCheckout {
         this.checkoutApiUrl = '/sales/api/checkout/';
         this.isProcessing = false;
         this.managerPin = null;
-        this.repairTicketId = null;
-
-        this.ensurePinModalExists();
-    }
-
-    ensurePinModalExists() {
-        if (document.getElementById('posManagerPinModal')) return;
-
-        const modalDiv = document.createElement('div');
-        modalDiv.id = 'posManagerPinModal';
-        modalDiv.className = 'modal fade';
-        modalDiv.tabIndex = -1;
-        modalDiv.setAttribute('data-bs-backdrop', 'static');
-        modalDiv.innerHTML = `
-            <div class="modal-dialog modal-dialog-centered modal-sm">
-                <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-                    <div class="modal-header bg-dark text-white border-0 py-2 px-3">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="badge bg-warning text-dark p-2 rounded-circle"><i class="fas fa-key"></i></span>
-                            <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="posManagerPinModalLabel">Supervisor Override PIN</h6>
-                        </div>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closePinModalBtn" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body p-4 text-center">
-                        <p class="fs-xs text-muted mb-3" id="posPinModalReasonText">
-                            This transaction requires Manager authorization for price override or discount.
-                        </p>
-                        <div class="mb-3">
-                            <input type="password" id="posManagerPinInput" 
-                                   class="form-control form-control-lg text-center font-monospace fw-bold fs-4 letter-spacing-lg" 
-                                   placeholder="••••" maxlength="6" autocomplete="new-password">
-                        </div>
-                        <div id="posPinErrorAlert" class="alert alert-danger p-2 fs-2xs d-none mb-0"></div>
-                    </div>
-                    <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
-                        <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" id="submitManagerPinBtn">
-                            Authorize Sale
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modalDiv);
-
-        document.getElementById('submitManagerPinBtn').addEventListener('click', () => this.handlePinSubmission());
-        document.getElementById('posManagerPinInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                this.handlePinSubmission();
-            }
-        });
-    }
-
-    promptForManagerPin(reason = '') {
-        return new Promise((resolve) => {
-            const modalEl = document.getElementById('posManagerPinModal');
-            const pinInput = document.getElementById('posManagerPinInput');
-            const reasonText = document.getElementById('posPinModalReasonText');
-            const errAlert = document.getElementById('posPinErrorAlert');
-
-            if (errAlert) errAlert.classList.add('d-none');
-            if (pinInput) pinInput.value = '';
-            if (reasonText && reason) reasonText.innerText = reason;
-
-            const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-            modal.show();
-
-            setTimeout(() => pinInput && pinInput.focus(), 300);
-
-            this._pinResolveCallback = resolve;
-
-            const onHidden = () => {
-                modalEl.removeEventListener('hidden.bs.modal', onHidden);
-                if (this._pinResolveCallback) {
-                    this._pinResolveCallback(null);
-                    this._pinResolveCallback = null;
-                }
-            };
-            modalEl.addEventListener('hidden.bs.modal', onHidden);
-        });
-    }
-
-    handlePinSubmission() {
-        const pinInput = document.getElementById('posManagerPinInput');
-        const pin = pinInput ? pinInput.value.trim() : '';
-
-        if (!pin || pin.length < 4) {
-            const errAlert = document.getElementById('posPinErrorAlert');
-            if (errAlert) {
-                errAlert.innerText = 'Please enter a 4-6 digit numeric PIN.';
-                errAlert.classList.remove('d-none');
-            }
-            return;
-        }
-
-        const modalEl = document.getElementById('posManagerPinModal');
-        const modal = bootstrap.Modal.getInstance(modalEl);
-        if (modal) modal.hide();
-
-        if (this._pinResolveCallback) {
-            this._pinResolveCallback(pin);
-            this._pinResolveCallback = null;
-        }
     }
 
     setButtonsDisabled(disabled) {
         this.isProcessing = disabled;
-        const cashBtn = document.getElementById('posDirectCashCheckoutBtn') || document.getElementById('quickCashPayBtn');
-        const splitConfirmBtn = document.getElementById('confirmSplitPaymentBtn');
-        const digitalPayBtn = document.getElementById('digitalPayBtn');
+        const cashBtn = document.getElementById('posDirectCashCheckoutBtn');
+        const creditBtn = document.getElementById('posCreditPayBtn');
+        const splitBtn = document.getElementById('posSplitPaymentBtn');
+        const confirmSplitBtn = document.getElementById('confirmSplitPaymentBtn');
 
         if (cashBtn) {
             cashBtn.disabled = disabled;
             if (disabled) cashBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> PROCESSING...';
-            else cashBtn.innerHTML = '<i class="fas fa-money-bill-wave me-2"></i> CASH PAYMENT [F4]';
+            else cashBtn.innerHTML = '💵 CASH PAYMENT (नगद भुक्तानी) [F4]';
         }
-        if (splitConfirmBtn) {
-            splitConfirmBtn.disabled = disabled;
-        }
-        if (digitalPayBtn) {
-            digitalPayBtn.disabled = disabled;
+        if (creditBtn) creditBtn.disabled = disabled;
+        if (splitBtn) splitBtn.disabled = disabled;
+        if (confirmSplitBtn) {
+            confirmSplitBtn.disabled = disabled;
+            if (disabled) confirmSplitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Finalizing...';
+            else confirmSplitBtn.innerHTML = '<i class="fas fa-check-circle me-1"></i> Finalize Split Payment';
         }
     }
 
@@ -2320,27 +1718,57 @@ class POSCheckout {
         if (this.isProcessing) return;
 
         if (this.engine.cart.items.length === 0) {
-            this.engine.showNotification('Cart is empty. Add items before checking out.', 'warning');
+            this.engine.showNotification('Bill is empty. Scan barcodes or add items before checkout.', 'warning');
             return;
         }
 
-        const totals = this.engine.cart.calculateTotals();
+        const totals = this.engine.cart.recalculateTotals();
         const payload = this.buildPayload([{ mode: 'CASH', amount: totals.grandTotal, transaction_ref: '' }]);
 
         this.setButtonsDisabled(true);
         await this.executeSubmit(payload, 'CASH (नगद)');
     }
 
-    async processSplitCheckout() {
+    async processCreditCheckout() {
         if (this.isProcessing) return;
 
         if (this.engine.cart.items.length === 0) {
-            this.engine.showNotification('Cart is empty.', 'warning');
+            this.engine.showNotification('Bill is empty.', 'warning');
             return;
         }
 
-        const totals = this.engine.cart.calculateTotals();
+        const totals = this.engine.cart.recalculateTotals();
+        const custName = document.getElementById('posCustomerInput')?.value.trim() || '';
+        const custId = document.getElementById('posCustomerId')?.value || (this.engine.cart.customer ? this.engine.cart.customer.id : null);
+
+        if (!custId && (!custName || custName.toLowerCase() === 'walk-in customer' || custName.toLowerCase() === 'walk-in' || custName === '-')) {
+            this.engine.showNotification('Credit sales (Udhaari) strictly require a registered customer profile.', 'danger');
+            POSAudioSynthesizer.play('error');
+            document.getElementById('posCustomerInput')?.focus();
+            return;
+        }
+
+        const payload = this.buildPayload([{ mode: 'CREDIT', amount: totals.grandTotal, transaction_ref: 'UDHAARI' }]);
+        this.setButtonsDisabled(true);
+        await this.executeSubmit(payload, 'CREDIT (उधारो)');
+    }
+
+    // ------------------------------------------------------------------------
+    // Process Split & Digital Wallet Payment Finalization
+    // ------------------------------------------------------------------------
+    async processSplitCheckout() {
+        if (this.isProcessing) return;
+
+        if (!this.engine.cart.items || this.engine.cart.items.length === 0) {
+            this.engine.showNotification('Bill is empty. Add items before checking out.', 'warning');
+            return;
+        }
+
+        const totals = this.engine.cart.recalculateTotals();
+        const grandTotal = totals.grandTotal;
+
         const cash = parseFloat(document.getElementById('splitCashAmt')?.value) || 0;
+        const credit = parseFloat(document.getElementById('splitCreditAmt')?.value) || 0;
         const fonepay = parseFloat(document.getElementById('splitFonepayAmt')?.value) || 0;
         const fonepayRef = (document.getElementById('splitFonepayRef')?.value || '').trim();
         const esewa = parseFloat(document.getElementById('splitEsewaAmt')?.value) || 0;
@@ -2351,8 +1779,6 @@ class POSCheckout {
         const cardRef = (document.getElementById('splitCardRef')?.value || '').trim();
         const bank = parseFloat(document.getElementById('splitBankAmt')?.value) || 0;
         const bankRef = (document.getElementById('splitBankRef')?.value || '').trim();
-        const credit = parseFloat(document.getElementById('splitCreditAmt')?.value) || 0;
-        const creditRef = (document.getElementById('splitCreditRef')?.value || '').trim();
 
         const payments = [];
         if (cash > 0) payments.push({ mode: 'CASH', amount: cash, transaction_ref: '' });
@@ -2360,18 +1786,35 @@ class POSCheckout {
         if (esewa > 0) payments.push({ mode: 'ESEWA', amount: esewa, transaction_ref: esewaRef });
         if (khalti > 0) payments.push({ mode: 'KHALTI', amount: khalti, transaction_ref: khaltiRef });
         if (card > 0) payments.push({ mode: 'CARD', amount: card, transaction_ref: cardRef });
-        if (bank > 0) payments.push({ mode: 'BANK', amount: bank, transaction_ref: bankRef });
-        if (credit > 0) payments.push({ mode: 'CREDIT', amount: credit, transaction_ref: creditRef });
+        if (bank > 0) payments.push({ mode: 'BANK_TRANSFER', amount: bank, transaction_ref: bankRef });
+        if (credit > 0) payments.push({ mode: 'CREDIT', amount: credit, transaction_ref: 'UDHAARI' });
 
-        const totalEntered = cash + fonepay + esewa + khalti + card + bank + credit;
-        if (Math.abs(totalEntered - totals.grandTotal) > 0.5) {
-            this.engine.showNotification(`Entered payments total (Rs. ${totalEntered.toFixed(2)}) must equal Grand Total (Rs. ${totals.grandTotal.toFixed(2)}).`, 'danger');
+        const totalTendered = cash + fonepay + esewa + khalti + card + bank + credit;
+
+        // Verify balance with grand total (within 0.05 paisa tolerance)
+        if (Math.abs(totalTendered - grandTotal) > 0.05) {
+            const diff = grandTotal - totalTendered;
+            this.engine.showNotification(
+                `Payment distribution mismatch: Total entered (Rs. ${totalTendered.toLocaleString('en-IN', {minimumFractionDigits: 2})}) ` +
+                `must equal Grand Total (Rs. ${grandTotal.toLocaleString('en-IN', {minimumFractionDigits: 2})}). ` +
+                `Remaining Balance: Rs. ${diff.toFixed(2)}`,
+                'danger'
+            );
+            POSAudioSynthesizer.play('error');
             return;
         }
 
-        const isUnpaidOrCredit = credit > 0 || (totalEntered < totals.grandTotal);
-        if (isUnpaidOrCredit && !this.engine.cart.customer) {
-            this.engine.showNotification('Credit sales (Udhaari) require selecting or registering a customer profile.', 'danger');
+        // Verify customer registration for Udhaari (credit)
+        const isCreditSale = credit > 0 || totalTendered < grandTotal;
+        const custName = document.getElementById('posCustomerInput')?.value.trim() || '';
+        const custId = document.getElementById('posCustomerId')?.value || (this.engine.cart.customer ? this.engine.cart.customer.id : null);
+        const isAnonymous = !custName || custName.toLowerCase() === 'walk-in customer' || custName.toLowerCase() === 'walk-in' || custName === '-';
+
+        if (isCreditSale && isAnonymous && !custId) {
+            this.engine.showNotification(
+                'Customer Udhaari (Credit) strictly requires selecting or registering a customer profile.',
+                'danger'
+            );
             POSAudioSynthesizer.play('error');
             const custInput = document.getElementById('posCustomerInput');
             if (custInput) custInput.focus();
@@ -2382,7 +1825,7 @@ class POSCheckout {
         this.setButtonsDisabled(true);
 
         const modalEl = document.getElementById('splitPaymentModal');
-        if (modalEl) {
+        if (modalEl && typeof bootstrap !== 'undefined') {
             const modalInstance = bootstrap.Modal.getInstance(modalEl);
             if (modalInstance) modalInstance.hide();
         }
@@ -2391,125 +1834,79 @@ class POSCheckout {
     }
 
     buildPayload(payments) {
-        const customerInput = document.getElementById('posCustomerInput') || document.getElementById('customerSelect');
-        let custName = 'Walk-in Customer';
-
-        if (this.engine.customerManager.selectedCustomer) {
-            custName = this.engine.customerManager.selectedCustomer.name;
-        } else if (customerInput) {
-            if (customerInput.tagName === 'SELECT' && customerInput.selectedIndex >= 0) {
-                const optText = customerInput.options[customerInput.selectedIndex].text;
-                custName = optText.includes('Walk-in') ? 'Walk-in Customer' : optText;
-            } else {
-                custName = customerInput.value.trim() || 'Walk-in Customer';
-            }
-        }
-
-        const custPan = this.engine.cart.customerPan || 
-                        document.getElementById('posCustomerPanInput')?.value.trim() || 
-                        (this.engine.customerManager.selectedCustomer ? this.engine.customerManager.selectedCustomer.pan : '') || '';
+        const custName = document.getElementById('posCustomerInput')?.value.trim() || 'Walk-in Customer';
+        const custPhone = document.getElementById('posCustomerMobileInput')?.value.trim() || '';
+        const custPan = document.getElementById('posCustomerPanInput')?.value.trim() || '';
+        const custId = document.getElementById('posCustomerId')?.value || null;
+        const narration = document.getElementById('posBillNarration')?.value.trim() || '';
+        const terms = document.getElementById('posBillTerms')?.value.trim() || '';
 
         const packagedCartItems = this.engine.cart.items.map(item => {
-            const price = (item.unit_price !== undefined) ? item.unit_price : (item.price || 0);
-            const discType = item.discount_type || 'NONE';
-            const discVal = item.discount_value !== undefined ? parseFloat(item.discount_value) : 0;
-            const lineGross = item.quantity * price;
+            const qty = Math.max(1, parseFloat(item.quantity) || 1);
+            const price = Math.max(0, parseFloat(item.unit_price) || 0);
+            const discVal = Math.max(0, parseFloat(item.discount_value) || 0);
+            const discType = item.discount_type || 'PERCENTAGE';
+            const gross = price * qty;
 
             let effectivePct = 0;
             if (discType === 'PERCENTAGE') {
-                effectivePct = discVal;
-            } else if (discType === 'AMOUNT' && lineGross > 0) {
-                effectivePct = (Math.min(discVal, lineGross) / lineGross) * 100;
+                effectivePct = Math.min(100, discVal);
+            } else if (gross > 0) {
+                effectivePct = (Math.min(discVal, gross) / gross) * 100;
             }
-
-            const primaryImei = item.imei_number || item.imei_1 || item.imei1 || '';
-            const requiresImeiFlag = Boolean(item.requires_imei && (this.engine.enforceImei || primaryImei));
 
             return {
                 product_id: item.product_id,
                 item_instance_id: item.item_instance_id || null,
+                name: item.name,
                 unit_price: price,
                 price: price,
-                official_unit_price: item.official_unit_price || item.catalog_price || price,
-                catalog_price: item.catalog_price || item.official_unit_price || price,
-                quantity: item.quantity,
+                quantity: qty,
                 discount_type: discType,
                 discount_value: discVal,
                 discount_input_value: discVal,
                 discount_percent: effectivePct,
-                is_discountable: item.is_discountable !== false,
-                tax_pricing_type: item.tax_pricing_type || 'EXEMPT',
-                vat_rate: item.vat_rate || 0,
-                requires_imei: requiresImeiFlag,
-                imei_1: primaryImei,
-                imei_number: primaryImei,
-                imei_2: item.secondary_imei || item.imei_2 || item.imei2 || '',
-                secondary_imei: item.secondary_imei || item.imei_2 || item.imei2 || '',
-                unit_conversion_id: item.conversion_id || null,
-                conversion_id: item.conversion_id || null,
+                tax_pricing_type: item.tax_type === '13%' ? 'EXCLUSIVE' : 'EXEMPT',
+                vat_rate: item.tax_type === '13%' ? 13 : 0,
+                requires_imei: Boolean(item.requires_imei),
+                imei_1: item.imei_1 || '',
+                imei_number: item.imei_1 || '',
+                imei_2: item.imei_2 || '',
+                secondary_imei: item.imei_2 || '',
                 repair_ticket_id: item.repair_ticket_id || null,
                 is_repair_service: Boolean(item.is_repair_service)
             };
         });
 
-        const totals = this.engine.cart.calculateTotals();
-        let billDiscType = this.engine.cart.billDiscountType || 'PERCENTAGE';
-        if (billDiscType === 'FIXED') billDiscType = 'AMOUNT';
-
-        const billDiscVal = this.engine.cart.billDiscountValue !== undefined ? parseFloat(this.engine.cart.billDiscountValue) : 0;
-        const netAfterItem = Math.max(0, totals.subtotal - totals.itemDiscountTotal);
-
-        let effectiveBillPct = 0;
-        if (billDiscType === 'PERCENTAGE') {
-            effectiveBillPct = billDiscVal;
-        } else if (netAfterItem > 0) {
-            effectiveBillPct = (Math.min(billDiscVal, netAfterItem) / netAfterItem) * 100;
-        }
-
-        const discountReason = document.getElementById('posDiscountReasonInput')?.value.trim() ||
-                               this.engine.cart.billDiscountReason ||
-                               '';
-
-        const standardizedPayments = (payments || []).map(p => ({
-            mode: p.mode,
-            amount: parseFloat(p.amount) || 0,
-            transaction_ref: (p.transaction_ref || p.reference || '').trim()
-        }));
-
-        const activeRepairId = this.repairTicketId || 
-                               this.engine.repairTicketId || 
-                               window.activeRepairTicketId || 
-                               null;
+        const totals = this.engine.cart.recalculateTotals();
+        const tradeInDeduction = parseFloat(document.getElementById('trade-in-input')?.value) || 0;
 
         return {
             idempotency_key: this.engine.cart.activeCartIdempotencyKey,
             cart: packagedCartItems,
-            payments: standardizedPayments,
-            customer_id: this.engine.cart.customer ? this.engine.cart.customer.id : null,
+            payments: payments,
+            customer_id: custId || (this.engine.cart.customer ? this.engine.cart.customer.id : null),
             customer_name: custName,
-            customer_phone: this.engine.cart.customerPhone || '',
+            customer_phone: custPhone,
             customer_pan: custPan,
-            bill_discount_type: billDiscType,
-            bill_discount_value: billDiscVal,
-            bill_discount_input_value: billDiscVal,
-            bill_discount_percent: effectiveBillPct,
-            discount_percent: effectiveBillPct,
-            discount_reason: discountReason,
-            trade_in_voucher_id: this.engine.tradeInManager.voucherId,
+
+            // Authoritative Dual-Mode Whole-Bill Discount
+            bill_discount_type: this.engine.cart.billDiscountType,
+            bill_discount_input_value: this.engine.cart.billDiscountValue,
+            bill_discount_value: this.engine.cart.billDiscountValue,
+            bill_discount_amount: totals.billDiscountAmt,
+            bill_discount_percent: totals.billDiscountPercent,
+            discount_percent: totals.billDiscountPercent,
+
+            trade_in_voucher_id: this.engine.tradeInManager ? this.engine.tradeInManager.voucherId : null,
+            trade_in_credit_amount: tradeInDeduction,
             manager_pin: this.managerPin || '',
-            repair_ticket_id: activeRepairId ? parseInt(activeRepairId, 10) : null,
-            notes: document.getElementById('posBillNotesInput')?.value.trim() || 
-                   (this.engine.tradeInManager.tradeInDetails ? `Exchange: ${this.engine.tradeInManager.tradeInDetails.model}` : '')
+            notes: narration ? (terms ? `${narration} | Terms: ${terms}` : narration) : terms
         };
     }
 
     async executeSubmit(payload, payModeDisplay = 'CASH') {
         const csrfToken = getCsrfToken();
-
-        if (!navigator.onLine) {
-            await this.handleOfflineSave(payload, payModeDisplay);
-            return;
-        }
 
         try {
             const response = await fetch(this.checkoutApiUrl, {
@@ -2524,16 +1921,17 @@ class POSCheckout {
 
             const data = await response.json();
 
+            // Handle Supervisor PIN authorization challenge
             if (response.status === 403 && (data.message || '').toLowerCase().includes('manager pin')) {
                 this.setButtonsDisabled(false);
-                const pin = await this.promptForManagerPin(data.message);
+                const pin = prompt('Supervisor authorization PIN required for this discount or credit override:');
                 if (pin) {
                     this.managerPin = pin;
                     payload.manager_pin = pin;
                     this.setButtonsDisabled(true);
                     return await this.executeSubmit(payload, payModeDisplay);
                 } else {
-                    this.engine.showNotification('Sale cancelled: Supervisor PIN authorization was not provided.', 'warning');
+                    this.engine.showNotification('Checkout cancelled: Supervisor PIN authorization was not provided.', 'warning');
                     this.managerPin = null;
                     return;
                 }
@@ -2541,71 +1939,21 @@ class POSCheckout {
 
             if (response.ok && data.status === 'success') {
                 this.managerPin = null;
-                const totals = this.engine.cart.calculateTotals();
+                const totals = this.engine.cart.recalculateTotals();
 
                 this.engine.showThermalReceipt(data.estimate_number, payload.customer_name, payModeDisplay, totals);
                 this.engine.showNotification(`Bill ${data.estimate_number} finalized successfully!`, 'success');
                 POSAudioSynthesizer.play('success');
 
                 this.engine.cart.clear();
-                this.engine.tradeInManager.remove();
                 this.engine.customerManager.clearCustomer(true);
-                
-                this.engine.repairTicketId = null;
-                this.repairTicketId = null;
-                window.activeRepairTicketId = null;
-                window.activeRepairTicket = null;
-
-                const repairBanner = document.getElementById('linkedRepairBanner');
-                if (repairBanner) repairBanner.remove();
             } else {
                 this.engine.showNotification(`Checkout failed: ${data.message || 'Validation error'}`, 'danger');
                 POSAudioSynthesizer.play('error');
             }
         } catch (err) {
-            console.warn('[POSCheckout] Network error. Invoking emergency offline queue...', err);
-            await this.handleOfflineSave(payload, payModeDisplay);
-        } finally {
-            this.setButtonsDisabled(false);
-        }
-    }
-
-    async handleOfflineSave(payload, payModeDisplay) {
-        try {
-            if (typeof IDBStorageService !== 'undefined') {
-                const tempId = `OFFLINE-${payload.idempotency_key ? payload.idempotency_key.substring(0, 8).toUpperCase() : Date.now()}`;
-                const offlineOrder = {
-                    ...payload,
-                    client_temp_id: tempId,
-                    created_at: new Date().toISOString(),
-                    is_offline: true,
-                    grand_total: this.engine.cart.calculateTotals().grandTotal
-                };
-
-                await IDBStorageService.set('pending_sales', offlineOrder);
-
-                const totals = this.engine.cart.calculateTotals();
-                this.engine.showThermalReceipt(tempId, payload.customer_name, `${payModeDisplay} (OFFLINE)`, totals);
-
-                this.engine.showNotification(
-                    `[OFFLINE MODE] Internet unavailable. Bill ${tempId} saved locally and queued for automatic sync!`,
-                    'warning'
-                );
-                POSAudioSynthesizer.play('success');
-
-                this.engine.cart.clear();
-                this.engine.tradeInManager.remove();
-                this.engine.customerManager.clearCustomer(true);
-                this.engine.repairTicketId = null;
-                this.repairTicketId = null;
-                window.activeRepairTicketId = null;
-                window.activeRepairTicket = null;
-            } else {
-                this.engine.showNotification('Network communication failure. Checkout not committed.', 'danger');
-            }
-        } catch (dbErr) {
-            console.error('[POSCheckout] Failed to save offline order to IndexedDB:', dbErr);
-            this.engine.showNotification('Critical Error: Failed to commit order to offline database.', 'danger');
+            console.error('[POSCheckout] Submission error:', err);
+            this.engine.showNotification('Network communication error during checkout.', 'danger');
         } finally {
             this.setButtonsDisabled(false);
         }
@@ -2613,139 +1961,80 @@ class POSCheckout {
 }
 
 // ============================================================================
-// 9. MASTER POS ENGINE ORCHESTRATOR
+// 7. MASTER POS ENGINE ORCHESTRATOR (ZERO-QUERY & TYPEAHEAD FAST LOOKUP)
 // ============================================================================
 class SmartPOSEngine {
     constructor() {
         const taxConfigEl = document.getElementById('posTaxConfigMeta');
-        this.shopTaxMode = taxConfigEl ? (taxConfigEl.dataset.taxMode || 'PAN') : 'PAN';
-        this.isVatMode = this.shopTaxMode === 'VAT';
-        this.defaultVatRate = taxConfigEl ? parseFloat(taxConfigEl.dataset.defaultVatRate || 0) : 0;
-        this.supervisorThreshold = taxConfigEl ? parseFloat(taxConfigEl.dataset.managerApprovalDiscount || 10) : 10;
-        
-        // Master Configuration Toggle: True = Strict Serialized Mode, False = Backlog / Catch-Up Mode
         this.enforceImei = taxConfigEl ? (taxConfigEl.dataset.enforceImei !== 'false') : true;
 
-        this.pendingPhoneProduct = null;
-        this.repairTicketId = null;
+        this.splitGrandTotal = 0;
 
         this.initDomElements();
 
-        // Instantiate decoupled modules
+        // Instantiate Modules
         this.customerManager = new POSCustomerManager(this);
         this.tradeInManager = new POSTradeInManager(this);
         this.cart = new POSCart(this);
         this.holdCartManager = new POSHoldCartManager(this);
         this.checkout = new POSCheckout(this);
-        this.repairManager = new POSRepairTicketManager(this);
-        this.catalogService = new POSCatalogService(this);
 
         this.bindEvents();
         this.initHotkeys();
-        this.detectLinkedRepairTicket();
-        this.catalogService.loadInitialCatalog();
+        this.initBarcodeSearchTypeahead();
+        this.initSplitModalDynamicCalculations();
 
-        // Hardware scanner listener bridge
-        if (typeof BarcodeScannerListener !== 'undefined') {
-            this.barcodeListener = new BarcodeScannerListener(
-                (code) => this.handleDirectImeiOrBarcodeScan(code),
-                {
-                    threshold: 60,
-                    dedicatedInputSelector: '#posProductSearchInput, #searchInput',
-                    enabled: true
-                }
-            );
-        }
+        // Initial card render
+        this.cart.render();
     }
 
     initDomElements() {
-        this.quickCashBtn = document.getElementById('posDirectCashCheckoutBtn') || document.getElementById('quickCashPayBtn');
-        this.digitalPayBtn = document.getElementById('posSplitPaymentBtn') || document.getElementById('digitalPayBtn');
-        this.clearCartBtn = document.getElementById('clearCartBtn');
-
-        // Modal Elements
-        this.imeiModalEl = document.getElementById('imeiCaptureModal');
-        this.imeiModal = this.imeiModalEl ? bootstrap.Modal.getOrCreateInstance(this.imeiModalEl) : null;
-        this.modalInStockSelect = document.getElementById('modalInStockSelect');
-        this.modalInputImei1 = document.getElementById('modalInputImei1');
-        this.modalInputImei2 = document.getElementById('modalInputImei2');
-        this.confirmImeiBtn = document.getElementById('confirmImeiModalBtn');
-        this.skipImeiBtn = document.getElementById('skipImeiModalBtn');
-
-        this.exchangeModalEl = document.getElementById('exchangeModal');
-        this.applyExchangeBtn = document.getElementById('applyExchangeBtn');
-
-        this.receiptModalEl = document.getElementById('receiptModal');
-        this.receiptModal = this.receiptModalEl ? bootstrap.Modal.getOrCreateInstance(this.receiptModalEl) : null;
+        this.scannerInput = document.getElementById('posProductSearchInput');
+        this.barcodeDropdown = document.getElementById('barcodeSearchDropdown');
+        this.cashBtn = document.getElementById('posDirectCashCheckoutBtn');
+        this.creditBtn = document.getElementById('posCreditPayBtn');
+        this.splitBtn = document.getElementById('posSplitPaymentBtn');
+        this.splitModalEl = document.getElementById('splitPaymentModal');
     }
 
     bindEvents() {
-        if (this.modalInStockSelect) {
-            this.modalInStockSelect.addEventListener('change', () => this.handleInStockSelectChange());
+        if (this.cashBtn) {
+            this.cashBtn.addEventListener('click', () => this.checkout.processDirectCash());
         }
-
-        if (this.modalInputImei1) {
-            this.modalInputImei1.addEventListener('input', (e) => this.autoMatchImei2(e.target.value));
+        if (this.creditBtn) {
+            this.creditBtn.addEventListener('click', () => this.checkout.processCreditCheckout());
         }
-
-        if (this.confirmImeiBtn) {
-            this.confirmImeiBtn.addEventListener('click', () => this.confirmImeiAddition());
-        }
-
-        if (this.skipImeiBtn) {
-            this.skipImeiBtn.addEventListener('click', () => this.skipImeiAddition());
-        }
-
-        if (this.applyExchangeBtn) {
-            this.applyExchangeBtn.addEventListener('click', () => this.applyExchangeDiscount());
-        }
-
-        const attachTradeInBtn = document.getElementById('attachTradeInPromptBtn');
-        if (attachTradeInBtn) {
-            attachTradeInBtn.addEventListener('click', () => {
-                const voucherCode = prompt('Enter Trade-In Buy-Back Voucher Code (e.g. EXC-BR-XXXXXX):');
-                if (voucherCode) {
-                    this.tradeInManager.attachByVoucherNumber(voucherCode);
-                }
+        if (this.splitBtn) {
+            this.splitBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.openSplitPaymentModal();
             });
-        }
-
-        if (this.clearCartBtn) {
-            this.clearCartBtn.addEventListener('click', () => this.cart.clear());
-        }
-
-        if (this.quickCashBtn) {
-            this.quickCashBtn.addEventListener('click', () => this.checkout.processDirectCash());
-        }
-
-        if (this.digitalPayBtn) {
-            this.digitalPayBtn.addEventListener('click', () => {
-                if (document.getElementById('splitPaymentModal')) {
-                    this.openSplitPaymentModal();
-                } else {
-                    this.checkout.processDirectCash();
-                }
-            });
-        }
-
-        const splitConfirmBtn = document.getElementById('confirmSplitPaymentBtn');
-        if (splitConfirmBtn) {
-            splitConfirmBtn.addEventListener('click', () => this.checkout.processSplitCheckout());
         }
     }
 
     initHotkeys() {
-        document.addEventListener('keydown', (e) => {
+        window.addEventListener('keydown', (e) => {
             if (e.key === 'F2') {
                 e.preventDefault();
-                const searchInp = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
-                if (searchInp) searchInp.focus();
+                if (this.scannerInput) {
+                    this.scannerInput.focus();
+                    this.scannerInput.select();
+                }
             } else if (e.key === 'F4') {
                 e.preventDefault();
                 this.checkout.processDirectCash();
+            } else if (e.key === 'F6') {
+                e.preventDefault();
+                const excModal = document.getElementById('exchangeModal');
+                if (excModal && typeof bootstrap !== 'undefined') {
+                    bootstrap.Modal.getOrCreateInstance(excModal).show();
+                }
             } else if (e.key === 'F7') {
                 e.preventDefault();
-                this.openRepairModal();
+                const repModal = document.getElementById('repairTicketSearchModal');
+                if (repModal && typeof bootstrap !== 'undefined') {
+                    bootstrap.Modal.getOrCreateInstance(repModal).show();
+                }
             } else if (e.key === 'F8') {
                 e.preventDefault();
                 this.openSplitPaymentModal();
@@ -2755,337 +2044,365 @@ class SmartPOSEngine {
             } else if (e.key === 'F10') {
                 e.preventDefault();
                 this.holdCartManager.openRecallModal();
-            } else if (e.key === 'Escape') {
-                if (this.imeiModalEl && this.imeiModalEl.classList.contains('show')) {
-                    this.imeiModal.hide();
-                }
             }
         });
     }
 
-    openRepairModal() {
-        if (this.repairManager) {
-            this.repairManager.openModal();
-        } else {
-            const modal = document.getElementById('repairTicketSearchModal');
-            if (modal) bootstrap.Modal.getOrCreateInstance(modal).show();
+    // ------------------------------------------------------------------------
+    // Authoritative Modal Initialization Method (openSplitPaymentModal)
+    // ------------------------------------------------------------------------
+    openSplitPaymentModal() {
+        const modalEl = document.getElementById('splitPaymentModal');
+        if (!modalEl || typeof bootstrap === 'undefined') return;
+
+        // 1. Calculate latest cart totals
+        const totals = this.cart.recalculateTotals();
+
+        // 2. If cart is empty or grand total is zero, prevent opening and display warning
+        if (!this.cart.items || this.cart.items.length === 0 || totals.grandTotal <= 0) {
+            this.showNotification('Cannot open Split Payment: Cart is empty or bill total is zero.', 'warning');
+            POSAudioSynthesizer.play('error');
+            return;
         }
+
+        this.splitGrandTotal = totals.grandTotal;
+
+        // 3. Target #splitModalPayableTotal and insert formatted grand total string
+        const payableEl = document.getElementById('splitModalPayableTotal');
+        if (payableEl) {
+            payableEl.innerText = formatCurrencyNPR(totals.grandTotal);
+        }
+
+        // 4. Reset all payment input boxes and reference/trace ID fields to empty
+        const cashInput = document.getElementById('splitCashAmt');
+        const creditInput = document.getElementById('splitCreditAmt');
+        const fonepayInput = document.getElementById('splitFonepayAmt');
+        const fonepayRef = document.getElementById('splitFonepayRef');
+        const esewaInput = document.getElementById('splitEsewaAmt');
+        const esewaRef = document.getElementById('splitEsewaRef');
+        const khaltiInput = document.getElementById('splitKhaltiAmt');
+        const khaltiRef = document.getElementById('splitKhaltiRef');
+        const cardInput = document.getElementById('splitCardAmt');
+        const cardRef = document.getElementById('splitCardRef');
+        const bankInput = document.getElementById('splitBankAmt');
+        const bankRef = document.getElementById('splitBankRef');
+
+        const inputsToClear = [
+            cashInput, creditInput, fonepayInput, esewaInput,
+            khaltiInput, cardInput, bankInput
+        ];
+        inputsToClear.forEach(inp => {
+            if (inp) inp.value = '';
+        });
+
+        const refsToClear = [fonepayRef, esewaRef, khaltiRef, cardRef, bankRef];
+        refsToClear.forEach(ref => {
+            if (ref) ref.value = '';
+        });
+
+        // 5. Set #splitRemainingBalance initially to the full grand total in bold red
+        const remBalEl = document.getElementById('splitRemainingBalance');
+        if (remBalEl) {
+            remBalEl.innerText = formatCurrencyNPR(totals.grandTotal);
+            remBalEl.className = 'fs-4 fw-bold text-danger font-mono';
+        }
+
+        // 6. Show Modal instance
+        const modalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modalInstance.show();
+
+        setTimeout(() => {
+            if (cashInput) cashInput.focus();
+        }, 300);
     }
 
-    detectLinkedRepairTicket() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const repairId = urlParams.get('repair_ticket');
-        if (repairId) {
-            const parsedId = parseInt(repairId, 10);
-            this.repairTicketId = parsedId;
-            if (this.checkout) {
-                this.checkout.repairTicketId = parsedId;
-            }
-            window.activeRepairTicketId = parsedId;
+    // ------------------------------------------------------------------------
+    // Real-Time Dynamic Input Calculation Listener & Udhaari Auto-Allocation
+    // ------------------------------------------------------------------------
+    initSplitModalDynamicCalculations() {
+        const modalEl = document.getElementById('splitPaymentModal');
+        if (!modalEl) return;
 
-            const container = document.querySelector('.pos-workspace-container') || document.querySelector('.container-fluid');
-            if (container) {
-                const banner = document.createElement('div');
-                banner.id = 'linkedRepairBanner';
-                banner.className = 'alert alert-info py-1 px-3 mb-2 rounded-3 d-flex justify-content-between align-items-center fs-xs shadow-sm';
-                banner.innerHTML = `
-                    <span><i class="fas fa-wrench me-1"></i> Linked to Repair Ticket <strong>#${this.repairTicketId}</strong> (Delivery on checkout)</span>
-                    <button type="button" class="btn-close btn-sm" onclick="document.getElementById('linkedRepairBanner').remove(); window.smartPos.repairTicketId=null;"></button>
-                `;
-                container.prepend(banner);
-            }
-        }
-    }
+        const inputs = modalEl.querySelectorAll('.split-pay-input');
+        const cashInput = document.getElementById('splitCashAmt');
+        const creditInput = document.getElementById('splitCreditAmt');
+        const fonepayInput = document.getElementById('splitFonepayAmt');
+        const esewaInput = document.getElementById('splitEsewaAmt');
+        const khaltiInput = document.getElementById('splitKhaltiAmt');
+        const cardInput = document.getElementById('splitCardAmt');
+        const bankInput = document.getElementById('splitBankAmt');
+        const remBalEl = document.getElementById('splitRemainingBalance');
 
-    async handleDirectImeiOrBarcodeScan(scannedCode) {
-        if (!scannedCode) return;
-        const cleanCode = scannedCode.trim();
+        const recalculateSplitRemaining = () => {
+            const grandTotal = this.splitGrandTotal || this.cart.recalculateTotals().grandTotal;
 
-        // 1. Check in-memory catalog
-        const memoryPool = [...this.catalogService.allLoadedProducts, ...(this.catalogService.initialProducts || [])];
-        for (const prod of memoryPool) {
-            if (prod.in_stock_units && prod.in_stock_units.length > 0) {
-                const matchedUnit = prod.in_stock_units.find(
-                    u => (u.imei_1 && u.imei_1 === cleanCode) || 
-                         (u.imei_2 && u.imei_2 === cleanCode) || 
-                         (u.serial_number && u.serial_number === cleanCode)
-                );
-                if (matchedUnit) {
-                    this.cart.addItem({
-                        ...prod,
-                        item_instance_id: matchedUnit.item_instance_id || null,
-                        imei_1: matchedUnit.imei_1,
-                        imei1: matchedUnit.imei_1,
-                        imei_2: matchedUnit.imei_2 || '',
-                        imei2: matchedUnit.imei_2 || '',
-                        requires_imei: true
-                    });
-                    const searchInp = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
-                    if (searchInp) {
-                        searchInp.value = '';
-                        this.catalogService.filterCatalogBySearch('');
-                    }
-                    POSAudioSynthesizer.play('success');
-                    return;
+            const cash = parseFloat(cashInput?.value) || 0;
+            const fonepay = parseFloat(fonepayInput?.value) || 0;
+            const esewa = parseFloat(esewaInput?.value) || 0;
+            const khalti = parseFloat(khaltiInput?.value) || 0;
+            const card = parseFloat(cardInput?.value) || 0;
+            const bank = parseFloat(bankInput?.value) || 0;
+            const credit = parseFloat(creditInput?.value) || 0;
+
+            const totalImmediatePaid = cash + fonepay + esewa + khalti + card + bank;
+            const totalTendered = totalImmediatePaid + credit;
+            const netRemainingBalance = grandTotal - totalTendered;
+
+            if (remBalEl) {
+                if (Math.abs(netRemainingBalance) < 0.01) {
+                    remBalEl.innerText = 'Rs. 0.00 (Balanced)';
+                    remBalEl.className = 'fs-4 fw-bold text-success font-mono';
+                } else if (netRemainingBalance > 0) {
+                    remBalEl.innerText = formatCurrencyNPR(netRemainingBalance);
+                    remBalEl.className = 'fs-4 fw-bold text-danger font-mono';
+                } else {
+                    remBalEl.innerText = `Overpaid: ${formatCurrencyNPR(Math.abs(netRemainingBalance))}`;
+                    remBalEl.className = 'fs-4 fw-bold text-warning font-mono';
                 }
             }
+        };
+
+        inputs.forEach(inp => {
+            inp.addEventListener('input', recalculateSplitRemaining);
+        });
+
+        // Automatic Udhaari Allocation Helper
+        if (creditInput) {
+            const allocateRemainingToUdhaari = () => {
+                const currentCreditVal = parseFloat(creditInput.value) || 0;
+                if (currentCreditVal === 0) {
+                    const grandTotal = this.splitGrandTotal || this.cart.recalculateTotals().grandTotal;
+
+                    const cash = parseFloat(cashInput?.value) || 0;
+                    const fonepay = parseFloat(fonepayInput?.value) || 0;
+                    const esewa = parseFloat(esewaInput?.value) || 0;
+                    const khalti = parseFloat(khaltiInput?.value) || 0;
+                    const card = parseFloat(cardInput?.value) || 0;
+                    const bank = parseFloat(bankInput?.value) || 0;
+
+                    const totalImmediatePaid = cash + fonepay + esewa + khalti + card + bank;
+                    const unpaidBeforeCredit = Math.max(0, grandTotal - totalImmediatePaid);
+
+                    if (unpaidBeforeCredit > 0) {
+                        creditInput.value = unpaidBeforeCredit.toFixed(2);
+                        recalculateSplitRemaining();
+                    }
+                }
+            };
+
+            creditInput.addEventListener('focus', allocateRemainingToUdhaari);
+            creditInput.addEventListener('click', allocateRemainingToUdhaari);
         }
 
-        // 2. Query server live
+        // Connect Finalize Split Payment Button
+        const confirmSplitBtn = document.getElementById('confirmSplitPaymentBtn');
+        if (confirmSplitBtn) {
+            confirmSplitBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.checkout.processSplitCheckout();
+            });
+        }
+    }
+
+    initBarcodeSearchTypeahead() {
+        if (!this.scannerInput || !this.barcodeDropdown) return;
+
+        let debounceTimer = null;
+        let activeIndex = -1;
+        let currentResults = [];
+
+        const closeDropdown = () => {
+            this.barcodeDropdown.classList.add('d-none');
+            this.barcodeDropdown.innerHTML = '';
+            activeIndex = -1;
+            currentResults = [];
+        };
+
+        const fetchAndRenderProducts = async (query = '') => {
+            try {
+                this.barcodeDropdown.innerHTML = '<div class="p-3 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1 text-primary"></i> Querying stock...</div>';
+                this.barcodeDropdown.classList.remove('d-none');
+
+                const url = query ? `/products/api/search/?mode=pos&q=${encodeURIComponent(query)}&limit=15` : `/products/api/search/?mode=pos&limit=15`;
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error('Search failed');
+
+                const data = await resp.json();
+                currentResults = data.results || (Array.isArray(data) ? data : []);
+                activeIndex = -1;
+
+                if (!currentResults.length) {
+                    this.barcodeDropdown.innerHTML = `
+                        <div class="p-3 text-center text-muted fs-xs">
+                            <i class="fas fa-box-open opacity-50 d-block mb-1"></i>
+                            No products found matching "<strong>${escapeHtml(query)}</strong>"
+                        </div>`;
+                    return;
+                }
+
+                let html = '';
+                currentResults.forEach((p, idx) => {
+                    const price = parseFloat(p.price || p.selling_price || 0);
+                    const stock = parseFloat(p.available_stock || 0);
+                    const isImei = Boolean(p.requires_imei || p.requires_imei_tracking || p.match_type === 'IMEI');
+                    const subtitle = p.specs || p.model_name || `SKU: ${p.sku || 'N/A'}`;
+
+                    html += `
+                        <div class="pos-suggestion-item" data-index="${idx}">
+                            <div>
+                                <div class="pos-suggestion-title">
+                                    ${highlightMatch(p.name, query)}
+                                    ${isImei ? '<span class="badge bg-primary bg-opacity-10 text-primary ms-1 font-mono fs-2xs">IMEI</span>' : ''}
+                                </div>
+                                <div class="pos-suggestion-subtitle">
+                                    ${escapeHtml(subtitle)} &bull; Stock: <strong class="${stock > 0 ? 'text-success' : 'text-danger'}">${stock}</strong>
+                                    ${p.imei_1 ? ` &bull; IMEI: <span class="font-mono text-dark fw-bold">${highlightMatch(p.imei_1, query)}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="text-end ps-3">
+                                <div class="fw-bold font-mono text-primary fs-xs">Rs. ${price.toLocaleString('en-IN', {minimumFractionDigits: 2})}</div>
+                                <div class="fs-3xs text-muted font-mono mt-0.5">${p.unit_code || 'Pcs'}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                this.barcodeDropdown.innerHTML = html;
+
+                this.barcodeDropdown.querySelectorAll('.pos-suggestion-item').forEach(itemEl => {
+                    itemEl.addEventListener('click', () => {
+                        const idx = parseInt(itemEl.dataset.index, 10);
+                        if (currentResults[idx]) {
+                            this.selectProductItem(currentResults[idx]);
+                        }
+                    });
+                });
+
+            } catch (err) {
+                console.warn('[SmartPOSEngine] Product typeahead error:', err);
+                this.barcodeDropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Catalog lookup unavailable</div>';
+            }
+        };
+
+        const updateActiveItem = (items) => {
+            items.forEach((item, idx) => {
+                if (idx === activeIndex) {
+                    item.classList.add('active');
+                    item.scrollIntoView({ block: 'nearest' });
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        };
+
+        this.scannerInput.addEventListener('focus', () => {
+            const val = this.scannerInput.value.trim();
+            fetchAndRenderProducts(val);
+        });
+
+        this.scannerInput.addEventListener('click', () => {
+            if (this.barcodeDropdown.classList.contains('d-none')) {
+                const val = this.scannerInput.value.trim();
+                fetchAndRenderProducts(val);
+            }
+        });
+
+        this.scannerInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+
+            if (query.length >= 14 && /^\d+$/.test(query)) {
+                clearTimeout(debounceTimer);
+                closeDropdown();
+                return;
+            }
+
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                fetchAndRenderProducts(query);
+            }, 150);
+        });
+
+        this.scannerInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const code = this.scannerInput.value.trim();
+
+                if (activeIndex >= 0 && currentResults[activeIndex]) {
+                    this.selectProductItem(currentResults[activeIndex]);
+                    return;
+                }
+
+                if (code) {
+                    clearTimeout(debounceTimer);
+                    closeDropdown();
+                    await this.handleDirectImeiOrBarcodeScan(code);
+                    this.scannerInput.value = '';
+                }
+                return;
+            }
+
+            if (this.barcodeDropdown.classList.contains('d-none')) return;
+
+            const items = this.barcodeDropdown.querySelectorAll('.pos-suggestion-item');
+            if (!items.length) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIndex = (activeIndex + 1) % items.length;
+                updateActiveItem(items);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIndex = (activeIndex - 1 + items.length) % items.length;
+                updateActiveItem(items);
+            } else if (e.key === 'Escape') {
+                closeDropdown();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!this.barcodeDropdown.contains(e.target) && e.target !== this.scannerInput) {
+                closeDropdown();
+            }
+        });
+    }
+
+    selectProductItem(item) {
+        if (!item) return;
+        this.cart.addItem(item);
+        if (this.scannerInput) this.scannerInput.value = '';
+        if (this.barcodeDropdown) {
+            this.barcodeDropdown.classList.add('d-none');
+            this.barcodeDropdown.innerHTML = '';
+        }
+        POSAudioSynthesizer.play('success');
+    }
+
+    async handleDirectImeiOrBarcodeScan(code) {
         try {
-            const customerType = this.cart.customerType || 'RETAIL';
-            const resp = await fetch(`/products/api/search/?q=${encodeURIComponent(cleanCode)}&customer_type=${customerType}`);
-            if (!resp.ok) return;
+            const resp = await fetch(`/products/api/search/?q=${encodeURIComponent(code)}&customer_type=RETAIL`);
+            if (!resp.ok) throw new Error('Search failed');
             const data = await resp.json();
             const results = data.results || [];
 
             if (results.length > 0) {
                 const item = results[0];
-                if (item.match_type === 'IMEI') {
-                    this.cart.addItem(item);
-                    const searchInp = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
-                    if (searchInp) {
-                        searchInp.value = '';
-                        this.catalogService.filterCatalogBySearch('');
-                    }
-                    POSAudioSynthesizer.play('success');
-                } else if (!item.requires_imei && !this.catalogService.isPhoneProduct(item)) {
-                    this.cart.addItem(item);
-                    const searchInp = document.getElementById('posProductSearchInput') || document.getElementById('searchInput');
-                    if (searchInp) {
-                        searchInp.value = '';
-                        this.catalogService.filterCatalogBySearch('');
-                    }
-                    POSAudioSynthesizer.play('success');
-                } else {
-                    this.handleProductCardClick(item);
-                }
+                this.cart.addItem(item);
+                POSAudioSynthesizer.play('success');
             } else {
-                this.showNotification(`No item or IMEI record matched barcode "${cleanCode}".`, 'warning');
-                POSAudioSynthesizer.play('error');
+                this.cart.addItem({
+                    product_id: null,
+                    name: `Scanned Device (${code})`,
+                    unit_price: 0,
+                    imei_1: code.length >= 14 ? code : '',
+                    requires_imei: code.length >= 14,
+                    tax_type: '13%'
+                });
+                this.showNotification(`Item '${code}' added to bill. Please verify name and rate.`, 'info');
+                POSAudioSynthesizer.play('second');
             }
         } catch (err) {
-            console.error('[SmartPOSEngine] Scan lookup error', err);
-            this.showNotification('Catalog lookup communication error.', 'danger');
-        }
-    }
-
-    handleProductCardClick(product) {
-        const isPhone = this.catalogService.isPhoneProduct(product);
-
-        if (isPhone && this.enforceImei) {
-            // STRICT MODE: Mandate selecting or scanning an exact in-stock IMEI box
-            this.openImeiModalForProduct(product);
-        } else if (isPhone && !this.enforceImei) {
-            // BACKLOG MODE: Add directly to cart without opening blocking serial modal
-            this.cart.addItem({
-                ...product,
-                item_instance_id: null,
-                imei_1: '',
-                imei1: '',
-                imei_number: '',
-                imei_2: '',
-                imei2: '',
-                secondary_imei: '',
-                requires_imei: false,
-                requires_imei_tracking: false
-            });
-            POSAudioSynthesizer.play('success');
-        } else {
-            // Standard non-serialized accessory
-            this.cart.addItem(product);
-            POSAudioSynthesizer.play('success');
-        }
-    }
-
-    openImeiModalForProduct(product) {
-        this.pendingPhoneProduct = product;
-        const titleEl = document.getElementById('imeiModalPhoneName');
-        if (titleEl) {
-            titleEl.innerText = `${product.name} (${product.specs || ''})`;
-        }
-
-        if (this.modalInStockSelect) {
-            this.modalInStockSelect.innerHTML = '<option value="">-- Choose from In-Stock Phone Boxes --</option>';
-            if (product.in_stock_units && product.in_stock_units.length > 0) {
-                product.in_stock_units.forEach((unit, idx) => {
-                    this.modalInStockSelect.innerHTML += `
-                        <option value="${escapeHtml(unit.imei_1)}">Box #${idx + 1}: IMEI 1: ${escapeHtml(unit.imei_1)} | IMEI 2: ${escapeHtml(unit.imei_2 || 'N/A')}</option>
-                    `;
-                });
-            }
-        }
-
-        if (this.modalInputImei1) this.modalInputImei1.value = '';
-        if (this.modalInputImei2) this.modalInputImei2.value = '';
-
-        // Unhide skip button ONLY if in Backlog Mode
-        if (this.skipImeiBtn) {
-            if (!this.enforceImei) {
-                this.skipImeiBtn.classList.remove('d-none');
-            } else {
-                this.skipImeiBtn.classList.add('d-none');
-            }
-        }
-
-        if (this.imeiModal) {
-            this.imeiModal.show();
-            setTimeout(() => this.modalInputImei1 && this.modalInputImei1.focus(), 300);
-        }
-    }
-
-    handleInStockSelectChange() {
-        if (!this.modalInStockSelect) return;
-        const selectedImei1 = this.modalInStockSelect.value;
-        if (!selectedImei1 || !this.pendingPhoneProduct) return;
-
-        const matched = this.pendingPhoneProduct.in_stock_units.find(u => u.imei_1 === selectedImei1);
-        if (matched) {
-            if (this.modalInputImei1) this.modalInputImei1.value = matched.imei_1;
-            if (this.modalInputImei2) this.modalInputImei2.value = matched.imei_2 || '';
-        }
-    }
-
-    autoMatchImei2(imei1Val) {
-        if (!this.pendingPhoneProduct || !this.pendingPhoneProduct.in_stock_units) return;
-        const matched = this.pendingPhoneProduct.in_stock_units.find(u => u.imei_1 === imei1Val.trim());
-        if (matched && this.modalInputImei2) {
-            this.modalInputImei2.value = matched.imei_2 || '';
-        } else if (this.modalInputImei2) {
-            this.modalInputImei2.value = '';
-        }
-    }
-
-    confirmImeiAddition() {
-        const imei1 = this.modalInputImei1 ? this.modalInputImei1.value.trim() : '';
-        const imei2 = this.modalInputImei2 ? this.modalInputImei2.value.trim() : '';
-
-        if (!imei1) {
-            if (this.enforceImei) {
-                alert('Please enter or select Primary IMEI 1.');
-                return;
-            } else {
-                // In Backlog Mode, allow confirming without mandatory IMEI
-                this.skipImeiAddition();
-                return;
-            }
-        }
-
-        const matchedUnit = this.pendingPhoneProduct?.in_stock_units?.find(u => u.imei_1 === imei1);
-
-        this.cart.addItem({
-            ...this.pendingPhoneProduct,
-            item_instance_id: matchedUnit ? matchedUnit.item_instance_id : null,
-            imei_1: imei1,
-            imei1: imei1,
-            imei_number: imei1,
-            imei_2: imei2,
-            imei2: imei2,
-            secondary_imei: imei2,
-            requires_imei: this.enforceImei
-        });
-
-        if (this.imeiModal) this.imeiModal.hide();
-        this.pendingPhoneProduct = null;
-        POSAudioSynthesizer.play('success');
-    }
-
-    skipImeiAddition() {
-        if (!this.pendingPhoneProduct) return;
-
-        this.cart.addItem({
-            ...this.pendingPhoneProduct,
-            item_instance_id: null,
-            imei_1: '',
-            imei1: '',
-            imei_number: '',
-            imei_2: '',
-            imei2: '',
-            secondary_imei: '',
-            requires_imei: false,
-            requires_imei_tracking: false
-        });
-
-        if (this.imeiModal) this.imeiModal.hide();
-        this.pendingPhoneProduct = null;
-        POSAudioSynthesizer.play('success');
-    }
-
-    applyExchangeDiscount() {
-        const modelInput = document.getElementById('exchangePhoneModel');
-        const valueInput = document.getElementById('exchangePhoneValue');
-
-        const model = modelInput ? modelInput.value.trim() : '';
-        const value = parseFloat(valueInput ? valueInput.value : 0) || 0;
-
-        if (!model || value <= 0) {
-            alert('Please enter the old phone model and agreed trade-in value.');
-            return;
-        }
-
-        this.tradeInManager.setDirectExchange(model, value);
-
-        if (this.exchangeModalEl) {
-            const modal = bootstrap.Modal.getInstance(this.exchangeModalEl);
-            if (modal) modal.hide();
-        }
-
-        this.showNotification(`Exchange discount of Rs. ${value.toFixed(2)} applied for ${model}.`, 'success');
-    }
-
-    openSplitPaymentModal() {
-        const modalEl = document.getElementById('splitPaymentModal');
-        if (modalEl) {
-            const totals = this.cart.calculateTotals();
-            const splitPayable = document.getElementById('splitModalPayableTotal');
-            if (splitPayable) splitPayable.innerText = `Rs. ${totals.grandTotal.toFixed(2)}`;
-
-            const splitCash = document.getElementById('splitCashAmt');
-            if (splitCash) splitCash.value = totals.grandTotal.toFixed(2);
-
-            const splitFonepay = document.getElementById('splitFonepayAmt');
-            if (splitFonepay) splitFonepay.value = '';
-            const splitEsewa = document.getElementById('splitEsewaAmt');
-            if (splitEsewa) splitEsewa.value = '';
-            const splitKhalti = document.getElementById('splitKhaltiAmt');
-            if (splitKhalti) splitKhalti.value = '';
-            const splitCard = document.getElementById('splitCardAmt');
-            if (splitCard) splitCard.value = '';
-            const splitBank = document.getElementById('splitBankAmt');
-            if (splitBank) splitBank.value = '';
-            const splitCredit = document.getElementById('splitCreditAmt');
-            if (splitCredit) splitCredit.value = '';
-
-            const refIds = [
-                'splitFonepayRef',
-                'splitEsewaRef',
-                'splitKhaltiRef',
-                'splitCardRef',
-                'splitBankRef',
-                'splitCreditRef'
-            ];
-            refIds.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.value = '';
-            });
-
-            const remBal = document.getElementById('splitRemainingBalance');
-            if (remBal) remBal.innerText = 'Rs. 0.00';
-
-            const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-            modal.show();
-
-            const inputs = modalEl.querySelectorAll('.split-pay-input');
-            const updateRemaining = () => {
-                let totalEntered = 0;
-                inputs.forEach(inp => totalEntered += (parseFloat(inp.value) || 0));
-                const diff = totals.grandTotal - totalEntered;
-                if (remBal) {
-                    remBal.innerText = `Rs. ${diff.toFixed(2)}`;
-                    remBal.className = Math.abs(diff) < 0.01 ? 'text-success font-monospace' : 'text-danger font-monospace';
-                }
-            };
-            inputs.forEach(inp => inp.addEventListener('input', updateRemaining));
+            console.error('[SmartPOSEngine] Scanner lookup error:', err);
+            this.showNotification('Error querying barcode catalog.', 'danger');
         }
     }
 
@@ -3098,52 +2415,13 @@ class SmartPOSEngine {
 
         if (slipEl) slipEl.innerText = slipNo;
         if (custEl) custEl.innerText = custName;
-        if (subtotalEl) subtotalEl.innerText = `Rs. ${totals.subtotal.toFixed(2)}`;
-        if (grandEl) grandEl.innerText = `Rs. ${totals.grandTotal.toFixed(2)}`;
+        if (subtotalEl) subtotalEl.innerText = formatCurrencyNPR(totals.subTotal);
+        if (grandEl) grandEl.innerText = formatCurrencyNPR(totals.grandTotal);
         if (payModeEl) payModeEl.innerText = payMode;
 
-        const exRow = document.getElementById('recExchangeRow');
-        const exText = document.getElementById('recExchange');
-        if (totals.tradeInCredit > 0 && exRow) {
-            exRow.style.display = 'flex';
-            if (exText) exText.innerText = `-Rs. ${totals.tradeInCredit.toFixed(2)}`;
-        } else if (exRow) {
-            exRow.style.display = 'none';
-        }
-
-        const discRow = document.getElementById('recDiscountRow');
-        const discText = document.getElementById('recDiscount');
-        if (totals.totalDiscount > 0 && discRow) {
-            discRow.style.display = 'flex';
-            if (discText) discText.innerText = `-Rs. ${totals.totalDiscount.toFixed(2)}`;
-        } else if (discRow) {
-            discRow.style.display = 'none';
-        }
-
-        const itemsContainer = document.getElementById('recItemsContainer');
-        if (itemsContainer) {
-            itemsContainer.innerHTML = '';
-            this.cart.items.forEach(i => {
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'mb-1';
-                const primaryImei = i.imei_number || i.imei_1 || i.imei1 || '';
-                const secondaryImei = i.secondary_imei || i.imei_2 || i.imei2 || '';
-                const price = (i.unit_price !== undefined) ? i.unit_price : (i.price || 0);
-
-                itemDiv.innerHTML = `
-                    <div class="d-flex justify-content-between">
-                        <strong>${escapeHtml(i.name)}</strong>
-                        <span>${i.quantity} x Rs. ${price.toLocaleString()}</span>
-                    </div>
-                    ${primaryImei ? `<div style="font-size: 8.5px;">&bull; [IMEI 1: ${escapeHtml(primaryImei)}]</div>` : ''}
-                    ${secondaryImei ? `<div style="font-size: 8.5px;">&bull; [IMEI 2: ${escapeHtml(secondaryImei)}]</div>` : ''}
-                `;
-                itemsContainer.appendChild(itemDiv);
-            });
-        }
-
-        if (this.receiptModal) {
-            this.receiptModal.show();
+        const modalEl = document.getElementById('receiptModal');
+        if (modalEl && typeof bootstrap !== 'undefined') {
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
         }
     }
 
@@ -3162,10 +2440,9 @@ class SmartPOSEngine {
     }
 }
 
-// Aliases for compatibility
+// Global initialization
 window.POSEngine = SmartPOSEngine;
 
-// Initialize on DOM Ready
 document.addEventListener('DOMContentLoaded', () => {
     window.smartPos = new SmartPOSEngine();
     window.posEngine = window.smartPos;
