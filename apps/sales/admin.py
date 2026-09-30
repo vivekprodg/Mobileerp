@@ -4,10 +4,12 @@ Trade-In Exchanges, and Itemized Sales Returns.
 
 Aligned with:
 - Standard Retail Turnover Accounting (Barter Trade-In = Tender Payment Offset).
+- Bidirectional Bikram Sambat (BS) and Gregorian (AD) Date Synchronization.
 - Safe Police-Compliant Undertaking Administration.
-- Forensic Financial Audit Trail.
+- Forensic Financial Audit Trail with Role-Based Permission Scoping.
 """
 
+from decimal import Decimal
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
@@ -63,7 +65,7 @@ class SalesEstimateItemInline(admin.TabularInline):
                 '<span class="font-monospace" style="color: #0f172a; font-weight: 700;">{}</span>{}',
                 obj.imei_number, format_html(sec_tag)
             )
-        return format_html('<span style="color: #94a3b8; font-style: italic; font-size: 10px;">(Non-Serialized / Historical)</span>')
+        return format_html('<span style="color: #94a3b8; font-style: italic; font-size: 10px;">(Non-Serialized / Accessory)</span>')
     imei_display.short_description = _("IMEI / Serial")
 
 class SalesPaymentTransactionInline(admin.TabularInline):
@@ -81,7 +83,7 @@ class SalesPaymentTransactionInline(admin.TabularInline):
     payment_mode_badge.short_description = _("Payment Mode")
 
 # =============================================================================
-# 2. SALES ESTIMATE / INVOICE ADMIN (TURNOVER ACCOUNTING ALIGNED)
+# 2. SALES ESTIMATE / INVOICE ADMIN (TURNOVER ACCOUNTING & DATE EDITING)
 # =============================================================================
 @admin.register(SalesEstimate)
 class SalesEstimateAdmin(admin.ModelAdmin):
@@ -101,33 +103,32 @@ class SalesEstimateAdmin(admin.ModelAdmin):
     search_fields = [
         'estimate_number', 'customer__name', 'customer__phone_number',
         'customer_phone_manual', 'customer_name_manual', 'customer_pan',
-        'fiscal_year', 'trade_in_voucher_reference', 'items__imei_number',
-        'items__secondary_imei', 'items__serial_number', 'discount_reason'
+        'bill_date_bs', 'fiscal_year', 'trade_in_voucher_reference',
+        'items__imei_number', 'items__secondary_imei', 'items__serial_number', 'discount_reason'
     ]
     inlines = [SalesEstimateItemInline, SalesPaymentTransactionInline]
-    readonly_fields = [
-        f.name for f in SalesEstimate._meta.fields
-    ] + [
-        'net_customer_payable_display', 'effective_trade_in_tender_display', 'excess_trade_in_credit_display'
-    ]
 
     fieldsets = (
-        ("1. Transaction & Historical Date Information", {
+        (_("1. Transaction & Historical Date Information"), {
+            'description': _(
+                "Updating either Bill Date (BS) or Bill Date (AD) will bidirectionally "
+                "recalculate the corresponding date and Nepali Fiscal Year automatically upon saving."
+            ),
             'fields': (
                 ('estimate_number', 'branch'),
                 ('bill_date_ad', 'bill_date_bs', 'fiscal_year'),
                 ('cashier', 'salesperson')
             )
         }),
-        ("2. Customer & B2B Tax Identification", {
+        (_("2. Customer & B2B Tax Identification"), {
             'fields': (
                 'customer',
                 ('customer_name_manual', 'customer_phone_manual'),
                 'customer_pan'
             )
         }),
-        ("3. Merchandise Turnover & 13% Tax Breakdown", {
-            'description': (
+        (_("3. Merchandise Turnover & 13% Tax Breakdown"), {
+            'description': _(
                 "Turnover Accounting: Grand Total strictly represents the gross merchandise sales value + applicable taxes. "
                 "Trade-In allowances act exclusively as a tender settlement offset (barter payment)."
             ),
@@ -139,24 +140,24 @@ class SalesEstimateAdmin(admin.ModelAdmin):
                 ('round_off', 'grand_total'),
             )
         }),
-        ("4. Trade-In Barter Tender & Settlement Offsets", {
+        (_("4. Trade-In Barter Tender & Settlement Offsets"), {
             'fields': (
                 ('has_trade_in_exchange', 'trade_in_discount_amount', 'trade_in_voucher_reference'),
                 ('effective_trade_in_tender_display', 'excess_trade_in_credit_display', 'net_customer_payable_display'),
             )
         }),
-        ("5. Acquisition Cost (COGS) & Margins", {
+        (_("5. Acquisition Cost (COGS) & Margins"), {
             'fields': (
                 ('total_cost_amount', 'total_gross_profit'),
             )
         }),
-        ("6. Payments, Collections & Udhaari (Debt)", {
+        (_("6. Payments, Collections & Udhaari (Debt)"), {
             'fields': (
                 ('paid_amount', 'due_amount', 'change_returned'),
                 ('status', 'payment_status')
             )
         }),
-        ("7. Commercial Approvals & Justifications", {
+        (_("7. Commercial Approvals & Justifications"), {
             'fields': (
                 ('manager_override_by', 'discount_approved_at'),
                 'discount_reason',
@@ -166,6 +167,52 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         }),
     )
 
+    def get_readonly_fields(self, request, obj=None):
+        """
+        Locks accounting numbers to prevent subledger corruption while permitting
+        authorized managers/superusers to adjust historical bill dates or notes.
+        """
+        permanent_readonly = [
+            'estimate_number', 'branch', 'fiscal_year',
+            'subtotal', 'item_discount_total', 'bill_discount_amount',
+            'taxable_amount', 'non_taxable_amount', 'vat_amount',
+            'round_off', 'grand_total', 'total_cost_amount', 'total_gross_profit',
+            'paid_amount', 'due_amount', 'change_returned',
+            'cashier', 'salesperson', 'manager_override_by', 'discount_approved_at',
+            'has_trade_in_exchange', 'trade_in_discount_amount', 'trade_in_voucher_reference',
+            'net_customer_payable_display', 'effective_trade_in_tender_display',
+            'excess_trade_in_credit_display', 'created_at', 'updated_at'
+        ]
+
+        is_privileged = bool(
+            request.user.is_superuser or
+            getattr(request.user, 'role', '') in ['OWNER', 'MANAGER']
+        )
+
+        if is_privileged:
+            # Allows privileged staff to update historical dates, customer info, or notes
+            return permanent_readonly
+
+        # Non-privileged users have full read-only access
+        return [f.name for f in SalesEstimate._meta.fields] + [
+            'net_customer_payable_display', 'effective_trade_in_tender_display', 'excess_trade_in_credit_display'
+        ]
+
+    def has_add_permission(self, request):
+        # Invoices must be generated through the POS Billing Counter Terminal
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        # Bills must be voided through the dedicated cancellation service
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return bool(
+            request.user.is_superuser or
+            getattr(request.user, 'role', '') in ['OWNER', 'MANAGER']
+        )
+
+    # --- Formatted Column Helpers ---
     def customer_phone_display(self, obj):
         phone = obj.customer_phone_manual or (obj.customer.phone_number if obj.customer else None)
         if phone:
@@ -257,12 +304,6 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         )
     payment_status_badge.short_description = _("Payment Status")
 
-    def has_add_permission(self, request):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
 # =============================================================================
 # 3. TRADE-IN & BUY-BACK ADMIN
 # =============================================================================
@@ -318,18 +359,22 @@ class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
         'voucher_number', 'brand_model_display', 'imei_1',
         'customer_name_manual', 'customer_phone_manual',
         'final_trade_in_value', 'grade_badge', 'mdms_badge',
-        'status_badge', 'fiscal_year', 'branch', 'created_at'
+        'status_badge', 'fiscal_year', 'branch', 'intake_date_ad', 'intake_date_bs'
     ]
-    list_filter = ['status', 'fiscal_year', 'recommended_condition_grade', 'mdms_status', 'branch', 'intake_date_ad', 'created_at']
+    list_filter = [
+        'status', 'fiscal_year', 'recommended_condition_grade',
+        'mdms_status', 'branch', 'intake_date_ad', 'created_at'
+    ]
     search_fields = [
         'voucher_number', 'brand_name', 'model_name',
-        'imei_1', 'imei_2', 'fiscal_year', 'customer_name_manual', 'customer_phone_manual'
+        'imei_1', 'imei_2', 'intake_date_bs', 'fiscal_year',
+        'customer_name_manual', 'customer_phone_manual'
     ]
-    readonly_fields = ['voucher_number', 'created_at', 'updated_at']
+    readonly_fields = ['voucher_number', 'fiscal_year', 'created_at', 'updated_at']
     inlines = [TradeInInspectionChecklistInline, TradeInLegalUndertakingInline]
 
     fieldsets = (
-        ("1. Voucher & Origin Store", {
+        (_("1. Voucher & Origin Store (Historical Dates Supported)"), {
             'fields': (
                 ('voucher_number', 'branch', 'status'),
                 ('intake_date_ad', 'intake_date_bs', 'fiscal_year'),
@@ -338,7 +383,7 @@ class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
                 'pos_estimate'
             )
         }),
-        ("2. Old Traded-In Device Identification", {
+        (_("2. Old Traded-In Device Identification"), {
             'fields': (
                 ('brand_name', 'model_name'),
                 ('ram_capacity', 'storage_capacity', 'color_variant'),
@@ -346,7 +391,7 @@ class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
                 'mdms_status'
             )
         }),
-        ("3. Valuation Calculation & Pre-Owned Grade", {
+        (_("3. Valuation Calculation & Pre-Owned Grade"), {
             'fields': (
                 ('market_base_value', 'total_deductions'),
                 ('shop_margin_deduction', 'final_trade_in_value'),
@@ -413,7 +458,7 @@ class TradeInLegalUndertakingAdmin(admin.ModelAdmin):
     readonly_fields = ['preview_customer_photo', 'preview_id_front', 'preview_id_back', 'created_at', 'updated_at']
 
     fieldsets = (
-        ("Customer Identity & Police KYC", {
+        (_("Customer Identity & Police KYC"), {
             'fields': (
                 'trade_in_voucher',
                 ('customer_full_name', 'customer_father_or_spouse_name'),
@@ -422,7 +467,7 @@ class TradeInLegalUndertakingAdmin(admin.ModelAdmin):
                 ('permanent_address', 'current_address')
             )
         }),
-        ("Identity Evidence & Snapshots", {
+        (_("Identity Evidence & Snapshots"), {
             'fields': (
                 ('id_front_image', 'preview_id_front'),
                 ('id_back_image', 'preview_id_back'),
@@ -430,7 +475,7 @@ class TradeInLegalUndertakingAdmin(admin.ModelAdmin):
                 'customer_digital_signature'
             )
         }),
-        ("Legal Undertaking & Verification", {
+        (_("Legal Undertaking & Verification"), {
             'fields': (
                 'declaration_text',
                 'declaration_accepted',
@@ -497,14 +542,14 @@ class SalesReturnAdmin(admin.ModelAdmin):
     list_filter = ['refund_mode', 'fiscal_year', 'branch', 'return_date_ad', 'created_at']
     search_fields = [
         'return_number', 'original_estimate__estimate_number',
-        'customer__name', 'customer__phone_number', 'fiscal_year',
+        'customer__name', 'customer__phone_number', 'return_date_bs', 'fiscal_year',
         'reason', 'items__returned_imei'
     ]
     inlines = [SalesReturnItemInline]
-    readonly_fields = [f.name for f in SalesReturn._meta.fields]
+    readonly_fields = ['return_number', 'fiscal_year', 'total_refund_amount', 'created_at', 'updated_at']
 
     fieldsets = (
-        ("Voucher Header & Routing", {
+        (_("Voucher Header & Routing (Historical Dates Supported)"), {
             'fields': (
                 ('return_number', 'branch'),
                 ('original_estimate', 'customer'),
@@ -512,7 +557,7 @@ class SalesReturnAdmin(admin.ModelAdmin):
                 ('refund_mode', 'processed_by')
             )
         }),
-        ("Financials & Reasons", {
+        (_("Financials & Reasons"), {
             'fields': (
                 'total_refund_amount',
                 'reason',

@@ -11,13 +11,14 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
     """
     Admin controller for the SystemConfiguration master singleton.
     Manages organization identity, operating tax mode, master IMEI tracking rules,
-    receipt headers, trade-in policies, MDMS compliance, and General Ledger
-    Chart of Accounts bindings.
+    cashier backdating permissions, receipt headers, trade-in policies, MDMS compliance,
+    and General Ledger Chart of Accounts bindings.
     """
     list_display = [
         'company_name_en',
         'tax_system_mode_badge',
         'imei_enforcement_badge',
+        'cashier_backdating_badge',
         'pan_number',
         'vat_number',
         'default_vat_rate',
@@ -64,13 +65,15 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
                 ('pan_number', 'vat_number'),
             )
         }),
-        (_("2. Master Handset IMEI Tracking Enforcement (Backlog vs. Strict Mode)"), {
+        (_("2. Operational Backlog Mode & Handset IMEI Policy"), {
             'description': _(
-                "Controls whether mobile phone additions, purchases (GRN), and sales bills strictly mandate "
-                "15-digit IMEI serial numbers. Turn OFF (Unchecked) to enter backlog paper bills and opening "
-                "shelf stock without IMEIs. Turn ON (Checked) for live shop operations. Accessories are never affected."
+                "Controls operational policies for live counter sales vs. retrospective backlog data entry. "
+                "Enable 'Allow Staff / Cashier Backdating' to let cashiers backdate sales bills without a supervisor PIN. "
+                "Disable 'Enforce Mandatory Handset IMEI Tracking' to record mobile phone additions, purchases, and sales "
+                "using simple quantities without entering 15-digit IMEIs."
             ),
             'fields': (
+                'allow_cashier_backdating',
                 'enforce_imei_tracking',
             )
         }),
@@ -171,6 +174,18 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
         return format_html(
             '<span style="color: #ffffff; background-color: #d97706; padding: 3px 9px; '
             'border-radius: 999px; font-weight: 700; font-size: 10.5px;">RELAXED (BACKLOG)</span>'
+        )
+
+    @admin.display(description=_("Staff Backdating"))
+    def cashier_backdating_badge(self, obj):
+        if obj.allow_cashier_backdating:
+            return format_html(
+                '<span style="color: #ffffff; background-color: #0284c7; padding: 3px 9px; '
+                'border-radius: 999px; font-weight: 700; font-size: 10.5px;">ALLOWED (BACKLOG)</span>'
+            )
+        return format_html(
+            '<span style="color: #ffffff; background-color: #64748b; padding: 3px 9px; '
+            'border-radius: 999px; font-weight: 700; font-size: 10.5px;">LOCKED (PIN REQ)</span>'
         )
 
     def has_add_permission(self, request):

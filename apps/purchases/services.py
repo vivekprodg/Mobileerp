@@ -18,9 +18,12 @@ Core Capabilities:
 5. Value-Based Overhead Allocation (Landed Cost / COGS):
    - Freight, customs duty, and insurance/handling fees are distributed proportionally
      based on each item's net pre-tax value to derive exact unit landed costs.
-6. Final Supplier Payable & Udhaari Debt:
+6. Final Supplier Payable & Udhaari Debt with Verified Historical Dates:
    - Net Invoice Total = Pre-VAT Base + 13% VAT + Overheads.
    - Due Balance = Net Invoice Total - Paid Amount.
+   - Posts `entry_date` and `entry_date_bs` to `SupplierUdhaariLedger` using verified historical bill dates.
+   - Calibrates `ProductBatch.purchase_date`, `ItemInstance.purchase_date`, and `Supplier.last_purchase_date`
+     to the historical invoice date.
 7. Master-Switch Sensitive Serialized & Dual-IMEI Enforcement:
    - In Strict Mode (enforce_imei_tracking=True): Requires exact 1-to-1 match between handset quantities and scanned IMEIs.
    - In Backlog Mode (enforce_imei_tracking=False): Allows phone inward entry without IMEIs, creating FIFO ProductBatch
@@ -33,7 +36,7 @@ import re
 import uuid
 import logging
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Tuple, Dict, Any, Optional
 
 from django.db import transaction
@@ -50,6 +53,8 @@ from apps.inventory.services import InventoryService
 from apps.branches.models import Branch, BranchDocumentSequence
 from apps.reports.models import ProductCostHistory
 from apps.core.models import SystemConfiguration, AuditLog
+from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
 logger = logging.getLogger(__name__)
 
@@ -78,16 +83,16 @@ def _post_purchase_return_direct(purchase_return: PurchaseReturn, user=None):
     date_ad = purchase_return.return_date
 
     ap_acc = AutoPostingService.get_or_create_control_account(
-        branch, 'ACCOUNTS_PAYABLE', '2010', 'Accounts Payable (Creditors)', 'LIABILITY', 'CREDIT'
+        branch, 'ACCOUNTS_PAYABLE', '2110', 'Accounts Payable (Trade Creditors)', 'LIABILITY', 'CREDIT'
     )
     cash_acc = AutoPostingService.get_or_create_control_account(
-        branch, 'CASH', '1010', 'Cash in Hand', 'ASSET', 'DEBIT'
+        branch, 'CASH', '1110', 'Cash in Hand (Main Drawer)', 'ASSET', 'DEBIT'
     )
     inv_asset_acc = AutoPostingService.get_or_create_control_account(
-        branch, 'INVENTORY_ASSET', '1040', 'Merchandise Inventory Asset', 'ASSET', 'DEBIT'
+        branch, 'INVENTORY_ASSET', '1310', 'Merchandise Inventory Asset', 'ASSET', 'DEBIT'
     )
     input_vat_acc = AutoPostingService.get_or_create_control_account(
-        branch, 'INPUT_VAT', '1050', 'Input VAT 13%', 'ASSET', 'DEBIT'
+        branch, 'INPUT_VAT', '1410', 'Input VAT 13%', 'ASSET', 'DEBIT'
     )
 
     lines: List[Dict[str, Any]] = []
@@ -171,7 +176,7 @@ class PurchaseService:
         """
         Main transactional entry point coordinating complete GRN verification,
         two-way discount calculation, proportional overhead distribution, stock inward,
-        supplier debt ledger updates, and fail-closed General Ledger posting.
+        historical date integrity, supplier debt ledger updates, and fail-closed General Ledger posting.
         """
         if grn.status == 'RECEIVED':
             raise ValidationError("This GRN voucher has already been verified and received.")
@@ -179,6 +184,9 @@ class PurchaseService:
         items = list(grn.items.select_related('product', 'product__base_unit', 'unit_conversion').all())
         if not items:
             raise ValidationError("Cannot approve a GRN without line items. Please add at least one product.")
+
+        # Step 0: Ensure Historical Date and Fiscal Year Integrity
+        cls._harmonize_grn_dates(grn)
 
         # Step 1: Pre-Validation of Serialized / Dual-IMEI Quantities & Master Setting Sensitivity
         cls._validate_grn_lines(grn, items)
@@ -190,13 +198,44 @@ class PurchaseService:
             user=user
         )
 
-        # Step 3: Post to Supplier Ledger with Row-Level Locking & Audit Trail
+        # Step 3: Post to Supplier Ledger with Row-Level Locking & Historical Dates
         cls._post_supplier_ledger(grn=grn, user=user)
 
         # Step 4: Post General Ledger Double-Entry Journal
         cls._post_gl_journal(grn=grn, user=user)
 
         return grn
+
+    # =========================================================================
+    # STEP 0: DATE & FISCAL YEAR HARMONIZATION
+    # =========================================================================
+    @staticmethod
+    def _harmonize_grn_dates(grn: GoodsReceivedNote) -> None:
+        """
+        Ensures that grn.bill_date (AD), grn.bill_date_bs (BS), and grn.fiscal_year
+        are accurately synchronized before inventory batches and ledger entries are minted.
+        """
+        if grn.bill_date_bs and str(grn.bill_date_bs).strip():
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(str(grn.bill_date_bs).strip())
+                target_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                grn.bill_date = target_ad
+                grn.bill_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                if not grn.fiscal_year:
+                    grn.fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            except Exception as e:
+                logger.warning(f"[PurchaseService] Could not parse grn.bill_date_bs '{grn.bill_date_bs}': {e}")
+        elif grn.bill_date:
+            ad_date = grn.bill_date.date() if isinstance(grn.bill_date, datetime) else grn.bill_date
+            grn.bill_date = ad_date
+            try:
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(ad_date)
+                if not grn.bill_date_bs:
+                    grn.bill_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                if not grn.fiscal_year:
+                    grn.fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            except Exception as e:
+                logger.warning(f"[PurchaseService] Could not convert grn.bill_date to BS: {e}")
 
     # =========================================================================
     # STEP 1: SERIALIZED QUANTITIES & MASTER SETTING VALIDATION
@@ -335,7 +374,7 @@ class PurchaseService:
         6. Proportional value-based overhead distribution for exact unit landed cost.
         7. Net Invoice Total = Pre-VAT Base + 13% VAT + Overheads.
         8. Live branch stock counters, FIFO batches (safeguarding non-serialized & backlog items),
-           and physical IMEI ItemInstance records created.
+           and physical IMEI ItemInstance records created with verified historical bill dates.
         """
         total_line_gross = Decimal('0.00')
         total_line_discount = Decimal('0.00')
@@ -464,12 +503,12 @@ class PurchaseService:
                 quantity_delta=base_qty,
                 movement_type='PURCHASE',
                 reference_doc=grn.grn_number,
-                remarks=f"GRN Inward: {grn.supplier_bill_no} from {grn.supplier.company_name} on {grn.bill_date}",
+                remarks=f"GRN Inward: {grn.supplier_bill_no} from {grn.supplier.company_name} on {grn.bill_date_bs or grn.bill_date}",
                 user=user,
                 allow_negative=True
             )
 
-            # B. Price Fluctuation Audit, Master Selling Price & FIFO Batch Creation (Prevents Ghost Stock)
+            # B. Price Fluctuation Audit, Master Selling Price & FIFO Batch Creation (Calibrated to grn.bill_date)
             batch_id = cls._update_product_master_and_batches(
                 grn=grn,
                 item=item,
@@ -478,7 +517,7 @@ class PurchaseService:
                 user=user
             )
 
-            # C. Register Physical ItemInstance Records (Dual-IMEI & MDMS) if IMEIs were provided
+            # C. Register Physical ItemInstance Records (Dual-IMEI & MDMS) with verified grn.bill_date
             cls._register_imei_instances(
                 grn=grn,
                 item=item,
@@ -496,10 +535,8 @@ class PurchaseService:
     ) -> str:
         """
         Updates product master purchase price to the latest landed cost, adjusts MRP if provided,
-        logs historical price transitions, and creates date-specific FIFO batches for:
-        1. All standard non-serialized items (accessories, chargers, covers).
-        2. Handset phone items that were entered WITHOUT IMEIs during Backlog Mode.
-        This guarantees inventory asset valuation and FIFO cost deduction are never corrupted.
+        logs historical price transitions, and creates date-specific FIFO batches calibrated
+        strictly to the verified historical `grn.bill_date`.
         """
         old_cost = product.purchase_price
         old_sell = product.selling_price
@@ -508,14 +545,14 @@ class PurchaseService:
         if item.unit_landed_cost != old_cost or (item.new_selling_price and new_sell != old_sell):
             ProductCostHistory.objects.create(
                 product=product,
-                date_effective=grn.bill_date,
+                date_effective=grn.bill_date,  # Strict historical date
                 old_cost_price=old_cost,
                 new_cost_price=item.unit_landed_cost,
                 old_selling_price=old_sell,
                 new_selling_price=new_sell,
                 source_reference=grn.grn_number,
                 changed_by=user,
-                remarks=f"Inward GRN price update from {grn.supplier.company_name}"
+                remarks=f"Inward GRN price update from {grn.supplier.company_name} on {grn.bill_date_bs or grn.bill_date}"
             )
 
         product.purchase_price = item.unit_landed_cost
@@ -535,7 +572,7 @@ class PurchaseService:
                 batch_number=batch_id,
                 product=product,
                 branch=grn.branch,
-                purchase_date=grn.bill_date,
+                purchase_date=grn.bill_date,  # Strict historical date
                 cost_price=item.unit_landed_cost,
                 selling_price=item.new_selling_price or product.selling_price,
                 quantity_received=base_qty,
@@ -555,8 +592,8 @@ class PurchaseService:
     ) -> None:
         """
         Parses scanned IMEI tokens and creates physical ItemInstance records with
-        NTA MDMS certification and individual warranty end dates.
-        Safely returns if item has no scanned IMEIs (e.g. Backlog entry or accessory).
+        NTA MDMS certification and individual warranty end dates, strictly stamped
+        with the verified historical `grn.bill_date`.
         """
         if not (product.requires_imei_tracking or product.requires_serial_tracking):
             return
@@ -584,7 +621,7 @@ class PurchaseService:
                 sn = None
 
             warranty_m = item.warranty_months or grn.warranty_months or product.warranty_months or 12
-            w_start = grn.bill_date
+            w_start = grn.bill_date  # Strict historical date
             w_end = w_start + timedelta(days=warranty_m * 30) if warranty_m > 0 else None
 
             existing = ItemInstance.objects.filter(imei_1=im1).first() if im1 else None
@@ -606,20 +643,20 @@ class PurchaseService:
                     activation_status='SEALED_INACTIVE',
                     source_type='NEW_PURCHASE_GRN',
                     mdms_status=line_mdms,
-                    mdms_verification_date=grn.bill_date,
+                    mdms_verification_date=grn.bill_date,  # Strict historical date
                     mdms_remarks=f"GRN Inward: {grn.grn_number} | Invoice: {grn.supplier_bill_no}",
                     purchase_reference=grn.grn_number,
                     batch_reference=batch_id,
                     supplier_name=grn.supplier.company_name,
                     landed_cost=item.unit_landed_cost,
-                    purchase_date=grn.bill_date,
+                    purchase_date=grn.bill_date,  # Strict historical date
                     warranty_start_date=w_start,
                     warranty_end_date=w_end,
                     warranty_remarks=f"Supplier Warranty: {item.warranty_provider or grn.warranty_provider or 'Distributor'}"
                 )
 
     # =========================================================================
-    # STEP 3: AUTOMATIC SUPPLIER LEDGER & BALANCE UPDATE
+    # STEP 3: AUTOMATIC SUPPLIER LEDGER & BALANCE UPDATE (HISTORICAL DATES)
     # =========================================================================
     @staticmethod
     def _post_supplier_ledger(
@@ -628,17 +665,18 @@ class PurchaseService:
     ) -> None:
         """
         Atomically updates the supplier's outstanding ledger balance using database
-        row-level locking (select_for_update), posts the ledger transaction, and generates an audit log.
+        row-level locking (select_for_update), posts the ledger transaction with
+        verified historical entry dates (AD and BS), and generates an audit log.
         """
         supplier = Supplier.objects.select_for_update().get(pk=grn.supplier_id)
         prev_bal = supplier.current_balance or Decimal('0.00')
         new_bal = prev_bal + grn.due_amount
 
         supplier.current_balance = new_bal
-        supplier.last_purchase_date = grn.bill_date
+        supplier.last_purchase_date = grn.bill_date  # Strict historical date
         supplier.save(update_fields=['current_balance', 'last_purchase_date', 'updated_at'])
 
-        # Post Supplier Udhaari Ledger Entry
+        # Post Supplier Udhaari Ledger Entry with verified historical dates
         SupplierUdhaariLedger.objects.create(
             supplier=supplier,
             branch=grn.branch,
@@ -648,9 +686,11 @@ class PurchaseService:
             resulting_balance=new_bal,
             payment_mode='CASH' if (grn.paid_amount or Decimal('0.00')) > Decimal('0.00') else 'OTHER',
             reference_number=grn.grn_number,
+            entry_date=grn.bill_date,  # Explicit historical entry date (AD)
+            entry_date_bs=grn.bill_date_bs,  # Explicit historical entry date (BS)
             recorded_by=user,
             remarks=(
-                f"GRN Received. Bill No: {grn.supplier_bill_no} "
+                f"GRN Received ({grn.bill_date_bs or grn.bill_date}). Bill No: {grn.supplier_bill_no} "
                 f"(Gross: Rs. {grn.gross_amount:.2f}, Taxable: Rs. {grn.taxable_amount:.2f}, "
                 f"VAT: Rs. {grn.vat_amount:.2f}, Total: Rs. {grn.net_total_amount:.2f}, "
                 f"Paid: Rs. {grn.paid_amount:.2f}, Due: Rs. {grn.due_amount:.2f})"
@@ -665,6 +705,9 @@ class PurchaseService:
             object_repr=grn.grn_number,
             details={
                 'supplier': supplier.company_name,
+                'bill_date_ad': str(grn.bill_date),
+                'bill_date_bs': grn.bill_date_bs or '',
+                'fiscal_year': grn.fiscal_year or '',
                 'gross_amount': str(grn.gross_amount),
                 'taxable_amount': str(grn.taxable_amount),
                 'vat_amount': str(grn.vat_amount),
@@ -707,12 +750,13 @@ class PurchaseReturnService:
     """
     Commercial Purchase Return / Debit Note Processing Engine.
     Executes atomic merchandise return to suppliers:
-    1. Pre-validates stock and serialized IMEIs in IN_STOCK status (supporting Backlog Mode).
-    2. Deducts physical inventory via InventoryService.adjust_stock.
-    3. Locks serialized ItemInstances as 'RETURNED_TO_SUPPLIER' if present.
-    4. Deducts from FIFO batches for non-serialized items or backlog units.
-    5. Reconciles supplier debt balance and records ledger entry.
-    6. Automatically posts double-entry General Ledger reversal vouchers fail-closed.
+    1. Harmonizes historical return dates.
+    2. Pre-validates stock and serialized IMEIs in IN_STOCK status (supporting Backlog Mode).
+    3. Deducts physical inventory via InventoryService.adjust_stock.
+    4. Locks serialized ItemInstances as 'RETURNED_TO_SUPPLIER' if present.
+    5. Deducts from FIFO batches for non-serialized items or backlog units.
+    6. Reconciles supplier debt balance with explicit historical dates.
+    7. Automatically posts double-entry General Ledger reversal vouchers fail-closed.
     """
 
     @staticmethod
@@ -738,6 +782,9 @@ class PurchaseReturnService:
         if not items:
             raise ValidationError("Cannot process a purchase return without line items. Please add at least one product.")
 
+        # Harmonize return dates (AD, BS, Fiscal Year)
+        cls._harmonize_return_dates(purchase_return)
+
         # Step 1: Pre-validation of Stock Availability & Serialized IMEI Ownership
         cls._validate_return_items(purchase_return, items)
 
@@ -754,9 +801,13 @@ class PurchaseReturnService:
         purchase_return.net_refund_amount = net_refund_val
         purchase_return.status = 'CONFIRMED'
         purchase_return.processed_by = user
-        purchase_return.save(update_fields=['total_return_amount', 'tax_amount', 'net_refund_amount', 'status', 'processed_by', 'updated_at'])
+        purchase_return.save(update_fields=[
+            'total_return_amount', 'tax_amount', 'net_refund_amount',
+            'status', 'processed_by', 'return_date', 'return_date_bs',
+            'fiscal_year', 'updated_at'
+        ])
 
-        # Step 3: Settle Supplier Debt Ledger & Post Financial Adjustment
+        # Step 3: Settle Supplier Debt Ledger & Post Financial Adjustment with Historical Dates
         cls._reconcile_supplier_ledger(purchase_return, net_refund_val, user)
 
         # Step 4: Post Double-Entry Journal to General Ledger
@@ -783,6 +834,9 @@ class PurchaseReturnService:
             object_repr=purchase_return.return_number,
             details={
                 'supplier': purchase_return.supplier.company_name,
+                'return_date_ad': str(purchase_return.return_date),
+                'return_date_bs': purchase_return.return_date_bs or '',
+                'fiscal_year': purchase_return.fiscal_year or '',
                 'net_refund_amount': str(net_refund_val),
                 'refund_mode': purchase_return.refund_mode,
                 'items_count': len(items),
@@ -791,6 +845,33 @@ class PurchaseReturnService:
         )
 
         return purchase_return
+
+    @staticmethod
+    def _harmonize_return_dates(purchase_return: PurchaseReturn) -> None:
+        """
+        Harmonizes return_date (AD), return_date_bs (BS), and fiscal_year before processing.
+        """
+        if purchase_return.return_date_bs and str(purchase_return.return_date_bs).strip():
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(str(purchase_return.return_date_bs).strip())
+                target_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                purchase_return.return_date = target_ad
+                purchase_return.return_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                if not purchase_return.fiscal_year:
+                    purchase_return.fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            except Exception as e:
+                logger.warning(f"[PurchaseReturnService] Could not parse return_date_bs '{purchase_return.return_date_bs}': {e}")
+        elif purchase_return.return_date:
+            ad_date = purchase_return.return_date.date() if isinstance(purchase_return.return_date, datetime) else purchase_return.return_date
+            purchase_return.return_date = ad_date
+            try:
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(ad_date)
+                if not purchase_return.return_date_bs:
+                    purchase_return.return_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                if not purchase_return.fiscal_year:
+                    purchase_return.fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            except Exception as e:
+                logger.warning(f"[PurchaseReturnService] Could not convert return_date to BS: {e}")
 
     @classmethod
     def _validate_return_items(cls, purchase_return: PurchaseReturn, items: List[PurchaseReturnItem]) -> None:
@@ -877,6 +958,7 @@ class PurchaseReturnService:
             total_tax_val += tax
 
             # 1. Deduct sellable stock from BranchStock
+            date_label = purchase_return.return_date_bs or str(purchase_return.return_date)
             InventoryService.adjust_stock(
                 product=product,
                 branch=purchase_return.branch,
@@ -886,7 +968,7 @@ class PurchaseReturnService:
                 imei_or_serial=item.returned_imei_list or "",
                 remarks=(
                     f"Commercial Purchase Return (Debit Note: {purchase_return.return_number}) "
-                    f"to {purchase_return.supplier.company_name}. Reason: {item.return_reason or 'Stock Return'}"
+                    f"to {purchase_return.supplier.company_name} on {date_label}. Reason: {item.return_reason or 'Stock Return'}"
                 ),
                 user=user,
                 allow_negative=False
@@ -944,6 +1026,10 @@ class PurchaseReturnService:
         net_refund_amount: Decimal,
         user=None
     ) -> None:
+        """
+        Updates supplier credit balance and posts historical sub-ledger records
+        with explicit entry_date and entry_date_bs.
+        """
         supplier = Supplier.objects.select_for_update().get(pk=purchase_return.supplier_id)
         prev_bal = supplier.current_balance or Decimal('0.00')
 
@@ -961,10 +1047,12 @@ class PurchaseReturnService:
                 resulting_balance=new_bal,
                 payment_mode='OTHER',
                 reference_number=purchase_return.return_number,
+                entry_date=purchase_return.return_date,          # Explicit historical entry date (AD)
+                entry_date_bs=purchase_return.return_date_bs,    # Explicit historical entry date (BS)
                 recorded_by=user,
                 remarks=(
-                    f"Debit Note {purchase_return.return_number}: Stock returned to supplier "
-                    f"{supplier.company_name}. Balance deducted by Rs. {net_refund_amount:.2f}. "
+                    f"Debit Note {purchase_return.return_number} ({purchase_return.return_date_bs or purchase_return.return_date}): "
+                    f"Stock returned to supplier {supplier.company_name}. Balance deducted by Rs. {net_refund_amount:.2f}. "
                     f"Original Ref: {purchase_return.original_bill_reference or '-'}"
                 )
             )
@@ -979,10 +1067,12 @@ class PurchaseReturnService:
                 resulting_balance=prev_bal,
                 payment_mode='CASH',
                 reference_number=purchase_return.return_number,
+                entry_date=purchase_return.return_date,          # Explicit historical entry date (AD)
+                entry_date_bs=purchase_return.return_date_bs,    # Explicit historical entry date (BS)
                 recorded_by=user,
                 remarks=(
-                    f"Debit Note {purchase_return.return_number}: Cash refund received of "
-                    f"Rs. {net_refund_amount:.2f} from {supplier.company_name}."
+                    f"Debit Note {purchase_return.return_number} ({purchase_return.return_date_bs or purchase_return.return_date}): "
+                    f"Cash refund received of Rs. {net_refund_amount:.2f} from {supplier.company_name}."
                 )
             )
 
@@ -996,9 +1086,11 @@ class PurchaseReturnService:
                 resulting_balance=prev_bal,
                 payment_mode='OTHER',
                 reference_number=purchase_return.return_number,
+                entry_date=purchase_return.return_date,          # Explicit historical entry date (AD)
+                entry_date_bs=purchase_return.return_date_bs,    # Explicit historical entry date (BS)
                 recorded_by=user,
                 remarks=(
-                    f"Debit Note {purchase_return.return_number}: Stock returned awaiting replacement "
-                    f"consignment from {supplier.company_name} (Value: Rs. {net_refund_amount:.2f})."
+                    f"Debit Note {purchase_return.return_number} ({purchase_return.return_date_bs or purchase_return.return_date}): "
+                    f"Stock returned awaiting replacement consignment from {supplier.company_name} (Value: Rs. {net_refund_amount:.2f})."
                 )
             )

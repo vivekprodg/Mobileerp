@@ -10,18 +10,30 @@ Key Capabilities:
 2. Thread-Safe Sub-Ledger Accounting:
    - recalculate_balance_from_ledger(): Mathematically computes current_credit_balance
      strictly from CustomerUdhaariLedger entries.
+3. Historical Date Integrity:
+   - CustomerUdhaariLedger explicitly tracks entry_date (AD) and entry_date_bs (BS) so
+     backdated sales bills, repayments, and returns appear on their true business dates
+     rather than defaulting to created_at timestamps.
 """
 
 import re
 import uuid
+import logging
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, datetime
 from typing import Optional, Tuple
+
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
 from apps.core.models import TimeStampedModel
 from apps.branches.models import Branch
+from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
+logger = logging.getLogger(__name__)
 
 class Customer(TimeStampedModel):
     """
@@ -241,11 +253,10 @@ class Customer(TimeStampedModel):
         # 3. Fallback to Standard Cash Customer Profile
         return cls.get_or_create_default_cash_customer(branch), False
 
-
 class CustomerUdhaariLedger(TimeStampedModel):
     """
     Sub-ledger tracking every debit (credit purchase / Udhaari) and credit (repayment)
-    for customer accounts with complete audit trail.
+    for customer accounts with complete audit trail and historical date synchronization.
     """
     ENTRY_TYPES = [
         ('DEBIT', _('Credit Purchase / Udhaari Taken (+) (उधारो सामान)')),
@@ -290,6 +301,23 @@ class CustomerUdhaariLedger(TimeStampedModel):
         max_length=30, choices=PAYMENT_MODES, default='CASH', blank=True, null=True,
         verbose_name=_("Payment Channel")
     )
+
+    # Explicit Historical Transaction Dates
+    entry_date = models.DateField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name=_("Transaction Date (AD)"),
+        help_text=_("Gregorian date of the transaction or repayment. Accurately preserves backdated bills.")
+    )
+    entry_date_bs = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Transaction Date (BS)"),
+        help_text=_("Nepali Bikram Sambat date string (YYYY-MM-DD).")
+    )
+
     remarks = models.TextField(blank=True, null=True, verbose_name=_("Ledger Remarks"))
     recorded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
@@ -298,14 +326,55 @@ class CustomerUdhaariLedger(TimeStampedModel):
 
     class Meta:
         db_table = 'customer_udhaari_ledger'
-        ordering = ['-created_at']
+        ordering = ['-entry_date', '-created_at']
         verbose_name = _('Customer Udhaari Ledger Entry')
         verbose_name_plural = _('Customer Udhaari Ledger Entries')
         indexes = [
-            models.Index(fields=['customer', 'created_at'], name='idx_cledger_cust_date'),
+            models.Index(fields=['customer', '-entry_date'], name='idx_cledger_cust_edate'),
+            models.Index(fields=['customer', '-created_at'], name='idx_cledger_cust_date'),
+            models.Index(fields=['branch', '-entry_date'], name='idx_cledger_br_edate'),
             models.Index(fields=['reference_invoice'], name='idx_cledger_ref_inv'),
             models.Index(fields=['entry_type', 'payment_mode'], name='idx_cledger_type_mode'),
+            models.Index(fields=['entry_date_bs'], name='idx_cledger_bs_date'),
         ]
 
     def __str__(self):
-        return f"{self.customer.name} - {self.get_entry_type_display()} Rs. {self.amount} ({self.created_at.strftime('%Y-%m-%d')})"
+        date_str = self.entry_date_bs or str(self.entry_date)
+        return f"{self.customer.name} - {self.get_entry_type_display()} Rs. {self.amount} ({date_str})"
+
+    def save(self, *args, **kwargs):
+        current_bs = str(self.entry_date_bs or '').strip()
+        current_ad = self.entry_date
+        if isinstance(current_ad, datetime):
+            current_ad = current_ad.date()
+
+        if current_bs:
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(current_bs)
+                self.entry_date = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                self.entry_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+            except Exception as e:
+                logger.warning(f"[CustomerUdhaariLedger] Could not parse BS date '{current_bs}': {e}")
+                if current_ad:
+                    try:
+                        bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(current_ad)
+                        self.entry_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                    except Exception:
+                        pass
+        elif current_ad:
+            try:
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(current_ad)
+                self.entry_date = current_ad
+                self.entry_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+            except Exception as e:
+                logger.warning(f"[CustomerUdhaariLedger] Could not convert AD date to BS: {e}")
+        else:
+            today = timezone.now().date()
+            self.entry_date = today
+            try:
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+                self.entry_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+            except Exception:
+                pass
+
+        super().save(*args, **kwargs)

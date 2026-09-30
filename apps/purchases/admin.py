@@ -1,7 +1,6 @@
 """
 Django Admin Configuration for Suppliers, Purchase Orders, Goods Received Notes (GRN),
 Commercial Purchase Returns (Debit Notes) & Supplier Udhaari Ledgers.
-File Path: apps/purchases/admin.py
 
 Synchronized with `apps/purchases/models.py`:
 - Inward GRN features 5-Section Financial Summary Cards:
@@ -13,6 +12,7 @@ Synchronized with `apps/purchases/models.py`:
 - Inline item support for dual discount types: Flat Amount (रू) vs Percentage (%).
 - Automatic overhead landed cost allocation across line items upon save.
 - Comprehensive date synchronization between Gregorian (AD) and Bikram Sambat (BS).
+- Explicit entry_date and entry_date_bs visibility in SupplierUdhaariLedger.
 - Supplier subledger double-entry recalculation actions.
 """
 
@@ -40,8 +40,15 @@ class SupplierUdhaariLedgerInline(admin.TabularInline):
     extra = 0
     can_delete = False
     readonly_fields = [
-        'transaction_type', 'amount', 'previous_balance', 'resulting_balance',
-        'payment_mode', 'reference_number', 'cheque_date', 'cheque_cleared',
+        'transaction_type', 'entry_date', 'entry_date_bs', 'amount',
+        'previous_balance', 'resulting_balance', 'payment_mode',
+        'reference_number', 'cheque_date', 'cheque_cleared',
+        'recorded_by', 'created_at'
+    ]
+    fields = [
+        'transaction_type', 'entry_date', 'entry_date_bs', 'amount',
+        'previous_balance', 'resulting_balance', 'payment_mode',
+        'reference_number', 'cheque_date', 'cheque_cleared',
         'recorded_by', 'created_at'
     ]
 
@@ -228,8 +235,11 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         'fiscal_year', 'status_badge', 'subtotal', 'total_amount', 'created_by'
     ]
     list_filter = ['status', 'fiscal_year', 'branch', 'order_date']
-    search_fields = ['po_number', 'supplier__company_name', 'supplier__phone_number', 'fiscal_year', 'order_date_bs', 'notes']
-    readonly_fields = ['created_at', 'updated_at']
+    search_fields = [
+        'po_number', 'supplier__company_name', 'supplier__phone_number',
+        'fiscal_year', 'order_date_bs', 'notes'
+    ]
+    readonly_fields = ['fiscal_year', 'created_at', 'updated_at']
     autocomplete_fields = ['supplier', 'branch', 'created_by']
     inlines = [PurchaseOrderItemInline]
 
@@ -306,7 +316,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     readonly_fields = [
         'gross_amount', 'total_line_discount', 'bill_discount_amount',
         'discount_amount', 'taxable_amount', 'vat_amount', 'total_landed_cost',
-        'net_total_amount', 'due_amount', 'financial_summary_card',
+        'net_total_amount', 'due_amount', 'fiscal_year', 'financial_summary_card',
         'created_at', 'updated_at'
     ]
     autocomplete_fields = ['supplier', 'branch', 'purchase_order', 'received_by']
@@ -315,7 +325,10 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (_("1. Supplier & Inward Metadata (Historical Dates Supported)"), {
-            'description': _("Permits setting historical supplier purchase dates starting from 2080 B.S."),
+            'description': _(
+                "Updating either Bill Date (BS) or Bill Date (AD) will bidirectionally "
+                "recalculate the corresponding date and Nepali Fiscal Year automatically upon saving."
+            ),
             'fields': (
                 ('grn_number', 'status'),
                 ('supplier', 'branch', 'purchase_order'),
@@ -357,7 +370,6 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         })
     )
 
-    # --- Visual 5-Card Financial Summary Component ---
     def financial_summary_card(self, obj):
         if not obj.pk:
             return format_html(
@@ -551,7 +563,7 @@ class PurchaseReturnAdmin(admin.ModelAdmin):
         'fiscal_year', 'return_date_bs', 'remarks'
     ]
     readonly_fields = [
-        'return_number', 'total_return_amount', 'tax_amount',
+        'return_number', 'fiscal_year', 'total_return_amount', 'tax_amount',
         'net_refund_amount', 'created_at', 'updated_at'
     ]
     autocomplete_fields = ['supplier', 'branch', 'original_grn', 'processed_by']
@@ -630,12 +642,15 @@ class PurchaseReturnItemAdmin(admin.ModelAdmin):
 @admin.register(SupplierUdhaariLedger)
 class SupplierUdhaariLedgerAdmin(admin.ModelAdmin):
     list_display = [
-        'supplier', 'branch', 'transaction_type_badge', 'amount',
-        'previous_balance', 'resulting_balance', 'payment_mode',
+        'supplier', 'branch', 'transaction_type_badge', 'entry_date', 'entry_date_bs',
+        'amount', 'previous_balance', 'resulting_balance', 'payment_mode',
         'reference_number', 'cheque_date', 'cheque_cleared', 'created_at'
     ]
-    list_filter = ['transaction_type', 'payment_mode', 'cheque_cleared', 'created_at', 'branch']
-    search_fields = ['supplier__company_name', 'supplier__phone_number', 'reference_number', 'remarks']
+    list_filter = ['transaction_type', 'payment_mode', 'cheque_cleared', 'entry_date', 'created_at', 'branch']
+    search_fields = [
+        'supplier__company_name', 'supplier__phone_number',
+        'reference_number', 'entry_date_bs', 'remarks'
+    ]
     autocomplete_fields = ['supplier', 'branch', 'recorded_by']
     readonly_fields = [f.name for f in SupplierUdhaariLedger._meta.fields]
 

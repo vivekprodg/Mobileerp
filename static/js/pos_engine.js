@@ -3,27 +3,27 @@
  * File: static/js/pos_engine.js
  *
  * Core Capabilities:
- * 1. Zero-Query Instant Suggestions on Click/Focus:
- *    - Barcode / 15-Digit IMEI Box: Immediately opens live suggestions with top/recent products.
- *    - Patron Details Box: Immediately opens live suggestions with recent customers and debtors.
- *    - Two-Tier Card Product Box: Immediately opens live catalog suggestions under the active row.
- * 2. Letter-by-Letter Real-Time Autocomplete Filtering:
- *    - Instant debounced querying on each keystroke (v -> vi -> viv).
- *    - Highlights search terms, displays prices, available stock, tax status, and dual-IMEIs.
- * 3. Smooth Keyboard Arrow Navigation:
- *    - Seamlessly navigate suggestions using ArrowDown, ArrowUp, Enter, and Escape across all search trays.
- * 4. Interactive In-Row & Whole-Bill Discount Controls (% vs Flat Rs.):
- *    - Dual-mode segmented toggle buttons with real-time math recalculation.
- *    - Instant VAT recalculation based on reduced taxable base upon every keystroke.
- *    - Live savings badge updates showing rupee deductions and effective percentage.
- * 5. Multi-Tender Split Payment & Udhaari Allocation Engine [F8]:
- *    - Authoritative modal initialization pulling exact grand total to #splitModalPayableTotal.
- *    - Dynamic real-time remaining balance calculations across all payment modes.
- *    - Automatic Customer Udhaari allocation for remaining unpaid balances.
- *    - Strict customer verification preventing anonymous credit debt.
- * 6. Full Accounting & POS Terminal Parity:
- *    - Exact JSON payload assembly for /sales/api/checkout/ supporting Cash [F4], Credit, and Split [F8].
- *    - Full preservation of Trade-In Exchange [F6], Repair Handovers [F7], and Hold/Recall Carts [F9/F10].
+ * 1. Self-Healing Two-Tier Card Rendering:
+ *    - Dynamically detects or creates the items container (#itemsContainer) without null-pointer crashes.
+ *    - Renders two-tier stacked cards (.item-card) with instant quantity, price, and discount calculations.
+ * 2. Complete Historical & Backdated Bill Synchronization:
+ *    - Entire #btnChangeBillDate container is clickable with hover feedback.
+ *    - Auto-Select Date Event (onChange): Clicking any day on the calendar instantly selects and updates the bill date.
+ *    - Zero "Apply" Button Dependency: Directly applies the date on click without requiring an extra button press.
+ *    - Explicit Floating Calendar Cleanup: Immediately closes and hides #ndp-nepali-box so it never hangs on screen.
+ *    - Synchronized Outside-Click & Cancel: Clicking outside or pressing Escape cleanly closes both popups.
+ *    - Validates selected dates against the active open Fiscal Year (e.g. 2083/84).
+ *    - Strictly preserves the chosen B.S. date in the checkout payload (bill_date_bs) across Cash,
+ *      Credit, Split payments, and parked bills (Hold/Recall).
+ * 3. Zero-Query Instant Suggestions & Live Typeahead:
+ *    - Barcode / 15-Digit IMEI box opens live suggestions with recent products.
+ *    - Patron Details box opens live suggestions with recent customers and debtors.
+ *    - Two-tier item row autocomplete queries the live catalog under the active row.
+ * 4. Dual-Mode Discounts (% vs Flat Rs.):
+ *    - In-row and whole-bill segmented toggles with instant VAT recalculation and savings badges.
+ * 5. Split Payments & Customer Udhaari Allocation [F8]:
+ *    - Real-time remaining balance calculations across Cash, Wallets, Card, Bank, and Credit.
+ * 6. Trade-In [F6], Repair Handover [F7], and Parked Cart [F9/F10] Parity.
  */
 
 // ============================================================================
@@ -103,32 +103,28 @@ class POSAudioSynthesizer {
             osc.start();
             osc.stop(ctx.currentTime + 0.09);
         } catch (e) {
-            // AudioContext policy handled gracefully
+            // Audio policy handled gracefully
         }
     }
 }
 
 // ============================================================================
-// 2. PATRON / CUSTOMER MANAGEMENT (ZERO-QUERY & LETTER-BY-LETTER AUTOCOMPLETE)
+// 2. PATRON / CUSTOMER MANAGEMENT (AUTOCOMPLETE & LIVE DROPDOWN)
 // ============================================================================
 class POSCustomerManager {
     constructor(engine) {
         this.engine = engine;
         this.searchApiUrl = '/customers/api/search/';
 
-        // Bind Customer Inputs
         this.customerInput = document.getElementById('posCustomerInput') || document.getElementById('cust-name');
         this.customerIdInput = document.getElementById('posCustomerId');
         this.customerPanInput = document.getElementById('posCustomerPanInput') || document.getElementById('cust-pan');
         this.customerMobileInput = document.getElementById('posCustomerMobileInput') || document.getElementById('cust-mobile');
         this.dropdownEl = document.getElementById('customerSearchDropdown');
 
-        // Clear Buttons (×)
         this.clearNameBtn = document.getElementById('clearCustomerNameBtn');
         this.clearPanBtn = document.getElementById('clearCustomerPanBtn');
         this.clearMobileBtn = document.getElementById('clearCustomerMobileBtn');
-
-        // Quick Walk-In Button
         this.quickWalkInBtn = document.getElementById('quickWalkInCustomerBtn');
 
         this.selectedCustomer = null;
@@ -358,12 +354,8 @@ class POSCustomerManager {
         this.selectedCustomer = customer;
         this.engine.cart.setCustomer(customer);
 
-        if (this.customerInput) {
-            this.customerInput.value = customer.name;
-        }
-        if (this.customerIdInput) {
-            this.customerIdInput.value = customer.id || '';
-        }
+        if (this.customerInput) this.customerInput.value = customer.name;
+        if (this.customerIdInput) this.customerIdInput.value = customer.id || '';
         if (this.customerPanInput) {
             this.customerPanInput.value = customer.pan || '-';
             this.engine.cart.customerPan = customer.pan || '';
@@ -394,7 +386,7 @@ class POSCustomerManager {
 }
 
 // ============================================================================
-// 3. TWO-TIER STACKED CARD CART & REAL-TIME CALCULATION ENGINE
+// 3. TWO-TIER STACKED CARD CART & CALCULATION ENGINE (SELF-HEALING)
 // ============================================================================
 class POSCart {
     constructor(engine) {
@@ -408,15 +400,15 @@ class POSCart {
 
         this.activeCartIdempotencyKey = generateUUID();
 
-        // Whole-Bill Discount State Tracking (% vs Rs.)
-        this.billDiscountType = 'PERCENTAGE';  // 'PERCENTAGE' or 'AMOUNT'
-        this.billDiscountValue = 0;           // Raw input typed by cashier
-        this.billDiscountAmount = 0;          // Calculated deduction
-        this.billDiscountPercent = 0;         // Effective percentage
+        // Whole-Bill Discount State
+        this.billDiscountType = 'PERCENTAGE';
+        this.billDiscountValue = 0;
+        this.billDiscountAmount = 0;
+        this.billDiscountPercent = 0;
 
-        // Bind Two-Tier Card Container & Controls
-        this.container = document.getElementById('itemsContainer') || document.getElementById('posCartTableBody');
-        this.addRowBtn = document.getElementById('btnAddCartRow');
+        // Container Reference (Resolved Dynamically)
+        this.container = null;
+        this.addRowBtn = document.getElementById('btnAddCartRow') || document.querySelector('.btn-add-table-row');
 
         // Summary Fields
         this.subtotalText = document.getElementById('posSubtotalText');
@@ -448,6 +440,49 @@ class POSCart {
 
         this.initBillDiscountControls();
         this.initEvents();
+    }
+
+    /**
+     * Self-healing container resolver. Discovers or creates the items area without crashes.
+     */
+    getContainer() {
+        if (!this.container || !document.body.contains(this.container)) {
+            this.container = document.getElementById('itemsContainer')
+                || document.getElementById('posCartTableBody')
+                || document.getElementById('posItemsContainer')
+                || document.getElementById('cartItemsContainer')
+                || document.getElementById('cartTableBody')
+                || document.querySelector('.pos-items-card-container #itemsContainer')
+                || document.querySelector('#itemsContainer');
+
+            if (!this.container) {
+                const parent = document.querySelector('.pos-items-card-container');
+                const addBtn = document.getElementById('btnAddCartRow') || document.querySelector('.btn-add-table-row');
+
+                if (parent) {
+                    let div = parent.querySelector('#itemsContainer');
+                    if (!div) {
+                        div = document.createElement('div');
+                        div.id = 'itemsContainer';
+                        const addStrip = parent.querySelector('.table-add-strip');
+                        if (addStrip) {
+                            parent.insertBefore(div, addStrip);
+                        } else if (addBtn) {
+                            parent.insertBefore(div, addBtn);
+                        } else {
+                            parent.appendChild(div);
+                        }
+                    }
+                    this.container = div;
+                } else if (addBtn && addBtn.parentElement) {
+                    let div = document.createElement('div');
+                    div.id = 'itemsContainer';
+                    addBtn.parentElement.insertBefore(div, addBtn);
+                    this.container = div;
+                }
+            }
+        }
+        return this.container;
     }
 
     initBillDiscountControls() {
@@ -492,11 +527,9 @@ class POSCart {
 
         this.billDiscountType = normalized;
 
-        if (this.billDiscountType === 'PERCENTAGE') {
-            if (this.billDiscountValue > 100) {
-                this.billDiscountValue = 0;
-                if (this.billDiscountInput) this.billDiscountInput.value = '0';
-            }
+        if (this.billDiscountType === 'PERCENTAGE' && this.billDiscountValue > 100) {
+            this.billDiscountValue = 0;
+            if (this.billDiscountInput) this.billDiscountInput.value = '0';
         }
 
         this.syncBillDiscountUI();
@@ -538,13 +571,15 @@ class POSCart {
 
     initEvents() {
         if (this.addRowBtn) {
-            this.addRowBtn.addEventListener('click', () => {
+            this.addRowBtn.addEventListener('click', (e) => {
+                e.preventDefault();
                 this.addEmptyRow();
             });
         }
 
-        if (this.container) {
-            this.container.addEventListener('input', (e) => {
+        const container = this.getContainer();
+        if (container) {
+            container.addEventListener('input', (e) => {
                 const target = e.target;
                 const card = target.closest('.item-card');
                 if (!card) return;
@@ -571,7 +606,7 @@ class POSCart {
                 }
             });
 
-            this.container.addEventListener('change', (e) => {
+            container.addEventListener('change', (e) => {
                 const target = e.target;
                 const card = target.closest('.item-card');
                 if (!card) return;
@@ -585,7 +620,7 @@ class POSCart {
                 }
             });
 
-            this.container.addEventListener('click', (e) => {
+            container.addEventListener('click', (e) => {
                 const modeBtn = e.target.closest('.item-disc-mode-btn');
                 if (modeBtn) {
                     e.preventDefault();
@@ -681,7 +716,10 @@ class POSCart {
             currentRowResults = [];
         };
 
-        this.container.addEventListener('focusin', (e) => {
+        const container = this.getContainer();
+        if (!container) return;
+
+        container.addEventListener('focusin', (e) => {
             const input = e.target.closest('.product-name-input');
             if (!input) return;
 
@@ -695,7 +733,7 @@ class POSCart {
             fetchRowProducts(input.value.trim(), dropdown, parseInt(card.dataset.index, 10));
         });
 
-        this.container.addEventListener('input', (e) => {
+        container.addEventListener('input', (e) => {
             const input = e.target.closest('.product-name-input');
             if (!input) return;
 
@@ -711,7 +749,7 @@ class POSCart {
             }, 150);
         });
 
-        this.container.addEventListener('keydown', (e) => {
+        container.addEventListener('keydown', (e) => {
             const input = e.target.closest('.product-name-input');
             if (!input || !activeRowDropdown || activeRowDropdown.classList.contains('d-none')) return;
 
@@ -821,10 +859,13 @@ class POSCart {
             POSAudioSynthesizer.play('success');
             this.render();
 
-            const cards = this.container.querySelectorAll('.item-card');
-            if (cards[rowIdx]) {
-                const qtyInput = cards[rowIdx].querySelector('.cart-qty-input') || cards[rowIdx].querySelector('.calc-qty');
-                if (qtyInput) qtyInput.focus();
+            const c = this.getContainer();
+            if (c) {
+                const cards = c.querySelectorAll('.item-card');
+                if (cards[rowIdx]) {
+                    const qtyInput = cards[rowIdx].querySelector('.cart-qty-input') || cards[rowIdx].querySelector('.calc-qty');
+                    if (qtyInput) qtyInput.focus();
+                }
             }
         };
 
@@ -877,11 +918,14 @@ class POSCart {
 
         this.render();
 
-        const cards = this.container.querySelectorAll('.item-card');
-        const lastCard = cards[cards.length - 1];
-        if (lastCard) {
-            const nameInp = lastCard.querySelector('.product-name-input');
-            if (nameInp) nameInp.focus();
+        const container = this.getContainer();
+        if (container) {
+            const cards = container.querySelectorAll('.item-card');
+            const lastCard = cards[cards.length - 1];
+            if (lastCard) {
+                const nameInp = lastCard.querySelector('.product-name-input');
+                if (nameInp) nameInp.focus();
+            }
         }
     }
 
@@ -999,7 +1043,7 @@ class POSCart {
         }
     }
 
-    clear() {
+    clear(resetDate = true) {
         this.items = [];
         this.billDiscountType = 'PERCENTAGE';
         this.billDiscountValue = 0;
@@ -1012,6 +1056,11 @@ class POSCart {
         if (this.tradeInInput) this.tradeInInput.value = '0.00';
         if (this.narrationInput) this.narrationInput.value = '';
         if (this.termsInput) this.termsInput.value = '';
+
+        if (resetDate && this.engine && typeof this.engine.resetBillDateToToday === 'function') {
+            this.engine.resetBillDateToToday();
+        }
+
         this.render();
     }
 
@@ -1045,22 +1094,25 @@ class POSCart {
 
         const netLine = Math.max(0, gross - lineDisc);
 
-        const cards = this.container.querySelectorAll('.item-card');
-        const card = cards[idx];
-        if (card) {
-            const grossEl = card.querySelector('.row-gross-amount') || card.querySelector('.calc-amount');
-            const netEl = card.querySelector('.row-net-amount') || card.querySelector('.calc-net');
-            const badgeEl = card.querySelector('.line-disc-savings-badge');
+        const container = this.getContainer();
+        if (container) {
+            const cards = container.querySelectorAll('.item-card');
+            const card = cards[idx];
+            if (card) {
+                const grossEl = card.querySelector('.row-gross-amount') || card.querySelector('.calc-amount');
+                const netEl = card.querySelector('.row-net-amount') || card.querySelector('.calc-net');
+                const badgeEl = card.querySelector('.line-disc-savings-badge');
 
-            if (grossEl) grossEl.value = gross.toFixed(2);
-            if (netEl) netEl.value = netLine.toFixed(2);
+                if (grossEl) grossEl.value = gross.toFixed(2);
+                if (netEl) netEl.value = netLine.toFixed(2);
 
-            if (badgeEl) {
-                if (lineDisc > 0) {
-                    badgeEl.style.display = 'inline-block';
-                    badgeEl.innerText = `-Rs. ${lineDisc.toFixed(2)}`;
-                } else {
-                    badgeEl.style.display = 'none';
+                if (badgeEl) {
+                    if (lineDisc > 0) {
+                        badgeEl.style.display = 'inline-block';
+                        badgeEl.innerText = `-Rs. ${lineDisc.toFixed(2)}`;
+                    } else {
+                        badgeEl.style.display = 'none';
+                    }
                 }
             }
         }
@@ -1094,7 +1146,6 @@ class POSCart {
 
         const netAfterItemDisc = Math.max(0, subTotal - itemDiscountTotal);
 
-        // Whole-Bill Discount Calculation
         let billDiscountAmt = 0;
         let effectiveBillPct = 0;
         const rawBillInput = Math.max(0, parseFloat(this.billDiscountValue) || 0);
@@ -1112,7 +1163,6 @@ class POSCart {
         this.billDiscountAmount = billDiscountAmt;
         this.billDiscountPercent = effectiveBillPct;
 
-        // Proportional allocation of bill discount to taxable and non-taxable lines
         let taxableAmount = 0;
         let nonTaxableAmount = 0;
 
@@ -1207,11 +1257,16 @@ class POSCart {
     }
 
     render() {
-        if (!this.container) return;
-        this.container.innerHTML = '';
+        const container = this.getContainer();
+        if (!container) {
+            console.error('[POSCart] Target items container (#itemsContainer) not found in DOM.');
+            return;
+        }
+
+        container.innerHTML = '';
 
         if (this.items.length === 0) {
-            this.container.innerHTML = `
+            container.innerHTML = `
                 <div class="text-center py-5 text-muted bg-white rounded-3 border">
                     <i class="fas fa-barcode fs-2 d-block mb-2 opacity-25"></i>
                     <span>Scan an IMEI, box barcode, or click <strong>+ Add</strong> to start billing.</span>
@@ -1261,7 +1316,7 @@ class POSCart {
                     <button type="button" class="btn-remove cart-remove-btn" title="Remove line">&times;</button>
                 </div>
 
-                <!-- Tier 2: 6 Roomy Edge-to-Edge Calculations With In-Row Discount Toggle -->
+                <!-- Tier 2: 6 Calculated Inputs Grid with In-Row Discount Toggle -->
                 <div class="tier-bottom">
                     <div class="calc-field">
                         <label class="field-label">QUANTITY</label>
@@ -1341,7 +1396,7 @@ class POSCart {
                 </div>
             `;
 
-            this.container.appendChild(card);
+            container.appendChild(card);
         });
 
         this.recalculateTotals();
@@ -1460,7 +1515,7 @@ class POSHoldCartManager {
             return;
         }
 
-        const totals = this.engine.cart.calculateTotals ? this.engine.cart.calculateTotals() : this.engine.cart.recalculateTotals();
+        const totals = this.engine.cart.recalculateTotals();
         const customerName = document.getElementById('posCustomerInput')?.value.trim() || 'Walk-in Customer';
         const customerPhone = document.getElementById('posCustomerMobileInput')?.value.trim() || '';
         const customerPan = document.getElementById('posCustomerPanInput')?.value.trim() || '';
@@ -1484,6 +1539,7 @@ class POSHoldCartManager {
         }));
 
         const tradeInDeduction = parseFloat(document.getElementById('trade-in-input')?.value) || 0;
+        const effectiveBillDateBs = this.engine.getEffectiveBillDateBs();
 
         const payload = {
             cart: serializedItems,
@@ -1491,6 +1547,7 @@ class POSHoldCartManager {
             customer_name: customerName,
             customer_phone: customerPhone,
             customer_pan: customerPan,
+            bill_date_bs: effectiveBillDateBs || '',
             bill_discount_type: this.engine.cart.billDiscountType,
             bill_discount_input_value: this.engine.cart.billDiscountValue,
             bill_discount_value: this.engine.cart.billDiscountValue,
@@ -1609,7 +1666,7 @@ class POSHoldCartManager {
             const items = (data.cart_payload && data.cart_payload.items) ? data.cart_payload.items : [];
 
             if (items.length > 0) {
-                this.engine.cart.clear();
+                this.engine.cart.clear(false);
 
                 items.forEach(item => {
                     this.engine.cart.addItem({
@@ -1619,6 +1676,13 @@ class POSHoldCartManager {
                         tax_type: item.tax_type || (item.tax_pricing_type === 'EXEMPT' ? 'No' : '13%')
                     });
                 });
+
+                const recalledBsDate = (data.cart_payload && data.cart_payload.bill_date_bs) || data.bill_date_bs || '';
+                if (recalledBsDate) {
+                    this.engine.setCustomBillDateBs(recalledBsDate);
+                } else {
+                    this.engine.resetBillDateToToday();
+                }
 
                 const billDiscType = (data.cart_payload && data.cart_payload.bill_discount_type) || data.bill_discount_type || 'PERCENTAGE';
                 const billDiscVal = (data.cart_payload && data.cart_payload.bill_discount_value !== undefined)
@@ -1753,9 +1817,6 @@ class POSCheckout {
         await this.executeSubmit(payload, 'CREDIT (उधारो)');
     }
 
-    // ------------------------------------------------------------------------
-    // Process Split & Digital Wallet Payment Finalization
-    // ------------------------------------------------------------------------
     async processSplitCheckout() {
         if (this.isProcessing) return;
 
@@ -1791,7 +1852,6 @@ class POSCheckout {
 
         const totalTendered = cash + fonepay + esewa + khalti + card + bank + credit;
 
-        // Verify balance with grand total (within 0.05 paisa tolerance)
         if (Math.abs(totalTendered - grandTotal) > 0.05) {
             const diff = grandTotal - totalTendered;
             this.engine.showNotification(
@@ -1804,7 +1864,6 @@ class POSCheckout {
             return;
         }
 
-        // Verify customer registration for Udhaari (credit)
         const isCreditSale = credit > 0 || totalTendered < grandTotal;
         const custName = document.getElementById('posCustomerInput')?.value.trim() || '';
         const custId = document.getElementById('posCustomerId')?.value || (this.engine.cart.customer ? this.engine.cart.customer.id : null);
@@ -1840,6 +1899,8 @@ class POSCheckout {
         const custId = document.getElementById('posCustomerId')?.value || null;
         const narration = document.getElementById('posBillNarration')?.value.trim() || '';
         const terms = document.getElementById('posBillTerms')?.value.trim() || '';
+
+        const effectiveBsDate = this.engine.getEffectiveBillDateBs();
 
         const packagedCartItems = this.engine.cart.items.map(item => {
             const qty = Math.max(1, parseFloat(item.quantity) || 1);
@@ -1889,15 +1950,13 @@ class POSCheckout {
             customer_name: custName,
             customer_phone: custPhone,
             customer_pan: custPan,
-
-            // Authoritative Dual-Mode Whole-Bill Discount
+            bill_date_bs: effectiveBsDate || '',
             bill_discount_type: this.engine.cart.billDiscountType,
             bill_discount_input_value: this.engine.cart.billDiscountValue,
             bill_discount_value: this.engine.cart.billDiscountValue,
             bill_discount_amount: totals.billDiscountAmt,
             bill_discount_percent: totals.billDiscountPercent,
             discount_percent: totals.billDiscountPercent,
-
             trade_in_voucher_id: this.engine.tradeInManager ? this.engine.tradeInManager.voucherId : null,
             trade_in_credit_amount: tradeInDeduction,
             manager_pin: this.managerPin || '',
@@ -1921,7 +1980,6 @@ class POSCheckout {
 
             const data = await response.json();
 
-            // Handle Supervisor PIN authorization challenge
             if (response.status === 403 && (data.message || '').toLowerCase().includes('manager pin')) {
                 this.setButtonsDisabled(false);
                 const pin = prompt('Supervisor authorization PIN required for this discount or credit override:');
@@ -1945,8 +2003,9 @@ class POSCheckout {
                 this.engine.showNotification(`Bill ${data.estimate_number} finalized successfully!`, 'success');
                 POSAudioSynthesizer.play('success');
 
-                this.engine.cart.clear();
+                this.engine.cart.clear(true);
                 this.engine.customerManager.clearCustomer(true);
+                this.engine.resetBillDateToToday();
             } else {
                 this.engine.showNotification(`Checkout failed: ${data.message || 'Validation error'}`, 'danger');
                 POSAudioSynthesizer.play('error');
@@ -1961,13 +2020,19 @@ class POSCheckout {
 }
 
 // ============================================================================
-// 7. MASTER POS ENGINE ORCHESTRATOR (ZERO-QUERY & TYPEAHEAD FAST LOOKUP)
+// 7. MASTER POS ENGINE ORCHESTRATOR
 // ============================================================================
 class SmartPOSEngine {
     constructor() {
         const taxConfigEl = document.getElementById('posTaxConfigMeta');
         this.enforceImei = taxConfigEl ? (taxConfigEl.dataset.enforceImei !== 'false') : true;
 
+        this.todayBs = (taxConfigEl?.dataset.todayBs || '').trim();
+        this.activeFiscalYear = (taxConfigEl?.dataset.activeFiscalYear || '2083/84').trim();
+        this.canBackdate = taxConfigEl ? (taxConfigEl.dataset.canBackdate === 'true') : true;
+        this.isPrivileged = taxConfigEl ? (taxConfigEl.dataset.isPrivileged === 'true') : false;
+
+        this.customBillDateBs = null;
         this.splitGrandTotal = 0;
 
         this.initDomElements();
@@ -1980,11 +2045,12 @@ class SmartPOSEngine {
         this.checkout = new POSCheckout(this);
 
         this.bindEvents();
+        this.initDateControls();
         this.initHotkeys();
         this.initBarcodeSearchTypeahead();
         this.initSplitModalDynamicCalculations();
 
-        // Initial card render
+        // Initial empty card render
         this.cart.render();
     }
 
@@ -1995,6 +2061,323 @@ class SmartPOSEngine {
         this.creditBtn = document.getElementById('posCreditPayBtn');
         this.splitBtn = document.getElementById('posSplitPaymentBtn');
         this.splitModalEl = document.getElementById('splitPaymentModal');
+
+        this.btnChangeBillDate = document.getElementById('btnChangeBillDate');
+        this.btnResetTodayDate = document.getElementById('btnResetTodayDate');
+        this.btnApplyCustomDate = document.getElementById('btnApplyCustomDate');
+        this.btnCancelCustomDate = document.getElementById('btnCancelCustomDate');
+        this.customDatePickerWrapper = document.getElementById('customDatePickerWrapper');
+        this.posBillDateBsInput = document.getElementById('posBillDateBsInput');
+        this.displayBillDateBs = document.getElementById('displayBillDateBs');
+        this.dateValidationErrorAlert = document.getElementById('dateValidationErrorAlert');
+    }
+
+    getEffectiveBillDateBs() {
+        if (this.customBillDateBs) {
+            return this.customBillDateBs;
+        }
+
+        if (this.posBillDateBsInput && this.posBillDateBsInput.value) {
+            const rawVal = this.posBillDateBsInput.value.trim().replace(/\//g, '-').replace(/\./g, '-');
+            if (rawVal && /^\d{4}-\d{2}-\d{2}$/.test(rawVal)) {
+                return rawVal;
+            }
+        }
+
+        return this.todayBs || '';
+    }
+
+    /**
+     * Explicitly close and hide the floating calendar popup (#ndp-nepali-box)
+     * so it never lingers on screen as an orphan.
+     */
+    closeFloatingCalendarBox() {
+        const ndpBox = document.getElementById('ndp-nepali-box') || document.querySelector('.ndp-nepali-box');
+        if (ndpBox) {
+            ndpBox.style.display = 'none';
+        }
+        if (this.posBillDateBsInput) {
+            this.posBillDateBsInput.blur();
+        }
+    }
+
+    setCustomBillDateBs(dateStr) {
+        if (!dateStr) return;
+        const normalized = dateStr.trim().replace(/\//g, '-').replace(/\./g, '-');
+        this.customBillDateBs = normalized;
+
+        if (this.posBillDateBsInput) {
+            this.posBillDateBsInput.value = normalized;
+        }
+        if (this.displayBillDateBs) {
+            this.displayBillDateBs.innerText = `${normalized} BS`;
+        }
+        if (this.btnResetTodayDate) {
+            this.btnResetTodayDate.classList.remove('d-none');
+        }
+        if (this.customDatePickerWrapper) {
+            this.customDatePickerWrapper.classList.add('d-none');
+        }
+        this.hideDateError();
+        this.closeFloatingCalendarBox();
+    }
+
+    resetBillDateToToday() {
+        this.customBillDateBs = null;
+
+        const defaultToday = this.todayBs || (document.getElementById('posTaxConfigMeta')?.dataset.todayBs || '').trim();
+        if (this.posBillDateBsInput) {
+            this.posBillDateBsInput.value = defaultToday;
+        }
+        if (this.displayBillDateBs) {
+            this.displayBillDateBs.innerText = defaultToday ? `${defaultToday} BS` : 'Today';
+        }
+        if (this.btnResetTodayDate) {
+            this.btnResetTodayDate.classList.add('d-none');
+        }
+        if (this.customDatePickerWrapper) {
+            this.customDatePickerWrapper.classList.add('d-none');
+        }
+        this.hideDateError();
+        this.closeFloatingCalendarBox();
+    }
+
+    showDateError(msg) {
+        if (this.dateValidationErrorAlert) {
+            this.dateValidationErrorAlert.innerText = msg;
+            this.dateValidationErrorAlert.classList.remove('d-none');
+        } else {
+            alert(msg);
+        }
+    }
+
+    hideDateError() {
+        if (this.dateValidationErrorAlert) {
+            this.dateValidationErrorAlert.innerText = '';
+            this.dateValidationErrorAlert.classList.add('d-none');
+        }
+    }
+
+    deriveBsFiscalYear(bsYear, bsMonth) {
+        if (bsMonth >= 4) {
+            const nextShort = String(bsYear + 1).slice(-2);
+            return `${bsYear}/${nextShort}`;
+        } else {
+            const prevYear = bsYear - 1;
+            const currShort = String(bsYear).slice(-2);
+            return `${prevYear}/${currShort}`;
+        }
+    }
+
+    async promptForSupervisorPin(reason = 'Supervisor PIN required to backdate bill.') {
+        if (this.checkout && typeof this.checkout.promptForManagerPin === 'function') {
+            return await this.checkout.promptForManagerPin(reason);
+        }
+        const pin = prompt(`${reason}\nEnter Supervisor PIN:`);
+        return pin ? pin.trim() : null;
+    }
+
+    async validateAndApplyCustomDate(rawVal) {
+        this.hideDateError();
+        if (!rawVal) {
+            this.showDateError('Please enter or select a valid Bikram Sambat date.');
+            return false;
+        }
+
+        const cleanVal = rawVal.trim().replace(/\//g, '-').replace(/\./g, '-');
+        const parts = cleanVal.split('-').map(Number);
+        if (parts.length !== 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) {
+            this.showDateError('Invalid date format. Expected YYYY-MM-DD (e.g. 2083-06-12).');
+            return false;
+        }
+
+        const [year, month, day] = parts;
+        if (year < 2000 || year > 2095 || month < 1 || month > 12 || day < 1 || day > 32) {
+            this.showDateError('B.S. date components are outside the supported Bikram Sambat calendar range.');
+            return false;
+        }
+
+        const formattedDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const derivedFy = this.deriveBsFiscalYear(year, month);
+
+        if (this.activeFiscalYear && derivedFy !== this.activeFiscalYear) {
+            this.showDateError(`Selected date (${formattedDate}) belongs to Fiscal Year ${derivedFy}. Only transactions within active FY (${this.activeFiscalYear}) are permitted.`);
+            return false;
+        }
+
+        // Supervisor authorization check for cashiers in live mode
+        if (!this.isPrivileged && this.enforceImei && this.todayBs && formattedDate !== this.todayBs) {
+            const pin = await this.promptForSupervisorPin('Supervisor authorization PIN is required to change or backdate the bill date in live counter mode.');
+            if (!pin) {
+                this.showDateError('Date adjustment cancelled: Supervisor authorization was not provided.');
+                return false;
+            }
+            if (this.checkout) {
+                this.checkout.managerPin = pin;
+            }
+        }
+
+        this.setCustomBillDateBs(formattedDate);
+        this.showNotification(`Bill date updated to ${formattedDate} BS (FY ${derivedFy}).`, 'info');
+        return true;
+    }
+
+    /**
+     * Binds the visual Nepali Datepicker with an immediate auto-select onChange handler.
+     */
+    bindNepaliDatePicker() {
+        if (!this.posBillDateBsInput) return;
+
+        if (typeof this.posBillDateBsInput.nepaliDatePicker === 'function') {
+            try {
+                this.posBillDateBsInput.nepaliDatePicker({
+                    ndpYear: true,
+                    ndpMonth: true,
+                    ndpYearCount: 25,
+                    readOnlyInput: false,
+                    dateFormat: 'YYYY-MM-DD',
+                    language: 'english',
+                    onChange: (e) => {
+                        const pickedDate = (e && e.bs) ? e.bs : (this.posBillDateBsInput ? this.posBillDateBsInput.value : '');
+                        if (pickedDate) {
+                            this.validateAndApplyCustomDate(pickedDate);
+                        }
+                    }
+                });
+                this.posBillDateBsInput.dataset.ndpInitialized = 'true';
+            } catch (err) {
+                console.warn('[SmartPOSEngine] Datepicker binding warning:', err);
+            }
+        }
+    }
+
+    toggleDatepickerPopover() {
+        if (!this.customDatePickerWrapper) return;
+        const isHidden = this.customDatePickerWrapper.classList.contains('d-none');
+
+        if (isHidden) {
+            this.customDatePickerWrapper.classList.remove('d-none');
+            this.hideDateError();
+
+            if (this.posBillDateBsInput) {
+                this.bindNepaliDatePicker();
+                this.posBillDateBsInput.focus();
+                this.posBillDateBsInput.select();
+            }
+        } else {
+            this.customDatePickerWrapper.classList.add('d-none');
+            this.hideDateError();
+            this.closeFloatingCalendarBox();
+        }
+    }
+
+    initDateControls() {
+        if (!this.todayBs && this.posBillDateBsInput) {
+            this.todayBs = this.posBillDateBsInput.value.trim();
+        }
+
+        // Initialize datepicker library binding with auto-select
+        this.bindNepaliDatePicker();
+
+        // 1. Entire .bs-date-badge container opens datepicker
+        if (this.btnChangeBillDate && this.customDatePickerWrapper) {
+            this.btnChangeBillDate.addEventListener('click', (e) => {
+                if (e.target.closest('#btnResetTodayDate')) {
+                    return;
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleDatepickerPopover();
+            });
+
+            this.btnChangeBillDate.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    this.toggleDatepickerPopover();
+                }
+            });
+        }
+
+        // 2. Prevent clicks inside popover from bubbling up to document and closing it
+        if (this.customDatePickerWrapper) {
+            this.customDatePickerWrapper.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        }
+
+        // 3. Document click-outside listener to dismiss both white container AND floating calendar
+        document.addEventListener('click', (e) => {
+            const ndpBox = document.getElementById('ndp-nepali-box') || document.querySelector('.ndp-nepali-box');
+            if (this.customDatePickerWrapper && !this.customDatePickerWrapper.classList.contains('d-none')) {
+                const clickedInsideWrapper = this.customDatePickerWrapper.contains(e.target);
+                const clickedOnTrigger = this.btnChangeBillDate && this.btnChangeBillDate.contains(e.target);
+                const clickedInsideNdpBox = ndpBox && ndpBox.contains(e.target);
+
+                if (!clickedInsideWrapper && !clickedOnTrigger && !clickedInsideNdpBox) {
+                    this.customDatePickerWrapper.classList.add('d-none');
+                    this.hideDateError();
+                    this.closeFloatingCalendarBox();
+                }
+            }
+        });
+
+        // 4. Auto-select upon calendar dateSelect, change, or Enter key
+        if (this.posBillDateBsInput) {
+            this.posBillDateBsInput.addEventListener('dateSelect', (e) => {
+                const selectedVal = e.detail?.value || this.posBillDateBsInput.value;
+                if (selectedVal) {
+                    this.validateAndApplyCustomDate(selectedVal);
+                }
+            });
+
+            this.posBillDateBsInput.addEventListener('change', (e) => {
+                const selectedVal = e.target.value;
+                if (selectedVal && /^\d{4}[-/. ]\d{1,2}[-/. ]\d{1,2}$/.test(selectedVal.trim())) {
+                    this.validateAndApplyCustomDate(selectedVal);
+                }
+            });
+
+            this.posBillDateBsInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.validateAndApplyCustomDate(this.posBillDateBsInput.value);
+                } else if (e.key === 'Escape') {
+                    if (this.customDatePickerWrapper) {
+                        this.customDatePickerWrapper.classList.add('d-none');
+                        this.hideDateError();
+                        this.closeFloatingCalendarBox();
+                    }
+                }
+            });
+        }
+
+        // 5. Apply button (preserved for backward compatibility if present in DOM)
+        if (this.btnApplyCustomDate && this.posBillDateBsInput) {
+            this.btnApplyCustomDate.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.validateAndApplyCustomDate(this.posBillDateBsInput.value);
+            });
+        }
+
+        // 6. Cancel button closes both white box and floating calendar
+        if (this.btnCancelCustomDate && this.customDatePickerWrapper) {
+            this.btnCancelCustomDate.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.customDatePickerWrapper.classList.add('d-none');
+                this.hideDateError();
+                this.closeFloatingCalendarBox();
+            });
+        }
+
+        // 7. Reset button
+        if (this.btnResetTodayDate) {
+            this.btnResetTodayDate.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.resetBillDateToToday();
+                this.showNotification('Bill date reset to today.', 'info');
+            });
+        }
     }
 
     bindEvents() {
@@ -2048,17 +2431,12 @@ class SmartPOSEngine {
         });
     }
 
-    // ------------------------------------------------------------------------
-    // Authoritative Modal Initialization Method (openSplitPaymentModal)
-    // ------------------------------------------------------------------------
     openSplitPaymentModal() {
         const modalEl = document.getElementById('splitPaymentModal');
         if (!modalEl || typeof bootstrap === 'undefined') return;
 
-        // 1. Calculate latest cart totals
         const totals = this.cart.recalculateTotals();
 
-        // 2. If cart is empty or grand total is zero, prevent opening and display warning
         if (!this.cart.items || this.cart.items.length === 0 || totals.grandTotal <= 0) {
             this.showNotification('Cannot open Split Payment: Cart is empty or bill total is zero.', 'warning');
             POSAudioSynthesizer.play('error');
@@ -2067,13 +2445,11 @@ class SmartPOSEngine {
 
         this.splitGrandTotal = totals.grandTotal;
 
-        // 3. Target #splitModalPayableTotal and insert formatted grand total string
         const payableEl = document.getElementById('splitModalPayableTotal');
         if (payableEl) {
             payableEl.innerText = formatCurrencyNPR(totals.grandTotal);
         }
 
-        // 4. Reset all payment input boxes and reference/trace ID fields to empty
         const cashInput = document.getElementById('splitCashAmt');
         const creditInput = document.getElementById('splitCreditAmt');
         const fonepayInput = document.getElementById('splitFonepayAmt');
@@ -2100,14 +2476,12 @@ class SmartPOSEngine {
             if (ref) ref.value = '';
         });
 
-        // 5. Set #splitRemainingBalance initially to the full grand total in bold red
         const remBalEl = document.getElementById('splitRemainingBalance');
         if (remBalEl) {
             remBalEl.innerText = formatCurrencyNPR(totals.grandTotal);
             remBalEl.className = 'fs-4 fw-bold text-danger font-mono';
         }
 
-        // 6. Show Modal instance
         const modalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
         modalInstance.show();
 
@@ -2116,9 +2490,6 @@ class SmartPOSEngine {
         }, 300);
     }
 
-    // ------------------------------------------------------------------------
-    // Real-Time Dynamic Input Calculation Listener & Udhaari Auto-Allocation
-    // ------------------------------------------------------------------------
     initSplitModalDynamicCalculations() {
         const modalEl = document.getElementById('splitPaymentModal');
         if (!modalEl) return;
@@ -2166,7 +2537,6 @@ class SmartPOSEngine {
             inp.addEventListener('input', recalculateSplitRemaining);
         });
 
-        // Automatic Udhaari Allocation Helper
         if (creditInput) {
             const allocateRemainingToUdhaari = () => {
                 const currentCreditVal = parseFloat(creditInput.value) || 0;
@@ -2194,7 +2564,6 @@ class SmartPOSEngine {
             creditInput.addEventListener('click', allocateRemainingToUdhaari);
         }
 
-        // Connect Finalize Split Payment Button
         const confirmSplitBtn = document.getElementById('confirmSplitPaymentBtn');
         if (confirmSplitBtn) {
             confirmSplitBtn.addEventListener('click', (e) => {
@@ -2412,6 +2781,12 @@ class SmartPOSEngine {
         const subtotalEl = document.getElementById('recSubtotal');
         const grandEl = document.getElementById('recGrandTotal');
         const payModeEl = document.getElementById('recPayMode');
+        const dateEl = document.getElementById('recBillDate');
+
+        const effectiveBsDate = this.getEffectiveBillDateBs();
+        if (dateEl) {
+            dateEl.innerText = effectiveBsDate ? `${effectiveBsDate} BS` : '';
+        }
 
         if (slipEl) slipEl.innerText = slipNo;
         if (custEl) custEl.innerText = custName;
@@ -2443,7 +2818,15 @@ class SmartPOSEngine {
 // Global initialization
 window.POSEngine = SmartPOSEngine;
 
-document.addEventListener('DOMContentLoaded', () => {
-    window.smartPos = new SmartPOSEngine();
-    window.posEngine = window.smartPos;
-});
+function initializePOS() {
+    if (!window.smartPos) {
+        window.smartPos = new SmartPOSEngine();
+        window.posEngine = window.smartPos;
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializePOS);
+} else {
+    initializePOS();
+}

@@ -5,11 +5,12 @@ Core Architecture & Capabilities:
 1. POSTerminalView:
    - High-speed zero-storage POS billing single page interface.
    - Enforces an active open cash drawer session before accepting transactions.
-   - Supplies comprehensive template context (Bikram Sambat dates, store branding, VAT status, staff permissions).
+   - Supplies comprehensive template context (Bikram Sambat dates, active fiscal year, store branding, VAT status, staff permissions).
 2. POSCheckoutAPIView (Security & Authoritative Discount Engine):
    - Accepts structured checkout payloads from the POS terminal.
    - Idempotency-Key validation preventing double-billing on network lags.
-   - Backdated Nepali Bikram Sambat (B.S.) date extraction and AD synchronization.
+   - Multi-format backdated Nepali Bikram Sambat (B.S.) date extraction and AD calendar synchronization.
+   - Validates that backdated bills fall strictly within the active, open fiscal year (rejecting locked years like 2080/81, 2081/82, 2082/83).
    - Enforces strict server-side validation on dual-mode line and bill discounts.
    - Standardizes error responses with machine-readable error_code across all validation failures.
    - Validates that attached repair tickets have corresponding billing items before marking as delivered.
@@ -73,6 +74,8 @@ from apps.repairs.models import RepairTicket, TechnicianCommissionLog
 from apps.pos.services import POSSessionService
 from apps.core.models import SystemConfiguration, AuditLog
 from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
+from apps.accounting.models import AccountingFiscalYear
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -113,9 +116,15 @@ class POSTerminalView(LoginRequiredMixin, TemplateView):
             bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today_ad)
             current_bs_en = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
             current_bs_np = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='ne')
+            current_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
         except Exception:
             current_bs_en = "2081-01-01"
             current_bs_np = "२०८१-०१-०१"
+            current_fy = "2083/84"
+
+        # Dynamically resolve active open fiscal year from database registry
+        active_fy_obj = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+        active_fiscal_year = active_fy_obj.name if active_fy_obj else current_fy
 
         # Staff role permissions
         user = self.request.user
@@ -144,6 +153,7 @@ class POSTerminalView(LoginRequiredMixin, TemplateView):
             'IS_VAT_MODE': is_vat_mode,
             'CURRENT_BS_DATE_EN': current_bs_en,
             'CURRENT_BS_DATE_NP': current_bs_np,
+            'active_fiscal_year': active_fiscal_year,
             'STORE_OUTLET_NAME': branch.name if branch else "",
             'STORE_OUTLET_CODE': branch.code if branch else "",
             'BILL_HEADER_TITLE': config.bill_header_title,
@@ -168,12 +178,13 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
     Security & Authoritative Processing Flow:
     1. Validates active cash drawer shift session.
     2. Enforces Idempotency-Key validation to prevent duplicate billing on network lags.
-    3. Extracts and sanitizes backdated Bikram Sambat (B.S.) date and synchronizes AD date.
-    4. Normalizes and authoritatively validates line-item and bill discounts.
-    5. Authenticates supervisor override PINs via constant-time verification.
-    6. Validates that attached repair tickets are billed as cart line items before delivery.
-    7. Dispatches structured data to SalesPOSService.process_checkout.
-    8. Returns authoritative financial figures and standardized error codes.
+    3. Multi-format B.S. date extraction and AD calendar synchronization using parse_bs_date_components().
+    4. Validates that backdated bills fall strictly within the active, open fiscal year (rejecting locked years like 2080/81, 2081/82, 2082/83).
+    5. Normalizes and authoritatively validates line-item and bill discounts.
+    6. Authenticates supervisor override PINs via constant-time verification.
+    7. Validates that attached repair tickets are billed as cart line items before delivery.
+    8. Dispatches structured data to SalesPOSService.process_checkout.
+    9. Returns authoritative financial figures and standardized error codes.
     """
 
     @staticmethod
@@ -239,23 +250,54 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
             manager_pin = payload.get('manager_pin', '').strip()
             repair_ticket_id = payload.get('repair_ticket_id')
 
-            # 3. Backdated Bikram Sambat Date Extraction & AD Calendar Synchronization
-            raw_bill_date_bs = str(payload.get('bill_date_bs') or '').strip().replace('/', '-')
+            # 3. Multi-Format Backdated B.S. Date Extraction & Active Fiscal Year Verification
+            raw_bill_date_bs = str(payload.get('bill_date_bs') or '').strip()
             target_date_ad: Optional[date] = None
             target_date_bs: Optional[str] = None
             target_fiscal_year: Optional[str] = None
 
-            if raw_bill_date_bs and re.match(r'^\d{4}-\d{2}-\d{2}$', raw_bill_date_bs):
+            if raw_bill_date_bs:
                 try:
-                    parts = [int(p) for p in raw_bill_date_bs.split('-')]
-                    if len(parts) == 3 and 2080 <= parts[0] <= 2095:
-                        bs_y, bs_m, bs_d = parts
-                        ad_y, ad_m, ad_d = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
-                        target_date_ad = date(ad_y, ad_m, ad_d)
-                        target_date_bs = raw_bill_date_bs
-                        target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+                    # Parses dots (2083.05.18), dashes (2083-05-18), slashes (2083/05/18), and Devanagari numerals
+                    bs_y, bs_m, bs_d = parse_bs_date_components(raw_bill_date_bs)
+                    target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                    target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                    target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                    # Validate against locked / closed historical fiscal years
+                    locked_fy = AccountingFiscalYear.objects.filter(name=target_fiscal_year, is_closed=True).first()
+                    if locked_fy:
+                        active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+                        open_fy_name = active_open_fy.name if active_open_fy else "the current active fiscal year (2083/84)"
+                        if idempotency_key and cache_key:
+                            cache.delete(f"lock_{cache_key}")
+                        return JsonResponse({
+                            'status': 'error',
+                            'error_code': 'CLOSED_FISCAL_YEAR',
+                            'message': (
+                                f"Financial posting rejected: Selected date ({target_date_bs}) belongs to Fiscal Year {target_fiscal_year}, "
+                                f"which is audited and locked. Only transactions within {open_fy_name} are permitted."
+                            )
+                        }, status=400)
+
+                except ValueError as ve:
+                    logger.warning(f"Invalid B.S. date input '{raw_bill_date_bs}': {ve}")
+                    if idempotency_key and cache_key:
+                        cache.delete(f"lock_{cache_key}")
+                    return JsonResponse({
+                        'status': 'error',
+                        'error_code': 'INVALID_BILL_DATE',
+                        'message': f"Invalid Bikram Sambat date format: '{raw_bill_date_bs}'. Expected YYYY-MM-DD or YYYY.MM.DD."
+                    }, status=400)
                 except Exception as ex:
-                    logger.warning(f"Failed to synchronize custom B.S. date '{raw_bill_date_bs}': {ex}")
+                    logger.error(f"Failed to synchronize custom B.S. date '{raw_bill_date_bs}': {ex}", exc_info=True)
+                    if idempotency_key and cache_key:
+                        cache.delete(f"lock_{cache_key}")
+                    return JsonResponse({
+                        'status': 'error',
+                        'error_code': 'DATE_CONVERSION_ERROR',
+                        'message': f"Could not convert Nepali date '{raw_bill_date_bs}' to Gregorian calendar."
+                    }, status=400)
 
             if not cart:
                 if idempotency_key and cache_key:

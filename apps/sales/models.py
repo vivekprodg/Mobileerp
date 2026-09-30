@@ -3,19 +3,18 @@ Sales & POS Billing Module Models: Estimations, Line Items, Split Payments,
 Itemized Sales Returns, and Pre-Owned Trade-In Exchanges.
 
 Key Capabilities:
-1. Historical Integrity (2080 B.S. & Onwards):
-   - bill_date_ad defaults to timezone.now (permits manual historical import dates).
-   - Auto-synchronizes Gregorian AD dates, Bikram Sambat (BS) date strings, and
-     Nepali Fiscal Year identifiers (e.g., '2080/81', '2081/82', '2082/83', '2083/84') in save().
+1. True Bidirectional Historical Date & Fiscal Year Synchronization:
+   - When bill_date_bs is explicitly supplied, it overrides the timezone.now default
+     on bill_date_ad, converts to Gregorian AD, and sets the Nepali Fiscal Year (e.g. 2080/81 to 2083/84).
+   - On updates, detecting a change in either the BS or AD date automatically synchronizes
+     the counterpart date and fiscal year before writing to the database.
 2. Safe IMEI Schema Architecture:
    - imei_number and secondary_imei allow null=True, blank=True at the database level.
-   - Live counter 15-digit IMEI mandate is enforced at the POS service layer for physical phones,
-     allowing historical tax summary records and accessories to save without database errors.
+   - Non-serialized accessories, repair labor, and historical tax sales save without database constraint crashes.
 3. Retail Turnover Accounting Model:
    - grand_total strictly represents the total gross sales turnover of merchandise sold plus applicable taxes.
    - Trade-in buy-back valuation allowance (trade_in_discount_amount) is treated as a tender settlement offset
-     (barter payment) rather than a commercial price reduction, protecting balance sheet inventory assets
-     and statutory revenue metrics from distortion.
+     (barter payment) rather than a commercial price reduction, protecting balance sheet inventory assets.
 4. Fast Counter Lookup & Search Indexes:
    - Composite and single-column indexes on customer_phone_manual, customer_name_manual,
      customer_pan, and branch to optimize real-time POS and return invoice lookups.
@@ -23,18 +22,25 @@ Key Capabilities:
 
 import re
 import uuid
-from decimal import Decimal, ROUND_HALF_UP
+import logging
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import date, datetime
+from typing import Optional, Tuple
+
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.core.exceptions import ValidationError
 
 from apps.core.models import TimeStampedModel
 from apps.branches.models import Branch
 from apps.customers.models import Customer
 from apps.inventory.models import Product, UnitConversion, ItemInstance
 from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # DISCOUNT TYPE CHOICES (NONE, PERCENTAGE, AMOUNT & LEGACY FIXED ALIAS)
@@ -46,6 +52,95 @@ DISCOUNT_TYPE_CHOICES = [
     ('FIXED', _('Fixed Amount [Legacy Alias] (नगद रकम छुट)')),
 ]
 
+
+def sync_nepali_and_ad_dates(
+    instance,
+    ad_field_name: str,
+    bs_field_name: str,
+    fy_field_name: str = 'fiscal_year'
+) -> None:
+    """
+    Ensures strict bidirectional synchronization between Gregorian (AD) and Bikram Sambat (BS) date fields:
+    1. If an existing instance is being updated and bs_field changed -> converts BS to AD, updates FY.
+    2. Else if an existing instance is being updated and ad_field changed -> converts AD to BS, updates FY.
+    3. For new instances (or if neither specifically changed):
+       - If bs_field is provided (non-empty) -> it takes precedence over any model default on ad_field!
+         Converts BS to AD, standardizes BS string to YYYY-MM-DD, and updates FY.
+       - Else if ad_field is provided -> converts AD to BS, standardizes BS string to YYYY-MM-DD, and updates FY.
+    """
+    current_bs = str(getattr(instance, bs_field_name, '') or '').strip()
+    current_ad = getattr(instance, ad_field_name, None)
+    if isinstance(current_ad, datetime):
+        current_ad = current_ad.date()
+
+    # Case A: Check if updating an existing record in the database
+    if instance.pk:
+        try:
+            orig = instance.__class__.objects.filter(pk=instance.pk).values(ad_field_name, bs_field_name).first()
+            if orig:
+                orig_bs = str(orig.get(bs_field_name) or '').strip()
+                orig_ad = orig.get(ad_field_name)
+                if isinstance(orig_ad, datetime):
+                    orig_ad = orig_ad.date()
+
+                bs_changed = bool(current_bs and current_bs != orig_bs)
+                ad_changed = bool(current_ad and current_ad != orig_ad)
+
+                # If BS date was explicitly changed, it takes precedence
+                if bs_changed:
+                    try:
+                        bs_y, bs_m, bs_d = parse_bs_date_components(current_bs)
+                        target_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                        setattr(instance, ad_field_name, target_ad)
+                        setattr(instance, bs_field_name, f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}")
+                        if fy_field_name:
+                            setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
+                        return
+                    except Exception as e:
+                        logger.warning(f"[sync_nepali_and_ad_dates] Could not parse changed BS date '{current_bs}': {e}")
+
+                # If AD date was explicitly changed
+                elif ad_changed:
+                    try:
+                        bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(current_ad)
+                        setattr(instance, ad_field_name, current_ad)
+                        setattr(instance, bs_field_name, f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}")
+                        if fy_field_name:
+                            setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
+                        return
+                    except Exception as e:
+                        logger.warning(f"[sync_nepali_and_ad_dates] Could not convert changed AD date '{current_ad}': {e}")
+        except Exception as e:
+            logger.debug(f"[sync_nepali_and_ad_dates] Checking original instance failed: {e}")
+
+    # Case B: New instance OR baseline synchronization
+    # If BS date was supplied, it MUST override the model default on ad_field!
+    if current_bs:
+        try:
+            bs_y, bs_m, bs_d = parse_bs_date_components(current_bs)
+            target_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+            setattr(instance, ad_field_name, target_ad)
+            setattr(instance, bs_field_name, f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}")
+            if fy_field_name:
+                setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
+            return
+        except Exception as e:
+            logger.warning(f"[sync_nepali_and_ad_dates] Could not parse BS date '{current_bs}': {e}")
+
+    # Fallback to AD date if BS was not provided or failed to parse
+    if current_ad:
+        try:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(current_ad)
+            setattr(instance, ad_field_name, current_ad)
+            setattr(instance, bs_field_name, f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}")
+            if fy_field_name:
+                setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
+        except Exception as e:
+            logger.warning(f"[sync_nepali_and_ad_dates] Could not convert AD date '{current_ad}': {e}")
+
+# =============================================================================
+# 1. SALES ESTIMATE / INVOICE MODEL
+# =============================================================================
 class SalesEstimate(TimeStampedModel):
     """
     Sales Estimation Slip / POS Invoice Header.
@@ -255,29 +350,13 @@ class SalesEstimate(TimeStampedModel):
         if self.bill_discount_type == 'FIXED':
             self.bill_discount_type = 'AMOUNT'
 
-        # Auto-synchronize BS date and Nepali Fiscal Year
-        if self.bill_date_ad:
-            if isinstance(self.bill_date_ad, datetime):
-                ad_date = self.bill_date_ad.date()
-            else:
-                ad_date = self.bill_date_ad
-
-            if not self.bill_date_bs or not self.fiscal_year:
-                try:
-                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
-                    if not self.bill_date_bs:
-                        self.bill_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
-                    if not self.fiscal_year:
-                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
-                except Exception:
-                    pass
-        elif self.bill_date_bs and not self.fiscal_year:
-            try:
-                parts = [int(p) for p in re.findall(r'\d+', str(self.bill_date_bs))]
-                if len(parts) >= 2:
-                    self.fiscal_year = NepaliCalendar.get_fiscal_year(parts[0], parts[1])
-            except Exception:
-                pass
+        # Robust bidirectional date and fiscal year synchronization
+        sync_nepali_and_ad_dates(
+            instance=self,
+            ad_field_name='bill_date_ad',
+            bs_field_name='bill_date_bs',
+            fy_field_name='fiscal_year'
+        )
 
         super().save(*args, **kwargs)
 
@@ -357,6 +436,9 @@ class SalesEstimate(TimeStampedModel):
         """
         return max(Decimal('0.00'), self.grand_total - self.effective_trade_in_tender)
 
+# =============================================================================
+# 2. SALES ESTIMATE ITEM (LINE ITEMS)
+# =============================================================================
 class SalesEstimateItem(TimeStampedModel):
     """
     Line item in sales estimate linked to exact sold IMEI, pricing mode, batch, and warranty card.
@@ -552,6 +634,9 @@ class SalesEstimateItem(TimeStampedModel):
         qty = self.quantity if self.quantity and self.quantity > Decimal('0.000') else Decimal('1.000')
         return (self.item_discount_amount / qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+# =============================================================================
+# 3. SPLIT PAYMENT TRANSACTIONS
+# =============================================================================
 class SalesPaymentTransaction(TimeStampedModel):
     """Split payment recording across Cash, Digital Wallets, Cards, and Udhaari."""
     PAYMENT_MODES = [
@@ -586,6 +671,9 @@ class SalesPaymentTransaction(TimeStampedModel):
     def __str__(self):
         return f"{self.estimate.estimate_number} - {self.payment_mode}: Rs. {self.amount}"
 
+# =============================================================================
+# 4. PHONE EXCHANGE & TRADE-IN VOUCHERS
+# =============================================================================
 class PhoneExchangeTradeIn(TimeStampedModel):
     """
     Second-Hand Phone Buy-Back & Trade-In Exchange Order.
@@ -714,21 +802,13 @@ class PhoneExchangeTradeIn(TimeStampedModel):
         return f"{self.voucher_number} - {self.brand_name} {self.model_name} (Rs. {self.final_trade_in_value}) [{self.status}]"
 
     def save(self, *args, **kwargs):
-        if self.intake_date_ad:
-            if isinstance(self.intake_date_ad, datetime):
-                ad_date = self.intake_date_ad.date()
-            else:
-                ad_date = self.intake_date_ad
-
-            if not self.intake_date_bs or not self.fiscal_year:
-                try:
-                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
-                    if not self.intake_date_bs:
-                        self.intake_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
-                    if not self.fiscal_year:
-                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
-                except Exception:
-                    pass
+        # Robust bidirectional date and fiscal year synchronization
+        sync_nepali_and_ad_dates(
+            instance=self,
+            ad_field_name='intake_date_ad',
+            bs_field_name='intake_date_bs',
+            fy_field_name='fiscal_year'
+        )
         super().save(*args, **kwargs)
 
 class TradeInInspectionChecklist(TimeStampedModel):
@@ -912,10 +992,13 @@ class TradeInLegalUndertaking(TimeStampedModel):
                 pass
         super().save(*args, **kwargs)
 
+# =============================================================================
+# 5. SALES RETURNS (CREDIT NOTES) & RETURN ITEMS
+# =============================================================================
 class SalesReturn(TimeStampedModel):
     """
     Customer sales return or warranty replacement voucher.
-    HISTORICAL INTEGRITY UPDATE: Added return_date_ad, return_date_bs, and fiscal_year.
+    HISTORICAL INTEGRITY: Supported by return_date_ad, return_date_bs, and fiscal_year.
     """
     return_number = models.CharField(max_length=50, unique=True, db_index=True, verbose_name=_("Return Voucher No."))
     original_estimate = models.ForeignKey(
@@ -979,21 +1062,13 @@ class SalesReturn(TimeStampedModel):
         return f"{self.return_number} for {self.original_estimate.estimate_number} (Rs. {self.total_refund_amount})"
 
     def save(self, *args, **kwargs):
-        if self.return_date_ad:
-            if isinstance(self.return_date_ad, datetime):
-                ad_date = self.return_date_ad.date()
-            else:
-                ad_date = self.return_date_ad
-
-            if not self.return_date_bs or not self.fiscal_year:
-                try:
-                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
-                    if not self.return_date_bs:
-                        self.return_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
-                    if not self.fiscal_year:
-                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
-                except Exception:
-                    pass
+        # Robust bidirectional date and fiscal year synchronization
+        sync_nepali_and_ad_dates(
+            instance=self,
+            ad_field_name='return_date_ad',
+            bs_field_name='return_date_bs',
+            fy_field_name='fiscal_year'
+        )
         super().save(*args, **kwargs)
 
 class SalesReturnItem(TimeStampedModel):

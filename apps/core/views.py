@@ -50,7 +50,7 @@ class SystemSettingsView(LoginRequiredMixin, UserPassesTestMixin, View):
     """
     System & Hardware Configuration Controller.
     Allows Store Owners and Superusers to update shop branding, tax parameters,
-    thermal printer width, and the master IMEI enforcement policy switch.
+    thermal printer width, cashier backdating permissions, and master IMEI tracking rules.
     Atomically writes immutable AuditLog records upon policy transitions.
     """
     template_name = 'core/settings.html'
@@ -82,7 +82,10 @@ class SystemSettingsView(LoginRequiredMixin, UserPassesTestMixin, View):
         bill_title = post_data.get('bill_header_title', '').strip()
         bill_disclaimer = post_data.get('bill_estimate_disclaimer', '').strip()
 
-        # Parse enforce_imei_tracking boolean checkbox
+        # Parse operational backdating and master IMEI tracking booleans
+        new_allow_backdating = post_data.get('allow_cashier_backdating') in ['true', 'on', '1', True]
+        prev_allow_backdating = getattr(config, 'allow_cashier_backdating', False)
+
         new_enforce_imei = post_data.get('enforce_imei_tracking') in ['true', 'on', '1', True]
         prev_enforce_imei = config.enforce_imei_tracking
 
@@ -95,11 +98,29 @@ class SystemSettingsView(LoginRequiredMixin, UserPassesTestMixin, View):
         except (InvalidOperation, ValueError, TypeError):
             default_vat_rate = Decimal('0.00')
 
-        # Detect and audit IMEI Policy Change
-        if prev_enforce_imei != new_enforce_imei:
-            policy_state_str = "Strict / Mandatory" if new_enforce_imei else "Relaxed / Backlog Mode"
-            active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
+        # Detect and audit Staff Backdating Policy change
+        if prev_allow_backdating != new_allow_backdating:
+            backdate_policy_str = "Enabled / Unrestricted Backlog Mode" if new_allow_backdating else "Strict / Supervisor PIN Required"
+            AuditLog.objects.create(
+                user=request.user,
+                branch=active_branch,
+                action_type='UPDATE',
+                module='SystemConfiguration',
+                object_repr="Staff Backdating Policy",
+                ip_address=request.META.get('REMOTE_ADDR'),
+                details={
+                    'previous_allow_cashier_backdating': prev_allow_backdating,
+                    'new_allow_cashier_backdating': new_allow_backdating,
+                    'policy_state': backdate_policy_str,
+                    'summary': f"Store owner changed cashier backdating policy to [{backdate_policy_str}]."
+                }
+            )
+
+        # Detect and audit Master IMEI Enforcement Policy change
+        if prev_enforce_imei != new_enforce_imei:
+            imei_policy_str = "Strict / Mandatory Serialized" if new_enforce_imei else "Relaxed / Backlog Mode"
             AuditLog.objects.create(
                 user=request.user,
                 branch=active_branch,
@@ -110,12 +131,12 @@ class SystemSettingsView(LoginRequiredMixin, UserPassesTestMixin, View):
                 details={
                     'previous_enforce_imei': prev_enforce_imei,
                     'new_enforce_imei': new_enforce_imei,
-                    'policy_state': policy_state_str,
-                    'summary': f"Store owner changed IMEI requirement policy to [{policy_state_str}]."
+                    'policy_state': imei_policy_str,
+                    'summary': f"Store owner changed IMEI requirement policy to [{imei_policy_str}]."
                 }
             )
 
-        # Update and save configuration
+        # Update and persist configuration attributes
         config.company_name_en = company_name_en
         config.company_name_np = company_name_np
         config.pan_number = pan_number or None
@@ -123,10 +144,11 @@ class SystemSettingsView(LoginRequiredMixin, UserPassesTestMixin, View):
         config.thermal_printer_paper_width = printer_width
         config.bill_header_title = bill_title or "SALES ESTIMATE SLIP"
         config.bill_estimate_disclaimer = bill_disclaimer
+        config.allow_cashier_backdating = new_allow_backdating
         config.enforce_imei_tracking = new_enforce_imei
         config.save()
 
-        messages.success(request, _("System configuration and IMEI tracking policies updated successfully."))
+        messages.success(request, _("System configuration, cashier backdating, and IMEI tracking policies updated successfully."))
         return redirect('core:settings')
 
 class DashboardHomeView(LoginRequiredMixin, TemplateView):

@@ -21,7 +21,8 @@ class SystemConfiguration(TimeStampedModel):
     Central master parameter singleton governing shop tax registration identity,
     dynamic tax rates, estimate/proforma bill headers, manager discount thresholds,
     NTA MDMS compliance policies, trade-in margin buffers, IMEI enforcement rules,
-    and dedicated Chart of Accounts control ledger bindings for automated journal entries.
+    staff backdating permissions, and dedicated Chart of Accounts control ledger
+    bindings for automated journal entries.
     """
     CACHE_KEY = 'system_configuration_singleton'
 
@@ -106,6 +107,18 @@ class SystemConfiguration(TimeStampedModel):
         choices=[('80mm', '80mm Roll (Standard Thermal POS)'), ('58mm', '58mm Roll (Mini Thermal)'), ('a4', 'Standard A4 Sheet')],
         default='80mm',
         verbose_name=_("Thermal Printer Width")
+    )
+
+    # Staff Backdating Permission (Backlog Mode vs. Strict Live Mode)
+    allow_cashier_backdating = models.BooleanField(
+        default=False,
+        db_index=True,
+        verbose_name=_("Allow Staff / Cashier Backdating (Backlog Mode)"),
+        help_text=_(
+            "When enabled (Backlog Mode), cashiers and counter sales staff can freely backdate bills "
+            "and select historical dates without requiring a Supervisor / Manager Override PIN. "
+            "When disabled (Live Mode), cashiers must provide a Manager PIN to backdate bills."
+        )
     )
 
     # Master IMEI Tracking Enforcement Switch (Backlog vs. Strict Mode)
@@ -290,6 +303,7 @@ class SystemConfiguration(TimeStampedModel):
                 bill_header_title="SALES ESTIMATE SLIP",
                 require_manager_approval_discount=Decimal('10.00'),
                 default_trade_in_margin_percent=Decimal('15.00'),
+                allow_cashier_backdating=False,
                 enforce_imei_tracking=True
             )
         cache.set(cls.CACHE_KEY, obj, timeout=300)

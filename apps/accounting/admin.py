@@ -14,7 +14,6 @@ from apps.accounting.models import (
     JournalEntry, JournalItem, ExpenseVoucher, BankReconciliation, BankStatementLine
 )
 
-
 @admin.register(AccountGroup)
 class AccountGroupAdmin(admin.ModelAdmin):
     list_display = ('code', 'name', 'name_np', 'category', 'nature', 'parent', 'is_system_reserved')
@@ -22,7 +21,6 @@ class AccountGroupAdmin(admin.ModelAdmin):
     search_fields = ('code', 'name', 'name_np')
     ordering = ('code',)
     raw_id_fields = ('parent',)
-
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
@@ -80,13 +78,11 @@ class AccountAdmin(admin.ModelAdmin):
 
         self.message_user(request, f"Successfully recalculated balance for {recalculated} account(s).")
 
-
 class JournalItemInline(admin.TabularInline):
     model = JournalItem
     extra = 0
     fields = ['account', 'debit_amount', 'credit_amount', 'customer', 'supplier', 'line_narration']
     raw_id_fields = ['account', 'customer', 'supplier']
-
 
 @admin.register(JournalEntry)
 class JournalEntryAdmin(admin.ModelAdmin):
@@ -95,15 +91,44 @@ class JournalEntryAdmin(admin.ModelAdmin):
         'branch', 'entry_date', 'entry_date_bs', 'fiscal_year',
         'balance_check', 'status', 'created_by'
     ]
-    list_filter = ['voucher_type', 'source_module', 'status', 'branch', 'fiscal_year']
-    search_fields = ['voucher_number', 'source_id', 'reference_document', 'narration']
+    list_filter = ['voucher_type', 'source_module', 'status', 'branch', 'fiscal_year', 'entry_date']
+    search_fields = ['voucher_number', 'source_id', 'reference_document', 'narration', 'entry_date_bs', 'fiscal_year']
     inlines = [JournalItemInline]
     readonly_fields = [
-        'voucher_number', 'total_debit', 'total_credit',
+        'voucher_number', 'fiscal_year', 'total_debit', 'total_credit',
         'posted_at', 'posted_by', 'created_at', 'updated_at'
     ]
     ordering = ['-entry_date', '-created_at']
     raw_id_fields = ['branch', 'created_by', 'posted_by']
+
+    fieldsets = (
+        (_("Voucher Identification & Dates"), {
+            'description': _(
+                "Updating either Voucher Date (BS) or Voucher Date (AD) will bidirectionally "
+                "recalculate the corresponding date and Nepali Fiscal Year automatically upon saving."
+            ),
+            'fields': (
+                ('voucher_number', 'voucher_type', 'status'),
+                ('branch', 'source_module', 'source_id'),
+                ('entry_date', 'entry_date_bs', 'fiscal_year'),
+                'reference_document',
+                'narration'
+            )
+        }),
+        (_("Financial Balance"), {
+            'fields': (
+                ('total_debit', 'total_credit'),
+                ('posted_by', 'posted_at')
+            )
+        }),
+        (_("Audit Metadata"), {
+            'classes': ('collapse',),
+            'fields': (
+                'created_by',
+                ('created_at', 'updated_at')
+            )
+        })
+    )
 
     def balance_check(self, obj):
         if obj.total_debit == obj.total_credit:
@@ -117,23 +142,46 @@ class JournalEntryAdmin(admin.ModelAdmin):
         )
     balance_check.short_description = _("Balance Equality")
 
-
 @admin.register(ExpenseVoucher)
 class ExpenseVoucherAdmin(admin.ModelAdmin):
     list_display = [
-        'voucher_number', 'branch', 'expense_date', 'expense_date_bs',
+        'voucher_number', 'branch', 'expense_date', 'expense_date_bs', 'fiscal_year',
         'expense_account', 'payment_account', 'amount_display',
         'payee_recipient', 'payment_method'
     ]
-    list_filter = ['payment_method', 'branch', 'expense_account', 'fiscal_year']
-    search_fields = ['voucher_number', 'payee_recipient', 'description', 'bill_invoice_number']
+    list_filter = ['payment_method', 'branch', 'expense_account', 'fiscal_year', 'expense_date']
+    search_fields = ['voucher_number', 'payee_recipient', 'description', 'bill_invoice_number', 'expense_date_bs']
     raw_id_fields = ['branch', 'expense_account', 'payment_account', 'journal_entry', 'recorded_by']
+    readonly_fields = ['fiscal_year', 'created_at', 'updated_at']
     ordering = ['-expense_date', '-created_at']
+
+    fieldsets = (
+        (_("Expense Identification & Dates"), {
+            'description': _(
+                "Updating either Expense Date (BS) or Expense Date (AD) will bidirectionally "
+                "recalculate the corresponding date and Nepali Fiscal Year automatically upon saving."
+            ),
+            'fields': (
+                ('voucher_number', 'branch'),
+                ('expense_date', 'expense_date_bs', 'fiscal_year'),
+                ('expense_account', 'payment_account'),
+                ('amount', 'payment_method'),
+                ('payee_recipient', 'bill_invoice_number'),
+                'description',
+                'receipt_attachment',
+                'journal_entry',
+                'recorded_by'
+            )
+        }),
+        (_("Audit Metadata"), {
+            'classes': ('collapse',),
+            'fields': (('created_at', 'updated_at'),)
+        })
+    )
 
     def amount_display(self, obj):
         return format_html('<strong>Rs. {:,.2f}</strong>', obj.amount)
     amount_display.short_description = _("Amount")
-
 
 @admin.register(AccountingFiscalYear)
 class AccountingFiscalYearAdmin(admin.ModelAdmin):
@@ -183,7 +231,6 @@ class AccountingFiscalYearAdmin(admin.ModelAdmin):
             )
         )
 
-
 @admin.register(FinancialPeriod)
 class FinancialPeriodAdmin(admin.ModelAdmin):
     list_display = ['period_name_en', 'period_name_np', 'fiscal_year', 'period_number', 'start_date_bs', 'end_date_bs', 'is_closed']
@@ -191,12 +238,10 @@ class FinancialPeriodAdmin(admin.ModelAdmin):
     search_fields = ['period_name_en', 'period_name_np']
     raw_id_fields = ['fiscal_year']
 
-
 class BankStatementLineInline(admin.TabularInline):
     model = BankStatementLine
     extra = 0
     raw_id_fields = ['matched_journal_item']
-
 
 @admin.register(BankReconciliation)
 class BankReconciliationAdmin(admin.ModelAdmin):
@@ -205,10 +250,9 @@ class BankReconciliationAdmin(admin.ModelAdmin):
         'statement_ending_balance', 'gl_book_balance', 'difference', 'status'
     ]
     list_filter = ['status', 'branch', 'bank_account']
-    search_fields = ['bank_account__name', 'notes']
+    search_fields = ['bank_account__name', 'notes', 'statement_date_bs']
     raw_id_fields = ['bank_account', 'branch', 'reconciled_by']
     inlines = [BankStatementLineInline]
-
 
 @admin.register(BankStatementLine)
 class BankStatementLineAdmin(admin.ModelAdmin):

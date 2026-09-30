@@ -6,17 +6,21 @@ Capabilities:
    - Supports official Nepali Fiscal Years (e.g., '2080/81', '2081/82', '2082/83', '2083/84').
    - Converts Bikram Sambat (BS) date inputs into Gregorian (AD) dates for database indexing.
    - Accurately resolves Shrawan 1 to dynamic Ashadh end (30, 31, or 32 days).
-2. Dynamic Historical Opening Balance Calculator:
+2. Clean Date Boundary Resolution:
+   - Avoids silent fallbacks to today's date when an earlier month or historical period within
+     the fiscal year is queried.
+   - Padded two-digit normalization for B.S. months and days.
+3. Dynamic Historical Opening Balance Calculator:
    - Reconstructs exact opening balance as of the start date by summing all transactions
      posted prior to that date (including the Mobilesoft/Hisaav migration opening journals).
    - Customer (Trade Debtor / Dr Normal): Opening Bal = Total Prior Debits - Total Prior Credits.
    - Supplier (Trade Creditor / Cr Normal): Opening Bal = Total Prior Credits - Total Prior Debits.
-3. Chronological Period Ledger Aggregation:
+4. Chronological Period Ledger Aggregation:
    - Queries posted double-entry journal items filtered strictly to party control accounts
      (excluding internal counter cash/bank lines to prevent voucher double-counting).
-4. Sequential Running Balance Math:
+5. Sequential Running Balance Math:
    - Calculates line-by-line running balance with debit/credit turnover summaries.
-5. Formal Audit Confirmation Package:
+6. Formal Audit Confirmation Package:
    - Returns party details, PAN, dates, ledger lines, closing balance, and legal confirmation text.
 """
 
@@ -34,7 +38,11 @@ from apps.customers.models import Customer
 from apps.purchases.models import Supplier
 from apps.branches.models import Branch
 from apps.core.nepali_calendar import NepaliCalendar
-from apps.core.utils.nepali_date_converter import ad_to_bs_string
+from apps.core.utils.nepali_date_converter import (
+    parse_bs_date_components,
+    parse_bs_date_to_ad,
+    ad_to_bs_string
+)
 
 def number_to_words_nepali_format(amount: Decimal) -> str:
     """
@@ -43,7 +51,7 @@ def number_to_words_nepali_format(amount: Decimal) -> str:
     Example: 150250.75 -> 'Rupees One Lakh Fifty Thousand Two Hundred Fifty and Seventy Five Paisa Only'
     """
     if amount is None:
-        return "Zero"
+        return "Zero Rupees Only"
 
     units = [
         "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
@@ -133,33 +141,41 @@ class PartyLedgerService:
     @classmethod
     def _parse_date_input(cls, raw_val: Any) -> Optional[Tuple[date, str]]:
         """
-        Parses arbitrary date strings in either Gregorian AD or Nepali BS (YYYY-MM-DD or YYYY.MM.DD)
-        and returns a clean (ad_date, bs_date_string) tuple.
+        Parses arbitrary date strings in either Gregorian AD or Nepali BS (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD)
+        with single or double-digit month/day padding.
+        Returns a clean (ad_date, bs_date_string) tuple or None if unparseable.
         """
         if not raw_val:
             return None
 
-        clean = re.sub(r'[^\d]', '-', str(raw_val).strip())
-        parts = [int(p) for p in clean.split('-') if p]
-        if len(parts) != 3:
+        if isinstance(raw_val, datetime):
+            raw_val = raw_val.date()
+        if isinstance(raw_val, date):
+            ad_d = raw_val
+            y, m, d = NepaliCalendar.ad_to_bs(ad_d)
+            return ad_d, f"{y:04d}-{m:02d}-{d:02d}"
+
+        raw_str = str(raw_val).strip()
+        if not raw_str or raw_str.lower() in ['none', 'nan', 'null', '-', '--']:
             return None
 
-        # BS format: YYYY-MM-DD (e.g. 2080-04-01)
-        if 2000 <= parts[0] <= 2095:
-            bs_y, bs_m, bs_d = parts[0], parts[1], parts[2]
-            bs_m = max(1, min(12, bs_m))
-            max_d = NepaliCalendar.get_days_in_month(bs_y, bs_m)
-            bs_d = max(1, min(max_d, bs_d))
+        # 1. Try B.S. Date Parsing
+        try:
+            bs_y, bs_m, bs_d = parse_bs_date_components(raw_str)
             ad_d = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
             bs_str = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
             return ad_d, bs_str
+        except Exception:
+            pass
 
-        # AD format: YYYY-MM-DD (e.g. 2023-07-17)
-        if 1970 <= parts[0] <= 2050:
+        # 2. Try Gregorian AD Date Parsing (YYYY-MM-DD or YYYY/MM/DD)
+        clean = re.sub(r'[^\d]', '-', raw_str)
+        parts = [int(p) for p in clean.split('-') if p]
+        if len(parts) == 3 and 1970 <= parts[0] <= 2050:
             try:
                 ad_d = date(parts[0], parts[1], parts[2])
                 y, m, d = NepaliCalendar.ad_to_bs(ad_d)
-                bs_str = NepaliCalendar.format_bs(y, m, d, lang='en')
+                bs_str = f"{y:04d}-{m:02d}-{d:02d}"
                 return ad_d, bs_str
             except (ValueError, TypeError):
                 return None
@@ -171,12 +187,58 @@ class PartyLedgerService:
         """
         Resolves query parameters into standardized date bounds:
         Returns: (start_date_ad, end_date_ad, start_date_bs, end_date_bs, fiscal_year_label)
+
+        Strictness Rules:
+        - When custom dates are supplied within an earlier month or historical fiscal year,
+          the end_date strictly respects that requested period and NEVER silently leaps forward to today!
+        - If a fiscal year preset is chosen, the entire range of that fiscal year is returned.
+        - If no parameters are given, defaults to the ongoing active fiscal year.
         """
         fy_param = str(params.get('fiscal_year') or '').strip()
         start_param = str(params.get('start_date') or '').strip()
         end_param = str(params.get('end_date') or '').strip()
 
-        # Case 1: Fiscal Year preset selected
+        parsed_start = cls._parse_date_input(start_param) if start_param else None
+        parsed_end = cls._parse_date_input(end_param) if end_param else None
+
+        # Case 1: Both Start and End Custom Dates are Explicitly Provided
+        if parsed_start and parsed_end:
+            start_ad, start_bs = parsed_start
+            end_ad, end_bs = parsed_end
+
+            if start_ad > end_ad:
+                start_ad, end_ad = end_ad, start_ad
+                start_bs, end_bs = end_bs, start_bs
+
+            bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(start_ad)
+            resolved_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            return start_ad, end_ad, start_bs, end_bs, resolved_fy
+
+        # Case 2: Only Start Date is Provided -> Scope to that Month or Fiscal Year
+        if parsed_start and not parsed_end:
+            start_ad, start_bs = parsed_start
+            bs_y, bs_m, bs_d = parse_bs_date_components(start_bs)
+            resolved_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+            # End of that specific B.S. month
+            max_days = NepaliCalendar.get_days_in_month(bs_y, bs_m)
+            end_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, max_days)
+            end_bs = f"{bs_y:04d}-{bs_m:02d}-{max_days:02d}"
+
+            return start_ad, end_ad, start_bs, end_bs, resolved_fy
+
+        # Case 3: Only End Date is Provided -> Scope from Month Start to End Date
+        if parsed_end and not parsed_start:
+            end_ad, end_bs = parsed_end
+            bs_y, bs_m, bs_d = parse_bs_date_components(end_bs)
+            resolved_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+            start_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, 1)
+            start_bs = f"{bs_y:04d}-{bs_m:02d}-01"
+
+            return start_ad, end_ad, start_bs, end_bs, resolved_fy
+
+        # Case 4: Fiscal Year Preset Selected
         if fy_param and fy_param.lower() not in ['all', 'none', '']:
             clean_fy = fy_param.replace('-', '/').strip()
             try:
@@ -185,45 +247,20 @@ class PartyLedgerService:
             except Exception:
                 pass
 
-        # Case 2: Custom date range inputs
-        start_ad, start_bs = None, ""
-        end_ad, end_bs = None, ""
-
-        if start_param:
-            parsed = cls._parse_date_input(start_param)
-            if parsed:
-                start_ad, start_bs = parsed
-
-        if end_param:
-            parsed = cls._parse_date_input(end_param)
-            if parsed:
-                end_ad, end_bs = parsed
-
+        # Case 5: Default Fallback -> Active Fiscal Year
         today = timezone.now().date()
         today_y, today_m, today_d = NepaliCalendar.ad_to_bs(today)
+        curr_fy = NepaliCalendar.get_fiscal_year(today_y, today_m)
 
-        if not start_ad or not end_ad:
-            # Fallback to current fiscal year
-            curr_fy = NepaliCalendar.get_fiscal_year(today_y, today_m)
-            try:
-                s_ad, e_ad, s_bs, e_bs = NepaliCalendar.get_fiscal_year_range(curr_fy)
-                start_ad = start_ad or s_ad
-                end_ad = end_ad or today
-                start_bs = start_bs or s_bs
-                end_bs = end_bs or NepaliCalendar.format_bs(today_y, today_m, today_d, lang='en')
-                return start_ad, end_ad, start_bs, end_bs, curr_fy
-            except Exception:
-                start_ad = start_ad or date(today.year, 1, 1)
-                end_ad = end_ad or today
-
-        if start_ad > end_ad:
-            start_ad, end_ad = end_ad, start_ad
-            start_bs, end_bs = end_bs, start_bs
-
-        s_y, s_m, _ = NepaliCalendar.ad_to_bs(start_ad)
-        resolved_fy = NepaliCalendar.get_fiscal_year(s_y, s_m)
-
-        return start_ad, end_ad, start_bs, end_bs, resolved_fy
+        try:
+            s_ad, e_ad, s_bs, e_bs = NepaliCalendar.get_fiscal_year_range(curr_fy)
+            return s_ad, e_ad, s_bs, e_bs, curr_fy
+        except Exception:
+            start_ad = date(today.year, 1, 1)
+            end_ad = today
+            sy, sm, sd = NepaliCalendar.ad_to_bs(start_ad)
+            ey, em, ed = NepaliCalendar.ad_to_bs(end_ad)
+            return start_ad, end_ad, f"{sy:04d}-{sm:02d}-{sd:02d}", f"{ey:04d}-{em:02d}-{ed:02d}", curr_fy
 
     @classmethod
     def get_party_ledger_statement(
@@ -264,8 +301,6 @@ class PartyLedgerService:
             control_tag = 'ACCOUNTS_PAYABLE'
 
         # 2. Base QuerySet Scoped to the Specific Party Control Lines
-        # Exclude counter payment lines (Cash/Bank) that may carry the party FK
-        # to ensure atomic double-entry line isolation
         base_items = JournalItem.objects.filter(
             journal_entry__status='POSTED'
         ).select_related('journal_entry', 'account', 'journal_entry__branch')
@@ -286,7 +321,6 @@ class PartyLedgerService:
             scoped_items = scoped_items.filter(journal_entry__branch=branch)
 
         # 3. Dynamic Opening Balance Calculation (Prior to start_date_ad)
-        # Sums all prior historical debits and credits from day 1 up to start_date_ad - 1
         prior_agg = scoped_items.filter(
             journal_entry__entry_date__lt=start_date_ad
         ).aggregate(

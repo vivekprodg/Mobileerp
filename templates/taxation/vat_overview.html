@@ -1,10 +1,58 @@
 {% extends "core/base.html" %}
-{% load humanize %}
+{% load humanize static %}
 
-{% block title %}Taxation & Estimation Overview | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+{% block title %}Taxation &amp; Estimation Overview | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.tax-nav-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.tax-nav-pill:hover, .tax-nav-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+.preview-mini-table td, .preview-mini-table th {
+    padding: 8px 10px;
+    font-size: 0.78rem;
+    vertical-align: middle;
+}
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+
+    <!-- Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:</span>
+        <a href="{% url 'taxation:dashboard' %}" class="tax-nav-pill active text-nowrap">
+            <i class="fas fa-chart-pie text-white"></i> VAT Overview
+        </a>
+        <a href="{% url 'taxation:daily_vat_report' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-day text-secondary"></i> Day-Wise VAT Ledger
+        </a>
+        <a href="{% url 'taxation:sales_register' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-book-open text-secondary"></i> Sales Book (Annex 5)
+        </a>
+        <a href="{% url 'taxation:purchase_register' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-truck-ramp-box text-secondary"></i> Purchase Book (Annex 7)
+        </a>
+    </div>
+
     <!-- Collapsible Non-IRD Disclaimer Banner -->
     <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 shadow-sm">
         <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
@@ -32,13 +80,17 @@
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
             <h4 class="fw-bold text-dark mb-0">
-                <i class="fas fa-calculator text-primary me-2"></i> Taxation & Proforma Register Overview
+                <i class="fas fa-calculator text-primary me-2"></i> Taxation &amp; Proforma Register Overview
             </h4>
             <p class="text-muted fs-xs mb-0">
-                Monthly Bikram Sambat tax estimation summaries, Annex 5 sales book, and Annex 7 purchase registers
+                Monthly Bikram Sambat tax estimation summaries, Annex 5 sales book, Annex 7 purchase registers, and Day-Wise VAT ledgers
             </p>
         </div>
         <div class="d-flex flex-wrap gap-2">
+            <!-- Dedicated Day-Wise VAT Ledger Action Pill -->
+            <a href="{% url 'taxation:daily_vat_report' %}" class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs">
+                <i class="fas fa-calendar-days me-1"></i> Day-Wise VAT Ledger &rarr;
+            </a>
             <a href="{% url 'taxation:sales_register' %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
                 <i class="fas fa-book-open me-1"></i> Sales Book (Annex 5)
             </a>
@@ -93,7 +145,7 @@
 
         <!-- 3. Net Tax Assessment -->
         <div class="col-12 col-md-4">
-            <div class="card p-4 border-0 shadow-sm rounded-4 bg-white border-start border-dark border-4 h-100">
+            <div class="card p-4 border-0 shadow-sm rounded-4 bg-white border-start {% if net_vat > 0 %}border-danger{% elif net_vat < 0 %}border-success{% else %}border-dark{% endif %} border-4 h-100">
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="text-muted fs-xs text-uppercase fw-bold">
                         {% if IS_VAT_MODE %}Net VAT Assessment (Payable){% else %}Net Operating Turnover{% endif %}
@@ -103,14 +155,82 @@
                        data-bs-placement="top" 
                        title="{% if IS_VAT_MODE %}Calculated as (Output VAT from Sales minus Input VAT from Purchases).{% else %}PAN stores operate with 0% VAT.{% endif %}"></i>
                 </div>
-                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                <h3 class="fw-extrabold {% if net_vat > 0 %}text-danger{% elif net_vat < 0 %}text-success{% else %}text-dark{% endif %} font-monospace mt-2 mb-0">
                     {% if IS_VAT_MODE %}Rs. {{ net_vat|floatformat:2|intcomma }}{% else %}Rs. 0.00 (Exempt / PAN){% endif %}
                 </h3>
-                <small class="text-muted fs-xs mt-1 d-block">
-                    {% if IS_VAT_MODE %}Output VAT minus Input VAT{% else %}PAN store does not calculate VAT{% endif %}
+                <small class="fs-xs mt-1 d-block fw-bold {% if net_vat > 0 %}text-danger{% elif net_vat < 0 %}text-success{% else %}text-muted{% endif %}">
+                    {% if IS_VAT_MODE %}
+                        {% if net_vat > 0 %}
+                            <i class="fas fa-arrow-up me-1"></i> Net Tax Liability Payable to Government
+                        {% elif net_vat < 0 %}
+                            <i class="fas fa-arrow-down me-1"></i> Input Tax Credit Claimable
+                        {% else %}
+                            Balanced (Rs. 0.00)
+                        {% endif %}
+                    {% else %}
+                        PAN store does not calculate VAT
+                    {% endif %}
                 </small>
             </div>
         </div>
     </div>
+
+    <!-- Recent Day-Wise VAT Movements Preview Section -->
+    {% if recent_daily_preview %}
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <div>
+                <h6 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-calendar-days text-primary me-2"></i> Recent Daily VAT Movements &amp; Running Liability Preview
+                </h6>
+                <small class="text-muted fs-2xs">Latest chronological tax movements for the current period</small>
+            </div>
+            <a href="{% url 'taxation:daily_vat_report' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                View Full Day-Wise Ledger &rarr;
+            </a>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 preview-mini-table">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
+                    <tr>
+                        <th class="ps-3">Nepali Date (B.S.)</th>
+                        <th>Date (A.D.)</th>
+                        <th class="text-end">Sales Output VAT</th>
+                        <th class="text-end">Purchases Input VAT</th>
+                        <th class="text-end">Daily Net Tax</th>
+                        <th class="text-center">Daily Status</th>
+                        <th class="text-end pe-3">Running Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in recent_daily_preview %}
+                    <tr>
+                        <td class="ps-3 font-monospace fw-bold text-primary">{{ row.date_bs }} BS</td>
+                        <td class="text-muted font-monospace fs-2xs">{{ row.date_ad_str }} ({{ row.day_name }})</td>
+                        <td class="text-end font-monospace fw-bold text-dark">Rs. {{ row.sales_vat|floatformat:2|intcomma }}</td>
+                        <td class="text-end font-monospace fw-bold text-success">Rs. {{ row.purchase_vat|floatformat:2|intcomma }}</td>
+                        <td class="text-end font-monospace fw-extrabold {% if row.is_daily_payable %}text-danger{% elif row.is_daily_credit %}text-success{% else %}text-muted{% endif %}">
+                            Rs. {{ row.daily_net_vat|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-center">
+                            {% if row.is_daily_payable %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-3xs">Payable</span>
+                            {% elif row.is_daily_credit %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs">Credit</span>
+                            {% else %}
+                                <span class="badge bg-light text-muted border fs-3xs">Balanced</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end pe-3 font-monospace fw-bold {% if row.is_cumulative_payable %}text-danger{% elif row.is_cumulative_credit %}text-success{% else %}text-dark{% endif %}">
+                            Rs. {{ row.cumulative_balance|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
 </div>
 {% endblock %}

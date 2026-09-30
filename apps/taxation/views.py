@@ -1,5 +1,5 @@
 """
-Taxation & Proforma Register Overview Views (Annex 5 Sales Book & Annex 7 Purchase Book).
+Taxation & Proforma Register Overview Views (Annex 5 Sales Book, Annex 7 Purchase Book & Day-Wise VAT Ledger).
 
 Capabilities:
 1. Multi-Calendar Date & Fiscal Year Engine:
@@ -11,19 +11,19 @@ Capabilities:
    - Supports custom date range queries in both Gregorian AD and Nepali BS.
 2. TaxDashboardView:
    - Displays period VAT summaries for output tax (sales) and input tax (purchases) along with net assessment.
-   - Supports switching period view mode ('month' vs. 'fiscal_year' vs. 'custom').
+   - Includes a 7-day recent tax movement preview with direct link to the Day-Wise VAT Ledger.
 3. SalesRegisterReportView:
-   - Generates the Internal Sales Register (बिक्री खाता - Annex 5 format) for any selected BS month or full Fiscal Year.
-   - Reconciles taxable base, non-taxable base, output VAT, and credit adjustments from customer sales returns.
-   - Offers 1-click CSV export with formula injection protection.
+   - Generates the Internal Sales Register (बिक्री खाता - Annex 5 format) with CSV export.
 4. PurchaseRegisterReportView:
-   - Generates the Commercial Purchase Register (खरिद खाता - Annex 7 format) for any selected BS month or full Fiscal Year.
-   - Retrieves full commercial metrics: gross subtotal, trade discounts, input VAT, shipping/customs overheads,
-     total landed inventory costs, net payable amounts, spot cash paid, and supplier ledger debt balances.
-   - Offers 1-click CSV and styled Excel export options.
+   - Generates the Commercial Purchase Register (खरिद खाता - Annex 7 format) with CSV/Excel exports.
+5. DailyVatReportView:
+   - Chronological Day-Wise Combined VAT & Tax Assessment Ledger.
+   - Merges daily sales output VAT and purchase input VAT with running cumulative liability balances.
+   - Supports 1-click formula-safe CSV and styled Excel spreadsheet exports.
 """
 
 import csv
+import io
 import re
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -43,15 +43,13 @@ from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
 from apps.reports.exports import CSVExportEngine, sanitize_csv_row
 
-
 # ==============================================================================
 # PERIOD & FISCAL YEAR RESOLUTION HELPERS
 # ==============================================================================
-
 def get_available_fiscal_years() -> List[str]:
     """
     Returns standard list of relevant Nepali Fiscal Years for selection dropdowns.
-    e.g., ['2082/83', '2081/82', '2080/81', '2079/80', '2078/79']
+    e.g., ['2083/84', '2082/83', '2081/82', '2080/81', '2079/80', '2078/79']
     """
     today_ad = timezone.now().date()
     current_bs_y, current_bs_m, _ = NepaliCalendar.ad_to_bs(today_ad)
@@ -63,7 +61,6 @@ def get_available_fiscal_years() -> List[str]:
         fys.append(current_fy)
     fys.sort(reverse=True)
     return fys
-
 
 def get_available_nepali_months() -> List[Dict[str, Any]]:
     """
@@ -77,7 +74,6 @@ def get_available_nepali_months() -> List[Dict[str, Any]]:
         }
         for i in range(12)
     ]
-
 
 def parse_flexible_date(val_str: str) -> Optional[Tuple[date, str]]:
     """
@@ -124,7 +120,6 @@ def parse_flexible_date(val_str: str) -> Optional[Tuple[date, str]]:
 
     return None
 
-
 def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
     """
     Central date & fiscal period resolution engine for taxation registers.
@@ -149,7 +144,6 @@ def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
     start_param = str(raw_params.get('start_date') or raw_params.get('start_date_bs') or '').strip()
     end_param = str(raw_params.get('end_date') or raw_params.get('end_date_bs') or '').strip()
 
-    # Determine view mode if not explicitly stated
     if not view_mode:
         if fy_param and not bs_month_param and not start_param and not end_param:
             view_mode = 'fiscal_year'
@@ -264,16 +258,14 @@ def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
         'period_label': period_label,
     }
 
-
 # ==============================================================================
-# 1. TAX DASHBOARD VIEW
+# 1. TAX DASHBOARD VIEW (WITH RECENT 7-DAY PREVIEW INTEGRATION)
 # ==============================================================================
-
 class TaxDashboardView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
     """
     Taxation & VAT Overview Dashboard.
-    Supports seamless toggling between a single BS month (e.g. Ashadh)
-    and an entire Nepali Fiscal Year (e.g. 2080/81, 2081/82).
+    Supports seamless toggling between a single BS month and an entire Nepali Fiscal Year,
+    providing high-level KPI cards and a 7-day preview of the Day-Wise VAT Ledger.
     """
     template_name = 'taxation/vat_overview.html'
 
@@ -293,35 +285,24 @@ class TaxDashboardView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
             if b_match:
                 active_branch = b_match
 
-        # 2. Resolve Period (Month vs Full Fiscal Year vs Custom Range)
+        # 2. Resolve Period
         period_ctx = resolve_taxation_period(self.request.GET)
         start_date = period_ctx['start_date']
         end_date = period_ctx['end_date']
 
-        # 3. Initialize Fallback Summaries
         sales_summary = {
-            'taxable': Decimal('0.00'),
-            'non_taxable': Decimal('0.00'),
-            'vat': Decimal('0.00'),
-            'grand_total': Decimal('0.00'),
-            'total_refunds': Decimal('0.00')
+            'taxable': Decimal('0.00'), 'non_taxable': Decimal('0.00'),
+            'vat': Decimal('0.00'), 'grand_total': Decimal('0.00'), 'total_refunds': Decimal('0.00')
         }
         purchase_summary = {
-            'gross': Decimal('0.00'),
-            'discount': Decimal('0.00'),
-            'vat': Decimal('0.00'),
-            'freight': Decimal('0.00'),
-            'customs': Decimal('0.00'),
-            'handling': Decimal('0.00'),
-            'overheads': Decimal('0.00'),
-            'landed': Decimal('0.00'),
-            'net': Decimal('0.00'),
-            'paid': Decimal('0.00'),
-            'due': Decimal('0.00')
+            'gross': Decimal('0.00'), 'discount': Decimal('0.00'), 'vat': Decimal('0.00'),
+            'freight': Decimal('0.00'), 'customs': Decimal('0.00'), 'handling': Decimal('0.00'),
+            'overheads': Decimal('0.00'), 'landed': Decimal('0.00'), 'net': Decimal('0.00'),
+            'paid': Decimal('0.00'), 'due': Decimal('0.00')
         }
         net_vat = Decimal('0.00')
+        recent_daily_preview = []
 
-        # 4. Generate Reports
         if active_branch:
             sales_data = TaxationReportGenerator.generate_sales_book(active_branch, start_date, end_date)
             purchase_data = TaxationReportGenerator.generate_purchase_book(active_branch, start_date, end_date)
@@ -330,28 +311,28 @@ class TaxDashboardView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
             purchase_summary = purchase_data.get('totals', purchase_summary)
             net_vat = sales_summary.get('vat', Decimal('0.00')) - purchase_summary.get('vat', Decimal('0.00'))
 
-        # 5. Populate Context
+            # Retrieve preview rows for the current period
+            daily_data = TaxationReportGenerator.generate_daily_vat_ledger(active_branch, start_date, end_date)
+            recent_daily_preview = daily_data.get('daily_rows', [])[-7:]
+
         context.update({
             'branch': active_branch,
             'branches': Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
             'sales_summary': sales_summary,
             'purchase_summary': purchase_summary,
             'net_vat': net_vat,
+            'recent_daily_preview': recent_daily_preview,
             'config': SystemConfiguration.get_solo(),
             **period_ctx,
         })
         return NonIRDDisclaimerEngine.inject_disclaimer(context)
 
-
 # ==============================================================================
 # 2. INTERNAL SALES REGISTER VIEW (ANNEX 5 FORMAT)
 # ==============================================================================
-
 class SalesRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
     """
     Internal Sales Register (बिक्री खाता - Annex 5 format).
-    Enables toggling between a single BS month or an entire Nepali Fiscal Year,
-    accurately deducting credit adjustments from customer returns.
     """
     template_name = 'taxation/sales_vat_register.html'
 
@@ -363,7 +344,6 @@ class SalesRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, TemplateV
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        # 1. Resolve Branch Scope
         active_branch = getattr(self.request, 'active_branch', None) or Branch.get_default_main_branch()
         branch_id = self.request.GET.get('branch')
         if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
@@ -371,7 +351,6 @@ class SalesRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, TemplateV
             if b_match:
                 active_branch = b_match
 
-        # 2. Resolve Period (Month vs Full Fiscal Year vs Custom Range)
         period_ctx = resolve_taxation_period(self.request.GET)
         start_date = period_ctx['start_date']
         end_date = period_ctx['end_date']
@@ -380,18 +359,14 @@ class SalesRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, TemplateV
             'records': [],
             'is_vat_shop': (SystemConfiguration.get_solo().tax_system_mode == 'VAT'),
             'totals': {
-                'taxable': Decimal('0.00'),
-                'non_taxable': Decimal('0.00'),
-                'vat': Decimal('0.00'),
-                'grand_total': Decimal('0.00'),
-                'total_refunds': Decimal('0.00'),
+                'taxable': Decimal('0.00'), 'non_taxable': Decimal('0.00'),
+                'vat': Decimal('0.00'), 'grand_total': Decimal('0.00'), 'total_refunds': Decimal('0.00'),
             }
         }
 
         if active_branch:
             report_data = TaxationReportGenerator.generate_sales_book(active_branch, start_date, end_date)
 
-        # 3. Handle CSV Export if requested
         if self.request.GET.get('export', '').strip().lower() == 'csv':
             response = HttpResponse(content_type='text/csv; charset=utf-8')
             filename = f"Sales_Register_Annex5_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.csv"
@@ -439,16 +414,12 @@ class SalesRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, TemplateV
         })
         return NonIRDDisclaimerEngine.inject_disclaimer(context)
 
-
 # ==============================================================================
 # 3. COMMERCIAL PURCHASE REGISTER VIEW (ANNEX 7 FORMAT)
 # ==============================================================================
-
 class PurchaseRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
     """
     Commercial Purchase Register (खरिद खाता - Annex 7 format).
-    Enables inspecting inward purchases across any single BS month or full Fiscal Year
-    with complete trade discounts, input VAT, shipping overheads, landed costs, and supplier payables.
     """
     template_name = 'taxation/purchase_vat_register.html'
 
@@ -460,7 +431,6 @@ class PurchaseRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, Templa
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        # 1. Resolve Branch Scope
         active_branch = getattr(self.request, 'active_branch', None) or Branch.get_default_main_branch()
         branch_id = self.request.GET.get('branch')
         if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
@@ -468,7 +438,6 @@ class PurchaseRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, Templa
             if b_match:
                 active_branch = b_match
 
-        # 2. Resolve Period (Month vs Full Fiscal Year vs Custom Range)
         period_ctx = resolve_taxation_period(self.request.GET)
         start_date = period_ctx['start_date']
         end_date = period_ctx['end_date']
@@ -476,24 +445,16 @@ class PurchaseRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, Templa
         report_data = {
             'records': [],
             'totals': {
-                'gross': Decimal('0.00'),
-                'discount': Decimal('0.00'),
-                'vat': Decimal('0.00'),
-                'freight': Decimal('0.00'),
-                'customs': Decimal('0.00'),
-                'handling': Decimal('0.00'),
-                'overheads': Decimal('0.00'),
-                'landed': Decimal('0.00'),
-                'net': Decimal('0.00'),
-                'paid': Decimal('0.00'),
-                'due': Decimal('0.00'),
+                'gross': Decimal('0.00'), 'discount': Decimal('0.00'), 'vat': Decimal('0.00'),
+                'freight': Decimal('0.00'), 'customs': Decimal('0.00'), 'handling': Decimal('0.00'),
+                'overheads': Decimal('0.00'), 'landed': Decimal('0.00'), 'net': Decimal('0.00'),
+                'paid': Decimal('0.00'), 'due': Decimal('0.00'),
             }
         }
 
         if active_branch:
             report_data = TaxationReportGenerator.generate_purchase_book(active_branch, start_date, end_date)
 
-        # Build dual-compatible totals dictionary supporting both key naming conventions
         raw_totals = report_data.get('totals', {})
         totals_context = {
             **raw_totals,
@@ -513,7 +474,6 @@ class PurchaseRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, Templa
         report_data['totals'].update(totals_context)
         records_context = report_data.get('records', [])
 
-        # 3. Handle File Exports
         export_mode = self.request.GET.get('export', '').strip().lower()
         if export_mode == 'csv':
             return CSVExportEngine.export_purchase_register_csv(
@@ -540,3 +500,263 @@ class PurchaseRegisterReportView(LoginRequiredMixin, UserPassesTestMixin, Templa
             **period_ctx,
         })
         return NonIRDDisclaimerEngine.inject_disclaimer(context)
+
+# ==============================================================================
+# 4. CHRONOLOGICAL DAY-WISE VAT & TAX ASSESSMENT LEDGER VIEW
+# ==============================================================================
+class DailyVatReportView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
+    """
+    Day-Wise VAT Ledger & Tax Assessment View.
+    Combines daily sales output VAT with purchase input VAT, computes daily net settlement,
+    and maintains progressive cumulative running liability balances.
+    Supports CSV and Excel spreadsheet file downloads.
+    """
+    template_name = 'taxation/daily_vat_report.html'
+
+    def test_func(self):
+        return self.request.user.is_superuser or getattr(self.request.user, 'role', '') in [
+            'OWNER', 'ACCOUNTANT', 'MANAGER'
+        ]
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        # 1. Resolve Branch Scope
+        active_branch = getattr(self.request, 'active_branch', None) or Branch.get_default_main_branch()
+        branch_id = self.request.GET.get('branch')
+        if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
+            b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
+            if b_match:
+                active_branch = b_match
+
+        # 2. Resolve Multi-Calendar Period
+        period_ctx = resolve_taxation_period(self.request.GET)
+        start_date = period_ctx['start_date']
+        end_date = period_ctx['end_date']
+
+        # 3. Generate Day-Wise Data
+        report_data = {
+            'daily_rows': [],
+            'is_vat_shop': (SystemConfiguration.get_solo().tax_system_mode == 'VAT'),
+            'total_days_in_period': 0,
+            'active_tax_days_count': 0,
+            'totals': {
+                'sales_taxable': Decimal('0.00'),
+                'sales_non_taxable': Decimal('0.00'),
+                'sales_vat': Decimal('0.00'),
+                'sales_grand_total': Decimal('0.00'),
+                'purchase_taxable': Decimal('0.00'),
+                'purchase_vat': Decimal('0.00'),
+                'purchase_net_total': Decimal('0.00'),
+                'net_vat': Decimal('0.00'),
+                'final_cumulative_balance': Decimal('0.00'),
+                'is_net_payable': False,
+                'is_net_credit': False,
+            }
+        }
+
+        if active_branch:
+            report_data = TaxationReportGenerator.generate_daily_vat_ledger(active_branch, start_date, end_date)
+
+        # 4. Handle Export Actions
+        export_mode = self.request.GET.get('export', '').strip().lower()
+        if export_mode == 'csv':
+            return self.export_csv(report_data, period_ctx)
+        elif export_mode == 'excel':
+            return self.export_excel(report_data, period_ctx, active_branch)
+
+        context.update({
+            'report': report_data,
+            'daily_rows': report_data.get('daily_rows', []),
+            'totals': report_data.get('totals', {}),
+            'branch': active_branch,
+            'branches': Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
+            'config': SystemConfiguration.get_solo(),
+            **period_ctx,
+        })
+        return NonIRDDisclaimerEngine.inject_disclaimer(context)
+
+    def export_csv(self, report_data: dict, period_ctx: dict) -> HttpResponse:
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        filename = f"Day_Wise_VAT_Ledger_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.csv"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Nepali Date (BS)', 'Date (AD)', 'Day',
+            'Sales Taxable (NPR)', 'Output VAT Collected (NPR)', 'Sales Grand Total (NPR)',
+            'Purchase Taxable (NPR)', 'Input VAT Paid (NPR)', 'Purchase Net Total (NPR)',
+            'Daily Net VAT (NPR)', 'Daily Tax Status', 'Running Cumulative Balance (NPR)'
+        ])
+
+        for row in report_data.get('daily_rows', []):
+            status_text = "Payable" if row['is_daily_payable'] else ("Credit" if row['is_daily_credit'] else "Balanced")
+            writer.writerow(sanitize_csv_row([
+                row['date_bs'],
+                row['date_ad_str'],
+                row['day_name'],
+                f"{row['sales_taxable']:.2f}",
+                f"{row['sales_vat']:.2f}",
+                f"{row['sales_grand_total']:.2f}",
+                f"{row['purchase_taxable']:.2f}",
+                f"{row['purchase_vat']:.2f}",
+                f"{row['purchase_net_total']:.2f}",
+                f"{row['daily_net_vat']:.2f}",
+                status_text,
+                f"{row['cumulative_balance']:.2f}"
+            ]))
+
+        t = report_data.get('totals', {})
+        writer.writerow(sanitize_csv_row([
+            'GRAND TOTALS', '', f"{report_data.get('active_tax_days_count', 0)} Active Days",
+            f"{t.get('sales_taxable', Decimal('0.00')):.2f}",
+            f"{t.get('sales_vat', Decimal('0.00')):.2f}",
+            f"{t.get('sales_grand_total', Decimal('0.00')):.2f}",
+            f"{t.get('purchase_taxable', Decimal('0.00')):.2f}",
+            f"{t.get('purchase_vat', Decimal('0.00')):.2f}",
+            f"{t.get('purchase_net_total', Decimal('0.00')):.2f}",
+            f"{t.get('net_vat', Decimal('0.00')):.2f}",
+            "Payable" if t.get('is_net_payable') else "Credit",
+            f"{t.get('final_cumulative_balance', Decimal('0.00')):.2f}"
+        ]))
+        return response
+
+    def export_excel(self, report_data: dict, period_ctx: dict, branch: Optional[Branch]) -> HttpResponse:
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Day-Wise VAT Ledger"
+            ws.views.sheetView[0].showGridLines = True
+
+            # Colors
+            navy_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+            header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+            total_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+            payable_fill = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+            credit_fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
+
+            white_bold = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+            title_font = Font(name="Calibri", size=14, bold=True, color="0F172A")
+            regular_font = Font(name="Calibri", size=10)
+            bold_font = Font(name="Calibri", size=10, bold=True)
+
+            thin_border = Border(
+                left=Side(style='thin', color='E2E8F0'),
+                right=Side(style='thin', color='E2E8F0'),
+                top=Side(style='thin', color='E2E8F0'),
+                bottom=Side(style='thin', color='E2E8F0')
+            )
+
+            # Document Titles
+            branch_name = branch.name if branch else "All Store Outlets"
+            ws.merge_cells('A1:L1')
+            ws['A1'] = f"{branch_name.upper()} - DAY-WISE VAT & TAX ASSESSMENT LEDGER"
+            ws['A1'].font = title_font
+            ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
+            ws.row_dimensions[1].height = 24
+
+            ws.merge_cells('A2:L2')
+            ws['A2'] = f"Period Scope: {period_ctx['period_label']} | AD: {period_ctx['start_date_str']} to {period_ctx['end_date_str']}"
+            ws['A2'].font = Font(name="Calibri", size=10, italic=True, color="64748B")
+            ws['A2'].alignment = Alignment(horizontal="center", vertical="center")
+
+            # Table Header
+            headers = [
+                'Nepali Date (BS)', 'Date (AD)', 'Day',
+                'Sales Taxable (NPR)', 'Output VAT (NPR)', 'Sales Total (NPR)',
+                'Purchases Taxable (NPR)', 'Input VAT (NPR)', 'Purchases Total (NPR)',
+                'Daily Net VAT (NPR)', 'Tax State', 'Running Balance (NPR)'
+            ]
+
+            ws.row_dimensions[4].height = 22
+            for col_idx, header in enumerate(headers, 1):
+                cell = ws.cell(row=4, column=col_idx, value=header)
+                cell.font = white_bold
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+            # Data Rows
+            current_row = 5
+            for row in report_data.get('daily_rows', []):
+                ws.row_dimensions[current_row].height = 18
+                ws.cell(row=current_row, column=1, value=row['date_bs']).alignment = Alignment(horizontal="center")
+                ws.cell(row=current_row, column=2, value=row['date_ad_str']).alignment = Alignment(horizontal="center")
+                ws.cell(row=current_row, column=3, value=row['day_name']).alignment = Alignment(horizontal="center")
+
+                # Numeric columns
+                c4 = ws.cell(row=current_row, column=4, value=float(row['sales_taxable']))
+                c5 = ws.cell(row=current_row, column=5, value=float(row['sales_vat']))
+                c6 = ws.cell(row=current_row, column=6, value=float(row['sales_grand_total']))
+                c7 = ws.cell(row=current_row, column=7, value=float(row['purchase_taxable']))
+                c8 = ws.cell(row=current_row, column=8, value=float(row['purchase_vat']))
+                c9 = ws.cell(row=current_row, column=9, value=float(row['purchase_net_total']))
+                c10 = ws.cell(row=current_row, column=10, value=float(row['daily_net_vat']))
+
+                status_text = "Payable" if row['is_daily_payable'] else ("Credit" if row['is_daily_credit'] else "Balanced")
+                c11 = ws.cell(row=current_row, column=11, value=status_text)
+                c11.alignment = Alignment(horizontal="center")
+
+                c12 = ws.cell(row=current_row, column=12, value=float(row['cumulative_balance']))
+
+                for col_idx in [4, 5, 6, 7, 8, 9, 10, 12]:
+                    cell = ws.cell(row=current_row, column=col_idx)
+                    cell.number_format = '#,##0.00'
+                    cell.font = regular_font
+
+                for c_idx in range(1, 13):
+                    ws.cell(row=current_row, column=c_idx).border = thin_border
+
+                current_row += 1
+
+            # Summary Totals Row
+            t = report_data.get('totals', {})
+            ws.row_dimensions[current_row].height = 22
+            ws.cell(row=current_row, column=1, value="GRAND TOTALS").font = bold_font
+            ws.cell(row=current_row, column=2, value="")
+            ws.cell(row=current_row, column=3, value=f"{report_data.get('active_tax_days_count', 0)} Active Days").font = bold_font
+
+            c4 = ws.cell(row=current_row, column=4, value=float(t.get('sales_taxable', 0)))
+            c5 = ws.cell(row=current_row, column=5, value=float(t.get('sales_vat', 0)))
+            c6 = ws.cell(row=current_row, column=6, value=float(t.get('sales_grand_total', 0)))
+            c7 = ws.cell(row=current_row, column=7, value=float(t.get('purchase_taxable', 0)))
+            c8 = ws.cell(row=current_row, column=8, value=float(t.get('purchase_vat', 0)))
+            c9 = ws.cell(row=current_row, column=9, value=float(t.get('purchase_net_total', 0)))
+            c10 = ws.cell(row=current_row, column=10, value=float(t.get('net_vat', 0)))
+            c11 = ws.cell(row=current_row, column=11, value="Payable" if t.get('is_net_payable') else "Credit")
+            c12 = ws.cell(row=current_row, column=12, value=float(t.get('final_cumulative_balance', 0)))
+
+            for col_idx in range(1, 13):
+                cell = ws.cell(row=current_row, column=col_idx)
+                cell.fill = total_fill
+                cell.font = bold_font
+                cell.border = thin_border
+                if col_idx in [4, 5, 6, 7, 8, 9, 10, 12]:
+                    cell.number_format = '#,##0.00'
+
+            # Auto-fit column widths
+            for col in ws.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    if cell.row > 2 and cell.value:
+                        max_len = max(max_len, len(str(cell.value)))
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+            buffer = io.BytesIO()
+            wb.save(buffer)
+            buffer.seek(0)
+
+            response = HttpResponse(
+                buffer.getvalue(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            filename = f"Day_Wise_VAT_Ledger_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.xlsx"
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except ImportError:
+            return self.export_csv(report_data, period_ctx)

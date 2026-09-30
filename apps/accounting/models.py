@@ -4,28 +4,34 @@ Double-Entry General Ledger & Financial Accounting Models.
 Key Capabilities:
 1. Multi-Year Fiscal Year & Period Locking (Nepal Context):
    - AccountingFiscalYear: Spans Shrawan 1 to Ashadh 31/32 (e.g. 2080/81 to 2083/84).
-   - Classmethods lock_year(), unlock_year(), and contextmanager temporary_unlock()
-     guarantee safe migration imports and permanent historical audit locks.
+   - Authoritative Helper Methods:
+     * validate_date_in_open_fiscal_year(date_input): Enforces audit lock checks fail-closed.
+     * is_date_allowed_for_posting(date_input): Non-throwing status check for forms/APIs.
    - FinancialPeriod: Granular month-by-month locks for all 12 Bikram Sambat months.
-2. General Ledger Chart of Accounts (COA):
+2. Bidirectional Date Synchronization (JournalEntry, ExpenseVoucher, BankReconciliation):
+   - Harmonizes entry_date (AD) and entry_date_bs (BS) so both fields strictly point
+     to the exact same calendar day.
+   - When entry_date_bs is provided, it overrides timezone.now defaults on entry_date.
+3. General Ledger Chart of Accounts (COA):
    - Hierarchical AccountGroup and Account models with system control tags.
    - Standardized SYSTEM_TAG_CHOICES officially supporting:
-     * Cash Drawer Discrepancies: CASH_SHORTAGE, CASH_SURPLUS, MISC_INCOME.
+     * Cash Drawer Discrepancies: CASH_SHORTAGE (5050), CASH_SURPLUS (4040), MISC_INCOME.
      * Trade-In Barter Settlement: TRADE_IN_CLEARING (Account 2150).
-     * Omnichannel Digital Clearings: FONEPAY, ESEWA, KHALTI, CARD_CLEARING.
+     * Omnichannel Digital Clearings: FONEPAY (1130), ESEWA (1140), KHALTI (1150), CARD_CLEARING (1160).
    - Protects transacted and system-reserved accounts from structural tampering.
-   - Optimized indexing on (code, name, branch) and high-speed query helpers for
-     instant partial matching ("11", "cash", "fonepay", "बैंक").
-3. Strict Double-Entry Journal Engine (JournalEntry & JournalItem):
+4. Strict Double-Entry Journal Engine (JournalEntry & JournalItem):
    - Mathematical balance enforcement: Sum(Debits) == Sum(Credits).
    - Provenance tracking via source_module and source_id.
 """
 
+import re
 import uuid
+import logging
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, datetime
 from contextlib import contextmanager
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
+
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -37,7 +43,98 @@ from apps.branches.models import Branch
 from apps.customers.models import Customer
 from apps.purchases.models import Supplier
 from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
+logger = logging.getLogger(__name__)
+
+def sync_nepali_and_ad_dates(
+    instance,
+    ad_field_name: str,
+    bs_field_name: str,
+    fy_field_name: Optional[str] = 'fiscal_year'
+) -> None:
+    """
+    Ensures strict bidirectional synchronization between Gregorian (AD) and Bikram Sambat (BS) date fields:
+    1. If an existing instance is being updated and bs_field changed -> converts BS to AD, updates FY.
+    2. Else if an existing instance is being updated and ad_field changed -> converts AD to BS, updates FY.
+    3. For new instances (or if neither specifically changed):
+       - If bs_field is provided (non-empty) -> it takes precedence over any model default on ad_field!
+         Converts BS to AD, standardizes BS string to YYYY-MM-DD, and updates FY.
+       - Else if ad_field is provided -> converts AD to BS, standardizes BS string to YYYY-MM-DD, and updates FY.
+    """
+    current_bs = str(getattr(instance, bs_field_name, '') or '').strip()
+    current_ad = getattr(instance, ad_field_name, None)
+    if isinstance(current_ad, datetime):
+        current_ad = current_ad.date()
+
+    # Case A: Check if updating an existing record in the database
+    if instance.pk:
+        try:
+            orig = instance.__class__.objects.filter(pk=instance.pk).values(ad_field_name, bs_field_name).first()
+            if orig:
+                orig_bs = str(orig.get(bs_field_name) or '').strip()
+                orig_ad = orig.get(ad_field_name)
+                if isinstance(orig_ad, datetime):
+                    orig_ad = orig_ad.date()
+
+                bs_changed = bool(current_bs and current_bs != orig_bs)
+                ad_changed = bool(current_ad and current_ad != orig_ad)
+
+                # If BS date was explicitly changed, it takes precedence
+                if bs_changed:
+                    try:
+                        bs_y, bs_m, bs_d = parse_bs_date_components(current_bs)
+                        target_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                        setattr(instance, ad_field_name, target_ad)
+                        setattr(instance, bs_field_name, f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}")
+                        if fy_field_name and hasattr(instance, fy_field_name):
+                            setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
+                        return
+                    except Exception as e:
+                        logger.warning(f"[sync_nepali_and_ad_dates] Could not parse changed BS date '{current_bs}': {e}")
+
+                # If AD date was explicitly changed
+                elif ad_changed:
+                    try:
+                        bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(current_ad)
+                        setattr(instance, ad_field_name, current_ad)
+                        setattr(instance, bs_field_name, f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}")
+                        if fy_field_name and hasattr(instance, fy_field_name):
+                            setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
+                        return
+                    except Exception as e:
+                        logger.warning(f"[sync_nepali_and_ad_dates] Could not convert changed AD date '{current_ad}': {e}")
+        except Exception as e:
+            logger.debug(f"[sync_nepali_and_ad_dates] Checking original instance failed: {e}")
+
+    # Case B: New instance OR baseline synchronization
+    # If BS date was supplied, it MUST override the model default on ad_field!
+    if current_bs:
+        try:
+            bs_y, bs_m, bs_d = parse_bs_date_components(current_bs)
+            target_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+            setattr(instance, ad_field_name, target_ad)
+            setattr(instance, bs_field_name, f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}")
+            if fy_field_name and hasattr(instance, fy_field_name):
+                setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
+            return
+        except Exception as e:
+            logger.warning(f"[sync_nepali_and_ad_dates] Could not parse BS date '{current_bs}': {e}")
+
+    # Fallback to AD date if BS was not provided or failed to parse
+    if current_ad:
+        try:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(current_ad)
+            setattr(instance, ad_field_name, current_ad)
+            setattr(instance, bs_field_name, f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}")
+            if fy_field_name and hasattr(instance, fy_field_name):
+                setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
+        except Exception as e:
+            logger.warning(f"[sync_nepali_and_ad_dates] Could not convert AD date '{current_ad}': {e}")
+
+# =============================================================================
+# 1. ACCOUNT GROUP & CHART OF ACCOUNTS
+# =============================================================================
 class AccountGroup(TimeStampedModel):
     """
     Hierarchical Account Grouping Model conforming to Standard Accounting Principles.
@@ -179,7 +276,6 @@ class Account(TimeStampedModel):
     )
     currency = models.CharField(max_length=5, default='NPR', verbose_name=_("Currency"))
 
-    # System Automation Tags officially covering all operational reconciliation modules
     SYSTEM_TAG_CHOICES = [
         ('NONE', _('Standard Custom Ledger')),
         ('CASH', _('Cash in Hand (Counter Float / Main Drawer)')),
@@ -266,10 +362,6 @@ class Account(TimeStampedModel):
 
     @classmethod
     def search(cls, query: str, branch=None, limit: int = 50):
-        """
-        Classmethod helper for autocomplete endpoints in manual journals,
-        expense vouchers, POS discrepancy postings, and bank reconciliations.
-        """
         return cls.objects.search(query=query, branch=branch)[:limit]
 
     def clean(self):
@@ -289,6 +381,9 @@ class Account(TimeStampedModel):
                     if errors:
                         raise ValidationError(errors)
 
+# =============================================================================
+# 2. NEPALI FISCAL YEAR & VALIDATION HELPERS
+# =============================================================================
 class AccountingFiscalYear(TimeStampedModel):
     """
     Nepali Fiscal Year (आर्थिक वर्ष) Master Record.
@@ -338,10 +433,94 @@ class AccountingFiscalYear(TimeStampedModel):
         super().save(*args, **kwargs)
 
     @classmethod
+    def validate_date_in_open_fiscal_year(cls, date_input: Any) -> Tuple[date, str, str]:
+        """
+        Authoritative Central Validator:
+        Accepts:
+          - datetime.date or datetime.datetime (Gregorian AD)
+          - string (Bikram Sambat BS e.g. '2083-05-18' or '2083.05.18')
+
+        Returns:
+          Tuple[date_ad: date, date_bs_str: str, fiscal_year_name: str]
+
+        Raises:
+          ValidationError: If the date falls within an audited, closed fiscal year
+                           or a closed monthly financial period.
+        """
+        if not date_input:
+            raise ValidationError(_("A transaction date is required for financial posting."))
+
+        target_ad: Optional[date] = None
+        target_bs: Optional[str] = None
+        target_fy: Optional[str] = None
+
+        if isinstance(date_input, datetime):
+            target_ad = date_input.date()
+        elif isinstance(date_input, date):
+            target_ad = date_input
+        elif isinstance(date_input, str):
+            clean_str = date_input.strip()
+            # Attempt to parse as BS date first
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(clean_str)
+                target_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                target_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                target_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            except Exception:
+                # Fallback to ISO AD date string YYYY-MM-DD
+                try:
+                    target_ad = datetime.strptime(clean_str[:10], '%Y-%m-%d').date()
+                except Exception as ex:
+                    raise ValidationError(_(f"Unrecognized date format: '{date_input}'. Expected YYYY-MM-DD.")) from ex
+        else:
+            raise ValidationError(_("Invalid date type supplied."))
+
+        if not target_bs or not target_fy:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(target_ad)
+            target_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+            target_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+        # 1. Check Fiscal Year Lock
+        locked_fy = cls.objects.filter(name=target_fy, is_closed=True).first()
+        if locked_fy:
+            open_fy = cls.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+            open_name = open_fy.name if open_fy else "the active fiscal year (2083/84)"
+            raise ValidationError(
+                f"Financial posting rejected: Transaction date ({target_bs} BS / {target_ad} AD) belongs to "
+                f"Fiscal Year {target_fy}, which is audited and locked. Only transactions within {open_name} are permitted."
+            )
+
+        # 2. Check Financial Period (Month) Lock
+        locked_period = FinancialPeriod.objects.filter(
+            fiscal_year__name=target_fy,
+            start_date_ad__lte=target_ad,
+            end_date_ad__gte=target_ad,
+            is_closed=True
+        ).first()
+        if locked_period:
+            raise ValidationError(
+                f"Financial posting rejected: Accounting period '{locked_period.period_name_en}' is closed for posting."
+            )
+
+        return target_ad, target_bs, target_fy
+
+    @classmethod
+    def is_date_allowed_for_posting(cls, date_input: Any) -> Tuple[bool, str, str]:
+        """
+        Non-throwing query helper for UI widgets, forms, and client APIs:
+        Returns: (is_allowed: bool, fiscal_year_name: str, message: str)
+        """
+        try:
+            ad_date, bs_str, fy_name = cls.validate_date_in_open_fiscal_year(date_input)
+            return True, fy_name, "Date is within an active open fiscal period."
+        except ValidationError as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return False, "", msg
+        except Exception as e:
+            return False, "", str(e)
+
+    @classmethod
     def get_or_create_fiscal_year(cls, fy_name: str, is_closed: bool = False) -> 'AccountingFiscalYear':
-        """
-        Retrieves or initializes a Fiscal Year and all 12 of its monthly FinancialPeriod records.
-        """
         ad_start, ad_end, bs_start, bs_end = NepaliCalendar.get_fiscal_year_range(fy_name)
         fy_obj, _ = cls.objects.get_or_create(
             name=fy_name,
@@ -385,9 +564,6 @@ class AccountingFiscalYear(TimeStampedModel):
 
     @classmethod
     def lock_year(cls, fy_name: str, user=None):
-        """
-        Permanently locks a fiscal year and cascades the lock across its 12 periods.
-        """
         fy = cls.objects.filter(name=fy_name).first()
         if fy:
             fy.is_closed = True
@@ -398,9 +574,6 @@ class AccountingFiscalYear(TimeStampedModel):
 
     @classmethod
     def unlock_year(cls, fy_name: str):
-        """
-        Temporarily unlocks a fiscal year and its 12 periods (for migrations/audits).
-        """
         fy = cls.objects.filter(name=fy_name).first()
         if fy:
             fy.is_closed = False
@@ -410,10 +583,6 @@ class AccountingFiscalYear(TimeStampedModel):
     @classmethod
     @contextmanager
     def temporary_unlock(cls, fy_names: List[str]):
-        """
-        Context manager ensuring historical years are unlocked for a batch operation
-        and guaranteed to be re-locked in a finally block even on unhandled crashes.
-        """
         originally_closed = list(
             cls.objects.filter(name__in=fy_names, is_closed=True).values_list('name', flat=True)
         )
@@ -427,12 +596,6 @@ class AccountingFiscalYear(TimeStampedModel):
 
     @classmethod
     def ensure_multi_year_setup(cls) -> Tuple[List['AccountingFiscalYear'], 'AccountingFiscalYear']:
-        """
-        Enforces the full 4-year lifecycle (FY 2080/81 to 2083/84):
-        - FY 2080/81, 2081/82, and 2082/83: Initialized and permanently LOCKED.
-        - FY 2083/84: Initialized and OPEN for daily counter billing.
-        Returns: (locked_years_list, active_2083_year)
-        """
         past_years = ['2080/81', '2081/82', '2082/83']
         locked_objs = []
         for y in past_years:
@@ -473,10 +636,14 @@ class FinancialPeriod(TimeStampedModel):
     def __str__(self):
         return f"{self.period_name_en} ({self.fiscal_year.name})"
 
+# =============================================================================
+# 3. DOUBLE-ENTRY JOURNAL VOUCHERS (WITH HARMONIZED SAVE)
+# =============================================================================
 class JournalEntry(TimeStampedModel):
     """
     Double-Entry Journal Entry Header (Voucher).
     Maintains rigorous financial audit integrity with strict equality: Sum(Debits) == Sum(Credits).
+    Synchronizes entry_date (AD) and entry_date_bs (BS) bidirectionally on every save.
     """
     VOUCHER_TYPE_CHOICES = [
         ('JOURNAL', _('Journal Voucher (JV) - सामान्य भौचर')),
@@ -544,15 +711,18 @@ class JournalEntry(TimeStampedModel):
 
     entry_date = models.DateField(
         default=timezone.now, db_index=True,
-        verbose_name=_("Voucher Date (AD)")
+        verbose_name=_("Voucher Date (AD)"),
+        help_text=_("Gregorian date for database indexing and accounting.")
     )
     entry_date_bs = models.CharField(
         max_length=15, blank=True, null=True, db_index=True,
-        verbose_name=_("Voucher Date (BS: YYYY-MM-DD)")
+        verbose_name=_("Voucher Date (BS: YYYY-MM-DD)"),
+        help_text=_("Bikram Sambat formatted date string. Takes precedence if provided.")
     )
     fiscal_year = models.CharField(
         max_length=15, blank=True, null=True, db_index=True,
-        verbose_name=_("Nepali Fiscal Year (आर्थिक वर्ष)")
+        verbose_name=_("Nepali Fiscal Year (आर्थिक वर्ष)"),
+        help_text=_("Nepali Fiscal Year derived from BS date (e.g. 2080/81 to 2083/84).")
     )
 
     total_debit = models.DecimalField(
@@ -601,12 +771,22 @@ class JournalEntry(TimeStampedModel):
 
     def clean(self):
         super().clean()
-        if self.fiscal_year:
-            fy = AccountingFiscalYear.objects.filter(name=self.fiscal_year, is_closed=True).first()
-            if fy:
-                raise ValidationError(
-                    f"Financial posting rejected: Nepali Fiscal Year {self.fiscal_year} is audited and locked."
-                )
+        # Synchronize dates before validation runs
+        sync_nepali_and_ad_dates(
+            instance=self,
+            ad_field_name='entry_date',
+            bs_field_name='entry_date_bs',
+            fy_field_name='fiscal_year'
+        )
+
+        # Validate open fiscal year for new or date-modified entries
+        if self.entry_date:
+            if self.pk:
+                orig = JournalEntry.objects.filter(pk=self.pk).values('entry_date', 'fiscal_year').first()
+                if not orig or orig['entry_date'] != self.entry_date:
+                    AccountingFiscalYear.validate_date_in_open_fiscal_year(self.entry_date)
+            else:
+                AccountingFiscalYear.validate_date_in_open_fiscal_year(self.entry_date)
 
         if self.status == 'POSTED' and self.total_debit != self.total_credit:
             raise ValidationError(
@@ -615,18 +795,13 @@ class JournalEntry(TimeStampedModel):
             )
 
     def save(self, *args, **kwargs):
-        if self.entry_date:
-            ad_date = self.entry_date.date() if isinstance(self.entry_date, datetime) else self.entry_date
-            if not self.entry_date_bs or not self.fiscal_year:
-                try:
-                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
-                    if not self.entry_date_bs:
-                        self.entry_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
-                    if not self.fiscal_year:
-                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
-                except Exception:
-                    pass
-
+        # Bidirectional date and fiscal year synchronization
+        sync_nepali_and_ad_dates(
+            instance=self,
+            ad_field_name='entry_date',
+            bs_field_name='entry_date_bs',
+            fy_field_name='fiscal_year'
+        )
         super().save(*args, **kwargs)
 
 class JournalItem(TimeStampedModel):
@@ -697,9 +872,13 @@ class JournalItem(TimeStampedModel):
         if dr > Decimal('0.00') and cr > Decimal('0.00'):
             raise ValidationError(_("A single line cannot have both Debit and Credit amounts. Split into two lines."))
 
+# =============================================================================
+# 4. EXPENSE VOUCHER & RECONCILIATIONS
+# =============================================================================
 class ExpenseVoucher(TimeStampedModel):
     """
     Operating Shop Expense Voucher (Rent, Electricity, Tea, Internet, Stationery).
+    Synchronizes expense_date (AD) and expense_date_bs (BS) bidirectionally on every save.
     """
     PAYMENT_METHOD_CHOICES = [
         ('CASH', _('Cash Counter Float (नगद)')),
@@ -735,11 +914,13 @@ class ExpenseVoucher(TimeStampedModel):
 
     expense_date = models.DateField(
         default=timezone.now, db_index=True,
-        verbose_name=_("Expense Date (AD)")
+        verbose_name=_("Expense Date (AD)"),
+        help_text=_("Gregorian date for database indexing.")
     )
     expense_date_bs = models.CharField(
         max_length=15, blank=True, null=True,
-        verbose_name=_("Expense Date (BS)")
+        verbose_name=_("Expense Date (BS)"),
+        help_text=_("Bikram Sambat formatted date string (YYYY-MM-DD).")
     )
     fiscal_year = models.CharField(max_length=15, blank=True, null=True)
 
@@ -775,17 +956,12 @@ class ExpenseVoucher(TimeStampedModel):
         return f"{self.voucher_number} - {self.expense_account.name}: Rs. {self.amount}"
 
     def save(self, *args, **kwargs):
-        if self.expense_date:
-            ad_date = self.expense_date.date() if isinstance(self.expense_date, datetime) else self.expense_date
-            if not self.expense_date_bs or not self.fiscal_year:
-                try:
-                    bs_year, bs_month, bs_day = NepaliCalendar.ad_to_bs(ad_date)
-                    if not self.expense_date_bs:
-                        self.expense_date_bs = NepaliCalendar.format_bs(bs_year, bs_month, bs_day, lang='en')
-                    if not self.fiscal_year:
-                        self.fiscal_year = NepaliCalendar.get_fiscal_year(bs_year, bs_month)
-                except Exception:
-                    pass
+        sync_nepali_and_ad_dates(
+            instance=self,
+            ad_field_name='expense_date',
+            bs_field_name='expense_date_bs',
+            fy_field_name='fiscal_year'
+        )
         super().save(*args, **kwargs)
 
 class BankReconciliation(TimeStampedModel):
@@ -832,6 +1008,15 @@ class BankReconciliation(TimeStampedModel):
 
     def __str__(self):
         return f"{self.bank_account.name} @ {self.statement_date} (Diff: Rs. {self.difference})"
+
+    def save(self, *args, **kwargs):
+        sync_nepali_and_ad_dates(
+            instance=self,
+            ad_field_name='statement_date',
+            bs_field_name='statement_date_bs',
+            fy_field_name=None
+        )
+        super().save(*args, **kwargs)
 
 class BankStatementLine(TimeStampedModel):
     """

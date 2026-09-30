@@ -304,7 +304,7 @@
                 <i class="fas fa-wallet fs-2xs me-1 text-primary"></i> Payment Methods Inflow
             </a>
 
-            <!-- Audit & Profit (Part A) -->
+            <!-- Audit & Profit -->
             <span class="text-uppercase fw-bold text-muted px-2 pt-2 pb-1 d-block border-top mt-1" style="font-size: 0.65rem; letter-spacing: 0.06em;">
                 Audit &amp; Profit
             </span>
@@ -359,19 +359,33 @@
         </div>
     </div>
 
-    <!-- Sub-Group A: Financial Ledgers & Taxes -->
+    <!-- Sub-Group A: Financial Ledgers & Taxation Suite (Enhanced with Day-Wise VAT Ledger) -->
     <div class="sidebar-subgroup-wrap">
         <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupA', this)">
-            <i class="fas fa-book-bookmark text-success"></i>
+            <i class="fas fa-landmark text-success"></i>
             <span class="sidebar-label-wrap flex-grow-1">Customer &amp; Tax Books</span>
             <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
         </div>
-        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'customer_udhaari' and request.resolver_match.app_name != 'taxation' or request.resolver_match.url_name == 'purchase_register' %}d-none{% endif %}" id="subgroupA">
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'customer_udhaari' and request.resolver_match.app_name != 'taxation' %}d-none{% endif %}" id="subgroupA">
+            <!-- Customer Udhaari -->
             <a href="{% url 'reports:customer_udhaari' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'customer_udhaari' %}active{% endif %}">
-                Customer Udhaari Book
+                <i class="fas fa-hand-holding-dollar fs-2xs me-1 text-warning"></i> Customer Udhaari Book
             </a>
-            <a href="{% url 'taxation:dashboard' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name != 'purchase_register' %}active{% endif %}">
-                Proforma / Tax Books
+            <!-- VAT Overview Dashboard -->
+            <a href="{% url 'taxation:dashboard' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+                <i class="fas fa-chart-pie fs-2xs me-1 text-primary"></i> VAT Overview
+            </a>
+            <!-- Day-Wise VAT Ledger (NEW) -->
+            <a href="{% url 'taxation:daily_vat_report' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'daily_vat_report' %}active{% endif %}">
+                <i class="fas fa-calendar-days fs-2xs me-1 text-danger"></i> Day-Wise VAT Ledger
+            </a>
+            <!-- Sales Book (Annex 5) -->
+            <a href="{% url 'taxation:sales_register' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'sales_register' %}active{% endif %}">
+                <i class="fas fa-book-open fs-2xs me-1 text-info"></i> Sales Book (Annex 5)
+            </a>
+            <!-- Purchase Book (Annex 7) -->
+            <a href="{% url 'taxation:purchase_register' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'purchase_register' %}active{% endif %}">
+                <i class="fas fa-truck-ramp-box fs-2xs me-1 text-success"></i> Purchase Book (Annex 7)
             </a>
         </div>
     </div>

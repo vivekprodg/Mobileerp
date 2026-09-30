@@ -20,18 +20,18 @@ Features:
 3. Non-Monetary Tender Isolation (Double-Accounting Prevention):
    - In post_sales_estimate, 'CREDIT' and 'UDHAARI' tenders inside the payment loop are skipped.
    - The dedicated estimate.due_amount handler creates the single authoritative debit to AR (1210).
-4. Historical Backdating Integrity (2080 B.S. & Onwards):
-   - Timestamps vouchers with the converted Gregorian date of the bill, locking them
-     to the correct historical Nepali Fiscal Year (e.g. 2080/81, 2081/82, 2082/83, 2083/84).
+4. Historical Backdating Integrity & Fiscal Year Lock Enforcement:
+   - post_sales_estimate strictly stamps vouchers with estimate.bill_date_ad.
+   - post_grn_receipt strictly stamps vouchers with grn.bill_date.
+   - post_customer_payment and post_supplier_payment read the true historical payment date
+     from the subledger (entry_date / entry_date_bs) rather than using today's creation timestamp.
+   - Rejects any transaction where the date falls into an audited, closed fiscal year
+     while allowing back-dated postings within the active open fiscal year (2083/84).
 5. Balance Sheet Asset Protection:
    - Skips COGS and Inventory Asset credits when total_cost_amount is 0.00,
      preventing artificial inventory deficits during historical data migrations.
 6. Omnichannel Payment Ledger Routing:
    - Cash (1110), Bank (1120), FonePay (1130), eSewa (1140), Khalti (1150), Card POS (1160), AR (1210), AP (2110), Trade-In Clearing (2150).
-7. Operational Dispatchers:
-   - Sales POS Checkouts, Purchase GRNs, Customer Udhaari Repayments, Supplier Payouts,
-     Sales Returns (Credit Notes), Purchase Returns (Debit Notes), Stock Damage Write-Offs,
-     Trade-In Acquisitions, and Digital Gateway Batch Settlements.
 """
 
 import uuid
@@ -53,7 +53,7 @@ from apps.purchases.models import GoodsReceivedNote, PurchaseReturn, SupplierUdh
 from apps.customers.models import Customer, CustomerUdhaariLedger
 from apps.branches.models import Branch, BranchDocumentSequence
 from apps.core.nepali_calendar import NepaliCalendar
-
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
 # =============================================================================
 # 1. CORE DOUBLE-ENTRY JOURNAL ENGINE
@@ -125,8 +125,11 @@ class JournalEngine:
         # 2. Check if Fiscal Year or Financial Period is Locked / Closed
         locked_fy = AccountingFiscalYear.objects.filter(name=fiscal_year_str, is_closed=True).first()
         if locked_fy:
+            active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+            open_name = active_open_fy.name if active_open_fy else "an active fiscal year (2083/84)"
             raise ValidationError(
-                f"Financial posting rejected: Nepali Fiscal Year {fiscal_year_str} is audited and closed."
+                f"Financial posting rejected: Voucher date ({date_bs_str} BS / {date_ad} AD) belongs to "
+                f"Fiscal Year {fiscal_year_str}, which is audited and closed. Only entries within {open_name} are permitted."
             )
 
         locked_period = FinancialPeriod.objects.filter(
@@ -257,7 +260,6 @@ class JournalEngine:
 
         return journal_entry
 
-
 # =============================================================================
 # 2. AUTOMATIC POSTING DISPATCHER SERVICE
 # =============================================================================
@@ -382,24 +384,14 @@ class AutoPostingService:
                 return cls.get_or_create_control_account(branch, 'BANK', '1120', 'Primary Bank Current Account', 'ASSET', 'DEBIT')
 
     # =========================================================================
-    # 1. POS SALES CHECKOUT POSTING (3-WAY VAT SPLIT & TRADE-IN ALIGNMENT)
+    # 1. POS SALES CHECKOUT POSTING (3-WAY VAT SPLIT & HISTORICAL DATE CALIBRATION)
     # =========================================================================
     @classmethod
     @transaction.atomic
     def post_sales_estimate(cls, estimate: SalesEstimate, user=None, **kwargs) -> Optional[JournalEntry]:
         """
         Creates a balanced double-entry voucher for a finalized Sales POS Invoice.
-
-        THREE-WAY TAX SPLIT & TRADE-IN CLEARING ALIGNMENT:
-        - Dr: Genuine Monetary Payment Modes (Cash, FonePay, eSewa, Bank, Card) for paid collections.
-        - Dr: Customer Accounts Receivable (1210) strictly for the remaining unpaid Udhaari due debt.
-        - Dr: Trade-In Clearing (2150) = Offsets the buy-back allowance consumed by the bill
-              plus any surplus cash change handed to a walk-in customer.
-        - Dr: Sales Discount Allowed (6170) = Commercial concessions granted.
-        - Cr: Cash in Hand (1110) = Cash change returned to customer (including surplus trade-in cash payouts).
-        - Cr: Sales Revenue (4110) = Pre-Tax Base (Taxable Base + Non-Taxable / Exempt Base).
-        - Cr: Output VAT 13% (2210) = 13% Output Tax collected.
-        - COGS / Inventory Asset: Relieved at landed cost (skipped if cost == 0.00 for historical migrations).
+        Strictly uses estimate.bill_date_ad and validates against closed fiscal years.
         """
         source_module = 'SALES'
         source_id = str(estimate.id)
@@ -411,7 +403,23 @@ class AutoPostingService:
             return existing
 
         branch = estimate.branch
-        date_ad = estimate.bill_date_ad or timezone.now().date()
+
+        # Strictly assign historical bill_date_ad
+        raw_date_ad = estimate.bill_date_ad or timezone.now().date()
+        date_ad = raw_date_ad.date() if isinstance(raw_date_ad, datetime) else raw_date_ad
+
+        # Fiscal Year Lock Guard: Reject audited/closed fiscal years
+        bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(date_ad)
+        fy_name = estimate.fiscal_year or NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+        locked_fy = AccountingFiscalYear.objects.filter(name=fy_name, is_closed=True).first()
+        if locked_fy:
+            active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+            open_name = active_open_fy.name if active_open_fy else "the active fiscal year (2083/84)"
+            raise ValidationError(
+                f"GL Posting Rejected: Bill {estimate.estimate_number} is dated {date_ad} (FY {fy_name}), "
+                f"which is audited and closed. Only transactions within {open_name} are permitted."
+            )
+
         lines: List[Dict[str, Any]] = []
 
         inv_asset_acc = cls.get_or_create_control_account(
@@ -433,7 +441,6 @@ class AutoPostingService:
         # ---------------------------------------------------------------------
         # 1. DEBIT: Genuine Monetary Payment Settlements
         # ---------------------------------------------------------------------
-        # Support kwargs-injected payment lists or fallback to database relationship
         raw_payments = (
             kwargs.get('payment_details') or
             kwargs.get('payments') or
@@ -464,14 +471,11 @@ class AutoPostingService:
             if p_amount <= Decimal('0.00'):
                 continue
 
-            # CRITICAL FIX: Skip non-monetary CREDIT / UDHAARI payment transactions.
-            # Accounts Receivable (1210) is debited authoritatively once by the dedicated
-            # 'if estimate.due_amount > Decimal("0.00"):' block below. Skipping here prevents
-            # duplicate debiting of AR 1210 and eliminates unbalanced journal voucher errors.
+            # Skip non-monetary CREDIT / UDHAARI to prevent double-debiting AR 1210
             if p_mode in ['CREDIT', 'UDHAARI', 'ON_CREDIT', 'DUE']:
                 continue
 
-            # Skip Trade-In here as it is handled authoritatively in Section 2 (Trade-In Clearing / 2150)
+            # Skip Trade-In here as it is handled authoritatively in Section 2
             if p_mode in ['TRADE_IN', 'EXCHANGE']:
                 continue
 
@@ -507,17 +511,12 @@ class AutoPostingService:
 
         # ---------------------------------------------------------------------
         # 2. DEBIT: Trade-In Buy-Back Tender Settlement
-        # Offsets the credit previously recorded on Account 2150 during device restock.
         # ---------------------------------------------------------------------
         trade_in_surplus_cash = Decimal('0.00')
 
         if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > Decimal('0.00'):
-            # The effective trade-in value consumed as tender against this invoice
             effective_trade_in = min(estimate.grand_total, estimate.trade_in_discount_amount)
 
-            # If walk-in customer received surplus trade-in cash out of the drawer,
-            # that cash payout was added to estimate.change_returned. We must debit
-            # Account 2150 for the surplus cash as well so that the voucher balances.
             if not estimate.customer_id and estimate.trade_in_discount_amount > estimate.grand_total:
                 trade_in_surplus_cash = (estimate.trade_in_discount_amount - estimate.grand_total).quantize(
                     Decimal('0.01'), rounding=ROUND_HALF_UP
@@ -645,18 +644,14 @@ class AutoPostingService:
         )
 
     # =========================================================================
-    # 2. INWARD GRN PROCUREMENT POSTING (MATHEMATICALLY SYNCHRONIZED)
+    # 2. INWARD GRN PROCUREMENT POSTING (STRICT HISTORICAL BILL DATE)
     # =========================================================================
     @classmethod
     @transaction.atomic
     def post_grn_receipt(cls, grn: GoodsReceivedNote, user=None, **kwargs) -> Optional[JournalEntry]:
         """
         Creates a balanced double-entry voucher for an approved Goods Received Note (GRN).
-        Strictly synchronized with Nepal Tax Standards:
-        - Debit: Merchandise Inventory Asset (Account 1310 at Total Landed Cost = Pre-VAT Base + Overheads)
-        - Debit: Input VAT 13% (Account 1410 for Dedicated 13% VAT Amount when is_vat_bill is True)
-        - Credit: Resolved Payment Account (for spot cash/bank/wallet paid on delivery)
-        - Credit: Accounts Payable (Account 2110 for remaining Supplier Udhaari due debt)
+        Strictly uses grn.bill_date and enforces closed fiscal year protection.
         """
         source_module = 'PURCHASE'
         source_id = str(grn.id)
@@ -668,7 +663,23 @@ class AutoPostingService:
             return existing
 
         branch = grn.branch
-        date_ad = grn.bill_date or timezone.now().date()
+
+        # Strictly use grn.bill_date
+        raw_date_ad = grn.bill_date or timezone.now().date()
+        date_ad = raw_date_ad.date() if isinstance(raw_date_ad, datetime) else raw_date_ad
+
+        # Fiscal Year Lock Guard
+        bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(date_ad)
+        fy_name = grn.fiscal_year or NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+        locked_fy = AccountingFiscalYear.objects.filter(name=fy_name, is_closed=True).first()
+        if locked_fy:
+            active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+            open_name = active_open_fy.name if active_open_fy else "the active fiscal year (2083/84)"
+            raise ValidationError(
+                f"GL Posting Rejected: GRN {grn.grn_number} is dated {date_ad} (FY {fy_name}), "
+                f"which is audited and closed. Only bills within {open_name} are permitted."
+            )
+
         lines: List[Dict[str, Any]] = []
 
         inv_asset_acc = cls.get_or_create_control_account(
@@ -678,7 +689,7 @@ class AutoPostingService:
             branch, 'ACCOUNTS_PAYABLE', '2110', 'Accounts Payable (Trade Creditors)', 'LIABILITY', 'CREDIT'
         )
 
-        # 1. DEBIT: Merchandise Inventory Asset (Landed Cost Valuation COGS)
+        # 1. DEBIT: Merchandise Inventory Asset (Landed Cost Valuation)
         landed_asset_value = grn.total_landed_cost
         if not landed_asset_value or landed_asset_value <= Decimal('0.00'):
             landed_asset_value = (
@@ -777,7 +788,7 @@ class AutoPostingService:
     post_grn_journal = post_grn_receipt
 
     # =========================================================================
-    # 3. CUSTOMER DEBT REPAYMENT (UDHAARI SETTLEMENT)
+    # 3. CUSTOMER DEBT REPAYMENT (READS SUB-LEDGER HISTORICAL ENTRY DATE)
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -793,9 +804,8 @@ class AutoPostingService:
         **kwargs
     ) -> Optional[JournalEntry]:
         """
-        Posts customer Udhaari debt collection into double-entry accounts:
-        - Debit: Resolved Payment Account (Cash, FonePay, eSewa, Khalti, Bank)
-        - Credit: Accounts Receivable (1210 Customer Sub-Ledger)
+        Posts customer Udhaari debt collection into double-entry accounts.
+        Reads the true historical payment date (entry_date) from CustomerUdhaariLedger.
         """
         if ledger_entry:
             cust = ledger_entry.customer
@@ -804,8 +814,13 @@ class AutoPostingService:
             br = ledger_entry.branch or getattr(cust, 'preferred_branch', None) or Branch.get_default_main_branch()
             ref_doc = getattr(ledger_entry, 'reference_invoice', None) or f"UDH-CUST-{ledger_entry.id}"
             source_id = str(ledger_entry.id)
-            date_ad = ledger_entry.created_at.date() if hasattr(ledger_entry.created_at, 'date') else ledger_entry.created_at
             user = user or getattr(ledger_entry, 'recorded_by', None)
+
+            # Read historical entry_date if present on sub-ledger; fallback to created_at
+            raw_date = getattr(ledger_entry, 'entry_date', None) or kwargs.get('date_ad')
+            if not raw_date:
+                raw_date = ledger_entry.created_at.date() if hasattr(ledger_entry.created_at, 'date') else ledger_entry.created_at
+            date_ad = raw_date.date() if isinstance(raw_date, datetime) else raw_date
         else:
             cust = customer
             amt = Decimal(str(amount or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -813,10 +828,23 @@ class AutoPostingService:
             br = branch or getattr(cust, 'preferred_branch', None) or Branch.get_default_main_branch()
             ref_doc = reference or f"UDH-CUST-{cust.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
             source_id = ref_doc
-            date_ad = timezone.now().date()
+            raw_date = kwargs.get('date_ad') or timezone.now().date()
+            date_ad = raw_date.date() if isinstance(raw_date, datetime) else raw_date
 
         if amt <= Decimal('0.00') or not cust:
             return None
+
+        # Closed fiscal year pre-check
+        bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(date_ad)
+        fy_name = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+        locked_fy = AccountingFiscalYear.objects.filter(name=fy_name, is_closed=True).first()
+        if locked_fy:
+            active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+            open_name = active_open_fy.name if active_open_fy else "the active fiscal year (2083/84)"
+            raise ValidationError(
+                f"Customer Repayment Posting Rejected: Transaction date {date_ad} belongs to Fiscal Year {fy_name}, "
+                f"which is audited and closed. Only collections within {open_name} are permitted."
+            )
 
         source_module = 'CUSTOMER_PAYMENT'
         duplicate_filter = Q(source_module=source_module, source_id=source_id, status='POSTED')
@@ -864,7 +892,7 @@ class AutoPostingService:
     post_customer_repayment_journal = post_customer_payment
 
     # =========================================================================
-    # 4. SUPPLIER DEBT PAYOUT
+    # 4. SUPPLIER DEBT PAYOUT (READS SUB-LEDGER HISTORICAL ENTRY DATE)
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -881,6 +909,7 @@ class AutoPostingService:
     ) -> Optional[JournalEntry]:
         """
         Posts supplier debt settlement payout:
+        - Reads the true historical payment date (entry_date) from SupplierUdhaariLedger.
         - Debit: Accounts Payable (2110 Supplier Sub-Ledger)
         - Credit: Resolved Payment Account (Cash, Bank, Wallet)
         """
@@ -891,8 +920,13 @@ class AutoPostingService:
             br = ledger_entry.branch or Branch.get_default_main_branch()
             ref_doc = getattr(ledger_entry, 'reference_number', None) or f"SUP-PAY-{ledger_entry.id}"
             source_id = str(ledger_entry.id)
-            date_ad = ledger_entry.created_at.date() if hasattr(ledger_entry.created_at, 'date') else ledger_entry.created_at
             user = user or getattr(ledger_entry, 'recorded_by', None)
+
+            # Read historical entry_date from SupplierUdhaariLedger
+            raw_date = getattr(ledger_entry, 'entry_date', None) or kwargs.get('date_ad')
+            if not raw_date:
+                raw_date = ledger_entry.created_at.date() if hasattr(ledger_entry.created_at, 'date') else ledger_entry.created_at
+            date_ad = raw_date.date() if isinstance(raw_date, datetime) else raw_date
         else:
             supp = supplier
             amt = Decimal(str(amount or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -900,10 +934,23 @@ class AutoPostingService:
             br = branch or Branch.get_default_main_branch()
             ref_doc = ref_no or f"SUP-PAY-{supp.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
             source_id = ref_doc
-            date_ad = timezone.now().date()
+            raw_date = kwargs.get('date_ad') or timezone.now().date()
+            date_ad = raw_date.date() if isinstance(raw_date, datetime) else raw_date
 
         if amt <= Decimal('0.00') or not supp:
             return None
+
+        # Closed fiscal year pre-check
+        bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(date_ad)
+        fy_name = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+        locked_fy = AccountingFiscalYear.objects.filter(name=fy_name, is_closed=True).first()
+        if locked_fy:
+            active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+            open_name = active_open_fy.name if active_open_fy else "the active fiscal year (2083/84)"
+            raise ValidationError(
+                f"Supplier Payout Posting Rejected: Transaction date {date_ad} belongs to Fiscal Year {fy_name}, "
+                f"which is audited and closed. Only payouts within {open_name} are permitted."
+            )
 
         source_module = 'SUPPLIER_PAYMENT'
         duplicate_filter = Q(source_module=source_module, source_id=source_id, status='POSTED')
@@ -958,6 +1005,7 @@ class AutoPostingService:
     def post_sales_return(cls, sales_return: SalesReturn, user=None, **kwargs) -> Optional[JournalEntry]:
         """
         Posts customer return or exchange credit note:
+        - Strictly binds date_ad to sales_return.return_date_ad
         - Debit: Sales Returns & Deductions (4020)
         - Debit: Inventory Asset (1310 working) OR Quarantine Asset (1330 defective)
         - Credit: Cash/Bank/Wallet (refund) OR Accounts Receivable (1210 store credit)
@@ -973,7 +1021,9 @@ class AutoPostingService:
             return existing
 
         branch = sales_return.branch
-        date_ad = sales_return.return_date_ad or timezone.now().date()
+        raw_date = sales_return.return_date_ad or timezone.now().date()
+        date_ad = raw_date.date() if isinstance(raw_date, datetime) else raw_date
+
         lines: List[Dict[str, Any]] = []
 
         ret_rev_acc = cls.get_or_create_control_account(
@@ -1079,6 +1129,7 @@ class AutoPostingService:
     def post_purchase_return(cls, purchase_return: PurchaseReturn, user=None, **kwargs) -> Optional[JournalEntry]:
         """
         Posts commercial purchase return / debit note to supplier:
+        - Strictly binds date_ad to purchase_return.return_date
         - Debit: Accounts Payable (2110) OR Cash in Hand (if cash refund received)
         - Credit: Merchandise Inventory Asset (1310 at purchase value)
         - Credit: Input VAT 13% (1410 reversal if tax bill)
@@ -1093,7 +1144,9 @@ class AutoPostingService:
             return existing
 
         branch = purchase_return.branch
-        date_ad = purchase_return.return_date or timezone.now().date()
+        raw_date = purchase_return.return_date or timezone.now().date()
+        date_ad = raw_date.date() if isinstance(raw_date, datetime) else raw_date
+
         lines: List[Dict[str, Any]] = []
 
         ap_acc = cls.get_or_create_control_account(
@@ -1271,7 +1324,8 @@ class AutoPostingService:
             return existing
 
         branch = trade_in_voucher.branch
-        date_ad = getattr(trade_in_voucher, 'intake_date_ad', None) or timezone.now().date()
+        raw_date = getattr(trade_in_voucher, 'intake_date_ad', None) or timezone.now().date()
+        date_ad = raw_date.date() if isinstance(raw_date, datetime) else raw_date
 
         inv_asset_acc = cls.get_or_create_control_account(
             branch, 'INVENTORY_ASSET', '1310', 'Merchandise Inventory Asset', 'ASSET', 'DEBIT'
@@ -1411,7 +1465,6 @@ class AutoPostingService:
             user=user,
             auto_post=True
         )
-
 
 # =============================================================================
 # MODULE-LEVEL CONVENIENCE BRIDGES (ZERO-IMPORT FAILURE GUARANTEE)

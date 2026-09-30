@@ -1,0 +1,541 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Day-Wise VAT &amp; Tax Assessment Ledger | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.kpi-tax-box {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.table-daily-ledger th {
+    font-size: 0.70rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-daily-ledger td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.tax-nav-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.tax-nav-pill:hover, .tax-nav-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+.nepali-date-chip {
+    background-color: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+    font-weight: 800;
+    font-size: 0.76rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+    display: inline-flex;
+    align-items: center;
+}
+.fy-active-pill {
+    background: #0f172a;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+.row-active-day {
+    background-color: #ffffff;
+}
+.row-quiet-day {
+    background-color: #fafbfc;
+    opacity: 0.75;
+}
+@media print {
+    @page { size: A4 landscape; margin: 8mm; }
+    .no-print, header, aside, nav, .btn, .tax-nav-pill { display: none !important; }
+    body { background: #fff !important; font-size: 10px !important; }
+    .card { box-shadow: none !important; border: 1px solid #ccc !important; }
+    .table-daily-ledger th { background-color: #1e293b !important; color: #fff !important; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1720px;">
+
+    <!-- Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap no-print">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:</span>
+        <a href="{% url 'taxation:dashboard' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-chart-pie text-secondary"></i> VAT Overview
+        </a>
+        <a href="{% url 'taxation:daily_vat_report' %}" class="tax-nav-pill active text-nowrap">
+            <i class="fas fa-calendar-day text-white"></i> Day-Wise VAT Ledger
+        </a>
+        <a href="{% url 'taxation:sales_register' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-book-open text-secondary"></i> Sales Book (Annex 5)
+        </a>
+        <a href="{% url 'taxation:purchase_register' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-truck-ramp-box text-secondary"></i> Purchase Book (Annex 7)
+        </a>
+    </div>
+
+    <!-- Collapsible Non-IRD Compliance Disclaimer Banner -->
+    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 shadow-sm no-print">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-warning text-dark p-2 rounded-circle fs-6"><i class="fas fa-calculator"></i></span>
+                <div>
+                    <h6 class="fw-bold text-dark mb-0">Internal Day-Wise VAT Ledger &amp; Running Liability Settlement</h6>
+                    <small class="text-muted">
+                        Operating Mode: <strong>{{ SHOP_TAX_MODE }}</strong> ({% if IS_VAT_MODE %}13% VAT Calculation Active{% else %}PAN / 0% Tax Proforma{% endif %})
+                    </small>
+                </div>
+            </div>
+            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 py-1 fs-2xs fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#disclaimerDetails" aria-expanded="false">
+                <i class="fas fa-circle-info me-1"></i> Compliance Notice Details
+            </button>
+        </div>
+        <div class="collapse mt-2 pt-2 border-top border-warning border-opacity-25" id="disclaimerDetails">
+            <p class="fs-xs text-muted mb-0">
+                {{ SYS_CONFIG.bill_estimate_disclaimer }} Recorded strictly for store accounting, daily tax reconciliation, and cash-flow estimation.
+            </p>
+        </div>
+    </div>
+
+    <!-- Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <h4 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-calendar-days text-primary me-2"></i> Day-Wise VAT &amp; Tax Assessment Ledger (दैनिक भ्याट खाता)
+                </h4>
+                {% if fiscal_year %}
+                    <span class="fy-active-pill">
+                        <i class="fas fa-landmark me-1 text-warning"></i> FY {{ fiscal_year }}
+                    </span>
+                {% endif %}
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Chronological daily matrix consolidating outward sales VAT collected, inward GRN purchase VAT paid, daily net settlement, and progressive running balance.
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center no-print">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=excel" 
+               class="btn btn-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-excel me-1"></i> Export Excel (.xlsx)
+            </a>
+            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet (A4)
+            </button>
+        </div>
+    </div>
+
+    <!-- Multi-Calendar Filter Bar (Nepali Fiscal Year, BS Month & Date Pickers) -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 no-print">
+        <form method="get" class="row g-2 align-items-end" id="dailyVatFilterForm">
+            <!-- 1. Fiscal Year Selector -->
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="fas fa-landmark text-primary me-1"></i> Nepali Fiscal Year (आर्थिक वर्ष)
+                </label>
+                <select name="fiscal_year" id="dailyTaxFySelect" class="form-select form-select-sm bg-light border-0 fw-bold text-dark">
+                    <option value="">-- All / Filter by Month --</option>
+                    {% for fy in available_fiscal_years %}
+                        <option value="{{ fy }}" {% if request.GET.fiscal_year == fy or fiscal_year == fy and is_fiscal_year_mode %}selected{% endif %}>
+                            Fiscal Year {{ fy }} (आ.व. {{ fy }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 2. BS Month Selector -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="far fa-calendar text-primary me-1"></i> B.S. Month (महिना)
+                </label>
+                <select name="bs_month" id="dailyTaxBsMonthSelect" class="form-select form-select-sm bg-light border-0 fw-semibold text-dark">
+                    <option value="">Full Year / All Months</option>
+                    {% for m in nepali_months %}
+                        <option value="{{ m.num }}" {% if bs_month == m.num and is_month_mode %}selected{% endif %}>
+                            {{ m.num }}. {{ m.name_en }} ({{ m.name_np }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 3. BS Year Selector -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="fas fa-calendar-year text-primary me-1"></i> B.S. Year (वर्ष)
+                </label>
+                <select name="bs_year" id="dailyTaxBsYearSelect" class="form-select form-select-sm bg-light border-0 font-monospace fw-semibold">
+                    {% for yr in available_bs_years %}
+                        <option value="{{ yr }}" {% if bs_year == yr %}selected{% endif %}>{{ yr }} BS</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 4. Start Date BS -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="far fa-calendar-alt text-muted me-1"></i> Start Date (B.S.)
+                </label>
+                <input type="text" 
+                       name="start_date_bs" 
+                       id="dailyTaxStartDateBs" 
+                       value="{{ start_date_bs }}" 
+                       class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
+                       placeholder="YYYY-MM-DD (BS)" 
+                       autocomplete="off">
+            </div>
+
+            <!-- 5. End Date BS -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="far fa-calendar-alt text-muted me-1"></i> End Date (B.S.)
+                </label>
+                <input type="text" 
+                       name="end_date_bs" 
+                       id="dailyTaxEndDateBs" 
+                       value="{{ end_date_bs }}" 
+                       class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
+                       placeholder="YYYY-MM-DD (BS)" 
+                       autocomplete="off">
+            </div>
+
+            <!-- 6. Filter & Clear Buttons -->
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.fiscal_year or request.GET.bs_month or request.GET.start_date_bs or request.GET.end_date_bs %}
+                <a href="{% url 'taxation:daily_vat_report' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <!-- Active Period Banner Strip -->
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 pt-2 border-top fs-2xs text-muted">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span>Period Scope: <strong class="text-primary font-mono">{{ period_label }}</strong></span>
+                <span class="text-muted">&bull;</span>
+                <span>Gregorian Dates (AD): <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong></span>
+                <span class="text-muted">&bull;</span>
+                <span>Total Days: <strong>{{ report.total_days_in_period }}</strong> (Active Tax Days: <strong>{{ report.active_tax_days_count }}</strong>)</span>
+            </div>
+            <div>
+                Store Context: <strong>{{ branch.name|default:ACTIVE_BRANCH.name }}</strong> ({{ branch.code|default:ACTIVE_BRANCH.code }})
+            </div>
+        </div>
+    </div>
+
+    <!-- 4 High-Level KPI Summary Cards -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Output VAT Collected -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="kpi-tax-box border-start border-primary border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Output VAT (Sales)</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    Rs. {{ totals.sales_vat|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Taxable Base: Rs. {{ totals.sales_taxable|default:0|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <!-- 2. Input VAT Paid -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="kpi-tax-box border-start border-success border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Input VAT (Purchases)</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.purchase_vat|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Taxable Base: Rs. {{ totals.purchase_taxable|default:0|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <!-- 3. Period Net VAT Position -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="kpi-tax-box border-start {% if totals.is_net_payable %}border-danger{% elif totals.is_net_credit %}border-success{% else %}border-secondary{% endif %} border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Period Net VAT Balance</span>
+                <h3 class="fw-extrabold {% if totals.is_net_payable %}text-danger{% elif totals.is_net_credit %}text-success{% else %}text-muted{% endif %} font-monospace mt-2 mb-0">
+                    Rs. {{ totals.net_vat|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="fs-2xs fw-bold {% if totals.is_net_payable %}text-danger{% elif totals.is_net_credit %}text-success{% else %}text-muted{% endif %}">
+                    {% if totals.is_net_payable %}
+                        <i class="fas fa-arrow-up me-1"></i> Net Tax Payable to Govt
+                    {% elif totals.is_net_credit %}
+                        <i class="fas fa-arrow-down me-1"></i> Net Tax Credit Available
+                    {% else %}
+                        Balanced (Rs. 0.00)
+                    {% endif %}
+                </small>
+            </div>
+        </div>
+
+        <!-- 4. Final Cumulative Progressive Balance -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="kpi-tax-box border-start border-dark border-4 h-100 bg-light">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Progressive Closing Tax Debt</span>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    Rs. {{ totals.final_cumulative_balance|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Cumulative liability closing balance</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Complete Day-Wise Combined VAT Ledger Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-table-list text-primary me-2"></i> Daily Chronological Tax Movements &amp; Progressive Balances
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ daily_rows|length }} Calendar Days</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-daily-ledger table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3" style="width: 140px;">Nepali Date (B.S.)</th>
+                        <th style="width: 110px;">Date (A.D.)</th>
+                        <th class="text-end" style="width: 130px;">Sales Taxable Base</th>
+                        <th class="text-end" style="width: 120px;">Output VAT (Sales)</th>
+                        <th class="text-end" style="width: 130px;">Sales Total (Turnover)</th>
+                        <th class="text-end" style="width: 130px;">Purchase Taxable Base</th>
+                        <th class="text-end" style="width: 120px;">Input VAT (Purchases)</th>
+                        <th class="text-end" style="width: 130px;">Purchase Net Total</th>
+                        <th class="text-end" style="width: 130px;">Daily Net VAT</th>
+                        <th class="text-center" style="width: 100px;">Daily State</th>
+                        <th class="text-end pe-3" style="width: 150px;">Running Balance (Cumulative)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in daily_rows %}
+                    <tr class="{% if row.has_activity %}row-active-day{% else %}row-quiet-day{% endif %}">
+                        <!-- 1. B.S. Date -->
+                        <td class="ps-3 font-monospace">
+                            <span class="nepali-date-chip">
+                                <i class="far fa-calendar-check text-primary me-1"></i>
+                                {{ row.date_bs }} BS
+                            </span>
+                        </td>
+
+                        <!-- 2. A.D. Date -->
+                        <td class="font-monospace text-muted fs-2xs">
+                            {{ row.date_ad_str }} <span class="badge bg-light text-secondary border py-0 px-1">{{ row.day_name }}</span>
+                        </td>
+
+                        <!-- 3. Sales Taxable Base -->
+                        <td class="col-num fw-semibold text-dark">
+                            {% if row.sales_taxable > 0 %}
+                                Rs. {{ row.sales_taxable|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted opacity-50">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 4. Output VAT Collected -->
+                        <td class="col-num fw-bold text-primary">
+                            {% if row.sales_vat > 0 %}
+                                Rs. {{ row.sales_vat|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted opacity-50">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 5. Sales Grand Total -->
+                        <td class="col-num text-dark">
+                            {% if row.sales_grand_total > 0 %}
+                                Rs. {{ row.sales_grand_total|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted opacity-50">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 6. Purchase Taxable Base -->
+                        <td class="col-num fw-semibold text-dark">
+                            {% if row.purchase_taxable > 0 %}
+                                Rs. {{ row.purchase_taxable|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted opacity-50">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 7. Input VAT Paid -->
+                        <td class="col-num fw-bold text-success">
+                            {% if row.purchase_vat > 0 %}
+                                Rs. {{ row.purchase_vat|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted opacity-50">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 8. Purchase Net Total -->
+                        <td class="col-num text-dark">
+                            {% if row.purchase_net_total > 0 %}
+                                Rs. {{ row.purchase_net_total|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted opacity-50">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 9. Daily Net VAT (Difference) -->
+                        <td class="col-num fw-extrabold {% if row.is_daily_payable %}text-danger{% elif row.is_daily_credit %}text-success{% else %}text-muted{% endif %}">
+                            {% if row.daily_net_vat != 0 %}
+                                Rs. {{ row.daily_net_vat|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted opacity-50">Rs. 0.00</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 10. Daily State Badge -->
+                        <td class="text-center">
+                            {% if row.is_daily_payable %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-3xs px-2 py-0.5 fw-bold">
+                                    Payable
+                                </span>
+                            {% elif row.is_daily_credit %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs px-2 py-0.5 fw-bold">
+                                    Credit
+                                </span>
+                            {% else %}
+                                <span class="badge bg-light text-muted border fs-3xs py-0.5">
+                                    Balanced
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 11. Progressive Cumulative Running Balance -->
+                        <td class="col-num pe-3 fw-bold font-monospace {% if row.is_cumulative_payable %}text-danger{% elif row.is_cumulative_credit %}text-success{% else %}text-dark{% endif %}">
+                            Rs. {{ row.cumulative_balance|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="11" class="text-center py-5 text-muted">
+                            <i class="fas fa-calendar-xmark fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Dates Found in Period</h6>
+                            <p class="text-muted fs-xs mb-0">Please adjust your date filter range.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if daily_rows %}
+                <!-- Grand Totals Reconciled Footer -->
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="2" class="ps-3 text-uppercase text-white-50">Grand Totals:</td>
+                        <td class="col-num text-info">Rs. {{ totals.sales_taxable|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-primary bg-white bg-opacity-10">Rs. {{ totals.sales_vat|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.sales_grand_total|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-info">Rs. {{ totals.purchase_taxable|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success bg-white bg-opacity-10">Rs. {{ totals.purchase_vat|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.purchase_net_total|floatformat:2|intcomma }}</td>
+                        <td class="col-num {% if totals.is_net_payable %}text-danger{% elif totals.is_net_credit %}text-success{% else %}text-white{% endif %} fs-6">
+                            Rs. {{ totals.net_vat|floatformat:2|intcomma }}
+                        </td>
+                        <td class="text-center">
+                            {% if totals.is_net_payable %}
+                                <span class="badge bg-danger text-white fs-3xs">Payable</span>
+                            {% elif totals.is_net_credit %}
+                                <span class="badge bg-success text-white fs-3xs">Credit</span>
+                            {% else %}
+                                <span class="badge bg-secondary text-white fs-3xs">Balanced</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-num pe-3 text-warning fs-6">
+                            Rs. {{ totals.final_cumulative_balance|floatformat:2|intcomma }}
+                        </td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const fySelect = document.getElementById('dailyTaxFySelect');
+    const monthSelect = document.getElementById('dailyTaxBsMonthSelect');
+    const yearSelect = document.getElementById('dailyTaxBsYearSelect');
+    const startDateBs = document.getElementById('dailyTaxStartDateBs');
+    const endDateBs = document.getElementById('dailyTaxEndDateBs');
+
+    if (fySelect) {
+        fySelect.addEventListener('change', () => {
+            if (fySelect.value) {
+                if (monthSelect) monthSelect.value = '';
+                if (startDateBs) startDateBs.value = '';
+                if (endDateBs) endDateBs.value = '';
+            }
+        });
+    }
+
+    if (monthSelect) {
+        monthSelect.addEventListener('change', () => {
+            if (monthSelect.value) {
+                if (fySelect) fySelect.value = '';
+                if (startDateBs) startDateBs.value = '';
+                if (endDateBs) endDateBs.value = '';
+            }
+        });
+    }
+
+    if (startDateBs && endDateBs) {
+        [startDateBs, endDateBs].forEach(el => {
+            el.addEventListener('input', () => {
+                if (el.value.trim() !== '') {
+                    if (fySelect) fySelect.value = '';
+                    if (monthSelect) monthSelect.value = '';
+                }
+            });
+            el.addEventListener('change', () => {
+                if (el.value.trim() !== '') {
+                    if (fySelect) fySelect.value = '';
+                    if (monthSelect) monthSelect.value = '';
+                }
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

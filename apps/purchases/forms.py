@@ -3,9 +3,10 @@ Procurement, Supplier Udhaari & Purchase Return Forms.
 
 Upgraded Capabilities:
 1. GoodsReceivedNoteForm:
+   - Full bidirectional date synchronization between `bill_date` (A.D.) and `bill_date_bs` (B.S.).
+   - Explicit Fiscal Year Lock Enforcement: Rejects bills falling within closed/audited fiscal years.
    - Exposes whole-bill discount controls: `bill_discount_type` and `bill_discount_input_value`.
    - Exposes Nepal 13% VAT toggle (`is_vat_bill`) and custom `vat_rate`.
-   - Validates that bill discount is non-negative and percentages do not exceed 100%.
 2. GRNItemForm:
    - Exposes dual-mode line discounts: `discount_type` (Amount vs %) and `discount_input_value`.
    - Dynamic Master Switch IMEI Enforcement:
@@ -14,10 +15,12 @@ Upgraded Capabilities:
      * Accessories: Always bypass IMEI requirements regardless of mode.
 3. Strict Serialized & Dual-IMEI Validation:
    - Validates numeric IMEI format and prevents duplicate entries within the same handset unit.
+4. PurchaseReturnForm & SupplierPaymentForm:
+   - Synchronized historical date inputs with closed fiscal year validation guards.
 """
 
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from django import forms
 from django.forms import inlineformset_factory
@@ -32,6 +35,8 @@ from apps.inventory.models import Product, UnitOfMeasurement, UnitConversion
 from apps.branches.models import Branch
 from apps.core.models import SystemConfiguration
 from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
+from apps.accounting.models import AccountingFiscalYear
 
 # ==============================================================================
 # 1. SUPPLIER FORM
@@ -214,11 +219,12 @@ class PurchaseOrderForm(forms.ModelForm):
     class Meta:
         model = PurchaseOrder
         fields = [
-            'supplier', 'order_date', 'expected_delivery_date', 'notes'
+            'supplier', 'order_date', 'order_date_bs', 'expected_delivery_date', 'notes'
         ]
         widgets = {
             'supplier': forms.Select(attrs={'class': 'form-select select2-enable', 'required': 'required'}),
             'order_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date', 'required': 'required'}),
+            'order_date_bs': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'YYYY-MM-DD (BS)'}),
             'expected_delivery_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'notes': forms.Textarea(attrs={
                 'class': 'form-control', 'rows': 2,
@@ -230,7 +236,62 @@ class PurchaseOrderForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['supplier'].queryset = Supplier.objects.filter(is_active=True).order_by('company_name')
         if not self.instance.pk:
-            self.fields['order_date'].initial = date.today()
+            today = date.today()
+            self.fields['order_date'].initial = today
+            try:
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+                self.fields['order_date_bs'].initial = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+            except Exception:
+                pass
+
+    def clean(self):
+        cleaned_data = super().clean()
+        order_date = cleaned_data.get('order_date')
+        order_date_bs = (cleaned_data.get('order_date_bs') or '').strip()
+
+        target_date_ad = None
+        target_date_bs = None
+        target_fiscal_year = None
+
+        if order_date_bs:
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(order_date_bs)
+                target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['order_date'] = target_date_ad
+                cleaned_data['order_date_bs'] = target_date_bs
+            except Exception as e:
+                self.add_error('order_date_bs', _(f"Invalid Bikram Sambat date format: {e}"))
+                return cleaned_data
+        elif order_date:
+            try:
+                ad_date = order_date.date() if isinstance(order_date, datetime) else order_date
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(ad_date)
+                target_date_ad = ad_date
+                target_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['order_date'] = target_date_ad
+                cleaned_data['order_date_bs'] = target_date_bs
+            except Exception as e:
+                self.add_error('order_date', _(f"Could not convert date to Nepali calendar: {e}"))
+                return cleaned_data
+
+        if target_fiscal_year:
+            locked_fy = AccountingFiscalYear.objects.filter(name=target_fiscal_year, is_closed=True).first()
+            if locked_fy:
+                active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+                open_name = active_open_fy.name if active_open_fy else "an active fiscal year"
+                error_msg = _(
+                    f"Order rejected: Date ({target_date_bs}) belongs to Fiscal Year {target_fiscal_year}, "
+                    f"which is locked and audited. Only orders in {open_name} are permitted."
+                )
+                self.add_error('order_date_bs', error_msg)
+                self.add_error('order_date', error_msg)
+
+        return cleaned_data
 
 class PurchaseOrderItemForm(forms.ModelForm):
     class Meta:
@@ -264,12 +325,14 @@ PurchaseOrderItemFormSet = inlineformset_factory(
 )
 
 # ==============================================================================
-# 3. GOODS RECEIVED NOTE (GRN) HEADER FORM
+# 3. GOODS RECEIVED NOTE (GRN) HEADER FORM (WITH BIDIRECTIONAL SYNC & FY CHECK)
 # ==============================================================================
 class GoodsReceivedNoteForm(forms.ModelForm):
     """
     Inward Procurement Header Form.
     Features:
+    - Bidirectional date synchronization between `bill_date` (AD) and `bill_date_bs` (BS).
+    - Fiscal Year Locking Guard: Prevents entering bills into closed fiscal years (e.g. 2080/81 to 2082/83).
     - Dedicated whole-bill discount controls (`bill_discount_type`, `bill_discount_input_value`).
     - Dedicated Nepal 13% VAT toggle (`is_vat_bill`) and rate.
     - Landed overhead expenses (Freight, Customs, Handling).
@@ -295,7 +358,7 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             'supplier_bill_no': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. INV-9908 / Chal-54'}),
             'supplier_product_code': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. BATCH-SAM-2024-Q3'}),
             'bill_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
-            'bill_date_bs': forms.TextInput(attrs={'class': 'form-control', 'placeholder': '2081-XX-XX'}),
+            'bill_date_bs': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'YYYY-MM-DD (BS)'}),
             'bill_discount_type': forms.Select(attrs={'class': 'form-select'}),
             'bill_discount_input_value': forms.NumberInput(attrs={
                 'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00', 'placeholder': '0.00'
@@ -333,6 +396,14 @@ class GoodsReceivedNoteForm(forms.ModelForm):
                 self.fields[f].required = False
 
         if not self.instance.pk:
+            today = date.today()
+            self.fields['bill_date'].initial = today
+            try:
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+                self.fields['bill_date_bs'].initial = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+            except Exception:
+                pass
+
             self.fields['bill_discount_type'].initial = 'NONE'
             self.fields['bill_discount_input_value'].initial = Decimal('0.00')
             self.fields['vat_rate'].initial = Decimal('13.00')
@@ -351,10 +422,77 @@ class GoodsReceivedNoteForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
+        bill_date = cleaned_data.get('bill_date')
+        bill_date_bs = (cleaned_data.get('bill_date_bs') or '').strip()
+
+        target_date_ad = None
+        target_date_bs = None
+        target_fiscal_year = None
+
+        # -------------------------------------------------------------
+        # 1. Bidirectional Date Synchronization
+        # -------------------------------------------------------------
+        # If bill_date_bs is provided, it takes priority and converts to Gregorian AD
+        if bill_date_bs:
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(bill_date_bs)
+                target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['bill_date'] = target_date_ad
+                cleaned_data['bill_date_bs'] = target_date_bs
+            except ValueError as ve:
+                self.add_error('bill_date_bs', _(f"Invalid Bikram Sambat date: {ve}"))
+                return cleaned_data
+            except Exception as e:
+                self.add_error('bill_date_bs', _("Could not convert Nepali date to Gregorian calendar."))
+                return cleaned_data
+        elif bill_date:
+            try:
+                ad_date = bill_date.date() if isinstance(bill_date, datetime) else bill_date
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(ad_date)
+                target_date_ad = ad_date
+                target_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['bill_date'] = target_date_ad
+                cleaned_data['bill_date_bs'] = target_date_bs
+            except Exception as e:
+                self.add_error('bill_date', _("Could not convert Gregorian date to Nepali calendar."))
+                return cleaned_data
+        else:
+            self.add_error('bill_date', _("Bill date is mandatory."))
+            return cleaned_data
+
+        # -------------------------------------------------------------
+        # 2. Fiscal Year Lock Validation
+        # -------------------------------------------------------------
+        if target_fiscal_year:
+            locked_fy = AccountingFiscalYear.objects.filter(
+                name=target_fiscal_year,
+                is_closed=True
+            ).first()
+
+            if locked_fy:
+                active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+                open_fy_name = active_open_fy.name if active_open_fy else "the active open fiscal year"
+                error_msg = _(
+                    f"Financial posting rejected: Selected bill date ({target_date_bs}) belongs to Fiscal Year {target_fiscal_year}, "
+                    f"which is audited and closed. Only bills within {open_fy_name} are permitted."
+                )
+                self.add_error('bill_date_bs', error_msg)
+                self.add_error('bill_date', error_msg)
+
+        # -------------------------------------------------------------
+        # 3. Bill Discount Validation
+        # -------------------------------------------------------------
         b_type = cleaned_data.get('bill_discount_type')
         b_input = cleaned_data.get('bill_discount_input_value') or Decimal('0.00')
 
-        if b_type == 'PERCENTAGE' and b_input > Decimal('100.00'):
+        if b_input < Decimal('0.00'):
+            self.add_error('bill_discount_input_value', _("Whole-bill discount cannot be negative."))
+        elif b_type == 'PERCENTAGE' and b_input > Decimal('100.00'):
             self.add_error('bill_discount_input_value', _("Whole-bill percentage discount cannot exceed 100%."))
 
         return cleaned_data
@@ -478,7 +616,6 @@ class GRNItemForm(forms.ModelForm):
                 )
 
         # 2. Dynamic Serialized IMEI Tracking Validation (Master Switch Sensitive)
-        # Non-phone accessories (requires_imei_tracking=False and requires_serial_tracking=False) ALWAYS bypass this check.
         if product and (product.requires_imei_tracking or product.requires_serial_tracking):
             factor = cleaned_data.get('conversion_factor') or Decimal('1.000')
             base_units = (quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
@@ -492,17 +629,14 @@ class GRNItemForm(forms.ModelForm):
             expected_units = int(base_units)
             tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
 
-            # Fetch the Master IMEI Enforcement Setting
             sys_config = SystemConfiguration.get_solo()
             enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
 
-            # BACKLOG MODE (enforce_imei == False):
-            # If the user left the IMEI box completely blank, allow saving phone as a quantity-only entry!
+            # BACKLOG MODE: If IMEI enforcement is OFF and user left the box blank, allow saving phone as quantity-only!
             if not enforce_imei and len(tokens) == 0:
                 return cleaned_data
 
-            # STRICT MODE (enforce_imei == True):
-            # Mandate an exact 1-to-1 match between quantity and scanned IMEIs.
+            # STRICT MODE: Mandate exact 1-to-1 match between quantity and scanned IMEIs
             if enforce_imei:
                 if expected_units > 0 and len(tokens) != expected_units:
                     raise forms.ValidationError(
@@ -511,7 +645,6 @@ class GRNItemForm(forms.ModelForm):
                           f"Please scan exactly {expected_units} IMEI pair(s), or switch off 'Enforce Mandatory IMEI' in Settings for backlog entries.")
                     )
             else:
-                # In Backlog Mode, if staff typed some IMEIs but not all, alert them to enter all or leave completely blank
                 if len(tokens) > 0 and len(tokens) != expected_units:
                     raise forms.ValidationError(
                         _(f"IMEI Count Mismatch on '{product.name}': You entered {len(tokens)} IMEI(s) for {expected_units} unit(s). "
@@ -562,7 +695,7 @@ class PurchaseReturnForm(forms.ModelForm):
             'original_grn': forms.Select(attrs={'class': 'form-select'}),
             'original_bill_reference': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'e.g. INV-9908 / GRN-MAIN-000001'}),
             'return_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date', 'required': 'required'}),
-            'return_date_bs': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'YYYY-MM-DD (BS)'}),
+            'return_date_bs': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'YYYY-MM-DD (BS)'}),
             'refund_mode': forms.Select(attrs={'class': 'form-select', 'required': 'required'}),
             'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Reason for return, commercial agreement, or supplier RMA authorization note...'}),
         }
@@ -593,17 +726,60 @@ class PurchaseReturnForm(forms.ModelForm):
         if not self.instance.pk:
             today = date.today()
             self.fields['return_date'].initial = today
-            y, m, d = NepaliCalendar.ad_to_bs(today)
-            self.fields['return_date_bs'].initial = NepaliCalendar.format_bs(y, m, d, lang='en')
+            try:
+                y, m, d = NepaliCalendar.ad_to_bs(today)
+                self.fields['return_date_bs'].initial = NepaliCalendar.format_bs(y, m, d, lang='en')
+            except Exception:
+                pass
             self.fields['refund_mode'].initial = 'DEDUCT_FROM_BALANCE'
 
     def clean(self):
         cleaned_data = super().clean()
         ret_date = cleaned_data.get('return_date')
-        ret_date_bs = cleaned_data.get('return_date_bs')
-        if ret_date and not ret_date_bs:
-            y, m, d = NepaliCalendar.ad_to_bs(ret_date)
-            cleaned_data['return_date_bs'] = NepaliCalendar.format_bs(y, m, d, lang='en')
+        ret_date_bs = (cleaned_data.get('return_date_bs') or '').strip()
+
+        target_date_ad = None
+        target_date_bs = None
+        target_fiscal_year = None
+
+        if ret_date_bs:
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(ret_date_bs)
+                target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['return_date'] = target_date_ad
+                cleaned_data['return_date_bs'] = target_date_bs
+            except Exception as e:
+                self.add_error('return_date_bs', _(f"Invalid Bikram Sambat date format: {e}"))
+                return cleaned_data
+        elif ret_date:
+            try:
+                ad_date = ret_date.date() if isinstance(ret_date, datetime) else ret_date
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(ad_date)
+                target_date_ad = ad_date
+                target_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['return_date'] = target_date_ad
+                cleaned_data['return_date_bs'] = target_date_bs
+            except Exception as e:
+                self.add_error('return_date', _(f"Could not convert date to Nepali calendar: {e}"))
+                return cleaned_data
+
+        if target_fiscal_year:
+            locked_fy = AccountingFiscalYear.objects.filter(name=target_fiscal_year, is_closed=True).first()
+            if locked_fy:
+                active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+                open_name = active_open_fy.name if active_open_fy else "an active fiscal year"
+                error_msg = _(
+                    f"Return rejected: Date ({target_date_bs}) belongs to Fiscal Year {target_fiscal_year}, "
+                    f"which is audited and closed. Only returns in {open_name} are permitted."
+                )
+                self.add_error('return_date_bs', error_msg)
+                self.add_error('return_date', error_msg)
+
         return cleaned_data
 
 class PurchaseReturnItemForm(forms.ModelForm):
@@ -682,7 +858,6 @@ class PurchaseReturnItemForm(forms.ModelForm):
         qty = cleaned_data.get('returned_quantity')
         imei_raw = (cleaned_data.get('returned_imei_list') or '').strip()
 
-        # Dynamic validation consulting SystemConfiguration.enforce_imei_tracking
         if product and (product.requires_imei_tracking or product.requires_serial_tracking):
             expected_units = int(qty or 0)
             tokens = [t.strip() for t in re.split(r'[\n,;]+', imei_raw) if t.strip()]
@@ -723,22 +898,90 @@ PurchaseReturnItemFormSet = inlineformset_factory(
 )
 
 # ==============================================================================
-# 6. SUPPLIER PAYMENT / PAYOUT FORM
+# 6. SUPPLIER PAYMENT / PAYOUT FORM (HISTORICAL DATES INCLUDED)
 # ==============================================================================
 class SupplierPaymentForm(forms.ModelForm):
+    """
+    Supplier Payout & Debt Settlement Form.
+    Features:
+    - Dedicated `entry_date` (AD) and `entry_date_bs` (BS) to support recording retroactive payments.
+    - Synchronizes BS <-> AD dates bidirectionally and enforces fiscal year lock validation.
+    """
     class Meta:
         model = SupplierUdhaariLedger
-        fields = ['amount', 'payment_mode', 'reference_number', 'cheque_date', 'remarks']
+        fields = ['amount', 'payment_mode', 'reference_number', 'entry_date', 'entry_date_bs', 'cheque_date', 'remarks']
         widgets = {
             'amount': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.01'}),
             'payment_mode': forms.Select(attrs={'class': 'form-select'}),
             'reference_number': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'Cheque No. / Bank Ref'}),
+            'entry_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'entry_date_bs': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'YYYY-MM-DD (BS)'}),
             'cheque_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Payment notes...'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance.pk:
+            today = date.today()
+            self.fields['entry_date'].initial = today
+            try:
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+                self.fields['entry_date_bs'].initial = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+            except Exception:
+                pass
 
     def clean_amount(self):
         val = self.cleaned_data.get('amount')
         if val is None or val <= Decimal('0.00'):
             raise forms.ValidationError(_("Payment amount must be greater than zero."))
         return val
+
+    def clean(self):
+        cleaned_data = super().clean()
+        entry_date = cleaned_data.get('entry_date')
+        entry_date_bs = (cleaned_data.get('entry_date_bs') or '').strip()
+
+        target_date_ad = None
+        target_date_bs = None
+        target_fiscal_year = None
+
+        if entry_date_bs:
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(entry_date_bs)
+                target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['entry_date'] = target_date_ad
+                cleaned_data['entry_date_bs'] = target_date_bs
+            except Exception as e:
+                self.add_error('entry_date_bs', _(f"Invalid Bikram Sambat date format: {e}"))
+                return cleaned_data
+        elif entry_date:
+            try:
+                ad_date = entry_date.date() if isinstance(entry_date, datetime) else entry_date
+                bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(ad_date)
+                target_date_ad = ad_date
+                target_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['entry_date'] = target_date_ad
+                cleaned_data['entry_date_bs'] = target_date_bs
+            except Exception as e:
+                self.add_error('entry_date', _(f"Could not convert date to Nepali calendar: {e}"))
+                return cleaned_data
+
+        if target_fiscal_year:
+            locked_fy = AccountingFiscalYear.objects.filter(name=target_fiscal_year, is_closed=True).first()
+            if locked_fy:
+                active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+                open_name = active_open_fy.name if active_open_fy else "an active fiscal year"
+                error_msg = _(
+                    f"Payment rejected: Date ({target_date_bs}) belongs to Fiscal Year {target_fiscal_year}, "
+                    f"which is audited and closed. Only payouts in {open_name} are permitted."
+                )
+                self.add_error('entry_date_bs', error_msg)
+                self.add_error('entry_date', error_msg)
+
+        return cleaned_data

@@ -6,29 +6,35 @@ Core Capabilities & Architectural Safeguards:
    - grand_total strictly represents the full merchandise gross sales value + applicable tax.
    - trade_in_discount_amount is treated exclusively as a tender settlement offset (barter payment),
      protecting statutory revenue reporting and customer spend analytics from distortion.
-2. Intelligent Customer Resolution for Credit Purchases:
+2. Robust Two-Way Historical Date & Fiscal Period Synchronization:
+   - When bill_date_bs is provided, converts immediately to Gregorian AD date and automatically
+     calculates the proper Bikram Sambat fiscal year without requiring manual fiscal_year input.
+   - Ensures estimate.bill_date_ad, estimate.bill_date_bs, and estimate.fiscal_year are preserved.
+   - Calibrates ItemInstance sale dates, warranty start dates, and component expiration schedules
+     to the historical bill date rather than the current server clock.
+3. Intelligent Customer Resolution for Credit Purchases:
    - In _process_payments_and_udhaari, when a credit sale is initiated without an explicit customer_id,
      the system automatically attempts resolution via Phone number, 9-digit PAN (via Customer.resolve_or_create_by_pan),
      or business name before raising a validation error.
-3. Itemized Audit Description in CustomerUdhaariLedger:
+4. Itemized Audit Description in CustomerUdhaariLedger:
    - Multi-tender payments (Cash, FonePay, eSewa, Cards, Bank, Trade-In) are compiled into an itemized
      audit summary stored directly in CustomerUdhaariLedger.remarks.
-4. Prevention of Double-Accounting of Credit:
+5. Prevention of Double-Accounting of Credit:
    - estimate.paid_amount strictly captures genuine monetary tenders.
    - estimate.due_amount strictly equals the unpaid balance / credit tender.
    - Non-monetary credit transactions are isolated so General Ledger auto-posting does not double-debit AR (1210).
-5. Dynamic Master Switch Sensitive IMEI Allocation:
+6. Dynamic Master Switch Sensitive IMEI Allocation:
    - When enforce_imei_tracking is OFF (Backlog Mode): Mobile phones can be sold without IMEIs,
      deducting directly from shelf stock and depleting FIFO batches like standard accessories.
    - When enforce_imei_tracking is ON (Strict Mode): Enforces strict 15-digit IMEI verification.
    - Transition Safety Guard: Seamlessly registers and sells backlog shelf stock when scanned with
      a live physical IMEI in Strict Mode without throwing "Stock Not Found" crashes.
-6. Unified Excess Trade-In Settlement:
+7. Unified Excess Trade-In Settlement:
    - Routed authoritatively through TradeInValuationEngine.settle_excess_trade_in_credit.
-7. Trade-In Cash Return Guard (Cash Refund Scam Prevention):
+8. Trade-In Cash Return Guard (Cash Refund Scam Prevention):
    - In process_sales_return, if an invoice utilized a trade-in exchange credit, cash refunds are
      strictly capped to the net physical cash tendered on that invoice.
-8. Comprehensive Atomic Bill Cancellation with Payroll Commission Safeguards:
+9. Comprehensive Atomic Bill Cancellation with Payroll Commission Safeguards:
    - Blocks voiding of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
    - Restores sold physical merchandise stock, batches, serials, and voids active device warranties.
 """
@@ -62,6 +68,7 @@ from apps.branches.models import Branch, BranchDocumentSequence
 from apps.repairs.models import RepairTicket, TechnicianCommissionLog
 from apps.core.models import SystemConfiguration, AuditLog
 from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
 logger = logging.getLogger(__name__)
 
@@ -166,21 +173,30 @@ class SalesPOSService:
         config = SystemConfiguration.get_solo()
         is_shop_vat_registered = (config.tax_system_mode == 'VAT')
 
-        # 1. Date & Fiscal Period Resolution
-        if bill_date_ad:
-            target_date_ad = bill_date_ad
-            if isinstance(target_date_ad, datetime):
-                target_date_ad = target_date_ad.date()
-        else:
-            target_date_ad = timezone.now().date()
+        # 1. Date & Fiscal Period Resolution (Two-Way Synchronization)
+        target_date_ad: Optional[date] = None
+        target_date_bs: Optional[str] = None
+        target_fiscal_year: Optional[str] = None
 
-        if bill_date_bs and fiscal_year:
-            target_date_bs = bill_date_bs
-            target_fiscal_year = fiscal_year
-        else:
+        if bill_date_bs and str(bill_date_bs).strip():
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(str(bill_date_bs).strip())
+                target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                target_fiscal_year = fiscal_year or NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            except Exception as e:
+                logger.warning(f"[SalesPOSService] Could not parse bill_date_bs '{bill_date_bs}': {e}. Falling back to bill_date_ad.")
+                target_date_ad = None
+
+        if not target_date_ad:
+            if bill_date_ad:
+                target_date_ad = bill_date_ad.date() if isinstance(bill_date_ad, datetime) else bill_date_ad
+            else:
+                target_date_ad = timezone.now().date()
+
             bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(target_date_ad)
-            target_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
-            target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            target_date_bs = target_date_bs or NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+            target_fiscal_year = fiscal_year or NepaliCalendar.get_fiscal_year(bs_y, bs_m)
 
         # 2. Resolve Customer Profile & Tier (Safe Lookup with Fallback)
         customer_type = 'RETAIL'
@@ -354,7 +370,7 @@ class SalesPOSService:
             is_vat_applicable=is_shop_vat_registered
         )
 
-        # 8. Process Line Items, Taxes, COGS & Inventory
+        # 8. Process Line Items, Taxes, COGS & Inventory (Passed Exact Historical Date)
         calc_result = cls._process_lines_and_inventory(
             estimate=estimate,
             branch=branch,
@@ -363,7 +379,7 @@ class SalesPOSService:
             is_shop_vat_registered=is_shop_vat_registered,
             default_vat_rate=config.default_vat_rate,
             allow_negative=config.allow_negative_stock,
-            today_ad=target_date_ad,
+            bill_date_ad=target_date_ad,
             customer_name=customer_name,
             customer_phone=customer_phone,
             is_historical=is_historical_import
@@ -401,7 +417,7 @@ class SalesPOSService:
             **kwargs
         )
 
-        # 11. Automatic General Ledger Double-Entry Posting
+        # 11. Automatic General Ledger Double-Entry Posting (Stamps Target Historical Date)
         cls._post_gl_sales_estimate(
             estimate=estimate,
             cashier=cashier,
@@ -417,6 +433,9 @@ class SalesPOSService:
             object_repr=estimate.estimate_number,
             details={
                 'tax_mode': config.tax_system_mode,
+                'bill_date_ad': str(estimate.bill_date_ad),
+                'bill_date_bs': estimate.bill_date_bs,
+                'fiscal_year': estimate.fiscal_year,
                 'subtotal': str(estimate.subtotal),
                 'item_discount_total': str(estimate.item_discount_total),
                 'bill_discount_type': estimate.bill_discount_type,
@@ -749,7 +768,7 @@ class SalesPOSService:
         is_shop_vat_registered: bool,
         default_vat_rate: Decimal,
         allow_negative: bool,
-        today_ad: date,
+        bill_date_ad: date,
         customer_name: str,
         customer_phone: str,
         is_historical: bool = False
@@ -804,7 +823,7 @@ class SalesPOSService:
                 imei_num=imei_num,
                 secondary_imei=secondary_imei,
                 allow_negative=allow_negative,
-                today_ad=today_ad,
+                bill_date_ad=bill_date_ad,
                 estimate=estimate,
                 customer_name=customer_name,
                 customer_phone=customer_phone,
@@ -848,7 +867,7 @@ class SalesPOSService:
                 serial_number=item_instance.serial_number if item_instance else None,
                 device_condition=item_instance.get_condition_display() if item_instance else "Brand New",
                 warranty_months=product.warranty_months if (not is_historical and product.warranty_months) else 0,
-                warranty_start_date=today_ad if (not is_historical and product.warranty_months and product.warranty_months > 0) else None,
+                warranty_start_date=bill_date_ad if (not is_historical and product.warranty_months and product.warranty_months > 0) else None,
                 warranty_expiry_date=warranty_exp,
                 warranty_terms=warranty_summary
             ))
@@ -871,7 +890,7 @@ class SalesPOSService:
         imei_num: str,
         secondary_imei: str,
         allow_negative: bool,
-        today_ad: date,
+        bill_date_ad: date,
         estimate: SalesEstimate,
         customer_name: str,
         customer_phone: str,
@@ -937,7 +956,7 @@ class SalesPOSService:
                         imei_2_pending_scan=False,
                         status='IN_STOCK',
                         landed_cost=product.purchase_price,
-                        purchase_date=today_ad,
+                        purchase_date=bill_date_ad,
                         device_barcode=clean_imei_1 or clean_imei_2 or product.barcode,
                         source_type='NEW_PURCHASE_GRN',
                         condition='BRAND_NEW',
@@ -962,18 +981,18 @@ class SalesPOSService:
             item_instance.sold_invoice_reference = estimate.estimate_number
             item_instance.customer_name = customer_name or (estimate.customer.name if estimate.customer else "Walk-in Customer")
             item_instance.customer_phone = customer_phone or (estimate.customer.phone_number if estimate.customer else "")
-            item_instance.sale_date = today_ad
+            item_instance.sale_date = bill_date_ad
             item_instance.sold_price = unit_price
-            item_instance.warranty_start_date = today_ad
+            item_instance.warranty_start_date = bill_date_ad
             if product.warranty_months > 0:
-                item_instance.warranty_end_date = today_ad + timedelta(days=product.warranty_months * 30)
+                item_instance.warranty_end_date = bill_date_ad + timedelta(days=product.warranty_months * 30)
             item_instance.save()
 
             warranty_exp = item_instance.warranty_end_date
 
             created_warranties = InventoryService.initialize_device_component_warranties(
                 item_instance=item_instance,
-                sale_date=today_ad,
+                sale_date=bill_date_ad,
                 custom_warranty_months=product.warranty_months
             )
 
@@ -1019,7 +1038,7 @@ class SalesPOSService:
             actual_unit_cost, batch_ref = cls._deplete_fifo_batches(product, branch, base_units)
 
             if has_warranty:
-                warranty_exp = today_ad + timedelta(days=product.warranty_months * 30)
+                warranty_exp = bill_date_ad + timedelta(days=product.warranty_months * 30)
                 if not is_phone:
                     warranty_summary = f"{product.warranty_months}M General Warranty"
                 else:
@@ -1030,6 +1049,7 @@ class SalesPOSService:
 
         # Deduct physical warehouse shelf stock
         imei_log_str = f"{imei_num} / {secondary_imei}".strip(' /') if (imei_num or secondary_imei) else ""
+        date_str_for_log = estimate.bill_date_bs or str(bill_date_ad)
         InventoryService.adjust_stock(
             product=product,
             branch=branch,
@@ -1037,7 +1057,7 @@ class SalesPOSService:
             movement_type='SALE',
             reference_doc=estimate.estimate_number,
             imei_or_serial=imei_log_str,
-            remarks=f"POS Sale to {estimate.recipient_display_name} by {estimate.salesperson.username}",
+            remarks=f"POS Sale to {estimate.recipient_display_name} on {date_str_for_log} by {estimate.salesperson.username}",
             user=cashier,
             allow_negative=allow_negative
         )
@@ -1227,7 +1247,6 @@ class SalesPOSService:
         is_credit_sale = (tentative_due > Decimal('0.00') or credit_tendered > Decimal('0.00'))
 
         # 2. Intelligent Customer Resolution for Credit Purchases
-        # If customer_id is missing, attempt resolution by Phone, PAN, or Name before rejecting
         if is_credit_sale and not is_historical:
             if not customer_id:
                 resolved_cust = None
@@ -1235,11 +1254,9 @@ class SalesPOSService:
                 clean_pan = re.sub(r'\D', '', str(customer_pan or '').strip())
                 clean_name = str(customer_name or '').strip()
 
-                # A. Try searching by phone number (Unique index in Customer model)
                 if clean_phone and clean_phone not in ['-', '9800000000', '']:
                     resolved_cust = Customer.objects.filter(phone_number=clean_phone, is_active=True).first()
 
-                # B. Try resolving or creating via 9-digit IRD PAN
                 if not resolved_cust and len(clean_pan) == 9:
                     resolved_cust, _ = Customer.resolve_or_create_by_pan(
                         name=clean_name,
@@ -1248,12 +1265,10 @@ class SalesPOSService:
                         branch=branch
                     )
 
-                # C. Try searching by exact name if not generic
                 generic_terms = ['walk-in customer', 'walk-in', 'walk in', 'cash customer', 'खुदरा ग्राहक', '', '-']
                 if not resolved_cust and clean_name and clean_name.lower() not in generic_terms:
                     resolved_cust = Customer.objects.filter(name__iexact=clean_name, is_active=True).first()
 
-                # Update estimate customer linkage if resolved
                 if resolved_cust:
                     customer_id = resolved_cust.id
                     estimate.customer = resolved_cust
@@ -1270,7 +1285,7 @@ class SalesPOSService:
                         "Please select an existing customer or provide a valid mobile number / PAN."
                     )
 
-        # 3. Credit Limit & Cash-Only Guard (Safe Customer Lookup)
+        # 3. Credit Limit & Cash-Only Guard
         if customer_id and not is_historical:
             customer = Customer.objects.select_for_update().filter(id=customer_id, is_active=True).first()
             if not customer:
@@ -1326,7 +1341,7 @@ class SalesPOSService:
                         }
                     )
 
-        # 4. Create Payment Transactions (Credit Tracked for Reference)
+        # 4. Create Payment Transactions
         for pay in payments:
             pay_mode = str(pay.get('mode') or pay.get('payment_mode') or '').upper().strip()
             raw_amt = pay.get('amount', 0)
@@ -1400,26 +1415,36 @@ class SalesPOSService:
                         paid_parts.append(f"Rs. {effective_trade_in_tender:,.2f} (Trade-In Buyback{trade_ref})")
 
                     paid_summary = ", ".join(paid_parts) if paid_parts else "None (Full Credit)"
+                    bill_date_label = estimate.bill_date_bs or str(estimate.bill_date_ad)
 
                     itemized_remarks = (
                         f"Bill Total: Rs. {estimate.grand_total:,.2f} | "
                         f"Paid: {paid_summary} | "
                         f"Balance Due (Udhaari): Rs. {estimate.due_amount:,.2f} "
-                        f"on estimate {estimate.estimate_number}"
+                        f"on estimate {estimate.estimate_number} ({bill_date_label})"
                     )
 
-                    CustomerUdhaariLedger.objects.create(
-                        customer=customer,
-                        branch=branch,
-                        entry_type='DEBIT',
-                        amount=estimate.due_amount,
-                        previous_balance=prev_bal,
-                        resulting_balance=new_bal,
-                        reference_invoice=estimate.estimate_number,
-                        payment_mode='OTHER',
-                        remarks=itemized_remarks,
-                        recorded_by=cashier
-                    )
+                    ledger_kwargs = {
+                        'customer': customer,
+                        'branch': branch,
+                        'entry_type': 'DEBIT',
+                        'amount': estimate.due_amount,
+                        'previous_balance': prev_bal,
+                        'resulting_balance': new_bal,
+                        'reference_invoice': estimate.estimate_number,
+                        'payment_mode': 'OTHER',
+                        'remarks': itemized_remarks,
+                        'recorded_by': cashier
+                    }
+
+                    # Safely stamp historical entry dates if columns exist on CustomerUdhaariLedger model
+                    customer_ledger_fields = {f.name for f in CustomerUdhaariLedger._meta.get_fields()}
+                    if 'entry_date' in customer_ledger_fields:
+                        ledger_kwargs['entry_date'] = estimate.bill_date_ad
+                    if 'entry_date_bs' in customer_ledger_fields:
+                        ledger_kwargs['entry_date_bs'] = estimate.bill_date_bs
+
+                    CustomerUdhaariLedger.objects.create(**ledger_kwargs)
                 else:
                     customer.total_spent += estimate.grand_total
                     customer.save(update_fields=['total_spent', 'updated_at'])
@@ -1444,7 +1469,6 @@ class SalesPOSService:
                 SalesPaymentTransaction.objects.filter(estimate=estimate).order_by('id')
             )
 
-        # Pass only genuine monetary payment lines to GL posting (Exclude CREDIT)
         payment_details = []
         monetary_transactions = []
 
@@ -1606,11 +1630,19 @@ class SalesPOSService:
 
         original_estimate = SalesEstimate.objects.select_for_update().get(pk=original_estimate.pk)
 
+        today_ad = timezone.now().date()
+        bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today_ad)
+        today_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+        active_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
         sales_return = SalesReturn.objects.create(
             return_number=f"RET-{uuid.uuid4().hex[:8].upper()}",
             original_estimate=original_estimate,
             branch=original_estimate.branch,
             customer=original_estimate.customer,
+            return_date_ad=today_ad,
+            return_date_bs=today_bs,
+            fiscal_year=active_fy,
             refund_mode=refund_mode,
             reason=reason,
             technician_notes=technician_notes,
@@ -1723,7 +1755,7 @@ class SalesPOSService:
                                 cost_price=est_item.cost_price if est_item.cost_price > Decimal('0.00') else est_item.product.purchase_price,
                                 initial_quantity=base_return_units,
                                 quantity_remaining=base_return_units,
-                                purchase_date=timezone.now().date(),
+                                purchase_date=today_ad,
                                 is_depleted=False
                             )
             else:

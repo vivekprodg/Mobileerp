@@ -152,6 +152,7 @@
     gap: 18px;
 }
 
+.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
 .grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
 
@@ -200,6 +201,18 @@
     display: flex;
     align-items: center;
     gap: 4px;
+    z-index: 2;
+}
+
+.clickable-prefix {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.clickable-prefix:hover {
+    color: var(--grn-primary) !important;
+    transform: scale(1.1);
 }
 
 .form-control {
@@ -846,6 +859,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
     <!-- Hidden Configuration Meta Tag to Communicate Master Switch to Frontend Scripts -->
     <div id="grnMasterConfigMeta"
          data-enforce-imei="{{ SYS_CONFIG.enforce_imei_tracking|yesno:'true,false' }}"
+         data-active-fiscal-year="{{ active_fiscal_year|default:'2083/84' }}"
          style="display: none;">
     </div>
 
@@ -913,7 +927,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
         </div>
         {% endif %}
 
-        <!-- SECTION 1: SUPPLIER & CONSIGNMENT INFORMATION -->
+        <!-- SECTION 1: SUPPLIER & CONSIGNMENT INFORMATION (SYNCHRONIZED B.S. & A.D. DATES) -->
         <section class="erp-card">
             <div class="erp-card-header">
                 <div>
@@ -922,16 +936,17 @@ input[type="checkbox"]:checked + .custom-switch::after {
                         1. Supplier &amp; Consignment Information
                     </div>
                     <div class="erp-card-subtitle">
-                        Log supplier fiscal references, freight, customs clearance and invoice level discounts
+                        Log supplier fiscal references, synchronized Bikram Sambat &amp; Gregorian dates, freight, and invoice discounts
                     </div>
                 </div>
             </div>
 
             <div class="erp-card-body">
                 
-                <!-- Primary Supplier Reference Grid -->
-                <div class="grid grid-cols-3">
+                <!-- Primary Supplier & Synchronized Date Grid (4 Columns) -->
+                <div class="grid grid-cols-4">
                     
+                    <!-- Col 1: Supplier Lookup -->
                     <div class="form-group">
                         <label class="form-label">
                             Supplier / Distributor Name <span class="req">*</span>
@@ -957,6 +972,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
                         {% endif %}
                     </div>
 
+                    <!-- Col 2: Supplier Bill Ref -->
                     <div class="form-group">
                         <label class="form-label">
                             Supplier Invoice / Challan Ref No. <span class="req">*</span>
@@ -970,12 +986,41 @@ input[type="checkbox"]:checked + .custom-switch::after {
                         {% endif %}
                     </div>
 
+                    <!-- Col 3: Synchronized Bill Date (B.S. Visual Datepicker Trigger) -->
                     <div class="form-group">
                         <label class="form-label">
-                            Bill / Challan Date (AD) <span class="req">*</span>
+                            Bill Date (BS) <span class="hint text-primary fw-bold">नेपाली मिति</span>
                         </label>
                         <div class="input-wrap">
-                            <span class="input-prefix"><i class="fa-regular fa-calendar"></i></span>
+                            <span class="input-prefix clickable-prefix" id="btn-trigger-bs-date" title="Click to open visual Nepali calendar">
+                                <i class="fa-regular fa-calendar-check text-primary"></i>
+                            </span>
+                            <input type="text" 
+                                   name="bill_date_bs" 
+                                   id="id_bill_date_bs" 
+                                   class="form-control has-prefix font-mono-val nepali-datepicker fw-bold text-primary" 
+                                   placeholder="YYYY-MM-DD (BS)" 
+                                   value="{{ form.bill_date_bs.value|default:'' }}" 
+                                   autocomplete="off">
+                        </div>
+                        <div class="d-flex align-items-center justify-content-between mt-1">
+                            <span class="badge bg-primary bg-opacity-10 text-primary font-mono fs-2xs" id="grnFyBadge">
+                                FY {{ active_fiscal_year|default:'2083/84' }}
+                            </span>
+                            <small class="text-muted fs-3xs" id="grnDateSyncState">Click input or icon for visual calendar</small>
+                        </div>
+                        {% if form.bill_date_bs.errors %}
+                            <div class="text-danger fs-2xs mt-1">{{ form.bill_date_bs.errors|striptags }}</div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Col 4: Synchronized Bill Date (A.D. Gregorian Calendar) -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            Bill / Challan Date (AD) <span class="req">*</span> <span class="hint">English</span>
+                        </label>
+                        <div class="input-wrap">
+                            <span class="input-prefix"><i class="fa-regular fa-calendar text-muted"></i></span>
                             <input type="date" name="bill_date" id="id_bill_date" class="form-control has-prefix font-mono-val" 
                                    value="{% if form.bill_date.value %}{% if form.bill_date.value.isoformat %}{{ form.bill_date.value|date:'Y-m-d' }}{% else %}{{ form.bill_date.value }}{% endif %}{% endif %}" required>
                         </div>
@@ -984,6 +1029,27 @@ input[type="checkbox"]:checked + .custom-switch::after {
                         {% endif %}
                     </div>
 
+                </div>
+
+                <!-- On-Screen Real-Time Fiscal Year Lock Warning Alert -->
+                <div id="grnFiscalLockWarning" class="alert alert-warning border border-warning border-opacity-50 d-none mt-3 p-3 rounded-4 shadow-xs" role="alert">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="rounded-circle bg-warning bg-opacity-25 p-2 text-warning-emphasis flex-shrink-0">
+                            <i class="fa-solid fa-triangle-exclamation fs-5"></i>
+                        </div>
+                        <div class="flex-grow-1 fs-xs">
+                            <strong class="text-dark d-block mb-1">
+                                <span class="badge bg-danger text-white me-1 font-mono">AUDITED &amp; LOCKED PERIOD</span>
+                                Selected date belongs to a Closed Fiscal Year (<span id="grnLockedFySpan" class="font-mono fw-bold">2080/81</span>)
+                            </strong>
+                            <p class="mb-1 text-secondary" id="grnFiscalLockWarningText">
+                                Financial posting to this date is blocked because the accounting period is formally closed and audited.
+                            </p>
+                            <div class="text-muted fs-2xs">
+                                <strong>Required Action:</strong> Either pick an inward date within the active open Fiscal Year (<strong class="text-primary">{{ active_fiscal_year|default:'2083/84' }}</strong>) or have a Store Owner temporarily unlock this historical period in the Accounting Settings dashboard.
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Overheads Grid -->
@@ -1604,7 +1670,7 @@ input[type="checkbox"]:checked + .custom-switch::after {
 </template>
 
 <!-- ==========================================================================
-     REACTIVE MATHEMATICAL JAVASCRIPT ENGINE
+     REACTIVE MATHEMATICAL & DATE SYNCHRONIZATION ENGINE
      ========================================================================== -->
 <script>
 let currentEditingModalRowIdx = null;
@@ -1612,6 +1678,8 @@ let currentEditingModalRowIdx = null;
 // Read Master IMEI Policy Setting from Meta Element
 const configMetaEl = document.getElementById('grnMasterConfigMeta');
 const GLOBAL_ENFORCE_IMEI = configMetaEl ? (configMetaEl.dataset.enforceImei === 'true') : true;
+const ACTIVE_FISCAL_YEAR = (configMetaEl?.dataset.activeFiscalYear || '2083/84').trim();
+const LOCKED_FISCAL_YEARS = ['2080/81', '2081/82', '2082/83'];
 
 // Currency Formatter
 function formatNPR(num) {
@@ -1619,6 +1687,225 @@ function formatNPR(num) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     });
+}
+
+// --------------------------------------------------------------------------
+// 0. BIDIRECTIONAL B.S. <-> A.D. DATE SYNCHRONIZER & FISCAL LOCK WATCHER
+// --------------------------------------------------------------------------
+function initGrnDateSynchronizer() {
+    const bsInput = document.getElementById('id_bill_date_bs');
+    const adInput = document.getElementById('id_bill_date');
+    const triggerIconBtn = document.getElementById('btn-trigger-bs-date');
+    const fyBadge = document.getElementById('grnFyBadge');
+    const syncStateText = document.getElementById('grnDateSyncState');
+    const lockWarningBox = document.getElementById('grnFiscalLockWarning');
+    const lockedFySpan = document.getElementById('grnLockedFySpan');
+    const warningText = document.getElementById('grnFiscalLockWarningText');
+    const submitBtn = document.getElementById('btn-final-submit');
+
+    if (!bsInput || !adInput) return;
+
+    let isSyncing = false;
+
+    // Helper: Derives official Nepali Fiscal Year from year and month
+    function deriveBsFiscalYear(bsYear, bsMonth) {
+        if (bsMonth >= 4) {
+            const nextShort = String(bsYear + 1).slice(-2);
+            return `${bsYear}/${nextShort}`;
+        } else {
+            const prevYear = bsYear - 1;
+            const currShort = String(bsYear).slice(-2);
+            return `${prevYear}/${currShort}`;
+        }
+    }
+
+    // Helper: Evaluates fiscal year lock status and displays on-screen warning
+    function checkFiscalYearLock(bsDateString) {
+        if (!bsDateString) return;
+        const cleanBs = bsDateString.trim().replace(/\//g, '-').replace(/\./g, '-');
+        const parts = cleanBs.split('-').map(Number);
+        if (parts.length !== 3 || isNaN(parts[0]) || isNaN(parts[1])) return;
+
+        const [y, m] = parts;
+        const derivedFy = deriveBsFiscalYear(y, m);
+
+        if (fyBadge) {
+            fyBadge.innerText = `FY ${derivedFy}`;
+        }
+
+        const isLocked = LOCKED_FISCAL_YEARS.includes(derivedFy);
+
+        if (isLocked) {
+            if (lockWarningBox) {
+                lockWarningBox.classList.remove('d-none');
+                if (lockedFySpan) lockedFySpan.innerText = derivedFy;
+                if (warningText) {
+                    warningText.innerHTML = `Bill Date <strong>${cleanBs} BS</strong> falls inside Fiscal Year <strong>${derivedFy}</strong>, which is audited and permanently locked.`;
+                }
+            }
+            if (fyBadge) {
+                fyBadge.className = 'badge bg-danger text-white font-mono fs-2xs';
+            }
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.title = `Posting blocked: Fiscal Year ${derivedFy} is audited and locked.`;
+            }
+        } else {
+            if (lockWarningBox) {
+                lockWarningBox.classList.add('d-none');
+            }
+            if (fyBadge) {
+                fyBadge.className = 'badge bg-primary bg-opacity-10 text-primary font-mono fs-2xs';
+            }
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.title = 'Verify & Update Warehouse Stock';
+            }
+        }
+    }
+
+    // 1. Direct Visual Datepicker Triggering
+    if (triggerIconBtn) {
+        triggerIconBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            bsInput.focus();
+            bsInput.click();
+        });
+    }
+
+    // Bind visual Nepali Datepicker popup
+    if (typeof HTMLElement.prototype.nepaliDatePicker !== 'undefined') {
+        try {
+            bsInput.nepaliDatePicker({
+                ndpYear: true,
+                ndpMonth: true,
+                ndpYearCount: 25,
+                readOnlyInput: false,
+                dateFormat: 'YYYY-MM-DD',
+                language: 'english',
+                onChange: function(e) {
+                    const pickedDate = (e && e.bs) ? e.bs : bsInput.value;
+                    if (pickedDate) {
+                        syncBsToAd(pickedDate);
+                    }
+                }
+            });
+            bsInput.dataset.ndpInitialized = 'true';
+        } catch (e) {
+            console.warn('[GRN] Direct nepaliDatePicker binding error:', e);
+        }
+    }
+
+    // Convert B.S. -> A.D.
+    async function syncBsToAd(bsVal) {
+        if (!bsVal || isSyncing) return;
+        const cleanBs = bsVal.trim().replace(/\//g, '-').replace(/\./g, '-');
+        if (!/^\d{4}-\d{1,2}-\d{1,2}$/.test(cleanBs)) return;
+
+        checkFiscalYearLock(cleanBs);
+
+        // Client-side library conversion
+        if (window.NepaliFunctions && typeof window.NepaliFunctions.BS2AD === 'function') {
+            try {
+                const parts = cleanBs.split('-').map(Number);
+                const adObj = window.NepaliFunctions.BS2AD({ year: parts[0], month: parts[1], day: parts[2] });
+                const adStr = window.NepaliFunctions.ConvertDateFormat(adObj, 'YYYY-MM-DD');
+                if (adStr) {
+                    isSyncing = true;
+                    adInput.value = adStr;
+                    if (syncStateText) syncStateText.innerText = `Synced to ${adStr} AD`;
+                    isSyncing = false;
+                    return;
+                }
+            } catch (e) {}
+        }
+
+        // Asynchronous conversion fallback
+        try {
+            isSyncing = true;
+            const res = await fetch(`{% url 'core:convert_date_api' %}?action=bs_to_ad&date=${encodeURIComponent(cleanBs)}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'success' && data.ad_date) {
+                    adInput.value = data.ad_date;
+                    if (syncStateText) syncStateText.innerText = `Synced to ${data.ad_date} AD`;
+                }
+            }
+        } catch (err) {
+            console.warn('[GRN] Date conversion error (BS to AD):', err);
+        } finally {
+            isSyncing = false;
+        }
+    }
+
+    // Convert A.D. -> B.S.
+    async function syncAdToBs(adVal) {
+        if (!adVal || isSyncing) return;
+        const cleanAd = adVal.trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanAd)) return;
+
+        // Client-side library conversion
+        if (window.NepaliFunctions && typeof window.NepaliFunctions.AD2BS === 'function') {
+            try {
+                const parts = cleanAd.split('-').map(Number);
+                const bsObj = window.NepaliFunctions.AD2BS({ year: parts[0], month: parts[1], day: parts[2] });
+                const bsStr = window.NepaliFunctions.ConvertDateFormat(bsObj, 'YYYY-MM-DD');
+                if (bsStr) {
+                    isSyncing = true;
+                    bsInput.value = bsStr;
+                    checkFiscalYearLock(bsStr);
+                    if (syncStateText) syncStateText.innerText = `Synced to ${bsStr} BS`;
+                    isSyncing = false;
+                    return;
+                }
+            } catch (e) {}
+        }
+
+        // Asynchronous conversion fallback
+        try {
+            isSyncing = true;
+            const res = await fetch(`{% url 'core:convert_date_api' %}?action=ad_to_bs&date=${encodeURIComponent(cleanAd)}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'success' && data.bs_en) {
+                    bsInput.value = data.bs_en;
+                    checkFiscalYearLock(data.bs_en);
+                    if (syncStateText) syncStateText.innerText = `Synced to ${data.bs_en} BS`;
+                }
+            }
+        } catch (err) {
+            console.warn('[GRN] Date conversion error (AD to BS):', err);
+        } finally {
+            isSyncing = false;
+        }
+    }
+
+    // Attach listeners
+    bsInput.addEventListener('input', (e) => syncBsToAd(e.target.value));
+    bsInput.addEventListener('change', (e) => syncBsToAd(e.target.value));
+    bsInput.addEventListener('dateSelect', (e) => {
+        const val = e.target.value || (e.detail && e.detail.value);
+        if (val) syncBsToAd(val);
+    });
+
+    adInput.addEventListener('input', (e) => syncAdToBs(e.target.value));
+    adInput.addEventListener('change', (e) => syncAdToBs(e.target.value));
+
+    // Baseline check on load
+    if (bsInput.value.trim()) {
+        checkFiscalYearLock(bsInput.value.trim());
+        if (!adInput.value.trim()) {
+            syncBsToAd(bsInput.value.trim());
+        }
+    } else if (adInput.value.trim()) {
+        syncAdToBs(adInput.value.trim());
+    }
+
+    // Global datepicker bootstrap hook
+    if (typeof window.initNepaliDatepickers === 'function') {
+        window.initNepaliDatepickers(bsInput.parentElement);
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -1722,7 +2009,6 @@ function setRowImeiRequirement(idx, isRequired) {
     }
 
     if (!isRequired) {
-        // Clear IMEIs if marked as non-IMEI
         const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
         if (hiddenImeiField) hiddenImeiField.value = '';
         const tag = row.querySelector(`#imei-count-tag-${idx}`);
@@ -1982,7 +2268,6 @@ function attachRowCalculationTriggers(containerEl) {
         if (isAccessory) {
             setRowImeiRequirement(idx, false);
         } else {
-            // Check if phone
             const extra = item.extra_data || {};
             const isExplicitPhone = Boolean(
                 item.requires_imei || 
@@ -1992,10 +2277,7 @@ function attachRowCalculationTriggers(containerEl) {
                 item.is_serialized
             );
 
-            // DYNAMIC MASTER SETTING SENSITIVITY:
-            // If Backlog Mode is active (GLOBAL_ENFORCE_IMEI == false), default row to Non-IMEI mode
-            // so staff aren't blocked from saving backlog paper purchases.
-            // If Strict Mode is active, enforce IMEI requirement for phones.
+            // DYNAMIC MASTER SETTING SENSITIVITY
             if (!GLOBAL_ENFORCE_IMEI) {
                 setRowImeiRequirement(idx, false);
             } else {
@@ -2126,7 +2408,7 @@ document.getElementById('grnMasterForm').addEventListener('submit', function(e) 
         const isImeiRequired = row.querySelector('.row-requires-imei-flag')?.value === 'true';
 
         if (prodId) {
-            // STRICT MODE: Enforce exact 1-to-1 match for all rows flagged as requiring IMEIs
+            // STRICT MODE
             if (GLOBAL_ENFORCE_IMEI && isImeiRequired) {
                 if (imeiLines.length !== qty) {
                     hasError = true;
@@ -2136,8 +2418,7 @@ document.getElementById('grnMasterForm').addEventListener('submit', function(e) 
                     return;
                 }
             } 
-            // BACKLOG MODE: If IMEIs are completely empty, allow it! 
-            // Only alert if staff typed some partial IMEIs that don't match the quantity.
+            // BACKLOG MODE
             else if (!GLOBAL_ENFORCE_IMEI) {
                 if (imeiLines.length > 0 && imeiLines.length !== qty) {
                     hasError = true;
@@ -2157,6 +2438,7 @@ document.getElementById('grnMasterForm').addEventListener('submit', function(e) 
 
 // Initialize on Document Load
 document.addEventListener('DOMContentLoaded', () => {
+    initGrnDateSynchronizer();
     initWholeBillDiscountControls();
     initImeiBadges();
     attachRowCalculationTriggers(document);

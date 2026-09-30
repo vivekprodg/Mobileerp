@@ -1,25 +1,29 @@
 """
 Django Admin Configuration for Customer Profiles & Udhaari Sub-Ledgers.
+Aligned strictly with CustomerUdhaariLedger historical entry_date and entry_date_bs fields.
 """
 
+from decimal import Decimal
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from apps.customers.models import Customer, CustomerUdhaariLedger
 
-
 class CustomerUdhaariLedgerInline(admin.TabularInline):
     model = CustomerUdhaariLedger
     extra = 0
     fields = [
-        'created_at', 'entry_type_badge', 'amount', 'previous_balance',
-        'resulting_balance', 'payment_mode', 'reference_invoice', 'remarks', 'recorded_by'
+        'entry_date', 'entry_date_bs', 'entry_type_badge', 'amount',
+        'previous_balance', 'resulting_balance', 'payment_mode',
+        'reference_invoice', 'remarks', 'recorded_by', 'created_at'
     ]
     readonly_fields = [
-        'created_at', 'entry_type_badge', 'amount', 'previous_balance',
-        'resulting_balance', 'payment_mode', 'reference_invoice', 'remarks', 'recorded_by'
+        'entry_date', 'entry_date_bs', 'entry_type_badge', 'amount',
+        'previous_balance', 'resulting_balance', 'payment_mode',
+        'reference_invoice', 'remarks', 'recorded_by', 'created_at'
     ]
     can_delete = False
+    ordering = ['-entry_date', '-created_at']
 
     def entry_type_badge(self, obj):
         if obj.entry_type == 'DEBIT':
@@ -40,7 +44,6 @@ class CustomerUdhaariLedgerInline(admin.TabularInline):
 
     def has_delete_permission(self, request, obj=None):
         return False
-
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
@@ -103,8 +106,8 @@ class CustomerAdmin(admin.ModelAdmin):
     pan_badge.short_description = _("Tax PAN")
 
     def current_credit_balance_display(self, obj):
-        bal = obj.current_credit_balance or 0
-        if bal > 0:
+        bal = obj.current_credit_balance or Decimal('0.00')
+        if bal > Decimal('0.00'):
             return format_html(
                 '<span style="color: #dc2626; font-weight: 700; font-family: monospace;">Rs. {:,.2f}</span>',
                 bal
@@ -113,7 +116,7 @@ class CustomerAdmin(admin.ModelAdmin):
     current_credit_balance_display.short_description = _("Outstanding Udhaari")
 
     def total_spent_display(self, obj):
-        return format_html('<span class="font-monospace">Rs. {:,.2f}</span>', obj.total_spent or 0)
+        return format_html('<span class="font-monospace">Rs. {:,.2f}</span>', obj.total_spent or Decimal('0.00'))
     total_spent_display.short_description = _("Lifetime Spend")
 
     @admin.action(description=_("Recalculate credit balance from sub-ledger for selected customers"))
@@ -138,17 +141,21 @@ class CustomerAdmin(admin.ModelAdmin):
             )
         )
 
-
 @admin.register(CustomerUdhaariLedger)
 class CustomerUdhaariLedgerAdmin(admin.ModelAdmin):
     list_display = [
-        'customer', 'entry_type', 'amount', 'previous_balance',
-        'resulting_balance', 'payment_mode', 'reference_invoice', 'recorded_by', 'created_at'
+        'customer', 'branch', 'entry_type', 'entry_date', 'entry_date_bs',
+        'amount', 'previous_balance', 'resulting_balance', 'payment_mode',
+        'reference_invoice', 'recorded_by', 'created_at'
     ]
-    list_filter = ['entry_type', 'payment_mode', 'branch', 'created_at']
-    search_fields = ['customer__name', 'customer__phone_number', 'customer__pan_number', 'reference_invoice', 'remarks']
+    list_filter = ['entry_type', 'payment_mode', 'branch', 'entry_date', 'created_at']
+    search_fields = [
+        'customer__name', 'customer__phone_number', 'customer__pan_number',
+        'reference_invoice', 'entry_date_bs', 'remarks'
+    ]
     list_select_related = ['customer', 'branch', 'recorded_by']
     readonly_fields = [f.name for f in CustomerUdhaariLedger._meta.fields]
+    ordering = ['-entry_date', '-created_at']
 
     def has_add_permission(self, request):
         return False

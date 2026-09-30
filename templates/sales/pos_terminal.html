@@ -126,6 +126,7 @@ body {
     border-color: var(--ms-text-muted);
 }
 
+/* Entire Bill Date Badge is an Interactive Clickable Container */
 .bs-date-badge {
     background: #ffffff;
     border: 1px solid var(--ms-border);
@@ -137,6 +138,21 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bs-date-badge:hover {
+    background-color: var(--ms-primary-light);
+    border-color: var(--ms-primary-border);
+    color: var(--ms-primary);
+    box-shadow: 0 2px 5px rgba(30, 64, 175, 0.08);
+}
+
+.bs-date-badge:focus-visible {
+    outline: 2px solid var(--ms-primary);
+    outline-offset: 2px;
 }
 
 .online-status-dot {
@@ -440,7 +456,7 @@ body {
     background-color: #fee2e2;
 }
 
-/* Tier 2: 6-Column Calculated Inputs Grid (Re-balanced for in-row discount toggle) */
+/* Tier 2: 6-Column Calculated Inputs Grid */
 .tier-bottom {
     display: grid;
     grid-template-columns: 1fr 1.5fr 1.5fr 2.4fr 1.1fr 1.8fr;
@@ -493,9 +509,7 @@ body {
     padding-right: 10px;
 }
 
-/* ==========================================================================
-   IN-ROW ITEM DISCOUNT TOGGLE GROUP STYLES (% vs Rs.)
-   ========================================================================== */
+/* In-Row Item Discount Toggle Group */
 .item-disc-toggle-group .btn {
     font-size: 11px;
     font-weight: 800;
@@ -587,9 +601,7 @@ body {
     border-color: var(--ms-primary);
 }
 
-/* ==========================================================================
-   VERTICAL FINANCIAL SUMMARY CARD (WITH INTERACTIVE BILL DISCOUNT)
-   ========================================================================== */
+/* Vertical Financial Summary Card */
 .hisaav-summary-card {
     background: var(--ms-bg-card);
     border: 1px solid var(--ms-border);
@@ -808,16 +820,19 @@ body {
          data-tax-mode="{{ SHOP_TAX_MODE|default:config.tax_system_mode|default:'EXEMPT' }}"
          data-default-vat-rate="{{ DEFAULT_TAX_RATE|default:config.default_vat_rate|default:'0.00' }}"
          data-enforce-imei="{% if SYS_CONFIG.enforce_imei_tracking == False or config.enforce_imei_tracking == False or ENFORCE_IMEI_TRACKING == False or enforce_imei_tracking == False %}false{% else %}true{% endif %}"
-         data-can-backdate="{% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' or IS_MANAGER or IS_OWNER %}true{% else %}false{% endif %}"
+         data-can-backdate="{% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' or IS_MANAGER or IS_OWNER or not SYS_CONFIG.enforce_imei_tracking or SYS_CONFIG.allow_cashier_backdating %}true{% else %}false{% endif %}"
+         data-allow-cashier-backdating="{{ SYS_CONFIG.allow_cashier_backdating|yesno:'true,false' }}"
+         data-is-privileged="{% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' or IS_MANAGER or IS_OWNER %}true{% else %}false{% endif %}"
          data-today-bs="{{ CURRENT_BS_DATE_EN|default:'' }}"
          data-today-bs-np="{{ CURRENT_BS_DATE_NP|default:'' }}"
+         data-active-fiscal-year="{{ active_fiscal_year|default:'2083/84' }}"
          style="display: none;">
     </div>
 
     <!-- =========================================================================
          1. TOP BAR: CLEAN WHITE CONTROLS, SHORTCUTS & BIKRAM SAMBAT DATE
          ========================================================================= -->
-    <header class="hisaav-top-bar">
+    <header class="hisaav-top-bar position-relative">
         <div style="display: flex; align-items: center; gap: 14px;">
             <!-- Bill Type Selector (Sales vs Estimates) -->
             <div class="bill-type-pills">
@@ -844,35 +859,45 @@ body {
 
         <!-- Right Side: Bikram Sambat Date & Outlet Status -->
         <div style="display: flex; align-items: center; gap: 10px;">
-            <div class="bs-date-badge">
+            
+            <!-- ENTIRE DATE BADGE IS AN INTERACTIVE CLICKABLE CONTAINER -->
+            <div class="bs-date-badge" id="btnChangeBillDate" role="button" tabindex="0" title="Click anywhere to change bill date">
                 <i class="far fa-calendar-check text-primary"></i>
                 <span class="text-muted" style="font-size: 11px;">Bill Date:</span>
-                <span id="displayBillDateBs" class="font-mono text-dark">{{ CURRENT_BS_DATE_EN|default:"2083-06-12" }} BS</span>
-                <button type="button" class="btn btn-link p-0 text-primary text-decoration-none fs-2xs fw-bold ms-1" id="btnChangeBillDate">
+                <span id="displayBillDateBs" class="font-mono text-dark fw-bold">{{ CURRENT_BS_DATE_EN|default:"2083-06-12" }} BS</span>
+                <span class="badge bg-primary bg-opacity-10 text-primary fs-3xs fw-bold ms-1 px-1.5 py-0.5 border border-primary border-opacity-25">
                     Change
-                </button>
-                <button type="button" class="btn btn-link p-0 text-danger text-decoration-none fs-2xs fw-bold ms-1 d-none" id="btnResetTodayDate">
-                    Today
+                </span>
+                <button type="button" class="btn btn-link p-0 text-danger text-decoration-none fs-2xs fw-bold ms-1 d-none" id="btnResetTodayDate" onclick="event.stopPropagation();">
+                    Reset
                 </button>
             </div>
 
-            <!-- Collapsible Datepicker Dropdown Wrapper -->
-            <div class="p-2 bg-white border rounded-3 d-none shadow-sm position-absolute" id="customDatePickerWrapper" style="right: 20px; top: 60px; z-index: 1050; width: 310px;">
-                <div class="d-flex align-items-center gap-2">
-                    <label class="form-label fs-2xs fw-bold text-dark mb-0 text-nowrap">B.S. Date:</label>
-                    <input type="text" 
-                           id="posBillDateBsInput" 
-                           name="bill_date_bs" 
-                           class="form-control form-control-sm font-mono fs-xs nepali-datepicker text-center fw-bold text-primary" 
-                           value="{{ CURRENT_BS_DATE_EN|default:'' }}" 
-                           placeholder="YYYY-MM-DD (BS)" 
-                           autocomplete="off">
-                    <button type="button" class="btn btn-success btn-sm py-0 px-2 fs-2xs fw-bold rounded-pill" id="btnApplyCustomDate">Apply</button>
-                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 fs-2xs rounded-pill" id="btnCancelCustomDate">Cancel</button>
+            <!-- Collapsible Datepicker Dropdown Wrapper (No "Apply" Button - 1-Click Auto Select) -->
+            <div class="p-2 bg-white border rounded-3 d-none shadow-lg position-absolute" id="customDatePickerWrapper" style="right: 20px; top: 52px; z-index: 1080; width: 310px;" onclick="event.stopPropagation();">
+                <div class="d-flex flex-column gap-2">
+                    <div class="d-flex align-items-center justify-content-between border-bottom pb-1">
+                        <span class="fs-2xs fw-bold text-dark text-uppercase"><i class="fas fa-calendar-alt text-primary me-1"></i> Historical Bill Date</span>
+                        <span class="badge bg-primary bg-opacity-10 text-primary font-mono fs-3xs">FY {{ active_fiscal_year|default:'2083/84' }}</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="text" 
+                               id="posBillDateBsInput" 
+                               name="bill_date_bs" 
+                               class="form-control form-control-sm font-mono fs-xs nepali-datepicker text-center fw-bold text-primary flex-grow-1" 
+                               value="{{ CURRENT_BS_DATE_EN|default:'' }}" 
+                               placeholder="YYYY-MM-DD (BS)" 
+                               autocomplete="off">
+                        <button type="button" class="btn btn-outline-secondary btn-sm py-1 px-3 fs-2xs rounded-pill" id="btnCancelCustomDate">Cancel</button>
+                    </div>
+                    <div class="text-muted fs-3xs text-center">
+                        <i class="fas fa-hand-pointer text-primary me-1"></i> Click any day on the calendar to update date instantly
+                    </div>
+                    <div id="dateValidationErrorAlert" class="alert alert-danger p-1 fs-3xs d-none mb-0 text-center"></div>
                 </div>
             </div>
 
-            <div class="bs-date-badge" style="gap: 6px;">
+            <div class="bs-date-badge" style="gap: 6px; cursor: default;">
                 <span class="online-status-dot"></span>
                 <span style="font-size: 11px;" id="posNetworkStatusBadge">Online</span>
             </div>
@@ -1187,7 +1212,7 @@ body {
 </div>
 
 <!-- =========================================================================
-     3. PRESERVED OPERATIONAL MODALS (REPRESENTING EXISTING BACKEND WORKFLOWS)
+     3. PRESERVED OPERATIONAL MODALS
      ========================================================================= -->
 
 <!-- MODAL 1: SMART DUAL-IMEI SELECTOR MODAL -->
@@ -1459,10 +1484,14 @@ body {
 
 <script>
 /**
- * Hisaav Layout Integration, Customer Context Propagation & Authoritative Event Routing
+ * Hisaav Layout Integration & UI Helper Bindings
+ * Note: All core datepicker events, auto-selection, fiscal year checks, and calendar dismissals
+ * are centralized authoritatively inside static/js/pos_engine.js.
  */
 document.addEventListener('DOMContentLoaded', () => {
+    // -------------------------------------------------------------
     // 1. One-Click Clear Buttons for Patron Fields
+    // -------------------------------------------------------------
     const clearNameBtn = document.getElementById('clearCustomerNameBtn');
     const custNameInput = document.getElementById('posCustomerInput');
     const custIdInput = document.getElementById('posCustomerId');
@@ -1499,7 +1528,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Manual input synchronization into smartPos.cart
     if (custPanInput) {
         custPanInput.addEventListener('input', (e) => {
             if (window.smartPos && window.smartPos.cart) {
@@ -1518,7 +1546,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (custNameInput) {
         custNameInput.addEventListener('input', (e) => {
-            // If the user manually edits the name, reset the bound customer ID unless selected from dropdown
             if (custIdInput) {
                 if (window.smartPos && window.smartPos.customerManager && window.smartPos.customerManager.selectedCustomer) {
                     if (window.smartPos.customerManager.selectedCustomer.name !== e.target.value) {
@@ -1533,7 +1560,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // -------------------------------------------------------------
     // 2. Quick 'Walk-in' Click Trigger
+    // -------------------------------------------------------------
     const quickWalkInBtn = document.getElementById('quickWalkInCustomerBtn');
     if (quickWalkInBtn) {
         quickWalkInBtn.addEventListener('click', () => {
@@ -1547,97 +1576,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 3. Bill Date B.S. Controller
-    const btnChangeBillDate = document.getElementById('btnChangeBillDate');
-    const customDatePickerWrapper = document.getElementById('customDatePickerWrapper');
-    const btnApplyCustomDate = document.getElementById('btnApplyCustomDate');
-    const btnCancelCustomDate = document.getElementById('btnCancelCustomDate');
-    const posBillDateBsInput = document.getElementById('posBillDateBsInput');
-    const displayBillDateBs = document.getElementById('displayBillDateBs');
-    const btnResetTodayDate = document.getElementById('btnResetTodayDate');
-
-    if (btnChangeBillDate && customDatePickerWrapper) {
-        btnChangeBillDate.addEventListener('click', () => {
-            customDatePickerWrapper.classList.toggle('d-none');
-            if (!customDatePickerWrapper.classList.contains('d-none') && posBillDateBsInput) {
-                posBillDateBsInput.focus();
-                if (window.initNepaliDatepickers) {
-                    window.initNepaliDatepickers(customDatePickerWrapper);
-                }
-            }
-        });
-    }
-
-    if (btnApplyCustomDate && posBillDateBsInput) {
-        btnApplyCustomDate.addEventListener('click', () => {
-            const val = posBillDateBsInput.value.trim();
-            if (val) {
-                if (displayBillDateBs) displayBillDateBs.innerText = `${val} BS`;
-                customDatePickerWrapper.classList.add('d-none');
-                if (btnResetTodayDate) btnResetTodayDate.classList.remove('d-none');
-            }
-        });
-    }
-
-    if (btnCancelCustomDate && customDatePickerWrapper) {
-        btnCancelCustomDate.addEventListener('click', () => {
-            customDatePickerWrapper.classList.add('d-none');
-        });
-    }
-
-    if (btnResetTodayDate) {
-        btnResetTodayDate.addEventListener('click', () => {
-            const todayBs = '{{ CURRENT_BS_DATE_EN|default:"2083-06-12" }}';
-            if (displayBillDateBs) displayBillDateBs.innerText = `${todayBs} BS`;
-            if (posBillDateBsInput) posBillDateBsInput.value = todayBs;
-            btnResetTodayDate.classList.add('d-none');
-        });
-    }
-
-    // 4. In-Row Line Item Discount Toggle Controller (% vs Rs.)
-    const itemsContainer = document.getElementById('itemsContainer');
-    if (itemsContainer) {
-        itemsContainer.addEventListener('click', (e) => {
-            const modeBtn = e.target.closest('.item-disc-mode-btn');
-            if (!modeBtn) return;
-
-            e.preventDefault();
-            const calcField = modeBtn.closest('.calc-field-discount');
-            if (!calcField) return;
-
-            const mode = modeBtn.dataset.mode;
-            const toggleGroup = calcField.querySelector('.item-disc-toggle-group');
-            const hiddenType = calcField.querySelector('.cart-item-disc-type');
-            const symbolSpan = calcField.querySelector('.item-disc-symbol');
-            const discountInput = calcField.querySelector('.cart-disc-input');
-
-            if (toggleGroup) {
-                toggleGroup.querySelectorAll('.item-disc-mode-btn').forEach(btn => {
-                    btn.classList.remove('active', 'btn-dark');
-                    btn.classList.add('btn-outline-secondary');
-                });
-                modeBtn.classList.remove('btn-outline-secondary');
-                modeBtn.classList.add('active', 'btn-dark');
-            }
-
-            if (hiddenType) hiddenType.value = mode;
-            if (symbolSpan) symbolSpan.innerText = (mode === 'AMOUNT') ? 'Rs.' : '%';
-
-            if (discountInput) {
-                let currentVal = parseFloat(discountInput.value) || 0;
-                if (mode === 'PERCENTAGE') {
-                    if (currentVal > 100) discountInput.value = '100';
-                    discountInput.max = '100';
-                } else {
-                    discountInput.removeAttribute('max');
-                }
-                discountInput.dispatchEvent(new Event('input', { bubbles: true }));
-                discountInput.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        });
-    }
-
-    // 5. Hotkeys [F4] Cash, [F6] Exchange, [F7] Repair, [F8] Split Modal, [F9] Hold, [F10] Recall
+    // -------------------------------------------------------------
+    // 3. Hotkeys [F4] Cash, [F6] Exchange, [F7] Repair, [F8] Split Modal, [F9] Hold, [F10] Recall
+    // -------------------------------------------------------------
     window.addEventListener('keydown', (e) => {
         if (e.key === 'F4') {
             e.preventDefault();
@@ -1657,7 +1598,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (repBtn) repBtn.click();
         } else if (e.key === 'F8') {
             e.preventDefault();
-            // Call openSplitPaymentModal() directly to ensure calculations initialize
             if (window.smartPos && typeof window.smartPos.openSplitPaymentModal === 'function') {
                 window.smartPos.openSplitPaymentModal();
             } else {
@@ -1677,7 +1617,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // 6. Split Button: Route directly to window.smartPos.openSplitPaymentModal()
+    // -------------------------------------------------------------
+    // 4. Split & Recall Action Triggers
+    // -------------------------------------------------------------
     const splitBtn = document.getElementById('posSplitPaymentBtn');
     if (splitBtn) {
         splitBtn.addEventListener('click', (e) => {
