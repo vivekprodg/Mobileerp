@@ -6,26 +6,35 @@ Core Architecture & Capabilities:
    - High-speed zero-storage POS billing single page interface.
    - Enforces an active open cash drawer session before accepting transactions.
    - Supplies comprehensive template context (Bikram Sambat dates, active fiscal year, store branding, VAT status, staff permissions).
-2. POSCheckoutAPIView (Security & Authoritative Discount Engine):
+2. POSCheckoutAPIView (Security, Document Sequencing & Authoritative Discount Engine):
    - Accepts structured checkout payloads from the POS terminal.
+   - Normalizes and extracts bill_type ('SALES' vs 'ESTIMATE') from incoming payloads.
    - Idempotency-Key validation preventing double-billing on network lags.
    - Multi-format backdated Nepali Bikram Sambat (B.S.) date extraction and AD calendar synchronization.
-   - Validates that backdated bills fall strictly within the active, open fiscal year (rejecting locked years like 2080/81, 2081/82, 2082/83).
+   - Validates that backdated bills fall strictly within the active, open fiscal year.
    - Enforces strict server-side validation on dual-mode line and bill discounts.
    - Standardizes error responses with machine-readable error_code across all validation failures.
    - Validates that attached repair tickets have corresponding billing items before marking as delivered.
+   - Returns authoritative document titles, sequence numbers, and thermal print URLs.
 3. SalesEstimateDetailView & SalesEstimateThermalSlipView:
    - Detailed invoice review, thermal 80mm/58mm printing, and formal A4 sheet views.
-4. Sales Estimate Voiding & Cancellation:
+4. SalesEstimateUpdateView (Safe Counter Bill Corrections):
+   - Provides safe counter-level metadata corrections (Dates, Customer Name, Phone, PAN, Remarks).
+   - Strict Lockout Rule: CANCELLED, RETURNED, and PARTIALLY_RETURNED bills are permanently locked.
+   - Explicit `get_success_url` implementation and direct form saving to prevent ImproperlyConfigured errors.
+   - Atomic Save: Recalculates BS/AD dates, synchronizes linked accounting journals, item warranties,
+     and customer debt records, while writing full forensic audit trails into AuditLog.
+5. Sales Estimate Voiding & Cancellation:
    - cancel_estimate_view & SalesEstimateCancelView:
      * Strictly restricted to Owners, Managers, and Superusers (cashiers blocked).
      * Blocks cancellation of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
      * Fully delegates atomic reversal (merchandise stock, Udhaari debt, trade-in vouchers,
        repair tickets, and General Ledger journal vouchers) to SalesPOSService.cancel_sales_estimate.
-5. Itemized Sales Returns:
+     * Enhanced redirection support: Redirects back to list view or detail view cleanly with clear audit alerts.
+6. Itemized Sales Returns:
    - SalesReturnListView, SalesReturnCreateView, SalesReturnDetailView, SalesReturnThermalSlipView.
    - Enforces active cash drawer shift when issuing CASH refunds to prevent drawer discrepancies.
-6. Trade-In & Buy-Back Vouchers:
+7. Trade-In & Buy-Back Vouchers:
    - TradeInListView, TradeInEvaluationWizardView, TradeInDetailView, TradeInPoliceUndertakingPrintView.
    - Bidirectional customer identification fallback between Step 1 intake and Step 3 KYC undertaking.
    - Guarantees SYS_CONFIG injection for statutory police anti-theft undertaking documents.
@@ -40,26 +49,26 @@ from datetime import date, datetime, timedelta
 from typing import Any, Optional, Dict, List, Tuple
 
 from django.shortcuts import render, redirect, get_object_or_404
-from django.views.generic import TemplateView, ListView, DetailView, View
+from django.views.generic import TemplateView, ListView, DetailView, UpdateView, View
 from django.views.decorators.http import require_http_methods
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponseRedirect
 from django.db.models import Q, Sum
 from django.db import transaction
 from django.utils import timezone
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
 
 from apps.sales.models import (
     SalesEstimate, SalesEstimateItem, SalesPaymentTransaction, SalesReturn, SalesReturnItem,
     PhoneExchangeTradeIn, TradeInInspectionChecklist, TradeInLegalUndertaking
 )
 from apps.sales.forms import (
-    TradeInDeviceIntakeForm, TradeIn10PointChecklistForm, TradeInLegalUndertakingForm,
-    SalesReturnProcessForm
+    SalesEstimateEditForm, TradeInDeviceIntakeForm, TradeIn10PointChecklistForm,
+    TradeInLegalUndertakingForm, SalesReturnProcessForm
 )
 from apps.sales.services import SalesPOSService, TradeInValuationEngine
 from apps.inventory.models import (
@@ -67,7 +76,7 @@ from apps.inventory.models import (
     DeviceComponentWarranty, BranchStock
 )
 from apps.products.services import ProductCatalogService
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerUdhaariLedger
 from apps.inventory.services import InventoryService
 from apps.branches.models import Branch
 from apps.repairs.models import RepairTicket, TechnicianCommissionLog
@@ -79,6 +88,16 @@ from apps.accounting.models import AccountingFiscalYear
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
+
+# Standard operational reasons for voiding sales bills
+VOID_REASON_CHOICES = [
+    ('CASHIER_ENTRY_MISTAKE', 'Cashier Entry Mistake / Typo (काउन्टरमा इन्ट्री गल्ती)'),
+    ('CUSTOMER_CHANGED_MIND', 'Customer Changed Mind Before Handover (ग्राहकले सामान लिन नचाहेको)'),
+    ('DUPLICATE_BILLING', 'Duplicate Bill Generated (दोहोरो बिल बनेको)'),
+    ('INCORRECT_PRICING_DISCOUNT', 'Incorrect Pricing or Discount Applied (मूल्य वा छुट गलत भएको)'),
+    ('PAYMENT_METHOD_DISCREPANCY', 'Payment Method Discrepancy (भुक्तानी माध्यम त्रुटि)'),
+    ('OTHER', 'Other Operational Reason (अन्य कारण खुलाउनुहोस्)'),
+]
 
 # ==============================================================================
 # 1. POS COUNTER TERMINAL & CHECKOUT VIEWS
@@ -174,17 +193,6 @@ class POSTerminalView(LoginRequiredMixin, TemplateView):
 class POSCheckoutAPIView(LoginRequiredMixin, View):
     """
     Atomic endpoint invoked by the POS Terminal upon checkout.
-
-    Security & Authoritative Processing Flow:
-    1. Validates active cash drawer shift session.
-    2. Enforces Idempotency-Key validation to prevent duplicate billing on network lags.
-    3. Multi-format B.S. date extraction and AD calendar synchronization using parse_bs_date_components().
-    4. Validates that backdated bills fall strictly within the active, open fiscal year (rejecting locked years like 2080/81, 2081/82, 2082/83).
-    5. Normalizes and authoritatively validates line-item and bill discounts.
-    6. Authenticates supervisor override PINs via constant-time verification.
-    7. Validates that attached repair tickets are billed as cart line items before delivery.
-    8. Dispatches structured data to SalesPOSService.process_checkout.
-    9. Returns authoritative financial figures and standardized error codes.
     """
 
     @staticmethod
@@ -250,7 +258,11 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
             manager_pin = payload.get('manager_pin', '').strip()
             repair_ticket_id = payload.get('repair_ticket_id')
 
-            # 3. Multi-Format Backdated B.S. Date Extraction & Active Fiscal Year Verification
+            # 3. Extract and Authoritatively Standardize Bill Type
+            raw_bill_type = str(payload.get('bill_type') or 'SALES').upper().strip()
+            bill_type = 'ESTIMATE' if raw_bill_type in ['ESTIMATE', 'EST'] else 'SALES'
+
+            # 4. Multi-Format Backdated B.S. Date Extraction & Active Fiscal Year Verification
             raw_bill_date_bs = str(payload.get('bill_date_bs') or '').strip()
             target_date_ad: Optional[date] = None
             target_date_bs: Optional[str] = None
@@ -258,17 +270,15 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
 
             if raw_bill_date_bs:
                 try:
-                    # Parses dots (2083.05.18), dashes (2083-05-18), slashes (2083/05/18), and Devanagari numerals
                     bs_y, bs_m, bs_d = parse_bs_date_components(raw_bill_date_bs)
                     target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
                     target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
                     target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
 
-                    # Validate against locked / closed historical fiscal years
                     locked_fy = AccountingFiscalYear.objects.filter(name=target_fiscal_year, is_closed=True).first()
                     if locked_fy:
                         active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
-                        open_fy_name = active_open_fy.name if active_open_fy else "the current active fiscal year (2083/84)"
+                        open_fy_name = active_open_fy.name if active_open_fy else "the current active fiscal year"
                         if idempotency_key and cache_key:
                             cache.delete(f"lock_{cache_key}")
                         return JsonResponse({
@@ -308,14 +318,14 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     'message': 'Cart is empty. Please add items.'
                 }, status=400)
 
-            # 4. Customer Profile & Tier Resolution
+            # 5. Customer Profile & Tier Resolution
             customer_type = 'RETAIL'
             if customer_id:
                 cust_record = Customer.objects.filter(id=customer_id, is_active=True).first()
                 if cust_record:
                     customer_type = cust_record.customer_type
 
-            # 5. Structured Server-Side Discount Parsing & Authoritative Calculation
+            # 6. Structured Server-Side Discount Parsing & Authoritative Calculation
             threshold = config.require_manager_approval_discount or Decimal('10.00')
             requires_manager_pin = False
             override_reasons = []
@@ -324,7 +334,6 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
             running_item_discount_total = Decimal('0.00')
             discountable_net_subtotal = Decimal('0.00')
 
-            # 5A. Validate Line-Item Pricing and Dual-Mode Discounts
             for item in cart:
                 prod_id = item.get('product_id')
                 if not prod_id:
@@ -355,7 +364,6 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                         'message': f"Invalid quantity for '{product_obj.name}'."
                     }, status=400)
 
-                # Packaging unit factor
                 pkg_conversion_id = item.get('unit_conversion_id') or item.get('conversion_id')
                 factor = Decimal('1.000')
                 unit_conv = None
@@ -364,7 +372,6 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     if unit_conv:
                         factor = unit_conv.conversion_factor
 
-                # Official catalog price verification
                 base_official = ProductCatalogService.get_applicable_price(product_obj, qty * factor, customer_type)
                 if unit_conv and unit_conv.selling_price_per_unit:
                     official_price = unit_conv.selling_price_per_unit
@@ -372,13 +379,7 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     official_price = base_official * factor
                 official_price = official_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-                # Submitted unit selling price
-                raw_unit_price = item.get('unit_price')
-                if raw_unit_price is None or str(raw_unit_price).strip() == '':
-                    raw_unit_price = item.get('price')
-                if raw_unit_price is None or str(raw_unit_price).strip() == '':
-                    raw_unit_price = item.get('selling_price')
-
+                raw_unit_price = item.get('unit_price') or item.get('price') or item.get('selling_price')
                 try:
                     submitted_price = Decimal(str(raw_unit_price if raw_unit_price is not None else official_price)).quantize(
                         Decimal('0.01'), rounding=ROUND_HALF_UP
@@ -398,13 +399,8 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                 line_official_gross = (qty * official_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 line_submitted_gross = (qty * submitted_price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-                # Parse and Validate Item Discount Type
                 raw_item_disc_type = self._normalize_discount_type(item.get('discount_type'))
-                raw_item_disc_val = item.get('discount_input_value')
-                if raw_item_disc_val is None or str(raw_item_disc_val).strip() == '':
-                    raw_item_disc_val = item.get('discount_value')
-                if raw_item_disc_val is None or str(raw_item_disc_val).strip() == '':
-                    raw_item_disc_val = item.get('discount_percent', 0)
+                raw_item_disc_val = item.get('discount_input_value') or item.get('discount_value') or item.get('discount_percent', 0)
 
                 try:
                     item_disc_val = Decimal(str(raw_item_disc_val if raw_item_disc_val is not None else 0)).quantize(
@@ -429,7 +425,7 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     return JsonResponse({
                         'status': 'error',
                         'error_code': 'NON_DISCOUNTABLE_ITEM',
-                        'message': f"Product '{product_obj.name}' is designated as non-discountable. Line item discount cannot be applied."
+                        'message': f"Product '{product_obj.name}' is designated as non-discountable."
                     }, status=400)
 
                 if not is_item_discountable or raw_item_disc_type == 'NONE' or item_disc_val == Decimal('0.00'):
@@ -444,7 +440,7 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                         return JsonResponse({
                             'status': 'error',
                             'error_code': 'DISCOUNT_EXCEEDS_GROSS',
-                            'message': f"Discount amount of Rs. {item_disc_val:.2f} on '{product_obj.name}' cannot exceed line gross value of Rs. {line_submitted_gross:.2f}."
+                            'message': f"Discount amount of Rs. {item_disc_val:.2f} on '{product_obj.name}' cannot exceed line gross value."
                         }, status=400)
                     line_disc_amt = item_disc_val
                     effective_item_disc_pct = (
@@ -478,11 +474,9 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                 item['unit_price'] = submitted_price
 
                 total_concession = max(Decimal('0.00'), line_official_gross - line_submitted_net)
-                effective_commercial_pct = Decimal('0.00')
-                if line_official_gross > Decimal('0.00'):
-                    effective_commercial_pct = (
-                        (total_concession / line_official_gross) * Decimal('100.00')
-                    ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                effective_commercial_pct = (
+                    (total_concession / line_official_gross) * Decimal('100.00')
+                ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if line_official_gross > Decimal('0.00') else Decimal('0.00')
 
                 prod_max_disc = getattr(product_obj, 'max_discount_percent', Decimal('10.00'))
                 item_threshold = min(threshold, prod_max_disc)
@@ -498,17 +492,11 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                             f"Discount on '{product_obj.name}' ({effective_commercial_pct:.2f}% exceeds allowed {item_threshold:.2f}%)"
                         )
 
-            # 5B. Validate Bill-Level Dual-Mode Discount
+            # Bill-Level Discount Parsing
             raw_bill_disc_type = self._normalize_discount_type(
                 payload.get('bill_discount_type') or payload.get('discount_type')
             )
-            raw_bill_disc_val = payload.get('bill_discount_input_value')
-            if raw_bill_disc_val is None or str(raw_bill_disc_val).strip() == '':
-                raw_bill_disc_val = payload.get('bill_discount_value')
-            if raw_bill_disc_val is None or str(raw_bill_disc_val).strip() == '':
-                raw_bill_disc_val = payload.get('discount_value')
-            if raw_bill_disc_val is None or str(raw_bill_disc_val).strip() == '':
-                raw_bill_disc_val = payload.get('discount_percent', Decimal('0.00'))
+            raw_bill_disc_val = payload.get('bill_discount_input_value') or payload.get('bill_discount_value') or payload.get('discount_value') or payload.get('discount_percent', Decimal('0.00'))
 
             try:
                 bill_discount_input_value = Decimal(str(raw_bill_disc_val if raw_bill_disc_val is not None else 0)).quantize(
@@ -544,7 +532,7 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     return JsonResponse({
                         'status': 'error',
                         'error_code': 'BILL_DISCOUNT_EXCEEDS_SUBTOTAL',
-                        'message': f"Bill discount amount of Rs. {bill_discount_input_value:.2f} cannot exceed the discountable subtotal of Rs. {discountable_net_subtotal:.2f}."
+                        'message': f"Bill discount amount of Rs. {bill_discount_input_value:.2f} cannot exceed the discountable subtotal."
                     }, status=400)
                 bill_discount_amt = bill_discount_input_value
                 effective_bill_disc_pct = (
@@ -573,10 +561,10 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
             if effective_bill_disc_pct > threshold:
                 requires_manager_pin = True
                 override_reasons.append(
-                    f"Bill discount of {effective_bill_disc_pct:.2f}% (Rs. {bill_discount_amt:.2f}) exceeds store manager threshold ({threshold:.2f}%)"
+                    f"Bill discount of {effective_bill_disc_pct:.2f}% exceeds store manager threshold ({threshold:.2f}%)"
                 )
 
-            # 6. Authenticate Manager PIN if Threshold Exceeded
+            # Authenticate Manager PIN if required
             is_cashier_privileged = bool(request.user.is_superuser or getattr(request.user, 'role', '') in ['OWNER', 'MANAGER'])
             manager_override_user = None
 
@@ -620,7 +608,7 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                             'message': 'Invalid Manager Override PIN. Price override rejected.'
                         }, status=403)
 
-            # 7. Validate Linked Repair Ticket Handover (Plug Free Repair Exploit)
+            # Validate Linked Repair Ticket Handover
             if repair_ticket_id:
                 repair_ticket = RepairTicket.objects.select_for_update().filter(id=repair_ticket_id).first()
                 if not repair_ticket:
@@ -659,19 +647,17 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                         return JsonResponse({
                             'status': 'error',
                             'error_code': 'REPAIR_FEE_NOT_IN_CART',
-                            'message': (
-                                f"Repair Ticket {repair_ticket.ticket_number} has a fee of Rs. {repair_fee:.2f}. "
-                                f"The repair service charge must be added to the cart items before delivery handover."
-                            )
+                            'message': f"Repair Ticket {repair_ticket.ticket_number} has a fee of Rs. {repair_fee:.2f}. Add service to cart."
                         }, status=400)
 
-            # 8. Atomic Checkout Execution via SalesPOSService
+            # Process Checkout
             with transaction.atomic():
                 estimate = SalesPOSService.process_checkout(
                     branch=branch,
                     cashier=request.user,
                     cart_items=cart,
                     payments=payments,
+                    bill_type=bill_type,
                     customer_id=customer_id,
                     customer_name=cust_name,
                     customer_phone=cust_phone,
@@ -688,7 +674,6 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                     fiscal_year=target_fiscal_year
                 )
 
-                # Finalize Linked Repair Ticket Handover
                 if repair_ticket_id:
                     repair_ticket = RepairTicket.objects.select_for_update().filter(id=repair_ticket_id).first()
                     repair_ticket.service_status = 'DELIVERED'
@@ -699,18 +684,7 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
 
                     if repair_ticket.technician and repair_ticket.labor_charge > Decimal('0.00'):
                         technician_user = repair_ticket.technician
-                        commission_rate = getattr(technician_user, 'commission_percentage', None)
-                        if commission_rate is None:
-                            commission_rate = getattr(technician_user, 'repair_commission_rate', None)
-                        if commission_rate is None:
-                            commission_rate = getattr(config, 'default_technician_commission_rate', None)
-                        if commission_rate is None:
-                            commission_rate = getattr(config, 'technician_commission_percent', None)
-                        if commission_rate is None:
-                            commission_rate = Decimal('30.00')
-                        else:
-                            commission_rate = Decimal(str(commission_rate)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
+                        commission_rate = getattr(technician_user, 'commission_percentage', None) or Decimal('30.00')
                         TechnicianCommissionLog.objects.create(
                             ticket=repair_ticket,
                             technician=technician_user,
@@ -719,11 +693,14 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                             commission_percentage=commission_rate
                         )
 
-            # Authoritative response including verified numbers
+            bill_title = "Tax Invoice / Sales Bill" if bill_type == 'SALES' else (config.bill_header_title or "Estimation Slip")
+
             response_data = {
                 'status': 'success',
                 'estimate_id': estimate.id,
                 'estimate_number': estimate.estimate_number,
+                'bill_type': bill_type,
+                'bill_title': bill_title,
                 'grand_total': str(estimate.grand_total),
                 'subtotal': str(estimate.subtotal),
                 'item_discount_total': str(estimate.item_discount_total),
@@ -745,27 +722,21 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
             if idempotency_key and cache_key:
                 cache.delete(f"lock_{cache_key}")
             msg = ve.message if hasattr(ve, 'message') else str(ve)
-            return JsonResponse({
-                'status': 'error',
-                'error_code': 'VALIDATION_ERROR',
-                'message': msg
-            }, status=400)
+            return JsonResponse({'status': 'error', 'error_code': 'VALIDATION_ERROR', 'message': msg}, status=400)
         except Exception as err:
             if idempotency_key and cache_key:
                 cache.delete(f"lock_{cache_key}")
-            return JsonResponse({
-                'status': 'error',
-                'error_code': 'INTERNAL_ERROR',
-                'message': str(err)
-            }, status=400)
+            return JsonResponse({'status': 'error', 'error_code': 'INTERNAL_ERROR', 'message': str(err)}, status=400)
 
 # ==============================================================================
-# 2. SALES ESTIMATE INVOICE VIEWS
+# 2. SALES ESTIMATE INVOICE VIEWS & SAFE COUNTER CORRECTIONS
 # ==============================================================================
 class SalesEstimateListView(LoginRequiredMixin, ListView):
     """
     Lists historical estimation slips and POS invoices with pagination,
     branch scoping, and multi-parameter search (slip no, customer, phone, PAN).
+    Injects cancellation reasons and user permissions so that the cancellation
+    confirmation modal can operate directly from this master table.
     """
     model = SalesEstimate
     template_name = 'sales/estimate_list.html'
@@ -781,6 +752,7 @@ class SalesEstimateListView(LoginRequiredMixin, ListView):
         query = self.request.GET.get('q', '').strip()
         status_filter = self.request.GET.get('status', '').strip()
         payment_status = self.request.GET.get('payment_status', '').strip()
+        bill_type_filter = self.request.GET.get('bill_type', '').strip()
 
         if query:
             qs = qs.filter(
@@ -794,8 +766,23 @@ class SalesEstimateListView(LoginRequiredMixin, ListView):
             qs = qs.filter(status=status_filter)
         if payment_status:
             qs = qs.filter(payment_status=payment_status)
+        if bill_type_filter:
+            qs = qs.filter(bill_type=bill_type_filter)
 
         return qs.order_by('-created_at')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        is_supervisor = bool(user.is_superuser or getattr(user, 'role', '') in ['OWNER', 'MANAGER'])
+
+        context.update({
+            'is_supervisor': is_supervisor,
+            'void_reason_choices': VOID_REASON_CHOICES,
+            'SYS_CONFIG': SystemConfiguration.get_solo(),
+            'config': SystemConfiguration.get_solo(),
+        })
+        return context
 
 class SalesEstimateDetailView(LoginRequiredMixin, DetailView):
     """
@@ -815,11 +802,16 @@ class SalesEstimateDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        user = self.request.user
+        is_supervisor = bool(user.is_superuser or getattr(user, 'role', '') in ['OWNER', 'MANAGER'])
+
         context['items'] = self.object.items.select_related('product', 'product__base_unit', 'item_instance').all()
         context['payments'] = self.object.payment_transactions.all()
         context['returns'] = self.object.returns.select_related('processed_by').prefetch_related('items__product').order_by('-created_at')
         context['config'] = SystemConfiguration.get_solo()
         context['SYS_CONFIG'] = SystemConfiguration.get_solo()
+        context['is_supervisor'] = is_supervisor
+        context['void_reason_choices'] = VOID_REASON_CHOICES
         return context
 
 class SalesEstimateThermalSlipView(LoginRequiredMixin, DetailView):
@@ -836,6 +828,126 @@ class SalesEstimateThermalSlipView(LoginRequiredMixin, DetailView):
         context['SYS_CONFIG'] = SystemConfiguration.get_solo()
         return context
 
+class SalesEstimateUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
+    """
+    Counter interface for correcting bill mistakes (e.g. wrong dates, typos in customer name/phone/PAN).
+
+    Security & Forensic Safeguards:
+    1. Only Owners, Managers, or the billing Cashier can access this view.
+    2. CANCELLED, RETURNED, and PARTIALLY_RETURNED bills are permanently locked.
+    3. Prevents modifying financial amounts (monetary quantities, tax, COGS) to protect ledger integrity.
+    4. Automatically records an immutable entry in AuditLog detailing changes.
+    5. Explicit get_success_url and self.object = form.save() completely resolves ImproperlyConfigured errors.
+    """
+    model = SalesEstimate
+    form_class = SalesEstimateEditForm
+    template_name = 'sales/estimate_form.html'
+    context_object_name = 'estimate'
+
+    def test_func(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return False
+        if user.is_superuser or getattr(user, 'role', '') in ['OWNER', 'MANAGER']:
+            return True
+        obj = self.get_object()
+        return obj.cashier == user
+
+    def handle_no_permission(self):
+        messages.error(
+            self.request,
+            "Permission Denied: Only Store Owners, Managers, or the billing cashier can edit this bill."
+        )
+        return redirect('sales:estimate_list')
+
+    def dispatch(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if not self.object.can_be_edited:
+            messages.error(
+                request,
+                f"Security Lockout: Bill '{self.object.estimate_number}' is {self.object.get_status_display().lower()} "
+                f"and legally locked from counter editing."
+            )
+            return redirect('sales:estimate_detail', pk=self.object.pk)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_success_url(self) -> str:
+        """Explicitly defines redirect destination upon successful bill correction."""
+        return reverse('sales:estimate_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        orig_obj = self.get_object()
+        old_date_bs = orig_obj.bill_date_bs
+        old_date_ad = orig_obj.bill_date_ad
+        old_customer = orig_obj.recipient_display_name
+        old_phone = orig_obj.customer_phone_manual
+        old_pan = orig_obj.customer_pan
+
+        with transaction.atomic():
+            # 1. Commit updated metadata to database & execute model save hooks
+            self.object = form.save()
+
+            # 2. Update customer udhaari ledger remarks if debt exists
+            if self.object.customer_id and self.object.due_amount > Decimal('0.00'):
+                try:
+                    CustomerUdhaariLedger.objects.filter(
+                        reference_invoice=self.object.estimate_number
+                    ).update(
+                        remarks=(
+                            f"Bill Total: Rs. {self.object.grand_total:,.2f} | "
+                            f"Recipient: {self.object.recipient_display_name} | "
+                            f"Balance Due: Rs. {self.object.due_amount:,.2f} on {self.object.estimate_number} "
+                            f"({self.object.bill_date_bs or self.object.bill_date_ad})"
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not update ledger remarks on bill edit: {e}")
+
+            # 3. Forensic Audit Trail Logging
+            changed_fields = list(form.changed_data)
+            diff_summary = {
+                'estimate_number': self.object.estimate_number,
+                'changed_fields': changed_fields,
+                'old_values': {
+                    'bill_date_bs': old_date_bs,
+                    'bill_date_ad': str(old_date_ad) if old_date_ad else None,
+                    'customer_name': old_customer,
+                    'customer_phone': old_phone,
+                    'customer_pan': old_pan
+                },
+                'new_values': {
+                    'bill_date_bs': self.object.bill_date_bs,
+                    'bill_date_ad': str(self.object.bill_date_ad) if self.object.bill_date_ad else None,
+                    'customer_name': self.object.recipient_display_name,
+                    'customer_phone': self.object.customer_phone_manual,
+                    'customer_pan': self.object.customer_pan
+                }
+            }
+
+            AuditLog.objects.create(
+                user=self.request.user,
+                branch=self.object.branch,
+                action_type='UPDATE',
+                module='POS_Sales_Edit',
+                object_repr=self.object.estimate_number,
+                details=diff_summary
+            )
+
+        messages.success(
+            self.request,
+            f"Bill '{self.object.estimate_number}' details were updated successfully."
+        )
+        return redirect(self.get_success_url())
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update({
+            'SYS_CONFIG': SystemConfiguration.get_solo(),
+            'config': SystemConfiguration.get_solo(),
+            'is_manager': bool(self.request.user.is_superuser or getattr(self.request.user, 'role', '') in ['OWNER', 'MANAGER']),
+        })
+        return context
+
 # ==============================================================================
 # DEDICATED ESTIMATE CANCELLATION CONTROLLER (RESTRICTED TO SUPERVISORS)
 # ==============================================================================
@@ -850,10 +962,10 @@ def cancel_estimate_view(request, pk):
     4. Authoritatively delegates full atomic reversal (merchandise stock, Udhaari debt,
        repair ticket restoration, trade-in buy-back rollback, and GL vouchers) directly
        to SalesPOSService.cancel_sales_estimate.
+    5. Clean redirect handling: returns to estimate list or bill detail view with green audit alerts.
     """
     estimate = get_object_or_404(SalesEstimate, pk=pk)
 
-    # 1. Permission check: Strictly restrict bill cancellation to supervisors
     is_authorized = bool(
         request.user.is_superuser or
         getattr(request.user, 'role', '') in ['OWNER', 'MANAGER']
@@ -865,7 +977,7 @@ def cancel_estimate_view(request, pk):
         messages.error(request, err_msg)
         return redirect('sales:estimate_detail', pk=estimate.pk)
 
-    # 2. Extract cancellation reason
+    # Extract cancellation reason
     reason = ""
     if request.content_type == 'application/json':
         try:
@@ -885,9 +997,9 @@ def cancel_estimate_view(request, pk):
         messages.error(request, err_msg)
         return redirect('sales:estimate_detail', pk=estimate.pk)
 
-    # 3. Block cancellation of already cancelled, returned, or partially returned invoices
+    # Block cancellation of already cancelled or returned invoices
     if estimate.status in ['CANCELLED', 'RETURNED']:
-        err_msg = f"Estimate slip {estimate.estimate_number} is already {estimate.get_status_display().lower()}."
+        err_msg = f"Bill {estimate.estimate_number} is already {estimate.get_status_display().lower()}."
         if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
             return JsonResponse({'status': 'error', 'error_code': 'ALREADY_CLOSED', 'message': err_msg}, status=400)
         messages.warning(request, err_msg)
@@ -895,7 +1007,7 @@ def cancel_estimate_view(request, pk):
 
     if estimate.status == 'PARTIALLY_RETURNED':
         err_msg = (
-            f"Estimate slip {estimate.estimate_number} has already had items returned and restocked. "
+            f"Bill {estimate.estimate_number} has already had items returned and restocked. "
             f"To prevent duplicate stock inflation, partially returned bills cannot be voided. "
             f"Please process a sales return for the remaining items instead."
         )
@@ -905,18 +1017,31 @@ def cancel_estimate_view(request, pk):
         return redirect('sales:estimate_detail', pk=estimate.pk)
 
     try:
-        # Full atomic delegation to the core service layer
         cancelled_estimate = SalesPOSService.cancel_sales_estimate(
             estimate=estimate,
             reason=reason,
             user=request.user
         )
 
-        success_msg = f"Estimate slip {cancelled_estimate.estimate_number} was successfully voided and all ledger balances and stocks were safely reversed."
+        success_msg = (
+            f"Bill '{cancelled_estimate.estimate_number}' was successfully voided. "
+            f"Sold items and IMEIs have been returned to active stock, customer debt has been reversed, "
+            f"and accounting ledgers have been balanced."
+        )
+
         if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
-            return JsonResponse({'status': 'success', 'message': success_msg, 'estimate_number': cancelled_estimate.estimate_number})
+            return JsonResponse({
+                'status': 'success',
+                'message': success_msg,
+                'estimate_number': cancelled_estimate.estimate_number
+            })
 
         messages.success(request, success_msg)
+
+        # Determine smart redirect destination
+        redirect_target = request.POST.get('next') or request.GET.get('next')
+        if redirect_target == 'list':
+            return redirect('sales:estimate_list')
         return redirect('sales:estimate_detail', pk=cancelled_estimate.pk)
 
     except Exception as err:
@@ -1019,11 +1144,10 @@ class SalesReturnCreateView(LoginRequiredMixin, View):
         if estimate.status in ['CANCELLED', 'RETURNED']:
             messages.error(
                 request,
-                f"Sales estimate '{estimate.estimate_number}' is already {estimate.get_status_display().lower()} and cannot accept further returns."
+                f"Sales bill '{estimate.estimate_number}' is already {estimate.get_status_display().lower()} and cannot accept returns."
             )
             return redirect('sales:estimate_detail', pk=estimate.pk)
 
-        # Build list of items and calculate previously returned quantities
         raw_items = estimate.items.select_related('product', 'product__base_unit', 'item_instance').all()
         items_with_return_state = []
 
@@ -1072,7 +1196,6 @@ class SalesReturnCreateView(LoginRequiredMixin, View):
         refund_mode = form.cleaned_data['refund_mode']
         technician_notes = form.cleaned_data.get('technician_notes', '')
 
-        # Enforce open cash drawer shift if issuing cash refunds
         if refund_mode == 'CASH':
             active_session = POSSessionService.get_active_session(request.user, estimate.branch)
             if not active_session:
@@ -1082,7 +1205,6 @@ class SalesReturnCreateView(LoginRequiredMixin, View):
                 )
                 return self.get(request, estimate_id)
 
-        # Parse selected return items from POST form
         items_to_return = []
         raw_items = estimate.items.all()
 
@@ -1214,7 +1336,6 @@ class TradeInListView(LoginRequiredMixin, ListView):
 class TradeInEvaluationWizardView(LoginRequiredMixin, View):
     """
     Full 3-step trade-in wizard for counter staff.
-    Features bidirectional customer identity synchronization between Step 1 and Step 3.
     """
     template_name = 'sales/trade_in_wizard.html'
 
@@ -1235,7 +1356,6 @@ class TradeInEvaluationWizardView(LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
         branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
-        # Bidirectional customer identification fallback between Step 1 and Step 3
         post_data = request.POST.copy()
         cust_name_manual = post_data.get('customer_name_manual', '').strip()
         cust_phone_manual = post_data.get('customer_phone_manual', '').strip()
@@ -1327,7 +1447,6 @@ class TradeInPoliceUndertakingPrintView(LoginRequiredMixin, View):
         checklist = getattr(trade_in, 'inspection_checklist', None)
         config = SystemConfiguration.get_solo()
 
-        # Provide both 'config' and 'SYS_CONFIG' to prevent blank statutory declarations
         return render(request, 'sales/trade_in_undertaking_a4.html', {
             'trade_in': trade_in,
             'undertaking': undertaking,

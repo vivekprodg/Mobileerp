@@ -1,0 +1,176 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Edit Bill Details - {{ estimate.estimate_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 960px;">
+    <!-- Breadcrumbs -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb fs-xs">
+            <li class="breadcrumb-item"><a href="{% url 'sales:estimate_list' %}" class="text-decoration-none">Estimates</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'sales:estimate_detail' estimate.pk %}" class="text-decoration-none font-monospace">{{ estimate.estimate_number }}</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Edit Details</li>
+        </ol>
+    </nav>
+
+    <!-- Header -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0 font-monospace">Edit Bill: {{ estimate.estimate_number }}</h4>
+                <span class="badge bg-{% if estimate.status == 'COMPLETED' %}success{% else %}secondary{% endif %} bg-opacity-10 text-{% if estimate.status == 'COMPLETED' %}success{% else %}secondary{% endif %} rounded-pill px-2.5 py-1 fs-2xs fw-bold">
+                    {{ estimate.get_status_display }}
+                </span>
+                <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 rounded-pill px-2.5 py-1 fs-2xs font-monospace">
+                    {{ estimate.get_bill_type_display }}
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">Safely correct historical dates, customer name, phone number, PAN, and internal remarks.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{% url 'sales:estimate_detail' estimate.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                &larr; Back to Bill Details
+            </a>
+        </div>
+    </div>
+
+    <!-- Read-Only Financial Overview Strip -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+        <div class="row g-3 fs-xs align-items-center">
+            <div class="col-6 col-md-3">
+                <span class="text-muted d-block fs-2xs text-uppercase fw-bold">Store Outlet:</span>
+                <strong class="text-dark">{{ estimate.branch.name }} ({{ estimate.branch.code }})</strong>
+            </div>
+            <div class="col-6 col-md-3">
+                <span class="text-muted d-block fs-2xs text-uppercase fw-bold">Billed Cashier:</span>
+                <strong class="text-dark">{{ estimate.cashier.get_full_name|default:estimate.cashier.username }}</strong>
+            </div>
+            <div class="col-6 col-md-3">
+                <span class="text-muted d-block fs-2xs text-uppercase fw-bold">Grand Total (Locked):</span>
+                <strong class="text-primary font-monospace fs-sm">Rs. {{ estimate.grand_total|floatformat:2|intcomma }}</strong>
+            </div>
+            <div class="col-6 col-md-3">
+                <span class="text-muted d-block fs-2xs text-uppercase fw-bold">Items Sold:</span>
+                <strong class="text-dark">{{ estimate.items.count }} Line Item(s)</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statutory Audit Guidance Box -->
+    <div class="alert bg-primary bg-opacity-10 border border-primary border-opacity-25 rounded-4 p-3 mb-4 fs-xs text-dark">
+        <div class="d-flex align-items-start gap-2">
+            <i class="fas fa-shield-halved text-primary fs-5 mt-1"></i>
+            <div>
+                <strong class="text-primary d-block mb-1">Accounting &amp; Tax Compliance Notice:</strong>
+                <p class="mb-0 text-muted">
+                    This screen allows correcting clerical metadata (wrong date entered by cashier, customer name typo, mobile number, or VAT PAN). 
+                    To change financial amounts, items sold, or quantities, please use the <strong>Void Bill</strong> or <strong>Return Items</strong> workflows to guarantee that stock levels and tax registers remain balanced.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Form Card -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <form method="post" id="estimateEditMasterForm" novalidate>
+            {% csrf_token %}
+
+            {% if form.errors %}
+            <div class="alert alert-danger rounded-3 p-3 fs-xs mb-4 border-0">
+                <strong class="d-block mb-1"><i class="fas fa-triangle-exclamation me-1"></i> Please resolve the following errors:</strong>
+                <ul class="mb-0 ps-3">
+                    {% for field, errors in form.errors.items %}
+                        {% for error in errors %}
+                            <li><strong>{{ field|title }}:</strong> {{ error }}</li>
+                        {% endfor %}
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <div class="row g-3">
+                <!-- 1. Bill Date (BS) -->
+                <div class="col-12 col-md-6">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">
+                        {{ form.bill_date_bs.label }} <span class="text-primary">*</span>
+                    </label>
+                    {{ form.bill_date_bs }}
+                    <small class="text-muted fs-2xs mt-1 d-block">Nepali Bikram Sambat date (YYYY-MM-DD). Automatically converts to Gregorian AD.</small>
+                </div>
+
+                <!-- 2. Bill Date (AD) -->
+                <div class="col-12 col-md-6">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">
+                        {{ form.bill_date_ad.label }}
+                    </label>
+                    {{ form.bill_date_ad }}
+                    <small class="text-muted fs-2xs mt-1 d-block">Gregorian date used for database indexing and accounting ledgers.</small>
+                </div>
+
+                <div class="col-12"><hr class="my-1 text-muted opacity-25"></div>
+
+                <!-- 3. Customer Full Name -->
+                <div class="col-12 col-md-6">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">
+                        {{ form.customer_name_manual.label }}
+                    </label>
+                    {{ form.customer_name_manual }}
+                    <small class="text-muted fs-2xs mt-1 d-block">Name as displayed on customer estimation or VAT invoice receipts.</small>
+                </div>
+
+                <!-- 4. Customer Phone Number -->
+                <div class="col-12 col-md-3">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">
+                        {{ form.customer_phone_manual.label }}
+                    </label>
+                    {{ form.customer_phone_manual }}
+                    <small class="text-muted fs-2xs mt-1 d-block">Primary 10-digit mobile number.</small>
+                </div>
+
+                <!-- 5. Customer Tax PAN -->
+                <div class="col-12 col-md-3">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">
+                        {{ form.customer_pan.label }}
+                    </label>
+                    {{ form.customer_pan }}
+                    <small class="text-muted fs-2xs mt-1 d-block">9-digit business PAN for tax tracking.</small>
+                </div>
+
+                <!-- 6. Remarks / Correction Justification -->
+                <div class="col-12">
+                    <label class="form-label fs-xs fw-bold text-dark mb-1">
+                        {{ form.notes.label }}
+                    </label>
+                    {{ form.notes }}
+                    <small class="text-muted fs-2xs mt-1 d-block">Brief explanation of changes for forensic audit trail accountability.</small>
+                </div>
+
+                <!-- Bottom Form Action Controls -->
+                <div class="col-12 mt-4 pt-3 border-top d-flex justify-content-between align-items-center">
+                    <a href="{% url 'sales:estimate_detail' estimate.pk %}" class="btn btn-outline-secondary btn-sm px-4 rounded-pill">
+                        Cancel
+                    </a>
+                    <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm" id="saveBillChangesBtn">
+                        <i class="fas fa-save me-1"></i> Save Changes (अपडेट सुरक्षित गर्नुहोस्)
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const editForm = document.getElementById('estimateEditMasterForm');
+    const saveBtn = document.getElementById('saveBillChangesBtn');
+
+    if (editForm && saveBtn) {
+        editForm.addEventListener('submit', () => {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Saving Changes...';
+        });
+    }
+});
+</script>
+{% endblock %}

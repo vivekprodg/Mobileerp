@@ -1,6 +1,5 @@
 """
 Fast-Moving & Slow-Moving Sales Velocity Intelligence Service.
-File Path: apps/reports/services/top_slow_sales_service.py
 
 Capabilities:
 1. Fast-Moving / Top Sellers:
@@ -8,10 +7,9 @@ Capabilities:
    - Computes realized gross profit, average selling price, and share % of total store sales.
    - Annotates live available showcase stock to avoid stockouts on high-demand items.
 2. Slow-Moving / Dormant Sales:
-   - Identifies in-stock products with zero or low sales velocity (<= threshold units)
-     over 30, 60, 90, 120, or 180-day windows.
+   - Identifies in-stock products with zero or low sales velocity.
    - Quantifies capital stagnation (unsold units * landed acquisition cost).
-   - Generates automated clearance action suggestions (markdowns, bundle promos).
+3. Exposes get_dashboard_top_selling_products() for the executive top products table.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -30,11 +28,58 @@ from apps.branches.models import Branch
 from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
 
-
 class TopSlowSalesService:
     """
     Business analytics engine for Product Sales Velocity (Top Performers & Slow-Moving Items).
     """
+
+    @classmethod
+    def get_dashboard_top_selling_products(
+        cls,
+        branch=None,
+        user=None,
+        days: int = 30,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Lightweight calculation engine for the Top-Selling Products table on the owner dashboard.
+        Groups completed sales over the past X days by product and returns the top revenue generators.
+        """
+        today = timezone.now().date()
+        start_date = today - timedelta(days=days)
+        active_branch = branch or (
+            getattr(user, 'assigned_branch', None)
+            if user and not (user.is_superuser or getattr(user, 'role', '') == 'OWNER')
+            else None
+        )
+
+        items_qs = SalesEstimateItem.objects.filter(
+            estimate__status__in=['COMPLETED', 'PARTIALLY_RETURNED'],
+            estimate__bill_date_ad__gte=start_date
+        )
+
+        if active_branch:
+            items_qs = items_qs.filter(estimate__branch=active_branch)
+
+        top_products = list(
+            items_qs.values(
+                'product__id',
+                'product__name',
+                'product__sku',
+                'product__category__name'
+            ).annotate(
+                units_sold=Coalesce(
+                    Sum('quantity'),
+                    Value(Decimal('0.000'), output_field=DecimalField(max_digits=18, decimal_places=3))
+                ),
+                revenue=Coalesce(
+                    Sum('line_total'),
+                    Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+                )
+            ).order_by('-revenue')[:limit]
+        )
+
+        return top_products
 
     @classmethod
     def resolve_date_range(cls, raw_params: Dict[str, Any]) -> Tuple[date, date, str, str]:
@@ -286,7 +331,6 @@ class TopSlowSalesService:
             qty_sold = s_data['total_qty'] if s_data else Decimal('0.000')
             net_revenue = max(Decimal('0.00'), s_data['gross_revenue'] - s_data['tax_sum']) if s_data else Decimal('0.00')
 
-            # Filter criterion: Sold <= threshold in the selected time window
             if qty_sold <= slow_threshold_qty:
                 cost_rate = prod.purchase_price or Decimal('0.00')
                 selling_rate = prod.selling_price or Decimal('0.00')
@@ -296,7 +340,6 @@ class TopSlowSalesService:
                 total_dormant_capital += tied_capital
                 total_slow_units_on_shelf += on_hand_qty
 
-                # Recommend commercial clearance action
                 if qty_sold == Decimal('0.000'):
                     recommendation = "Zero Velocity: Initiate Clearance / Bundle Offer (10-15% Off)"
                     rec_badge = "danger"
@@ -332,7 +375,6 @@ class TopSlowSalesService:
                     'rack_number': prod.rack_number or '-',
                 })
 
-        # Sort Slow Sellers: Highest tied-up capital first
         slow_selling_records.sort(key=lambda x: x['tied_capital_cost'], reverse=True)
 
         # ---------------------------------------------------------------------

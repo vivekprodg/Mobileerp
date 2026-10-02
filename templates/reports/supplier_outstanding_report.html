@@ -57,7 +57,7 @@
     background-color: var(--erp-primary) !important;
     color: #ffffff !important;
     border-color: var(--erp-primary) !important;
-    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+    box-shadow: 0 2px 6px rgba(37, 99, 255, 0.25);
 }
 </style>
 {% endblock %}
@@ -178,17 +178,17 @@
     <!-- Multi-Parameter Filter Toolbar with Universal Supplier Search -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
         <form method="get" class="row g-2 align-items-center" id="supplierOutstandingFilterForm">
-            <!-- Standardized Contextual Supplier Autocomplete Search -->
+            <!-- Step 1 & 2: Standardized Contextual Supplier Autocomplete Search with Defensive Resolution -->
             <div class="col-12 col-md-4">
                 <div class="contextual-search-wrapper"
                      id="supplierFilterWrapper"
                      data-search-url="/purchases/suppliers/api/search/"
                      data-search-type="supplier"
                      data-placeholder="Search Supplier Name, PAN, or Phone..."
-                     data-initial-id="{{ selected_supplier.id|default:filters.supplier|default:'' }}"
+                     data-initial-id="{% if selected_supplier %}{{ selected_supplier.id }}{% else %}{{ request.GET.supplier|default:'' }}{% endif %}"
                      data-initial-title="{{ selected_supplier.company_name|default:'' }}"
                      data-initial-subtitle="{% if selected_supplier.code %}Code: {{ selected_supplier.code }}{% endif %}">
-                    <input type="hidden" name="supplier" id="selectedSupplierId" value="{{ selected_supplier.id|default:filters.supplier|default:'' }}">
+                    <input type="hidden" name="supplier" id="selectedSupplierId" value="{% if selected_supplier %}{{ selected_supplier.id }}{% else %}{{ request.GET.supplier|default:'' }}{% endif %}">
                     <input type="text"
                            class="form-control form-control-sm contextual-search-input async-search-input"
                            placeholder="Search Supplier Name, PAN, or Phone..."
@@ -217,7 +217,8 @@
 
             <div class="col-12 col-md-2 d-flex gap-1">
                 <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
-                {% if filters.supplier or filters.q or filters.status or filters.supplier_type %}
+                <!-- Step 3: Defensive Reset Condition without Fragile Dictionary Lookups -->
+                {% if selected_supplier or request.GET.supplier or filters.q or filters.supplier_type or filters.status and filters.status != 'due' %}
                 <a href="{% url 'reports:supplier_outstanding' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
                 {% endif %}
             </div>

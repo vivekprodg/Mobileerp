@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 /* ==========================================================================
    1. DESIGN SYSTEM TOKENS & APPLICATION RESET
@@ -14,6 +14,12 @@
     --erp-primary-light: #eff6ff;
     --erp-primary-border: #bfdbfe;
     
+    /* Executive Brand & Dashboard Teals */
+    --dash-teal-600: #0d9488;
+    --dash-teal-700: #0f766e;
+    --dash-teal-50:  #f0fdfa;
+    --dash-teal-border: #ccfbf1;
+
     /* Executive Header Surfaces */
     --erp-top-header-bg: #060b18;
     --erp-main-header-bg: #0b132b;
@@ -31,7 +37,7 @@
     --erp-slate-300: #cbd5e1;
     --erp-slate-200: #e2e8f0;
     --erp-slate-100: #f1f5f9;
-    --erp-slate-50: #f8fafc;
+    --erp-slate-50:  #f8fafc;
     
     /* Semantics */
     --erp-success: #10b981;
@@ -78,6 +84,10 @@
     --erp-shadow-md: 0 8px 20px -2px rgba(15, 23, 42, 0.07);
     --erp-shadow-lg: 0 20px 30px -4px rgba(15, 23, 42, 0.1);
     --erp-shadow-command: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+
+    /* Animation Easing */
+    --erp-ease-bounce: cubic-bezier(0.16, 1, 0.3, 1);
+    --erp-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 *, *::before, *::after {
@@ -104,13 +114,20 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--erp-slate-300); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--erp-slate-400); }
 
-/* Typography Helpers */
+/* Typography & Tabular Alignments */
 .fs-2xs { font-size: 0.6875rem !important; }
 .fs-xs { font-size: 0.78125rem !important; }
 .fs-sm { font-size: 0.875rem !important; }
 .fs-base { font-size: 0.9375rem !important; }
-.font-mono { font-family: var(--erp-font-mono) !important; }
-.font-tabular { font-variant-numeric: tabular-nums; }
+.font-mono { 
+    font-family: var(--erp-font-mono) !important;
+    font-variant-numeric: tabular-nums slashed-zero;
+    font-feature-settings: "tnum" 1, "zero" 1;
+}
+.font-tabular { 
+    font-variant-numeric: tabular-nums slashed-zero !important; 
+    font-feature-settings: "tnum" 1, "zero" 1 !important;
+}
 .fw-semibold { font-weight: 600 !important; }
 .fw-bold { font-weight: 700 !important; }
 .fw-extrabold { font-weight: 800 !important; }
@@ -356,7 +373,7 @@ kbd, .kbd-pill {
     box-shadow: 0 6px 16px rgba(245, 158, 11, 0.45);
 }
 
-/* Profile Button: STRICT ZERO-ZIGZAG ROW ALIGNMENT */
+/* Profile Button */
 .user-profile-btn {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.14);
@@ -440,14 +457,14 @@ kbd, .kbd-pill {
     top: var(--erp-header-total-height);
     display: flex;
     flex-direction: column;
-    transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
-                min-width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
-                max-width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: width 0.22s var(--erp-ease-standard),
+                min-width 0.22s var(--erp-ease-standard),
+                max-width 0.22s var(--erp-ease-standard);
     z-index: 1020;
     box-shadow: var(--erp-shadow-xs);
 }
 
-/* Collapsed Sidebar Mode (Desktop [Ctrl+B]) */
+/* Collapsed Sidebar Mode */
 .app-layout.sidebar-collapsed .app-sidebar-wrapper {
     width: var(--erp-sidebar-collapsed-width);
     min-width: var(--erp-sidebar-collapsed-width);
@@ -551,7 +568,7 @@ kbd, .kbd-pill {
     color: #78350f;
 }
 
-/* Sub-group Accordion Container for Reports */
+/* Sub-group Accordion Container */
 .sidebar-subgroup-toggle {
     cursor: pointer;
 }
@@ -600,7 +617,7 @@ kbd, .kbd-pill {
 
 /* ==========================================================================
    5. MAIN CONTENT VIEWPORT & TWO-TIER FOOTERS
-   ========================================================================= */
+   ========================================================================== */
 .app-content-wrapper {
     flex: 1 1 0%;
     min-width: 0;
@@ -664,7 +681,7 @@ kbd, .kbd-pill {
 
 /* ==========================================================================
    6. GLOBAL BUTTONS, CARDS, BADGES & TABLES
-   ========================================================================= */
+   ========================================================================== */
 .btn {
     display: inline-flex;
     align-items: center;
@@ -674,7 +691,7 @@ kbd, .kbd-pill {
     font-weight: 600;
     line-height: 1.4;
     border-radius: var(--erp-radius-pill);
-    transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.18s var(--erp-ease-standard);
     box-shadow: var(--erp-shadow-xs);
     cursor: pointer;
     padding-block: 0.5rem;
@@ -749,14 +766,14 @@ kbd, .kbd-pill {
     transform: translateY(-1.5px);
 }
 
-/* Badges */
+/* Global Badges */
 .badge-soft-primary { background-color: var(--erp-primary-light); color: var(--erp-primary); border: 1px solid var(--erp-primary-border); }
 .badge-soft-success { background-color: var(--erp-success-light); color: #065f46; border: 1px solid var(--erp-success-border); }
 .badge-soft-warning { background-color: var(--erp-warning-light); color: #92400e; border: 1px solid var(--erp-warning-border); }
 .badge-soft-danger  { background-color: var(--erp-danger-light); color: #991b1b; border: 1px solid var(--erp-danger-border); }
 .badge-soft-secondary { background-color: var(--erp-slate-100); color: var(--erp-slate-600); border: 1px solid var(--erp-slate-200); }
 
-/* Domain-Specific Soft Badges */
+/* Domain Badges */
 .badge-domain-product { background-color: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
 .badge-domain-imei { background-color: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
 .badge-domain-customer { background-color: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
@@ -766,7 +783,7 @@ kbd, .kbd-pill {
 .badge-domain-repair { background-color: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; }
 .badge-domain-account { background-color: #f8fafc; color: #334155; border: 1px solid #cbd5e1; }
 
-/* Cards */
+/* Cards & Generic KPI Hover Elevators */
 .card {
     background-color: #ffffff;
     border: 1px solid var(--erp-slate-200) !important;
@@ -776,16 +793,194 @@ kbd, .kbd-pill {
 
 .card-kpi {
     border-radius: var(--erp-radius-md);
-    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.22s var(--erp-ease-bounce), box-shadow 0.22s var(--erp-ease-bounce), border-color 0.22s ease;
 }
 
 .card-kpi:hover {
     box-shadow: var(--erp-shadow-lg) !important;
     border-color: var(--erp-primary-border) !important;
-    transform: translateY(-3px);
+    transform: translateY(-2.5px);
 }
 
-/* Form Controls */
+/* ==========================================================================
+   7. EXECUTIVE DASHBOARD SPECIFIC TOKENS & CARD STYLES
+   ========================================================================== */
+/* Premium Ultra-Clean KPI Tiles */
+.kpi-card-clean,
+.kpi-tile-premium {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: var(--erp-radius-lg);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
+    min-height: 156px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.02);
+    transition: transform 0.24s var(--erp-ease-bounce), 
+                box-shadow 0.24s var(--erp-ease-bounce), 
+                border-color 0.2s ease;
+}
+
+.kpi-card-clean:hover,
+.kpi-tile-premium:hover {
+    transform: translateY(-2.5px);
+    box-shadow: 0 12px 24px -6px rgba(15, 23, 42, 0.08), 0 4px 8px -2px rgba(15, 23, 42, 0.03);
+    border-color: var(--erp-slate-300);
+}
+
+/* KPI Typography */
+.kpi-val-container {
+    margin: 12px 0 8px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.kpi-val-prefix,
+.kpi-currency-prefix {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--erp-slate-400);
+    text-transform: uppercase;
+}
+
+.kpi-val-amount,
+.kpi-value-digits {
+    font-size: 1.625rem;
+    font-weight: 800;
+    color: var(--erp-slate-900);
+    letter-spacing: -0.035em;
+    line-height: 1;
+    font-family: var(--erp-font-mono);
+    font-variant-numeric: tabular-nums slashed-zero;
+    font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+/* Live Sync Pulse Indicators */
+.live-sync-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--erp-success-light);
+    color: #047857;
+    border: 1px solid var(--erp-success-border);
+    padding: 3px 10px;
+    border-radius: var(--erp-radius-pill);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.pulse-dot {
+    width: 6.5px;
+    height: 6.5px;
+    border-radius: 50%;
+    background-color: var(--erp-success);
+    animation: livePulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.85); }
+}
+
+/* Tender Badges & Payment Chips */
+.tender-chip {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3.5px 9px;
+    border-radius: 7px;
+    font-family: var(--erp-font-mono);
+    font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.tender-cash    { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.tender-fonepay { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.tender-esewa   { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.tender-credit  { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+
+/* Critical Stock & Alert Badges */
+.stock-tag-critical {
+    background-color: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fee2e2;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-weight: 800;
+    font-family: var(--erp-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.72rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+/* Margin Tier Realization Badges */
+.margin-tier-high     { background-color: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+.margin-tier-medium   { background-color: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+.margin-tier-slim     { background-color: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.margin-tier-negative { background-color: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+
+/* Interactive Chart Switcher Pills */
+.chart-toggle-group {
+    background: var(--erp-slate-100);
+    padding: 3px;
+    border-radius: 10px;
+    display: inline-flex;
+    gap: 2px;
+}
+
+.chart-toggle-btn {
+    border: none;
+    background: transparent;
+    padding: 4px 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--erp-slate-600);
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.16s ease;
+}
+
+.chart-toggle-btn.active {
+    background: #ffffff;
+    color: var(--erp-slate-900);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+/* Clean Dashboard Tables */
+.dash-clean-table th {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--erp-slate-400);
+    background-color: #fafbfd;
+    border-bottom: 1px solid var(--erp-slate-200);
+    padding: 12px 18px;
+}
+
+.dash-clean-table td {
+    padding: 12px 18px;
+    font-size: 0.8125rem;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--erp-slate-100);
+    color: var(--erp-slate-700);
+}
+
+.dash-clean-table tbody tr:hover {
+    background-color: #fbfcfe;
+}
+
+/* ==========================================================================
+   8. FORM CONTROLS & TABLES (CORE)
+   ========================================================================== */
 .form-control, .form-select {
     min-height: 40px;
     border: 1px solid var(--erp-slate-200);
@@ -818,7 +1013,6 @@ kbd, .kbd-pill {
     font-size: 1rem;
 }
 
-/* Table Architecture */
 .table {
     margin-bottom: 0;
     width: 100%;
@@ -859,7 +1053,6 @@ kbd, .kbd-pill {
     vertical-align: middle;
 }
 
-/* Interactivity & Modals */
 .pointer { cursor: pointer; }
 .hover-bg:hover { background-color: var(--erp-slate-100) !important; }
 .hover-primary:hover { color: var(--erp-primary) !important; }
@@ -870,16 +1063,11 @@ kbd, .kbd-pill {
     box-shadow: var(--erp-shadow-lg);
 }
 
-.modal-header {
-    border-bottom: 1px solid var(--erp-slate-100);
-}
-
-.modal-footer {
-    border-top: 1px solid var(--erp-slate-100);
-}
+.modal-header { border-bottom: 1px solid var(--erp-slate-100); }
+.modal-footer { border-top: 1px solid var(--erp-slate-100); }
 
 /* ==========================================================================
-   7. GLOBAL COMMAND PALETTE (CTRL + K) SEARCH MODAL
+   9. GLOBAL COMMAND PALETTE (CTRL + K) SEARCH MODAL
    ========================================================================== */
 .global-search-backdrop {
     backdrop-filter: blur(8px);
@@ -903,7 +1091,6 @@ kbd, .kbd-pill {
     flex-direction: column;
 }
 
-/* Header & Search Input */
 .global-search-header {
     padding: 14px 18px;
     background-color: #ffffff;
@@ -971,7 +1158,6 @@ kbd, .kbd-pill {
     to { transform: rotate(360deg); }
 }
 
-/* Domain Filter Pills */
 .global-search-chips {
     display: flex;
     align-items: center;
@@ -1015,7 +1201,6 @@ kbd, .kbd-pill {
     color: #ffffff;
 }
 
-/* Search Body & Categorized Matches */
 .global-search-body {
     max-height: 55vh;
     min-height: 240px;
@@ -1112,7 +1297,6 @@ kbd, .kbd-pill {
     gap: 2px;
 }
 
-/* Empty, Initial & Loading States */
 .search-empty-state,
 .search-initial-state {
     padding: 36px 20px;
@@ -1162,7 +1346,6 @@ kbd, .kbd-pill {
     transform: translateY(-1px);
 }
 
-/* Command Palette Footer */
 .global-search-footer {
     padding: 10px 18px;
     background-color: var(--erp-slate-50);
@@ -1195,7 +1378,7 @@ kbd, .kbd-pill {
 }
 
 /* ==========================================================================
-   8. UNIFIED CONTEXTUAL ASYNC DROPDOWN CLASSES
+   10. UNIFIED CONTEXTUAL ASYNC DROPDOWN CLASSES
    ========================================================================== */
 .async-search-wrapper {
     position: relative;

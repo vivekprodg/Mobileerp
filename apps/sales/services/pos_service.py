@@ -2,39 +2,45 @@
 POS Counter Terminal, Sales Estimation & Parked Bill Recovery Service.
 
 Core Capabilities & Architectural Safeguards:
-1. Standard Retail Turnover Accounting (No Revenue Distortion):
+1. Dual Document Sequencing (Official Sales Bill vs Internal Estimate):
+   - generate_estimate_number() dynamically checks bill_type:
+     * If bill_type == 'SALES': Generates official Sales/Tax Invoices (e.g. INV-NR-000001)
+       using document_type='SALES_INVOICE'.
+     * If bill_type == 'ESTIMATE': Generates quotation estimation slips (e.g. EST-NR-000001)
+       using document_type='SALES_ESTIMATE'.
+2. Standard Retail Turnover Accounting (No Revenue Distortion):
    - grand_total strictly represents the full merchandise gross sales value + applicable tax.
    - trade_in_discount_amount is treated exclusively as a tender settlement offset (barter payment),
      protecting statutory revenue reporting and customer spend analytics from distortion.
-2. Robust Two-Way Historical Date & Fiscal Period Synchronization:
+3. Robust Two-Way Historical Date & Fiscal Period Synchronization:
    - When bill_date_bs is provided, converts immediately to Gregorian AD date and automatically
      calculates the proper Bikram Sambat fiscal year without requiring manual fiscal_year input.
    - Ensures estimate.bill_date_ad, estimate.bill_date_bs, and estimate.fiscal_year are preserved.
    - Calibrates ItemInstance sale dates, warranty start dates, and component expiration schedules
      to the historical bill date rather than the current server clock.
-3. Intelligent Customer Resolution for Credit Purchases:
+4. Intelligent Customer Resolution for Credit Purchases:
    - In _process_payments_and_udhaari, when a credit sale is initiated without an explicit customer_id,
      the system automatically attempts resolution via Phone number, 9-digit PAN (via Customer.resolve_or_create_by_pan),
      or business name before raising a validation error.
-4. Itemized Audit Description in CustomerUdhaariLedger:
+5. Itemized Audit Description in CustomerUdhaariLedger:
    - Multi-tender payments (Cash, FonePay, eSewa, Cards, Bank, Trade-In) are compiled into an itemized
      audit summary stored directly in CustomerUdhaariLedger.remarks.
-5. Prevention of Double-Accounting of Credit:
+6. Prevention of Double-Accounting of Credit:
    - estimate.paid_amount strictly captures genuine monetary tenders.
    - estimate.due_amount strictly equals the unpaid balance / credit tender.
    - Non-monetary credit transactions are isolated so General Ledger auto-posting does not double-debit AR (1210).
-6. Dynamic Master Switch Sensitive IMEI Allocation:
+7. Dynamic Master Switch Sensitive IMEI Allocation:
    - When enforce_imei_tracking is OFF (Backlog Mode): Mobile phones can be sold without IMEIs,
      deducting directly from shelf stock and depleting FIFO batches like standard accessories.
    - When enforce_imei_tracking is ON (Strict Mode): Enforces strict 15-digit IMEI verification.
    - Transition Safety Guard: Seamlessly registers and sells backlog shelf stock when scanned with
      a live physical IMEI in Strict Mode without throwing "Stock Not Found" crashes.
-7. Unified Excess Trade-In Settlement:
+8. Unified Excess Trade-In Settlement:
    - Routed authoritatively through TradeInValuationEngine.settle_excess_trade_in_credit.
-8. Trade-In Cash Return Guard (Cash Refund Scam Prevention):
+9. Trade-In Cash Return Guard (Cash Refund Scam Prevention):
    - In process_sales_return, if an invoice utilized a trade-in exchange credit, cash refunds are
      strictly capped to the net physical cash tendered on that invoice.
-9. Comprehensive Atomic Bill Cancellation with Payroll Commission Safeguards:
+10. Comprehensive Atomic Bill Cancellation with Payroll Commission Safeguards:
    - Blocks voiding of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
    - Restores sold physical merchandise stock, batches, serials, and voids active device warranties.
 """
@@ -126,17 +132,40 @@ class SalesPOSService:
     }
 
     @staticmethod
-    def generate_estimate_number(branch: Branch) -> str:
+    def generate_estimate_number(branch: Branch, bill_type: str = 'SALES') -> str:
         """
-        Atomically allocates a unique sequential estimate slip number using row-level locking.
+        Atomically allocates a unique sequential document number using row-level locking.
+        - If bill_type == 'SALES': Uses document_type='SALES_INVOICE' with prefix 'INV' (e.g. INV-NR-000001).
+        - If bill_type == 'ESTIMATE': Uses document_type='SALES_ESTIMATE' with prefix 'EST' (e.g. EST-NR-000001).
         """
-        prefix = branch.invoice_prefix or "EST"
-        return BranchDocumentSequence.get_next_sequence_number(
-            branch=branch,
-            document_type='SALES_ESTIMATE',
-            prefix_override=prefix,
-            padding=6
-        )
+        clean_bill_type = str(bill_type or 'SALES').upper().strip()
+        is_estimate = clean_bill_type in ['ESTIMATE', 'EST']
+
+        if is_estimate:
+            doc_type = 'SALES_ESTIMATE'
+            prefix = f"EST-{branch.code}"
+        else:
+            doc_type = 'SALES_INVOICE'
+            branch_prefix = getattr(branch, 'invoice_prefix', '') or ''
+            if branch_prefix and not branch_prefix.upper().startswith('EST'):
+                prefix = branch_prefix
+            else:
+                prefix = f"INV-{branch.code}"
+
+        try:
+            return BranchDocumentSequence.get_next_sequence_number(
+                branch=branch,
+                document_type=doc_type,
+                prefix_override=prefix,
+                padding=6
+            )
+        except Exception:
+            return f"{prefix}-{uuid.uuid4().hex[:6].upper()}"
+
+    @classmethod
+    def generate_document_number(cls, branch: Branch, bill_type: str = 'SALES') -> str:
+        """Convenience alias for generate_estimate_number supporting dual sequencing."""
+        return cls.generate_estimate_number(branch=branch, bill_type=bill_type)
 
     @classmethod
     @transaction.atomic
@@ -146,6 +175,7 @@ class SalesPOSService:
         cashier,
         cart_items: list,
         payments: list,
+        bill_type: str = 'SALES',
         salesperson=None,
         customer_id: Optional[int] = None,
         customer_name: str = "",
@@ -166,12 +196,16 @@ class SalesPOSService:
         **kwargs
     ) -> SalesEstimate:
         """
-        Main transactional checkout coordinator.
+        Main transactional checkout coordinator supporting dual document sequencing (Sales vs Estimate).
         """
         cls._validate_cart_items(cart_items)
 
         config = SystemConfiguration.get_solo()
         is_shop_vat_registered = (config.tax_system_mode == 'VAT')
+
+        # Normalize Bill Type: 'SALES' or 'ESTIMATE'
+        raw_bill_type = kwargs.get('bill_type') or bill_type or 'SALES'
+        normalized_bill_type = 'ESTIMATE' if str(raw_bill_type).upper().strip() in ['ESTIMATE', 'EST'] else 'SALES'
 
         # 1. Date & Fiscal Period Resolution (Two-Way Synchronization)
         target_date_ad: Optional[date] = None
@@ -249,15 +283,15 @@ class SalesPOSService:
             line['line_after_item_disc'] for line in processed_lines if line['is_discountable']
         )
 
-        raw_bill_type = str(bill_discount_type or 'PERCENTAGE').upper().strip()
-        if raw_bill_type in ['AMOUNT', 'FIXED', 'FLAT', 'CASH', 'NPR', 'RS']:
-            raw_bill_type = 'AMOUNT'
-        elif raw_bill_type in ['PERCENTAGE', '%', 'PERCENT']:
-            raw_bill_type = 'PERCENTAGE'
-        elif raw_bill_type == 'NONE':
-            raw_bill_type = 'NONE'
+        raw_bill_disc_type = str(bill_discount_type or 'PERCENTAGE').upper().strip()
+        if raw_bill_disc_type in ['AMOUNT', 'FIXED', 'FLAT', 'CASH', 'NPR', 'RS']:
+            raw_bill_disc_type = 'AMOUNT'
+        elif raw_bill_disc_type in ['PERCENTAGE', '%', 'PERCENT']:
+            raw_bill_disc_type = 'PERCENTAGE'
+        elif raw_bill_disc_type == 'NONE':
+            raw_bill_disc_type = 'NONE'
         else:
-            raw_bill_type = 'PERCENTAGE'
+            raw_bill_disc_type = 'PERCENTAGE'
 
         if bill_discount_input_value is not None and str(bill_discount_input_value).strip() != '':
             try:
@@ -267,7 +301,7 @@ class SalesPOSService:
         elif bill_discount_percent is not None and str(bill_discount_percent).strip() != '':
             try:
                 raw_bill_input = Decimal(str(bill_discount_percent))
-                raw_bill_type = 'PERCENTAGE'
+                raw_bill_disc_type = 'PERCENTAGE'
             except (InvalidOperation, ValueError, TypeError):
                 raise ValidationError("Invalid bill discount percentage format.")
         else:
@@ -282,7 +316,7 @@ class SalesPOSService:
             raise ValidationError("Bill discount cannot be applied because there are no discountable items in the cart.")
 
         # Calculate bill discount deduction amount and secondary control percentage
-        if raw_bill_type == 'AMOUNT':
+        if raw_bill_disc_type == 'AMOUNT':
             if raw_bill_input > discountable_net_base and not is_historical_import:
                 raise ValidationError(
                     f"Bill discount amount of Rs. {raw_bill_input:.2f} cannot exceed "
@@ -296,7 +330,7 @@ class SalesPOSService:
                 if discountable_net_base > Decimal('0.00')
                 else Decimal('0.00')
             )
-        elif raw_bill_type == 'PERCENTAGE':
+        elif raw_bill_disc_type == 'PERCENTAGE':
             if raw_bill_input > Decimal('100.00'):
                 raise ValidationError(f"Bill discount percentage ({raw_bill_input:.2f}%) cannot exceed 100.00%.")
             effective_bill_discount_pct = raw_bill_input
@@ -304,7 +338,7 @@ class SalesPOSService:
                 discountable_net_base * (effective_bill_discount_pct / Decimal('100.00'))
             ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         else:
-            raw_bill_type = 'NONE'
+            raw_bill_disc_type = 'NONE'
             raw_bill_input = Decimal('0.00')
             effective_bill_discount_pct = Decimal('0.00')
             bill_discount_amt = Decimal('0.00')
@@ -332,8 +366,12 @@ class SalesPOSService:
             bill_discount_amt=bill_discount_amt
         )
 
-        # 7. Initialize Sales Estimate Invoice Model
-        estimate_number = estimate_number_override or cls.generate_estimate_number(branch)
+        # 7. Initialize Sales Estimate / Invoice Model (With Correct Prefix & Sequencing)
+        estimate_number = estimate_number_override or cls.generate_estimate_number(
+            branch=branch,
+            bill_type=normalized_bill_type
+        )
+
         discount_approved_at = timezone.now() if (
             manager_override_user or (
                 is_cashier_privileged and (
@@ -355,7 +393,7 @@ class SalesPOSService:
             customer_name_manual=customer_name,
             customer_phone_manual=customer_phone,
             customer_pan=customer_pan,
-            bill_discount_type=raw_bill_type,
+            bill_discount_type=raw_bill_disc_type,
             bill_discount_input_value=raw_bill_input,
             bill_discount_percent=effective_bill_discount_pct,
             bill_discount_amount=bill_discount_amt,
@@ -369,6 +407,12 @@ class SalesPOSService:
             status='COMPLETED',
             is_vat_applicable=is_shop_vat_registered
         )
+
+        # If the model has a bill_type column, persist it; otherwise set on the in-memory instance
+        if hasattr(estimate, 'bill_type'):
+            estimate.bill_type = normalized_bill_type
+        else:
+            setattr(estimate, 'bill_type', normalized_bill_type)
 
         # 8. Process Line Items, Taxes, COGS & Inventory (Passed Exact Historical Date)
         calc_result = cls._process_lines_and_inventory(
@@ -432,6 +476,7 @@ class SalesPOSService:
             module='POS_Sales',
             object_repr=estimate.estimate_number,
             details={
+                'bill_type': normalized_bill_type,
                 'tax_mode': config.tax_system_mode,
                 'bill_date_ad': str(estimate.bill_date_ad),
                 'bill_date_bs': estimate.bill_date_bs,
@@ -1421,7 +1466,7 @@ class SalesPOSService:
                         f"Bill Total: Rs. {estimate.grand_total:,.2f} | "
                         f"Paid: {paid_summary} | "
                         f"Balance Due (Udhaari): Rs. {estimate.due_amount:,.2f} "
-                        f"on estimate {estimate.estimate_number} ({bill_date_label})"
+                        f"on bill {estimate.estimate_number} ({bill_date_label})"
                     )
 
                     ledger_kwargs = {
@@ -1518,6 +1563,8 @@ class SalesPOSService:
                 call_kwargs['payments'] = payment_details
             if 'trade_in_amount' in sig.parameters:
                 call_kwargs['trade_in_amount'] = estimate.trade_in_discount_amount
+            if 'bill_type' in sig.parameters and hasattr(estimate, 'bill_type'):
+                call_kwargs['bill_type'] = getattr(estimate, 'bill_type', 'SALES')
             if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
                 call_kwargs['payment_details'] = payment_details
                 call_kwargs['payment_transactions'] = monetary_transactions
@@ -1536,7 +1583,7 @@ class SalesPOSService:
             raise
         except Exception as err:
             logger.error(
-                f"[POS GL Auto-Posting Error] Estimate {estimate.estimate_number} failed to post to GL: {err}",
+                f"[POS GL Auto-Posting Error] Bill {estimate.estimate_number} failed to post to GL: {err}",
                 exc_info=True
             )
             raise ValidationError(

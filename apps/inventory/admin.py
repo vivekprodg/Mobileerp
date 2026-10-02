@@ -1,6 +1,7 @@
 """
 Django Admin Configuration for Inventory, Warehouses, IMEI Handset Tracking, Batches & Audit Logs.
-Fully integrated with the Enhanced Product Catalog, NTA MDMS Compliance, and Synchronized Warranty Ledgers.
+Fully aligned with the Enhanced Product Catalog, Custom Batch Lot Tracking, NTA MDMS Compliance,
+and Synchronized Warranty Ledgers in `apps/inventory/models.py`.
 """
 
 from decimal import Decimal
@@ -8,6 +9,7 @@ from django.contrib import admin
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
+
 from apps.inventory.models import (
     UnitOfMeasurement, ProductCategory, ProductSubCategory, Brand,
     Product, ProductComponentWarrantyRule, UnitConversion, BranchStock,
@@ -56,7 +58,7 @@ class ItemInstanceInline(admin.TabularInline):
     model = ItemInstance
     extra = 0
     fields = [
-        'imei_1', 'imei_2', 'imei_2_pending_scan', 'condition', 'mdms_status',
+        'imei_1', 'imei_2', 'imei_2_pending_scan', 'batch_reference', 'condition', 'mdms_status',
         'source_type', 'landed_cost', 'purchase_date', 'status', 'branch', 'sold_invoice_reference'
     ]
     readonly_fields = ['landed_cost', 'purchase_date', 'sold_invoice_reference']
@@ -116,7 +118,7 @@ class ProductAdmin(admin.ModelAdmin):
     ]
 
     fieldsets = (
-        ("1. Product Identification", {
+        (_("1. Product Identification"), {
             'fields': (
                 ('name', 'sku', 'barcode'),
                 ('category', 'subcategory', 'brand'),
@@ -125,14 +127,14 @@ class ProductAdmin(admin.ModelAdmin):
                 'description'
             )
         }),
-        ("2. Mobile Variant & NTA MDMS Classification", {
+        (_("2. Mobile Variant & NTA MDMS Classification"), {
             'fields': (
                 ('variant_name', 'ram', 'internal_storage'),
                 ('color_variant', 'network_type', 'sim_configuration'),
                 ('region_variant', 'default_mdms_status')
             )
         }),
-        ("3. Smartphone Hardware & Display Specifications", {
+        (_("3. Smartphone Hardware & Display Specifications"), {
             'classes': ('collapse',),
             'fields': (
                 ('operating_system', 'processor_chipset'),
@@ -148,20 +150,20 @@ class ProductAdmin(admin.ModelAdmin):
                 ('size_dimension', 'base_unit')
             )
         }),
-        ("4. Pricing & Dynamic Tax Calculations", {
+        (_("4. Pricing & Dynamic Tax Calculations"), {
             'fields': (
                 ('purchase_price', 'selling_price', 'wholesale_price'),
                 ('is_discountable', 'max_discount_percent'),
                 ('tax_pricing_type', 'is_vat_applicable', 'vat_rate')
             )
         }),
-        ("5. Inventory & Warehouse Shelf Location", {
+        (_("5. Inventory & Warehouse Shelf Location"), {
             'fields': (
                 ('inventory_tracking_type', 'requires_imei_tracking', 'requires_serial_tracking'),
                 ('reorder_level', 'rack_number', 'shelf_identifier', 'bin_location')
             )
         }),
-        ("6. Official Overall Warranty Terms", {
+        (_("6. Official Overall Warranty Terms"), {
             'fields': (
                 ('warranty_months', 'warranty_provider'),
                 'effective_warranty_display_field'
@@ -268,10 +270,6 @@ class ProductAdmin(admin.ModelAdmin):
     is_spare_part_badge.short_description = _("Item Type")
 
     def save_formset(self, request, form, formset, change):
-        """
-        Immediately updates the parent Product's warranty_months in the database
-        when an inline rule for Main Handset Body is added or updated in the admin panel.
-        """
         super().save_formset(request, form, formset, change)
         if formset.model == ProductComponentWarrantyRule and form.instance.pk:
             body_rule = form.instance.component_warranty_rules.filter(component_type='DEVICE').first()
@@ -283,9 +281,6 @@ class ProductAdmin(admin.ModelAdmin):
 
     @admin.action(description=_("Synchronize overall warranty with Main Handset Body component rule"))
     def sync_warranties_action(self, request, queryset):
-        """
-        Admin action to instantly repair any existing out-of-sync products (e.g. Product #1977).
-        """
         synced_count = 0
         for product in queryset:
             body_rule = product.component_warranty_rules.filter(component_type='DEVICE').first()
@@ -312,7 +307,8 @@ class ItemInstanceAdmin(admin.ModelAdmin):
     list_display = [
         'product', 'branch', 'imei_1', 'imei_2', 'imei_2_status_badge',
         'condition_badge', 'mdms_status_badge', 'source_type_badge',
-        'landed_cost', 'purchase_date', 'status_badge', 'sold_invoice_reference', 'customer_name'
+        'batch_reference_badge', 'landed_cost', 'purchase_date',
+        'status_badge', 'sold_invoice_reference', 'customer_name'
     ]
     list_filter = [
         'status', 'imei_2_pending_scan', 'mdms_status', 'source_type',
@@ -320,8 +316,8 @@ class ItemInstanceAdmin(admin.ModelAdmin):
     ]
     search_fields = [
         'imei_1', 'imei_2', 'serial_number', 'device_uid',
-        'trade_in_voucher_reference', 'sold_invoice_reference',
-        'customer_phone', 'customer_name', 'purchase_reference'
+        'batch_reference', 'purchase_reference', 'trade_in_voucher_reference',
+        'sold_invoice_reference', 'customer_phone', 'customer_name'
     ]
     autocomplete_fields = ['product']
     list_select_related = ['product', 'branch']
@@ -329,14 +325,14 @@ class ItemInstanceAdmin(admin.ModelAdmin):
     inlines = [DeviceComponentWarrantyInline]
 
     fieldsets = (
-        ("Device Identification & Dual-IMEI Tracking", {
+        (_("Device Identification & Dual-IMEI Tracking"), {
             'fields': (
                 ('product', 'branch'),
                 ('imei_1', 'imei_2', 'imei_2_pending_scan'),
                 ('serial_number', 'device_uid', 'device_barcode')
             )
         }),
-        ("Condition, Origin & NTA MDMS Compliance", {
+        (_("Condition, Origin & NTA MDMS Compliance"), {
             'fields': (
                 ('condition', 'activation_status'),
                 ('source_type', 'trade_in_voucher_reference'),
@@ -344,24 +340,34 @@ class ItemInstanceAdmin(admin.ModelAdmin):
                 'mdms_remarks'
             )
         }),
-        ("Acquisition & Cost", {
+        (_("Acquisition & Cost (GRN & Lot Tracking)"), {
             'fields': (
                 ('purchase_reference', 'batch_reference', 'supplier_name'),
                 ('landed_cost', 'purchase_date')
             )
         }),
-        ("Sales & Customer Allocation", {
+        (_("Sales & Customer Allocation"), {
             'fields': (
                 ('status', 'sold_invoice_reference'),
                 ('customer_name', 'customer_phone', 'sale_date', 'sold_price'),
                 ('warranty_start_date', 'warranty_end_date', 'warranty_remarks')
             )
         }),
-        ("Audit Metadata", {
+        (_("Audit Metadata"), {
             'classes': ('collapse',),
             'fields': ('created_at', 'updated_at')
         })
     )
+
+    def batch_reference_badge(self, obj):
+        if obj.batch_reference:
+            return format_html(
+                '<span class="font-monospace fw-bold" style="color: #6d28d9; background-color: #faf5ff; border: 1px solid #e9d5ff; padding: 1px 6px; border-radius: 4px; font-size: 10px;">{}</span>',
+                obj.batch_reference
+            )
+        return format_html('<span style="color: #94a3b8; font-size: 10px;">-</span>')
+    batch_reference_badge.short_description = _("Lot / Batch")
+    batch_reference_badge.admin_order_field = 'batch_reference'
 
     def imei_2_status_badge(self, obj):
         if not obj.product.requires_imei_tracking:
@@ -433,6 +439,7 @@ class ItemInstanceAdmin(admin.ModelAdmin):
             'SOLD': '#64748b',
             'UNDER_SERVICE': '#f59e0b',
             'RETURNED_DEFECTIVE': '#ef4444',
+            'RETURNED_TO_SUPPLIER': '#dc2626',
             'ARCHIVED': '#475569',
             'TRANSFERRED': '#0ea5e9',
         }
@@ -506,7 +513,7 @@ class VendorRMAClaimAdmin(admin.ModelAdmin):
     inlines = [VendorRMAClaimItemInline]
 
     fieldsets = (
-        ("RMA Identification & Parties", {
+        (_("RMA Identification & Parties"), {
             'fields': (
                 ('rma_number', 'status'),
                 ('supplier', 'branch'),
@@ -514,14 +521,14 @@ class VendorRMAClaimAdmin(admin.ModelAdmin):
                 'distributor_service_center'
             )
         }),
-        ("Settlement & Metrics", {
+        (_("Settlement & Metrics"), {
             'fields': (
                 ('total_claimed_parts_count', 'total_credit_amount'),
                 ('resolution_date', 'resolved_by'),
                 'resolution_notes'
             )
         }),
-        ("Audit Details", {
+        (_("Audit Details"), {
             'classes': ('collapse',),
             'fields': (('dispatched_by', 'created_at', 'updated_at'),)
         })
@@ -572,16 +579,80 @@ class VendorRMAClaimItemAdmin(admin.ModelAdmin):
 # ==============================================================================
 @admin.register(ProductBatch)
 class ProductBatchAdmin(admin.ModelAdmin):
+    """
+    Admin Controller for FIFO Inventory Batches.
+    Surfaces custom physical batch codes, GRN links, cost valuations, and depletion flags.
+    """
     list_display = [
-        'batch_number', 'product', 'branch', 'purchase_date',
-        'cost_price', 'selling_price', 'quantity_received',
-        'quantity_remaining', 'is_depleted'
+        'batch_number_badge', 'product', 'branch', 'purchase_date',
+        'cost_price_display', 'selling_price_display', 'quantity_received',
+        'quantity_remaining', 'is_depleted_badge', 'grn_reference_badge', 'supplier_name'
     ]
     list_filter = ['is_depleted', 'branch', 'purchase_date', 'product__category']
     search_fields = ['batch_number', 'product__name', 'product__sku', 'grn_reference', 'supplier_name']
     autocomplete_fields = ['product']
     list_select_related = ['product', 'branch']
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['is_depleted', 'created_at', 'updated_at']
+
+    fieldsets = (
+        (_("Batch & Inventory Lot Identification"), {
+            'description': _("Custom physical batch number entered during GRN inward receiving."),
+            'fields': (
+                ('batch_number', 'is_depleted'),
+                ('product', 'branch'),
+                ('purchase_date', 'expiry_date'),
+                ('grn_reference', 'supplier_name')
+            )
+        }),
+        (_("Quantity & FIFO Valuation"), {
+            'fields': (
+                ('quantity_received', 'quantity_remaining'),
+                ('cost_price', 'selling_price'),
+            )
+        }),
+        (_("System Metadata"), {
+            'classes': ('collapse',),
+            'fields': ('created_at', 'updated_at')
+        })
+    )
+
+    def batch_number_badge(self, obj):
+        return format_html(
+            '<span class="font-monospace fw-bold" style="color: #4338ca; background-color: #e0e7ff; padding: 2px 8px; border-radius: 4px; font-size: 11px;">{}</span>',
+            obj.batch_number
+        )
+    batch_number_badge.short_description = _("Batch / Lot No")
+    batch_number_badge.admin_order_field = 'batch_number'
+
+    def cost_price_display(self, obj):
+        return format_html('Rs. {:,.2f}', obj.cost_price or Decimal('0.00'))
+    cost_price_display.short_description = _("Unit Landed Cost")
+
+    def selling_price_display(self, obj):
+        return format_html('Rs. {:,.2f}', obj.selling_price or Decimal('0.00'))
+    selling_price_display.short_description = _("Counter MRP")
+
+    def is_depleted_badge(self, obj):
+        if obj.is_depleted or obj.quantity_remaining <= Decimal('0.000'):
+            return format_html(
+                '<span style="color: #991b1b; background-color: #fef2f2; border: 1px solid #fecaca; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">DEPLETED</span>'
+            )
+        return format_html(
+            '<span style="color: #065f46; background-color: #ecfdf5; border: 1px solid #a7f3d0; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">ACTIVE ({} left)</span>',
+            obj.quantity_remaining
+        )
+    is_depleted_badge.short_description = _("Batch State")
+    is_depleted_badge.admin_order_field = 'is_depleted'
+
+    def grn_reference_badge(self, obj):
+        if obj.grn_reference:
+            return format_html(
+                '<span class="font-monospace text-primary fw-semibold fs-2xs">{}</span>',
+                obj.grn_reference
+            )
+        return format_html('<span style="color: #94a3b8;">-</span>')
+    grn_reference_badge.short_description = _("GRN Ref")
+    grn_reference_badge.admin_order_field = 'grn_reference'
 
 @admin.register(UnitOfMeasurement)
 class UnitOfMeasurementAdmin(admin.ModelAdmin):

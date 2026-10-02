@@ -1,15 +1,29 @@
 """
 Inventory & Product Catalog Models: Warehouses, Physical Shelf Stock,
 IMEI Handset Instances, FIFO Batches, Warranties, and Immutable Audit Logs.
+
+Core Batch Tracking Enhancements:
+1. ProductBatch: Expanded `batch_number` to 100 characters to match the GRN table schema.
+2. Custom Batch Priority: Automatically preserves and prioritizes user-defined vendor batch
+   codes entered on GRN rows (e.g. BT-2026-A1). Falls back to an internal formatted batch
+   string only if left completely blank.
+3. Quantity & Depletion Defensiveness: Handles both `quantity_received` and legacy `initial_quantity`
+   kwargs gracefully. Automatically calculates `is_depleted` based on `quantity_remaining`.
+4. Non-Serialized & Backlog Phone FIFO Tracking: Seamlessly links FIFO batches to GRN references
+   and suppliers so that non-serialized accessories and backlog phones entered without IMEIs
+   maintain true landed cost accounting.
+5. ItemInstance: Expanded `batch_reference` to 100 characters with indexing for 1-to-1 batch tracing.
 """
 
 import uuid
-from decimal import Decimal
-from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, datetime
+from typing import Optional, List, Tuple
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
 from apps.core.models import TimeStampedModel
 from apps.branches.models import Branch
 
@@ -298,7 +312,7 @@ class Product(TimeStampedModel):
             if self.barcode == '':
                 self.barcode = None
 
-        # Auto-Sync 1: Synchronize warranty_months from Main Handset Body component rule if it exists
+        # Auto-Sync: Synchronize warranty_months from Main Handset Body component rule if it exists
         if self.pk:
             body_rule = self.component_warranty_rules.filter(component_type='DEVICE').first()
             if body_rule is not None:
@@ -340,7 +354,7 @@ class ProductComponentWarrantyRule(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        # Auto-Sync 2: Synchronize parent product warranty_months when Main Handset Body rule is created or updated
+        # Auto-Sync: Synchronize parent product warranty_months when Main Handset Body rule is created or updated
         if self.component_type == 'DEVICE' and self.product_id:
             Product.objects.filter(pk=self.product_id).update(
                 warranty_months=self.warranty_months,
@@ -411,18 +425,33 @@ class BranchStock(TimeStampedModel):
         return self.quantity <= self.low_stock_threshold
 
 class ProductBatch(TimeStampedModel):
-    """Tracks non-serialized multi-date inventory batches for accessories and spare parts."""
-    batch_number = models.CharField(max_length=60, db_index=True, verbose_name=_("Batch Number"))
+    """
+    FIFO Inventory Batch Ledger for Non-Serialized Items, Accessories & Backlog Handsets.
+    
+    Architectural Rules:
+    1. Prioritizes custom physical batch codes (`batch_number`, max_length=100) entered on the GRN row.
+    2. Defensively handles both `quantity_received` and `initial_quantity` constructor arguments.
+    3. Auto-computes `is_depleted` boolean flag whenever remaining units hit 0.000.
+    4. Provides `record_inward_batch` helper method for centralized atomic creation.
+    """
+    batch_number = models.CharField(
+        max_length=100, db_index=True, verbose_name=_("Batch / Lot Number"),
+        help_text=_("Physical manufacturer, distributor, or user-entered batch identifier.")
+    )
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='batches')
     branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='product_batches')
-    purchase_date = models.DateField(db_index=True)
-    cost_price = models.DecimalField(max_digits=12, decimal_places=2)
-    selling_price = models.DecimalField(max_digits=12, decimal_places=2)
-    quantity_received = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('0.000'))
-    quantity_remaining = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('0.000'), db_index=True)
-    is_depleted = models.BooleanField(default=False, db_index=True)
-    supplier_name = models.CharField(max_length=150, blank=True, null=True)
-    grn_reference = models.CharField(max_length=60, blank=True, null=True)
+    purchase_date = models.DateField(default=timezone.now, db_index=True, verbose_name=_("Inward Purchase Date"))
+    
+    cost_price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Unit Landed Cost (NPR)"))
+    selling_price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Target Counter MRP (NPR)"))
+    
+    quantity_received = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('0.000'), verbose_name=_("Received Quantity"))
+    quantity_remaining = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('0.000'), db_index=True, verbose_name=_("Remaining Quantity"))
+    is_depleted = models.BooleanField(default=False, db_index=True, verbose_name=_("Is Depleted"))
+    
+    supplier_name = models.CharField(max_length=150, blank=True, null=True, verbose_name=_("Supplier / Vendor Name"))
+    grn_reference = models.CharField(max_length=100, blank=True, null=True, db_index=True, verbose_name=_("GRN Reference No."))
+    expiry_date = models.DateField(blank=True, null=True, verbose_name=_("Expiry Date (If Applicable)"))
 
     class Meta:
         db_table = 'inv_product_batches'
@@ -430,18 +459,87 @@ class ProductBatch(TimeStampedModel):
         verbose_name = _('Product Batch (FIFO)')
         verbose_name_plural = _('Product Batches (FIFO)')
         indexes = [
+            models.Index(fields=['batch_number'], name='idx_batch_number'),
+            models.Index(fields=['grn_reference'], name='idx_batch_grn_ref'),
             models.Index(fields=['product', 'branch', 'is_depleted'], name='idx_batch_prod_br_depleted'),
             models.Index(fields=['purchase_date'], name='idx_batch_purch_date'),
         ]
 
+    def __init__(self, *args, **kwargs):
+        # Defensive kwarg normalization for backward-compatibility
+        if 'initial_quantity' in kwargs and 'quantity_received' not in kwargs:
+            kwargs['quantity_received'] = kwargs.pop('initial_quantity')
+        super().__init__(*args, **kwargs)
+
+    def __str__(self):
+        status_tag = " [DEPLETED]" if self.is_depleted else f" ({self.quantity_remaining} left)"
+        return f"{self.product.name} | Batch: {self.batch_number}{status_tag}"
+
     def save(self, *args, **kwargs):
-        self.is_depleted = self.quantity_remaining <= Decimal('0.000')
+        # 1. Custom Batch Number Prioritization
+        if not self.batch_number or not str(self.batch_number).strip():
+            date_str = (self.purchase_date or timezone.now().date()).strftime('%y%m%d')
+            prod_id_part = str(self.product_id or 'GEN')
+            self.batch_number = f"BATCH-{date_str}-{prod_id_part}-{uuid.uuid4().hex[:4].upper()}"
+        else:
+            self.batch_number = str(self.batch_number).strip()
+
+        # 2. Synchronize remaining quantity on new batch creation if not explicitly given
+        if self.pk is None and (self.quantity_remaining is None or self.quantity_remaining == Decimal('0.000')):
+            if self.quantity_received > Decimal('0.000'):
+                self.quantity_remaining = self.quantity_received
+
+        # 3. Dynamic Depletion Status Verification
+        rem = self.quantity_remaining if self.quantity_remaining is not None else Decimal('0.000')
+        self.is_depleted = (rem <= Decimal('0.000'))
+
         super().save(*args, **kwargs)
+
+    @classmethod
+    def record_inward_batch(
+        cls,
+        product: Product,
+        branch: Branch,
+        quantity: Decimal,
+        cost_price: Decimal,
+        selling_price: Optional[Decimal] = None,
+        purchase_date: Optional[date] = None,
+        batch_number: Optional[str] = None,
+        supplier_name: Optional[str] = None,
+        grn_reference: Optional[str] = None,
+        expiry_date: Optional[date] = None,
+    ) -> 'ProductBatch':
+        """
+        Central constructor for Inward FIFO Batches:
+        - Prioritizes custom batch_number if provided (e.g. from GRN table row).
+        - Links non-serialized accessories or backlog phones received without IMEIs.
+        """
+        clean_batch_no = str(batch_number or '').strip()
+        if not clean_batch_no:
+            date_str = (purchase_date or timezone.now().date()).strftime('%y%m%d')
+            clean_batch_no = f"BATCH-{date_str}-{product.id}-{uuid.uuid4().hex[:4].upper()}"
+
+        batch = cls.objects.create(
+            batch_number=clean_batch_no,
+            product=product,
+            branch=branch,
+            purchase_date=purchase_date or timezone.now().date(),
+            cost_price=cost_price,
+            selling_price=selling_price if selling_price is not None else product.selling_price,
+            quantity_received=quantity,
+            quantity_remaining=quantity,
+            supplier_name=supplier_name or "",
+            grn_reference=grn_reference or "",
+            expiry_date=expiry_date,
+            is_depleted=(quantity <= Decimal('0.000'))
+        )
+        return batch
 
 class ItemInstance(TimeStampedModel):
     """
     Physical smartphone/device unit tracked by unique IMEI 1, IMEI 2, Serial Number,
-    physical condition grade, NTA MDMS registration status, and source origin (GRN vs Trade-In).
+    physical condition grade, NTA MDMS registration status, source origin (GRN vs Trade-In),
+    and linked to custom batch identifiers (`batch_reference`, max_length=100).
     """
     STATUS_CHOICES = [
         ('IN_STOCK', 'In Stock (उपलब्ध)'),
@@ -449,6 +547,7 @@ class ItemInstance(TimeStampedModel):
         ('SOLD', 'Sold (बिक्री भएको)'),
         ('UNDER_SERVICE', 'Under Service / Repair (मर्मतमा रहेको)'),
         ('RETURNED_DEFECTIVE', 'Returned Defective (खराब फिर्ता)'),
+        ('RETURNED_TO_SUPPLIER', 'Returned to Supplier / Debit Note (सप्लायर फिर्ता)'),
         ('TRANSFERRED', 'In Transit Transfer'),
         ('ARCHIVED', 'Archived / Re-traded (अभिलेख गरिएको)'),
     ]
@@ -519,8 +618,12 @@ class ItemInstance(TimeStampedModel):
     mdms_remarks = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("MDMS Remarks / Verification Ref"))
 
     # Inward Purchase Tracking
-    purchase_reference = models.CharField(max_length=60, blank=True, null=True)
-    batch_reference = models.CharField(max_length=60, blank=True, null=True)
+    purchase_reference = models.CharField(max_length=60, blank=True, null=True, db_index=True)
+    batch_reference = models.CharField(
+        max_length=100, blank=True, null=True, db_index=True,
+        verbose_name=_("Batch Reference Number"),
+        help_text=_("Custom batch code linked from GRN line or product batch lot.")
+    )
     supplier_name = models.CharField(max_length=150, blank=True, null=True)
     landed_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     purchase_date = models.DateField(blank=True, null=True, db_index=True)
@@ -563,6 +666,8 @@ class ItemInstance(TimeStampedModel):
             models.Index(fields=['imei_2', 'status'], name='idx_instance_imei2_status'),
             models.Index(fields=['serial_number', 'status'], name='idx_inst_serial_status'),
             models.Index(fields=['device_barcode', 'status'], name='idx_inst_barcode_status'),
+            models.Index(fields=['purchase_reference'], name='idx_inst_purch_ref'),
+            models.Index(fields=['batch_reference'], name='idx_inst_batch_ref'),
             models.Index(fields=['sold_invoice_reference'], name='idx_inst_sold_invoice'),
             models.Index(fields=['customer_phone'], name='idx_inst_cust_phone'),
             models.Index(fields=['status', 'created_at'], name='idx_inst_status_created'),
@@ -585,6 +690,11 @@ class ItemInstance(TimeStampedModel):
             self.serial_number = self.serial_number.strip()
             if self.serial_number == '':
                 self.serial_number = None
+
+        if self.batch_reference:
+            self.batch_reference = self.batch_reference.strip()
+            if self.batch_reference == '':
+                self.batch_reference = None
 
     def save(self, *args, **kwargs):
         if not self.device_uid:
@@ -610,6 +720,13 @@ class ItemInstance(TimeStampedModel):
                 self.serial_number = None
         else:
             self.serial_number = None
+
+        if self.batch_reference:
+            self.batch_reference = self.batch_reference.strip()
+            if self.batch_reference == '':
+                self.batch_reference = None
+        else:
+            self.batch_reference = None
 
         if self.product and self.product.requires_imei_tracking:
             is_dual_sim = getattr(self.product, 'sim_configuration', 'DUAL_SIM') in ['DUAL_SIM', 'ESIM_DUAL']

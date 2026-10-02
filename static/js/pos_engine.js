@@ -1,29 +1,34 @@
 /**
- * POS Counter Terminal & Billing Engine (Hisaav Minimalist Architecture)
+ * POS Counter Terminal & Billing Engine (Growerp Minimalist Architecture)
  * File: static/js/pos_engine.js
  *
- * Core Capabilities:
- * 1. Self-Healing Two-Tier Card Rendering:
+ * Core Capabilities & Upgrades:
+ * 1. Bill Type State Management:
+ *    - Tracks active document mode: this.billType ('SALES' vs 'ESTIMATE').
+ *    - Binds #btnBillTypeSales and #btnBillTypeEstimate buttons with active class toggling.
+ *    - Injects bill_type into the checkout payload and parked bill records.
+ * 2. Active Thermal Print Driver & Modal Integration:
+ *    - Captures data.print_url and data.estimate_id from the server response.
+ *    - Dynamically wires up #printThermalReceiptModalBtn to launch the thermal print window.
+ *    - Updates the modal title and receipt slip header dynamically based on bill_type.
+ *    - Populates line items, IMEIs, and discounts into the receipt preview container.
+ * 3. Self-Healing Two-Tier Card Rendering:
  *    - Dynamically detects or creates the items container (#itemsContainer) without null-pointer crashes.
  *    - Renders two-tier stacked cards (.item-card) with instant quantity, price, and discount calculations.
- * 2. Complete Historical & Backdated Bill Synchronization:
+ * 4. Complete Historical & Backdated Bill Synchronization:
  *    - Entire #btnChangeBillDate container is clickable with hover feedback.
  *    - Auto-Select Date Event (onChange): Clicking any day on the calendar instantly selects and updates the bill date.
  *    - Zero "Apply" Button Dependency: Directly applies the date on click without requiring an extra button press.
  *    - Explicit Floating Calendar Cleanup: Immediately closes and hides #ndp-nepali-box so it never hangs on screen.
- *    - Synchronized Outside-Click & Cancel: Clicking outside or pressing Escape cleanly closes both popups.
  *    - Validates selected dates against the active open Fiscal Year (e.g. 2083/84).
- *    - Strictly preserves the chosen B.S. date in the checkout payload (bill_date_bs) across Cash,
- *      Credit, Split payments, and parked bills (Hold/Recall).
- * 3. Zero-Query Instant Suggestions & Live Typeahead:
+ * 5. Zero-Query Instant Suggestions & Live Typeahead:
  *    - Barcode / 15-Digit IMEI box opens live suggestions with recent products.
  *    - Patron Details box opens live suggestions with recent customers and debtors.
  *    - Two-tier item row autocomplete queries the live catalog under the active row.
- * 4. Dual-Mode Discounts (% vs Flat Rs.):
+ * 6. Dual-Mode Discounts (% vs Flat Rs.):
  *    - In-row and whole-bill segmented toggles with instant VAT recalculation and savings badges.
- * 5. Split Payments & Customer Udhaari Allocation [F8]:
- *    - Real-time remaining balance calculations across Cash, Wallets, Card, Bank, and Credit.
- * 6. Trade-In [F6], Repair Handover [F7], and Parked Cart [F9/F10] Parity.
+ * 7. Split Payments & Customer Udhaari Allocation [F8].
+ * 8. Trade-In [F6], Repair Handover [F7], and Parked Cart [F9/F10] Parity.
  */
 
 // ============================================================================
@@ -442,9 +447,6 @@ class POSCart {
         this.initEvents();
     }
 
-    /**
-     * Self-healing container resolver. Discovers or creates the items area without crashes.
-     */
     getContainer() {
         if (!this.container || !document.body.contains(this.container)) {
             this.container = document.getElementById('itemsContainer')
@@ -1548,6 +1550,7 @@ class POSHoldCartManager {
             customer_phone: customerPhone,
             customer_pan: customerPan,
             bill_date_bs: effectiveBillDateBs || '',
+            bill_type: this.engine.billType || 'SALES',
             bill_discount_type: this.engine.cart.billDiscountType,
             bill_discount_input_value: this.engine.cart.billDiscountValue,
             bill_discount_value: this.engine.cart.billDiscountValue,
@@ -1683,6 +1686,9 @@ class POSHoldCartManager {
                 } else {
                     this.engine.resetBillDateToToday();
                 }
+
+                const recalledBillType = (data.cart_payload && data.cart_payload.bill_type) || data.bill_type || 'SALES';
+                this.engine.setBillType(recalledBillType);
 
                 const billDiscType = (data.cart_payload && data.cart_payload.bill_discount_type) || data.bill_discount_type || 'PERCENTAGE';
                 const billDiscVal = (data.cart_payload && data.cart_payload.bill_discount_value !== undefined)
@@ -1946,6 +1952,7 @@ class POSCheckout {
             idempotency_key: this.engine.cart.activeCartIdempotencyKey,
             cart: packagedCartItems,
             payments: payments,
+            bill_type: this.engine.billType || 'SALES',
             customer_id: custId || (this.engine.cart.customer ? this.engine.cart.customer.id : null),
             customer_name: custName,
             customer_phone: custPhone,
@@ -1999,7 +2006,19 @@ class POSCheckout {
                 this.managerPin = null;
                 const totals = this.engine.cart.recalculateTotals();
 
-                this.engine.showThermalReceipt(data.estimate_number, payload.customer_name, payModeDisplay, totals);
+                const printUrl = data.print_url || (data.estimate_id ? `/sales/estimates/${data.estimate_id}/thermal-slip/` : '');
+                const billTypeSubmitted = payload.bill_type || this.engine.billType || 'SALES';
+
+                this.engine.showThermalReceipt(
+                    data.estimate_number,
+                    payload.customer_name,
+                    payModeDisplay,
+                    totals,
+                    printUrl,
+                    data.estimate_id,
+                    billTypeSubmitted
+                );
+
                 this.engine.showNotification(`Bill ${data.estimate_number} finalized successfully!`, 'success');
                 POSAudioSynthesizer.play('success');
 
@@ -2032,8 +2051,12 @@ class SmartPOSEngine {
         this.canBackdate = taxConfigEl ? (taxConfigEl.dataset.canBackdate === 'true') : true;
         this.isPrivileged = taxConfigEl ? (taxConfigEl.dataset.isPrivileged === 'true') : false;
 
+        // Default Bill Type is official Sales Bill
+        this.billType = 'SALES'; // 'SALES' or 'ESTIMATE'
+
         this.customBillDateBs = null;
         this.splitGrandTotal = 0;
+        this.activePrintUrl = '';
 
         this.initDomElements();
 
@@ -2062,6 +2085,9 @@ class SmartPOSEngine {
         this.splitBtn = document.getElementById('posSplitPaymentBtn');
         this.splitModalEl = document.getElementById('splitPaymentModal');
 
+        this.btnBillTypeSales = document.getElementById('btnBillTypeSales');
+        this.btnBillTypeEstimate = document.getElementById('btnBillTypeEstimate');
+
         this.btnChangeBillDate = document.getElementById('btnChangeBillDate');
         this.btnResetTodayDate = document.getElementById('btnResetTodayDate');
         this.btnApplyCustomDate = document.getElementById('btnApplyCustomDate');
@@ -2070,6 +2096,26 @@ class SmartPOSEngine {
         this.posBillDateBsInput = document.getElementById('posBillDateBsInput');
         this.displayBillDateBs = document.getElementById('displayBillDateBs');
         this.dateValidationErrorAlert = document.getElementById('dateValidationErrorAlert');
+
+        this.printThermalReceiptModalBtn = document.getElementById('printThermalReceiptModalBtn');
+        this.finishReceiptBtn = document.getElementById('finishReceiptBtn');
+    }
+
+    setBillType(type) {
+        this.billType = (type === 'ESTIMATE') ? 'ESTIMATE' : 'SALES';
+
+        if (this.btnBillTypeSales && this.btnBillTypeEstimate) {
+            if (this.billType === 'SALES') {
+                this.btnBillTypeSales.classList.add('active');
+                this.btnBillTypeEstimate.classList.remove('active');
+            } else {
+                this.btnBillTypeSales.classList.remove('active');
+                this.btnBillTypeEstimate.classList.add('active');
+            }
+        }
+
+        const modeLabel = (this.billType === 'SALES') ? 'Sales Bill (Tax Invoice)' : 'Estimation Slip';
+        this.showNotification(`Billing Mode Switched: ${modeLabel}`, 'info');
     }
 
     getEffectiveBillDateBs() {
@@ -2087,10 +2133,6 @@ class SmartPOSEngine {
         return this.todayBs || '';
     }
 
-    /**
-     * Explicitly close and hide the floating calendar popup (#ndp-nepali-box)
-     * so it never lingers on screen as an orphan.
-     */
     closeFloatingCalendarBox() {
         const ndpBox = document.getElementById('ndp-nepali-box') || document.querySelector('.ndp-nepali-box');
         if (ndpBox) {
@@ -2205,7 +2247,6 @@ class SmartPOSEngine {
             return false;
         }
 
-        // Supervisor authorization check for cashiers in live mode
         if (!this.isPrivileged && this.enforceImei && this.todayBs && formattedDate !== this.todayBs) {
             const pin = await this.promptForSupervisorPin('Supervisor authorization PIN is required to change or backdate the bill date in live counter mode.');
             if (!pin) {
@@ -2222,9 +2263,6 @@ class SmartPOSEngine {
         return true;
     }
 
-    /**
-     * Binds the visual Nepali Datepicker with an immediate auto-select onChange handler.
-     */
     bindNepaliDatePicker() {
         if (!this.posBillDateBsInput) return;
 
@@ -2276,10 +2314,8 @@ class SmartPOSEngine {
             this.todayBs = this.posBillDateBsInput.value.trim();
         }
 
-        // Initialize datepicker library binding with auto-select
         this.bindNepaliDatePicker();
 
-        // 1. Entire .bs-date-badge container opens datepicker
         if (this.btnChangeBillDate && this.customDatePickerWrapper) {
             this.btnChangeBillDate.addEventListener('click', (e) => {
                 if (e.target.closest('#btnResetTodayDate')) {
@@ -2298,14 +2334,12 @@ class SmartPOSEngine {
             });
         }
 
-        // 2. Prevent clicks inside popover from bubbling up to document and closing it
         if (this.customDatePickerWrapper) {
             this.customDatePickerWrapper.addEventListener('click', (e) => {
                 e.stopPropagation();
             });
         }
 
-        // 3. Document click-outside listener to dismiss both white container AND floating calendar
         document.addEventListener('click', (e) => {
             const ndpBox = document.getElementById('ndp-nepali-box') || document.querySelector('.ndp-nepali-box');
             if (this.customDatePickerWrapper && !this.customDatePickerWrapper.classList.contains('d-none')) {
@@ -2321,7 +2355,6 @@ class SmartPOSEngine {
             }
         });
 
-        // 4. Auto-select upon calendar dateSelect, change, or Enter key
         if (this.posBillDateBsInput) {
             this.posBillDateBsInput.addEventListener('dateSelect', (e) => {
                 const selectedVal = e.detail?.value || this.posBillDateBsInput.value;
@@ -2351,7 +2384,6 @@ class SmartPOSEngine {
             });
         }
 
-        // 5. Apply button (preserved for backward compatibility if present in DOM)
         if (this.btnApplyCustomDate && this.posBillDateBsInput) {
             this.btnApplyCustomDate.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -2359,7 +2391,6 @@ class SmartPOSEngine {
             });
         }
 
-        // 6. Cancel button closes both white box and floating calendar
         if (this.btnCancelCustomDate && this.customDatePickerWrapper) {
             this.btnCancelCustomDate.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -2369,7 +2400,6 @@ class SmartPOSEngine {
             });
         }
 
-        // 7. Reset button
         if (this.btnResetTodayDate) {
             this.btnResetTodayDate.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -2381,6 +2411,21 @@ class SmartPOSEngine {
     }
 
     bindEvents() {
+        // 1. Wire up Bill Type Navigation Pills (Sales Bill vs Estimates)
+        if (this.btnBillTypeSales) {
+            this.btnBillTypeSales.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.setBillType('SALES');
+            });
+        }
+        if (this.btnBillTypeEstimate) {
+            this.btnBillTypeEstimate.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.setBillType('ESTIMATE');
+            });
+        }
+
+        // 2. Checkout Triggers
         if (this.cashBtn) {
             this.cashBtn.addEventListener('click', () => this.checkout.processDirectCash());
         }
@@ -2392,6 +2437,37 @@ class SmartPOSEngine {
                 e.preventDefault();
                 this.openSplitPaymentModal();
             });
+        }
+
+        // 3. Thermal Receipt Modal Actions
+        if (this.printThermalReceiptModalBtn) {
+            this.printThermalReceiptModalBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.triggerThermalPrint();
+            });
+        }
+
+        if (this.finishReceiptBtn) {
+            this.finishReceiptBtn.addEventListener('click', () => {
+                if (this.scannerInput) {
+                    setTimeout(() => this.scannerInput.focus(), 200);
+                }
+            });
+        }
+    }
+
+    triggerThermalPrint() {
+        if (this.activePrintUrl) {
+            if (typeof ThermalPrinterHelper !== 'undefined' && typeof ThermalPrinterHelper.printSlipFromUrl === 'function') {
+                ThermalPrinterHelper.printSlipFromUrl(this.activePrintUrl);
+            } else {
+                const printWindow = window.open(this.activePrintUrl, '_blank', 'width=380,height=650,location=no,toolbar=no,scrollbars=yes');
+                if (printWindow) {
+                    printWindow.focus();
+                }
+            }
+        } else {
+            window.print();
         }
     }
 
@@ -2775,7 +2851,30 @@ class SmartPOSEngine {
         }
     }
 
-    showThermalReceipt(slipNo, custName, payMode, totals) {
+    showThermalReceipt(slipNo, custName, payMode, totals, printUrl = '', estimateId = null, billType = 'SALES') {
+        this.activePrintUrl = printUrl || (estimateId ? `/sales/estimates/${estimateId}/thermal-slip/` : '');
+
+        // 1. Dynamic Modal Header & Title
+        const modalTitleEl = document.querySelector('#receiptModal .modal-title') || document.getElementById('recModalTitle');
+        if (modalTitleEl) {
+            if (billType === 'SALES') {
+                modalTitleEl.innerHTML = '<i class="fas fa-file-invoice text-success me-1"></i> Sales Bill / Tax Invoice';
+            } else {
+                modalTitleEl.innerHTML = '<i class="fas fa-print text-warning me-1"></i> Estimation Bill Slip';
+            }
+        }
+
+        // 2. Dynamic Banner Header on Slip
+        const headerBanner = document.getElementById('recBillHeaderBanner') || document.querySelector('#thermalReceiptContent div[style*="border-top: 1px dashed"]');
+        if (headerBanner) {
+            if (billType === 'SALES') {
+                headerBanner.innerHTML = '*** TAX INVOICE / SALES BILL ***';
+            } else {
+                headerBanner.innerHTML = '*** ESTIMATE BILL / ESTIMATION SLIP ***';
+            }
+        }
+
+        // 3. Receipt Details
         const slipEl = document.getElementById('recSlipNo');
         const custEl = document.getElementById('recCustomer');
         const subtotalEl = document.getElementById('recSubtotal');
@@ -2794,6 +2893,44 @@ class SmartPOSEngine {
         if (grandEl) grandEl.innerText = formatCurrencyNPR(totals.grandTotal);
         if (payModeEl) payModeEl.innerText = payMode;
 
+        // 4. Render Cart Line Items into Receipt Container
+        const itemsContainer = document.getElementById('recItemsContainer');
+        if (itemsContainer && this.cart.items && this.cart.items.length > 0) {
+            itemsContainer.innerHTML = this.cart.items.map(i => {
+                const qty = i.quantity || 1;
+                const price = (i.unit_price !== undefined) ? i.unit_price : 0;
+                const lineTotal = qty * price;
+                const imei = i.imei_1 || i.imei_number || '';
+                return `
+                    <div class="mb-1">
+                        <div class="d-flex justify-content-between">
+                            <strong>${escapeHtml(i.name)}</strong>
+                            <span>${qty} x Rs. ${price.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                        </div>
+                        ${imei ? `<div class="text-muted" style="font-size: 8.5px;">&bull; IMEI: ${escapeHtml(imei)}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 5. Exchange / Trade-In Row
+        const exRow = document.getElementById('recExchangeRow');
+        const exText = document.getElementById('recExchange');
+        if (totals.tradeInCredit > 0 && exRow) {
+            exRow.style.display = 'flex';
+            if (exText) exText.innerText = `-Rs. ${totals.tradeInCredit.toFixed(2)}`;
+        } else if (exRow) {
+            exRow.style.display = 'none';
+        }
+
+        // 6. Ensure Print Button is Enabled and Stamped with URL
+        const printBtn = document.getElementById('printThermalReceiptModalBtn');
+        if (printBtn) {
+            printBtn.disabled = false;
+            printBtn.dataset.printUrl = this.activePrintUrl;
+        }
+
+        // 7. Show Modal
         const modalEl = document.getElementById('receiptModal');
         if (modalEl && typeof bootstrap !== 'undefined') {
             bootstrap.Modal.getOrCreateInstance(modalEl).show();

@@ -3,7 +3,8 @@ Double-Entry Journal Posting Engine & Automated Operational Dispatcher.
 
 Features:
 1. Strict GRN Inward Double-Entry Synchronization (Nepal Tax Standard):
-   - Debit: Merchandise Inventory Asset (Account 1310 at Total Landed Cost = Pre-VAT Base + Overheads).
+   - Debit: Merchandise Inventory Asset (Account 1310 at Total Landed Cost = Pre-VAT Base + All 5 Overheads:
+     Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads).
    - Debit: Input VAT 13% (Account 1410 for Dedicated 13% Input VAT).
    - Credit: Cash/Bank/Wallet (for spot payments made on delivery).
    - Credit: Accounts Payable (Account 2110 for remaining Supplier Udhaari due debt).
@@ -644,14 +645,19 @@ class AutoPostingService:
         )
 
     # =========================================================================
-    # 2. INWARD GRN PROCUREMENT POSTING (STRICT HISTORICAL BILL DATE)
+    # 2. INWARD GRN PROCUREMENT POSTING (ALL 5 OVERHEADS & PARITY AP CREDIT)
     # =========================================================================
     @classmethod
     @transaction.atomic
     def post_grn_receipt(cls, grn: GoodsReceivedNote, user=None, **kwargs) -> Optional[JournalEntry]:
         """
-        Creates a balanced double-entry voucher for an approved Goods Received Note (GRN).
-        Strictly uses grn.bill_date and enforces closed fiscal year protection.
+        Creates a balanced double-entry voucher for an approved Goods Received Note (GRN):
+        1. Debit: Merchandise Inventory Asset (1310) at Total Landed Cost (Pre-VAT Base + All 5 Overheads:
+           Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads).
+        2. Debit: Dedicated 13% Input VAT (1410) for tax claimable on supplier tax bill.
+        3. Credit: Cash/Bank/Wallet for spot cash payments made upon delivery.
+        4. Credit: Accounts Payable (2110 Supplier Udhaari) for the remaining balance.
+        5. Enforces exact mathematical double-entry equality: Sum(Debits) == Sum(Credits).
         """
         source_module = 'PURCHASE'
         source_id = str(grn.id)
@@ -689,88 +695,106 @@ class AutoPostingService:
             branch, 'ACCOUNTS_PAYABLE', '2110', 'Accounts Payable (Trade Creditors)', 'LIABILITY', 'CREDIT'
         )
 
-        # 1. DEBIT: Merchandise Inventory Asset (Landed Cost Valuation)
-        landed_asset_value = grn.total_landed_cost
-        if not landed_asset_value or landed_asset_value <= Decimal('0.00'):
-            landed_asset_value = (
-                (grn.taxable_amount or grn.gross_amount or Decimal('0.00')) +
-                grn.overhead_total
-            ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # ---------------------------------------------------------------------
+        # 1. DEBIT: Merchandise Inventory Asset (Landed Cost with All 5 Overheads)
+        # ---------------------------------------------------------------------
+        extra_freight = getattr(grn, 'extra_freight_charge', Decimal('0.00')) or Decimal('0.00')
+        customs_charge = getattr(grn, 'customs_import_charge', Decimal('0.00')) or Decimal('0.00')
+        handling_charge = getattr(grn, 'other_handling_charge', Decimal('0.00')) or Decimal('0.00')
+        insurance_charge = getattr(grn, 'insurance_charge', Decimal('0.00')) or Decimal('0.00')
+        other_overheads = getattr(grn, 'other_overheads_charge', Decimal('0.00')) or Decimal('0.00')
+
+        overheads_5_tier = (
+            extra_freight + customs_charge + handling_charge + insurance_charge + other_overheads
+        ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        pre_tax_base = (
+            grn.taxable_amount or grn.gross_amount or Decimal('0.00')
+        ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        if grn.total_landed_cost and grn.total_landed_cost > Decimal('0.00'):
+            landed_asset_value = grn.total_landed_cost.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            landed_asset_value = (pre_tax_base + overheads_5_tier).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         lines.append({
             'account': inv_asset_acc,
             'debit': landed_asset_value,
             'credit': Decimal('0.00'),
             'supplier': grn.supplier,
-            'narration': f"Stock received at landed cost under GRN {grn.grn_number} (Bill: {grn.supplier_bill_no})"
+            'narration': (
+                f"Stock received at landed cost under GRN {grn.grn_number} "
+                f"(Bill: {grn.supplier_bill_no}, Pre-VAT: Rs. {pre_tax_base:,.2f}, Overheads: Rs. {overheads_5_tier:,.2f})"
+            )
         })
 
-        # 2. DEBIT: Dedicated 13% Input VAT
+        # ---------------------------------------------------------------------
+        # 2. DEBIT: Dedicated 13% Input VAT (When Inward Bill is VAT Registered)
+        # ---------------------------------------------------------------------
+        input_vat = Decimal('0.00')
         if grn.is_vat_bill and (grn.vat_amount or Decimal('0.00')) > Decimal('0.00'):
+            input_vat = grn.vat_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             input_vat_acc = cls.get_or_create_control_account(
                 branch, 'INPUT_VAT', '1410', 'Input VAT 13%', 'ASSET', 'DEBIT'
             )
             lines.append({
                 'account': input_vat_acc,
-                'debit': grn.vat_amount,
+                'debit': input_vat,
                 'credit': Decimal('0.00'),
                 'supplier': grn.supplier,
                 'narration': f"Dedicated 13% Input VAT claimed on supplier invoice {grn.supplier_bill_no}"
             })
 
-        # 3. CREDIT: Spot Delivery Payout & Accounts Payable (Supplier Udhaari)
-        paid = (grn.paid_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        due = (grn.due_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        net_total = (grn.net_total_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # Total Debits to Balance
+        total_debits = (landed_asset_value + input_vat).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+        # ---------------------------------------------------------------------
+        # 3. CREDIT: Spot Delivery Payout & Accounts Payable (Supplier Udhaari)
+        # ---------------------------------------------------------------------
+        paid = (grn.paid_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # If spot cash/bank payment was made
         if paid > Decimal('0.00'):
             payment_mode = getattr(grn, 'preferred_payment_method', None) or getattr(grn, 'payment_mode', 'CASH') or 'CASH'
             spot_acc = cls.resolve_payment_account(branch, payment_mode, for_party='SUPPLIER')
+            effective_paid = min(paid, total_debits)
             lines.append({
                 'account': spot_acc,
                 'debit': Decimal('0.00'),
-                'credit': paid,
+                'credit': effective_paid,
                 'supplier': grn.supplier,
                 'narration': f"Spot payment made to {grn.supplier.company_name} on GRN {grn.grn_number} via {payment_mode}"
             })
+            remaining_ap = (total_debits - effective_paid).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            remaining_ap = total_debits
 
-        if due > Decimal('0.00'):
+        # Remaining balance credits Accounts Payable (Account 2110)
+        if remaining_ap > Decimal('0.00'):
             lines.append({
                 'account': ap_acc,
                 'debit': Decimal('0.00'),
-                'credit': due,
+                'credit': remaining_ap,
                 'supplier': grn.supplier,
                 'narration': f"Supplier Udhaari debt owed to {grn.supplier.company_name} on bill {grn.supplier_bill_no}"
             })
-        elif paid <= Decimal('0.00') and net_total > Decimal('0.00'):
-            lines.append({
-                'account': ap_acc,
-                'debit': Decimal('0.00'),
-                'credit': net_total,
-                'supplier': grn.supplier,
-                'narration': f"Payable debt owed to {grn.supplier.company_name} on bill {grn.supplier_bill_no}"
-            })
 
+        # ---------------------------------------------------------------------
         # 4. Penny Rounding Residual Reconciliation
+        # ---------------------------------------------------------------------
         sum_dr = sum(l['debit'] for l in lines)
         sum_cr = sum(l['credit'] for l in lines)
         diff = sum_dr - sum_cr
         if Decimal('0.00') < abs(diff) <= Decimal('0.05'):
-            adjusted = False
             for l in lines:
                 if l['account'] == ap_acc and l['credit'] > Decimal('0.00'):
                     l['credit'] += diff
-                    adjusted = True
                     break
-            if not adjusted:
-                for l in lines:
-                    if l['account'] == inv_asset_acc and l['debit'] > Decimal('0.00'):
-                        l['debit'] -= diff
-                        break
 
+        net_total = (grn.net_total_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         narration = (
             f"Inward GRN stock procurement from {grn.supplier.company_name} "
-            f"(Challan/Bill: {grn.supplier_bill_no}, Net: Rs. {net_total:,.2f})"
+            f"(Challan/Bill: {grn.supplier_bill_no}, Net: Rs. {net_total:,.2f}, Landed: Rs. {landed_asset_value:,.2f})"
         )
         return JournalEngine.create_balanced_entry(
             voucher_type='PURCHASE',

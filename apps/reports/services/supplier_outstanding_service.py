@@ -4,14 +4,11 @@ Supplier Outstanding (Udhaari) & Payables Aging Report Service.
 Capabilities:
 1. Multi-Calendar Date & Fiscal Year Engine:
    - Supports filtering by official Nepali Fiscal Year (आर्थिक वर्ष, e.g. '2080/81', '2081/82').
-   - Resolves Shrawan 1 through the exact dynamic last day of Ashadh (accounting for 30, 31, or 32 days).
+   - Resolves Shrawan 1 through the exact dynamic last day of Ashadh.
    - Accurately converts Nepali BS date inputs to Gregorian AD dates for database querying.
-2. Historical Udhaari Balance Reconstruction:
-   - Accurately computes what was owed to distributors at the start of the fiscal year (e.g. start of FY 2080/81).
-   - Reconciles period inward purchases, payments made, and debit note deductions.
-   - Calculates the exact debt carried over into the next fiscal year (e.g. carryover into FY 2081/82).
+2. Historical Udhaari Balance Reconstruction.
 3. Classifies supplier credit status: Overdue (> Credit Period Days), Within Terms, Clear, or In Advance.
-4. Provides banking account numbers, ConnectIPS details, and FonePay QR parameters for rapid bill settlement.
+4. Exposes get_dashboard_payables_summary() for instant supplier liability calculations on the dashboard.
 """
 
 import re
@@ -28,11 +25,54 @@ from apps.branches.models import Branch
 from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
 
-
 class SupplierOutstandingService:
     """
     Business logic engine for Report 5: Supplier Outstanding / Udhaari Report.
     """
+
+    @classmethod
+    def get_dashboard_payables_summary(
+        cls,
+        branch=None,
+        user=None
+    ) -> Dict[str, Any]:
+        """
+        Calculates total vendor liabilities, active creditor accounts,
+        and overdue vendor debts directly from live master records.
+        """
+        today = timezone.now().date()
+        supplier_due_qs = Supplier.objects.filter(current_balance__gt=Decimal('0.00'), is_active=True)
+
+        agg = supplier_due_qs.aggregate(
+            total=Coalesce(
+                Sum('current_balance'),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            count=Count('id')
+        )
+
+        supplier_payable_total = agg['total']
+        active_suppliers_count = agg['count']
+
+        supplier_dates = supplier_due_qs.filter(last_purchase_date__isnull=False).values_list(
+            'last_purchase_date', 'credit_period_days', 'current_balance'
+        )
+
+        overdue_vendors_count = 0
+        overdue_debt_amount = Decimal('0.00')
+
+        for lp_date, credit_days, bal in supplier_dates:
+            c_days = credit_days or 30
+            if (today - lp_date).days > c_days:
+                overdue_vendors_count += 1
+                overdue_debt_amount += (bal or Decimal('0.00'))
+
+        return {
+            'supplier_payable_total': supplier_payable_total,
+            'active_suppliers_count': active_suppliers_count,
+            'overdue_suppliers_count': overdue_vendors_count,
+            'overdue_debt_amount': overdue_debt_amount,
+        }
 
     @classmethod
     def get_available_fiscal_years(cls) -> List[str]:
@@ -98,14 +138,9 @@ class SupplierOutstandingService:
         """
         Resolves query dates and Nepali Fiscal Year with multi-format support:
         1. Fiscal Year parameter (e.g. '2080/81', '2081/82', '2080-81').
-           Accurately resolves Shrawan 1 to Ashadh 31/32 (variable month length).
         2. Direct Nepali BS dates ('YYYY-MM-DD').
         3. Gregorian AD dates ('YYYY-MM-DD').
         4. Default fallback: 1st of the current BS month up to today.
-
-        Returns:
-            Tuple[date, date, str, str, str]:
-            (start_date_ad, end_date_ad, start_date_bs, end_date_bs, fiscal_year)
         """
         today_ad = timezone.now().date()
         today_bs_y, today_bs_m, today_bs_d = NepaliCalendar.ad_to_bs(today_ad)
@@ -126,7 +161,7 @@ class SupplierOutstandingService:
                 except Exception:
                     pass
 
-        # Case 2: Parse custom start and end date inputs (supporting both AD and BS formats)
+        # Case 2: Parse custom start and end date inputs
         start_date = None
         end_date = None
         start_date_bs = ""
@@ -298,11 +333,8 @@ class SupplierOutstandingService:
             after_returns = a_data.get('after_returns', Decimal('0.00'))
             net_movement_after_period = after_purchases - after_payments - after_returns
 
-            # Historical Balance Reconstruction:
-            # 1. Closing balance at end of period (what carried over into next fiscal year):
+            # Historical Balance Reconstruction
             period_closing_balance = curr_live_bal - net_movement_after_period
-
-            # 2. Opening balance at start of period (what was owed at the start of this fiscal year):
             period_opening_balance = period_closing_balance - net_movement_in_period
 
             # Filter by Balance Status based on period_closing_balance

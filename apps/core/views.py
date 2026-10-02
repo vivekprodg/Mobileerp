@@ -1,4 +1,5 @@
 import logging
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 
@@ -9,7 +10,7 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.urls import reverse, NoReverseMatch
 from django.db.models import Sum, F, Q, Count, DecimalField, Value, Case, When, ExpressionWrapper
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.core.cache import cache
@@ -148,15 +149,15 @@ class SystemSettingsView(LoginRequiredMixin, UserPassesTestMixin, View):
         config.enforce_imei_tracking = new_enforce_imei
         config.save()
 
-        messages.success(request, _("System configuration, cashier backdating, and IMEI tracking policies updated successfully."))
+        messages.success(request, _("System configuration policies updated successfully."))
         return redirect('core:settings')
 
 class DashboardHomeView(LoginRequiredMixin, TemplateView):
     """
     Central Executive Dashboard Controller.
-    Optimized to eliminate Python in-memory loops by delegating all stock valuations,
-    landed cost aggregations, and overdue metrics to PostgreSQL/database expressions.
-    Includes a 60-second caching layer for near-instantaneous page reloads.
+    Aggregates the 10 vital owner metrics: Sales, Purchases, Gross Profit, Liquid Cash/Bank,
+    Inventory Valuation, Receivables, Payables, Low Stock Radar, Daily/Monthly Trends, and
+    Fastest-Selling Counter Products.
     """
     template_name = 'core/dashboard.html'
 
@@ -168,7 +169,7 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         is_super = self.request.user.is_superuser
 
         # ---------------------------------------------------------------------
-        # CACHE LAYER: 60-second cache per branch & user scope to prevent DB thrashing
+        # CACHE LAYER (60s Cache Key Per Scope)
         # ---------------------------------------------------------------------
         cache_key = f"dashboard_kpis_branch_{branch_id}_{today.isoformat()}_{is_super}"
         cached_data = cache.get(cache_key)
@@ -180,12 +181,13 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         # ---------------------------------------------------------------------
         # 1. TODAY'S SALES & BILLS COUNT (Database Aggregation)
         # ---------------------------------------------------------------------
-        sales_qs = SalesEstimate.objects.filter(
-            bill_date_ad=today,
+        sales_base_qs = SalesEstimate.objects.filter(
             status__in=['COMPLETED', 'PARTIALLY_RETURNED']
         )
         if active_branch and not is_super:
-            sales_qs = sales_qs.filter(branch=active_branch)
+            sales_base_qs = sales_base_qs.filter(branch=active_branch)
+
+        sales_qs = sales_base_qs.filter(bill_date_ad=today)
 
         sales_agg = sales_qs.aggregate(
             total_sales=Coalesce(Sum('grand_total'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
@@ -210,12 +212,11 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         # ---------------------------------------------------------------------
         # 2. TODAY'S PURCHASES AMOUNT (GRN INWARD - Database Aggregation)
         # ---------------------------------------------------------------------
-        grn_qs = GoodsReceivedNote.objects.filter(
-            bill_date=today,
-            status='RECEIVED'
-        )
+        grn_base_qs = GoodsReceivedNote.objects.filter(status='RECEIVED')
         if active_branch and not is_super:
-            grn_qs = grn_qs.filter(branch=active_branch)
+            grn_base_qs = grn_base_qs.filter(branch=active_branch)
+
+        grn_qs = grn_base_qs.filter(bill_date=today)
 
         grn_agg = grn_qs.aggregate(
             total_purchases=Coalesce(Sum('net_total_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
@@ -229,7 +230,7 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         today_purchase_paid = grn_agg['paid_sum']
 
         # ---------------------------------------------------------------------
-        # 3. CURRENT STOCK VALUATION (DATABASE AGGREGATION - REPLACED PYTHON FOR-LOOP)
+        # 3. CURRENT STOCK VALUATION (DATABASE AGGREGATION)
         # ---------------------------------------------------------------------
         stock_qs = BranchStock.objects.filter(product__is_active=True)
         if active_branch and not is_super:
@@ -283,6 +284,14 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
             if (today - lp_date).days > (credit_days or 30)
         )
 
+        # Stock coverage percentage of debt
+        if supplier_payable_total > Decimal('0.00'):
+            stock_coverage_pct = ((current_stock_valuation / supplier_payable_total) * Decimal('100.00')).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+        else:
+            stock_coverage_pct = Decimal('100.0') if current_stock_valuation > Decimal('0.00') else Decimal('0.0')
+
+        net_stock_buffer = current_stock_valuation - supplier_payable_total
+
         # ---------------------------------------------------------------------
         # 6. TOTAL SMARTPHONES (IMEI UNITS) IN STOCK
         # ---------------------------------------------------------------------
@@ -320,7 +329,38 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         today_credit_sales = tender_agg['credit_sum']
 
         # ---------------------------------------------------------------------
-        # 9. RECENT SUMMARIES (TOP 5 RECENT SALES & PURCHASES)
+        # 9. CASH & BANK LIQUIDITY AGGREGATION (FIELD-SAFE QUERY)
+        # ---------------------------------------------------------------------
+        cash_in_hand_total = Decimal('0.00')
+        bank_balance_total = Decimal('0.00')
+        try:
+            from apps.accounting.models import Account
+            acc_qs = Account.objects.filter(is_active=True)
+            if hasattr(Account, 'branch') and active_branch and not is_super:
+                acc_qs = acc_qs.filter(Q(branch=active_branch) | Q(branch__isnull=True))
+
+            # Query exclusively on confirmed fields: system_tag and name
+            cash_filter = Q(system_tag__icontains='CASH') | Q(name__icontains='Cash')
+            bank_filter = Q(system_tag__icontains='BANK') | Q(name__icontains='Bank')
+
+            cash_in_hand_total = acc_qs.filter(cash_filter).aggregate(
+                s=Coalesce(Sum('current_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+            )['s']
+            bank_balance_total = acc_qs.filter(bank_filter).aggregate(
+                s=Coalesce(Sum('current_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+            )['s']
+        except Exception as e:
+            logger.warning(f"Error querying Chart of Accounts balances: {e}")
+
+        # Fallback to tender receipts if chart of accounts is unconfigured or zero
+        if cash_in_hand_total == Decimal('0.00') and bank_balance_total == Decimal('0.00'):
+            cash_in_hand_total = today_cash_sales
+            bank_balance_total = today_fonepay_sales + today_esewa_sales
+
+        total_cash_bank = cash_in_hand_total + bank_balance_total
+
+        # ---------------------------------------------------------------------
+        # 10. RECENT SUMMARIES (TOP 5 RECENT SALES & PURCHASES)
         # ---------------------------------------------------------------------
         recent_sales = list(
             sales_qs.select_related('customer', 'cashier', 'salesperson')
@@ -339,9 +379,112 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
         active_repairs_count = repair_qs.count()
 
         # ---------------------------------------------------------------------
-        # PACKAGE & CACHE DATA DICTIONARY
+        # 11. TOP-SELLING PRODUCTS (LAST 30 DAYS)
+        # ---------------------------------------------------------------------
+        thirty_days_ago = today - timedelta(days=30)
+        recent_items_qs = SalesEstimateItem.objects.filter(
+            estimate__bill_date_ad__gte=thirty_days_ago,
+            estimate__status__in=['COMPLETED', 'PARTIALLY_RETURNED']
+        )
+        if active_branch and not is_super:
+            recent_items_qs = recent_items_qs.filter(estimate__branch=active_branch)
+
+        # Inspect SalesEstimateItem field schema safely
+        item_fields = {f.name for f in SalesEstimateItem._meta.get_fields()}
+        if 'line_total' in item_fields:
+            amount_expr = F('line_total')
+        elif 'total_amount' in item_fields:
+            amount_expr = F('total_amount')
+        elif 'rate' in item_fields:
+            amount_expr = F('quantity') * F('rate')
+        else:
+            amount_expr = F('quantity') * F('unit_price')
+
+        top_selling_products = list(
+            recent_items_qs.values(
+                'product__id',
+                'product__name',
+                'product__sku',
+                'product__category__name'
+            ).annotate(
+                units_sold=Coalesce(Sum('quantity'), Value(Decimal('0'))),
+                revenue=Coalesce(Sum(amount_expr), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+            ).order_by('-revenue')[:5]
+        )
+
+        # ---------------------------------------------------------------------
+        # 12. SALES & PURCHASE TRENDS (DAILY & MONTHLY SERIALIZATION)
+        # ---------------------------------------------------------------------
+        # (A) Daily Trend: Last 7 Days
+        start_date_7d = today - timedelta(days=6)
+        sales_7d_dict = dict(
+            sales_base_qs.filter(bill_date_ad__gte=start_date_7d, bill_date_ad__lte=today)
+            .values('bill_date_ad')
+            .annotate(total=Sum('grand_total'))
+            .values_list('bill_date_ad', 'total')
+        )
+        grn_7d_dict = dict(
+            grn_base_qs.filter(bill_date__gte=start_date_7d, bill_date__lte=today)
+            .values('bill_date')
+            .annotate(total=Sum('net_total_amount'))
+            .values_list('bill_date', 'total')
+        )
+
+        daily_labels = []
+        daily_sales_data = []
+        daily_purchase_data = []
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            lbl = 'Today' if i == 0 else d.strftime('%a')
+            daily_labels.append(lbl)
+            daily_sales_data.append(float(sales_7d_dict.get(d) or 0))
+            daily_purchase_data.append(float(grn_7d_dict.get(d) or 0))
+
+        # (B) Monthly Trend: Last 6 Calendar Months
+        months_list = []
+        cur_year, cur_month = today.year, today.month
+        for i in range(5, -1, -1):
+            m = cur_month - i
+            y = cur_year
+            while m <= 0:
+                m += 12
+                y -= 1
+            months_list.append((y, m))
+
+        first_month_date = date(months_list[0][0], months_list[0][1], 1)
+        sales_monthly_dict = dict(
+            sales_base_qs.filter(bill_date_ad__gte=first_month_date)
+            .annotate(month=TruncMonth('bill_date_ad'))
+            .values('month')
+            .annotate(total=Sum('grand_total'))
+            .values_list('month', 'total')
+        )
+        grn_monthly_dict = dict(
+            grn_base_qs.filter(bill_date__gte=first_month_date)
+            .annotate(month=TruncMonth('bill_date'))
+            .values('month')
+            .annotate(total=Sum('net_total_amount'))
+            .values_list('month', 'total')
+        )
+
+        monthly_labels = []
+        monthly_sales_data = []
+        monthly_purchase_data = []
+        for y, m in months_list:
+            dt_key = date(y, m, 1)
+            monthly_labels.append(dt_key.strftime('%b %Y'))
+            s_val = sum(v for k, v in sales_monthly_dict.items() if k and k.year == y and k.month == m)
+            p_val = sum(v for k, v in grn_monthly_dict.items() if k and k.year == y and k.month == m)
+            monthly_sales_data.append(float(s_val or 0))
+            monthly_purchase_data.append(float(p_val or 0))
+
+        # ---------------------------------------------------------------------
+        # PACKAGE & COMMIT DATA DICTIONARY TO CACHE
         # ---------------------------------------------------------------------
         kpi_payload = {
+            'active_branch': active_branch,
+            'today_date_ad': today,
+            'today_date_bs': ad_to_bs_string(today, lang='en'),
             'daily_sales_total': daily_sales_total,
             'today_sales_count': today_sales_count,
             'today_purchase_total': today_purchase_total,
@@ -358,6 +501,8 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
             'supplier_payable_total': supplier_payable_total,
             'active_suppliers_count': active_suppliers_count,
             'overdue_suppliers_count': overdue_suppliers_count,
+            'stock_coverage_pct': stock_coverage_pct,
+            'net_stock_buffer': net_stock_buffer,
             'total_stock_quantity': total_stock_quantity,
             'total_phones_in_stock': total_phones_in_stock,
             'low_stock_count': low_stock_count,
@@ -365,10 +510,20 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
             'today_fonepay_sales': today_fonepay_sales,
             'today_esewa_sales': today_esewa_sales,
             'today_credit_sales': today_credit_sales,
+            'total_cash_bank': total_cash_bank,
+            'cash_in_hand_total': cash_in_hand_total,
+            'bank_balance_total': bank_balance_total,
             'recent_sales': recent_sales,
             'recent_purchases': recent_purchases,
             'low_stock_items': low_stock_items,
             'active_repair_count': active_repairs_count,
+            'top_selling_products': top_selling_products,
+            'trend_daily_labels_json': json.dumps(daily_labels),
+            'trend_daily_sales_json': json.dumps(daily_sales_data),
+            'trend_daily_purchases_json': json.dumps(daily_purchase_data),
+            'trend_monthly_labels_json': json.dumps(monthly_labels),
+            'trend_monthly_sales_json': json.dumps(monthly_sales_data),
+            'trend_monthly_purchases_json': json.dumps(monthly_purchase_data),
         }
 
         cache.set(cache_key, kpi_payload, timeout=60)
@@ -392,7 +547,6 @@ class AuditLogListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
 
     def get_queryset(self):
         qs = AuditLog.objects.select_related('user', 'branch')
-
         q = self.request.GET.get('q', '').strip()
         action_type = self.request.GET.get('action_type', '').strip()
         module_name = self.request.GET.get('module', '').strip()
@@ -407,19 +561,14 @@ class AuditLogListView(LoginRequiredMixin, UserPassesTestMixin, ListView):
                 Q(module__icontains=q) |
                 Q(ip_address__icontains=q)
             )
-
         if action_type:
             qs = qs.filter(action_type=action_type)
-
         if module_name:
             qs = qs.filter(module=module_name)
-
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
-
         if start_date:
             qs = qs.filter(timestamp__date__gte=start_date)
-
         if end_date:
             qs = qs.filter(timestamp__date__lte=end_date)
 
@@ -801,7 +950,7 @@ class GlobalSearchAPIView(LoginRequiredMixin, View):
                     )
                     item_dict = {
                         'title': f"GL {a.code} - {a.name}",
-                        'subtitle': f"Type: {a.get_account_type_display() if hasattr(a, 'get_account_type_display') else getattr(a, 'account_type', '')} | Balance: Rs. {getattr(a, 'current_balance', Decimal('0.00')):,.2f}",
+                        'subtitle': f"Balance: Rs. {getattr(a, 'current_balance', Decimal('0.00')):,.2f}",
                         'badge': getattr(a, 'system_tag', 'GL Account') or 'Account',
                         'badge_color': 'secondary',
                         'url': acc_url,

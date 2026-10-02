@@ -2,33 +2,38 @@
 Sales & POS Billing Module Models: Estimations, Line Items, Split Payments,
 Itemized Sales Returns, and Pre-Owned Trade-In Exchanges.
 
-Key Capabilities:
-1. True Bidirectional Historical Date & Fiscal Year Synchronization:
-   - When bill_date_bs is explicitly supplied, it overrides the timezone.now default
-     on bill_date_ad, converts to Gregorian AD, and sets the Nepali Fiscal Year (e.g. 2080/81 to 2083/84).
-   - On updates, detecting a change in either the BS or AD date automatically synchronizes
-     the counterpart date and fiscal year before writing to the database.
-2. Safe IMEI Schema Architecture:
-   - imei_number and secondary_imei allow null=True, blank=True at the database level.
-   - Non-serialized accessories, repair labor, and historical tax sales save without database constraint crashes.
-3. Retail Turnover Accounting Model:
+Key Capabilities & Forensic Architecture:
+1. Persistent Bill Type Architecture:
+   - Tracks official VAT Sales Invoices ('SALES') vs Internal Estimation Slips ('ESTIMATE')
+     directly in the database (`bill_type`).
+2. Status Helper & Security Properties:
+   - Provides `can_be_edited`, `can_be_voided`, and `is_cancelled` guards.
+   - Enforces the golden rule: CANCELLED, RETURNED, and PARTIALLY_RETURNED bills are
+     strictly locked from front-end editing.
+3. True Bidirectional Historical Date & Fiscal Year Synchronization:
+   - When bill_date_bs is explicitly supplied, converts to Gregorian AD and sets the Nepali
+     Fiscal Year (e.g., 2080/81 to 2083/84).
+   - Automatically propagates date updates down to linked General Ledger Journal Entries,
+     ItemInstance sale records, active component warranties, and customer udhaari debt ledgers.
+4. Retail Turnover Accounting Model:
    - grand_total strictly represents the total gross sales turnover of merchandise sold plus applicable taxes.
-   - Trade-in buy-back valuation allowance (trade_in_discount_amount) is treated as a tender settlement offset
-     (barter payment) rather than a commercial price reduction, protecting balance sheet inventory assets.
-4. Fast Counter Lookup & Search Indexes:
-   - Composite and single-column indexes on customer_phone_manual, customer_name_manual,
-     customer_pan, and branch to optimize real-time POS and return invoice lookups.
+   - Trade-in buy-back valuation allowance (trade_in_discount_amount) is treated as a tender settlement offset.
+5. Canonical Routing & URL Resolution:
+   - Implements standard `get_absolute_url()` resolving to the detailed invoice sheet view.
+6. Safe IMEI Schema Architecture:
+   - imei_number and secondary_imei allow null=True, blank=True at the database level.
 """
 
 import re
 import uuid
 import logging
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional, Tuple
 
 from django.db import models
 from django.conf import settings
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ValidationError
@@ -43,7 +48,7 @@ from apps.core.utils.nepali_date_converter import parse_bs_date_components
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# DISCOUNT TYPE CHOICES (NONE, PERCENTAGE, AMOUNT & LEGACY FIXED ALIAS)
+# CHOICES DEFINITIONS
 # =============================================================================
 DISCOUNT_TYPE_CHOICES = [
     ('NONE', _('No Discount (छुट छैन)')),
@@ -52,6 +57,10 @@ DISCOUNT_TYPE_CHOICES = [
     ('FIXED', _('Fixed Amount [Legacy Alias] (नगद रकम छुट)')),
 ]
 
+BILL_TYPE_CHOICES = [
+    ('SALES', _('Official VAT / Sales Invoice (कर बिजक)')),
+    ('ESTIMATE', _('Internal Estimation Slip (अनुमानित पर्चा)')),
+]
 
 def sync_nepali_and_ad_dates(
     instance,
@@ -114,7 +123,6 @@ def sync_nepali_and_ad_dates(
             logger.debug(f"[sync_nepali_and_ad_dates] Checking original instance failed: {e}")
 
     # Case B: New instance OR baseline synchronization
-    # If BS date was supplied, it MUST override the model default on ad_field!
     if current_bs:
         try:
             bs_y, bs_m, bs_d = parse_bs_date_components(current_bs)
@@ -127,7 +135,6 @@ def sync_nepali_and_ad_dates(
         except Exception as e:
             logger.warning(f"[sync_nepali_and_ad_dates] Could not parse BS date '{current_bs}': {e}")
 
-    # Fallback to AD date if BS was not provided or failed to parse
     if current_ad:
         try:
             bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(current_ad)
@@ -147,11 +154,6 @@ class SalesEstimate(TimeStampedModel):
     Tracks salesperson, customer information, multi-mode split payments,
     dynamic tax calculations, trade-in exchange deductions, customer warranty cards,
     and structured merchandise discounts (Percentage or Fixed Cash Amount).
-
-    TURNOVER ACCOUNTING CONVENTIONS:
-    - grand_total represents the gross merchandise sales value + applicable taxes.
-    - trade_in_discount_amount represents the customer's trade-in buy-back allowance (barter tender).
-    - net_customer_payable represents the remaining cash/digital payment required from the customer.
     """
     STATUS_CHOICES = [
         ('DRAFT', _('Draft / On Hold (होल्ड)')),
@@ -168,9 +170,18 @@ class SalesEstimate(TimeStampedModel):
     ]
 
     DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
+    BILL_TYPE_CHOICES = BILL_TYPE_CHOICES
 
     estimate_number = models.CharField(
         max_length=50, unique=True, db_index=True, verbose_name=_("Estimate Slip No.")
+    )
+    bill_type = models.CharField(
+        max_length=20,
+        choices=BILL_TYPE_CHOICES,
+        default='SALES',
+        db_index=True,
+        verbose_name=_("Document / Bill Type"),
+        help_text=_("Designates whether this transaction is an official VAT sales invoice or an internal estimation voucher.")
     )
     branch = models.ForeignKey(
         Branch, on_delete=models.PROTECT, related_name='sales_estimates',
@@ -190,7 +201,7 @@ class SalesEstimate(TimeStampedModel):
         max_length=15, blank=True, null=True, db_index=True, verbose_name=_("Customer PAN (Optional)")
     )
 
-    # Date Trackers (Allows Historical Imports from 2080 B.S.)
+    # Date Trackers
     bill_date_ad = models.DateField(
         default=timezone.now,
         db_index=True,
@@ -222,7 +233,7 @@ class SalesEstimate(TimeStampedModel):
         max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Total Line Discounts")
     )
 
-    # Bill-Level Discount Configuration (Percentage vs Fixed Amount)
+    # Bill-Level Discount Configuration
     bill_discount_type = models.CharField(
         max_length=15,
         choices=DISCOUNT_TYPE_CHOICES,
@@ -257,7 +268,7 @@ class SalesEstimate(TimeStampedModel):
         help_text=_("Exact timestamp when manager override PIN authorized the discount/price override.")
     )
 
-    # Old Phone Trade-In / Exchange Buy-Back Credit (Payment Tender Offset)
+    # Old Phone Trade-In / Exchange Buy-Back Credit
     has_trade_in_exchange = models.BooleanField(default=False, verbose_name=_("Has Old Phone Trade-In Exchange"))
     trade_in_discount_amount = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
@@ -336,10 +347,17 @@ class SalesEstimate(TimeStampedModel):
             models.Index(fields=['customer_name_manual'], name='idx_est_cust_name_man'),
             models.Index(fields=['customer_pan'], name='idx_est_cust_pan'),
             models.Index(fields=['branch', 'customer_phone_manual'], name='idx_est_branch_cust_phone'),
+            models.Index(fields=['bill_type', 'status'], name='idx_est_type_status'),
         ]
 
     def __str__(self):
         return f"{self.estimate_number} - Rs. {self.grand_total} ({self.status})"
+
+    def get_absolute_url(self) -> str:
+        """
+        Standard Django model canonical URL: resolves directly to the bill details view.
+        """
+        return reverse('sales:estimate_detail', kwargs={'pk': self.pk})
 
     def clean(self):
         super().clean()
@@ -350,6 +368,21 @@ class SalesEstimate(TimeStampedModel):
         if self.bill_discount_type == 'FIXED':
             self.bill_discount_type = 'AMOUNT'
 
+        # Auto-infer bill_type from estimate_number prefix if not explicitly set
+        if not self.bill_type:
+            if self.estimate_number and self.estimate_number.upper().startswith(('INV', 'TAX')):
+                self.bill_type = 'SALES'
+            else:
+                self.bill_type = 'ESTIMATE'
+
+        # Detect date modification on existing instances for downstream propagation
+        date_changed = False
+        old_date_ad = None
+        if self.pk:
+            orig = SalesEstimate.objects.filter(pk=self.pk).values('bill_date_ad', 'bill_date_bs').first()
+            if orig:
+                old_date_ad = orig.get('bill_date_ad')
+
         # Robust bidirectional date and fiscal year synchronization
         sync_nepali_and_ad_dates(
             instance=self,
@@ -358,7 +391,125 @@ class SalesEstimate(TimeStampedModel):
             fy_field_name='fiscal_year'
         )
 
+        if old_date_ad and self.bill_date_ad and old_date_ad != self.bill_date_ad:
+            date_changed = True
+
         super().save(*args, **kwargs)
+
+        if date_changed:
+            self._propagate_date_changes()
+
+    def _propagate_date_changes(self) -> None:
+        """
+        Propagates updated historical dates across linked records:
+        - Accounting General Ledger Journal Entries (dynamically handling model column naming)
+        - Serialized ItemInstance sale and warranty records
+        - Active DeviceComponentWarranty expiration schedules
+        - Customer Udhaari Debt Ledger entries
+        """
+        # 1. Synchronize Accounting Journal Entries (Dynamically checking field names)
+        try:
+            from apps.accounting.models import JournalEntry
+            je_fields = {f.name for f in JournalEntry._meta.get_fields()}
+            je_updates = {}
+
+            if 'entry_date' in je_fields:
+                je_updates['entry_date'] = self.bill_date_ad
+            elif 'date_ad' in je_fields:
+                je_updates['date_ad'] = self.bill_date_ad
+
+            if 'entry_date_bs' in je_fields:
+                je_updates['entry_date_bs'] = self.bill_date_bs
+            elif 'date_bs' in je_fields:
+                je_updates['date_bs'] = self.bill_date_bs
+
+            if 'fiscal_year' in je_fields:
+                je_updates['fiscal_year'] = self.fiscal_year
+
+            if 'updated_at' in je_fields:
+                je_updates['updated_at'] = timezone.now()
+
+            if je_updates:
+                JournalEntry.objects.filter(
+                    reference_document=self.estimate_number
+                ).update(**je_updates)
+        except Exception as e:
+            logger.warning(f"Could not propagate date update to JournalEntry for {self.estimate_number}: {e}")
+
+        # 2. Synchronize Sold Item Instances & Component Warranties
+        try:
+            instances = ItemInstance.objects.filter(sold_invoice_reference=self.estimate_number)
+            for inst in instances:
+                inst.sale_date = self.bill_date_ad
+                inst.warranty_start_date = self.bill_date_ad
+                if inst.product.warranty_months and inst.product.warranty_months > 0:
+                    inst.warranty_end_date = self.bill_date_ad + timedelta(days=inst.product.warranty_months * 30)
+                inst.save(update_fields=['sale_date', 'warranty_start_date', 'warranty_end_date', 'updated_at'])
+
+                # Recalculate component warranties
+                from apps.inventory.models import DeviceComponentWarranty
+                comp_warranties = DeviceComponentWarranty.objects.filter(item_instance=inst, status='ACTIVE')
+                for cw in comp_warranties:
+                    days = 365 if cw.warranty_months == 12 else (180 if cw.warranty_months == 6 else (90 if cw.warranty_months == 3 else cw.warranty_months * 30))
+                    cw.warranty_start_date = self.bill_date_ad
+                    cw.warranty_expiry_date = self.bill_date_ad + timedelta(days=days)
+                    cw.save(update_fields=['warranty_start_date', 'warranty_expiry_date', 'updated_at'])
+        except Exception as e:
+            logger.warning(f"Could not propagate date update to ItemInstances for {self.estimate_number}: {e}")
+
+        # 3. Synchronize Customer Udhaari Ledger
+        try:
+            from apps.customers.models import CustomerUdhaariLedger
+            ledger_fields = {f.name for f in CustomerUdhaariLedger._meta.get_fields()}
+            ledger_updates = {}
+            if 'entry_date' in ledger_fields:
+                ledger_updates['entry_date'] = self.bill_date_ad
+            if 'entry_date_bs' in ledger_fields:
+                ledger_updates['entry_date_bs'] = self.bill_date_bs
+            if ledger_updates:
+                CustomerUdhaariLedger.objects.filter(reference_invoice=self.estimate_number).update(**ledger_updates)
+        except Exception as e:
+            logger.warning(f"Could not propagate date update to CustomerUdhaariLedger for {self.estimate_number}: {e}")
+
+    # =========================================================================
+    # STATUS & PERMISSION GUARDS
+    # =========================================================================
+    @property
+    def is_cancelled(self) -> bool:
+        """Returns True if the bill is cancelled / voided."""
+        return self.status == 'CANCELLED'
+
+    @property
+    def is_returned(self) -> bool:
+        """Returns True if the bill has had any sales returns processed."""
+        return self.status in ['RETURNED', 'PARTIALLY_RETURNED']
+
+    @property
+    def can_be_edited(self) -> bool:
+        """
+        Strict front-end edit lockdown guard:
+        CANCELLED, RETURNED, or PARTIALLY_RETURNED bills can NEVER be edited from the counter front-end.
+        Only active COMPLETED or DRAFT bills can have their metadata corrected.
+        """
+        if self.status in ['CANCELLED', 'RETURNED', 'PARTIALLY_RETURNED']:
+            return False
+        return True
+
+    @property
+    def can_be_voided(self) -> bool:
+        """
+        Void / Cancellation guard:
+        Only active COMPLETED or DRAFT bills can be voided.
+        Partially returned bills are blocked to prevent phantom inventory duplication.
+        """
+        if self.status in ['CANCELLED', 'RETURNED', 'PARTIALLY_RETURNED']:
+            return False
+        return True
+
+    @property
+    def is_official_vat_bill(self) -> bool:
+        """Returns True if this is an official VAT/Tax invoice."""
+        return self.bill_type == 'SALES' or (self.estimate_number and self.estimate_number.startswith('INV-'))
 
     @property
     def recipient_display_name(self) -> str:
@@ -442,11 +593,6 @@ class SalesEstimate(TimeStampedModel):
 class SalesEstimateItem(TimeStampedModel):
     """
     Line item in sales estimate linked to exact sold IMEI, pricing mode, batch, and warranty card.
-
-    SCHEMA CONSTRAINT DESIGN:
-    - imei_number and secondary_imei have blank=True, null=True.
-    - Non-serialized accessories, repair labor, and historical tax sales save without database constraint crashes.
-    - Mandatory 15-digit IMEI validation for real phones is enforced at the POS service/form layer.
     """
     DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
 
@@ -677,8 +823,6 @@ class SalesPaymentTransaction(TimeStampedModel):
 class PhoneExchangeTradeIn(TimeStampedModel):
     """
     Second-Hand Phone Buy-Back & Trade-In Exchange Order.
-    Manages 10-point technical diagnosis, algorithmic valuation, police-compliant
-    ownership undertaking (KYC), POS bill deduction offset, and inventory restocking.
     """
     TRADE_IN_STATUS_CHOICES = [
         ('DRAFT', _('1. Inspection In-Progress (जाँच हुँदै)')),
@@ -710,7 +854,6 @@ class PhoneExchangeTradeIn(TimeStampedModel):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='inspected_trade_ins'
     )
 
-    # Historical Trade-In Date & Fiscal Tracking
     intake_date_ad = models.DateField(
         default=timezone.now,
         db_index=True,
@@ -731,7 +874,6 @@ class PhoneExchangeTradeIn(TimeStampedModel):
         verbose_name=_("Fiscal Year (BS)")
     )
 
-    # Traded-in Device Profile
     brand_name = models.CharField(max_length=80, verbose_name=_("Brand (e.g. Apple, Samsung)"))
     model_name = models.CharField(max_length=120, verbose_name=_("Phone Model (e.g. iPhone 13)"))
     ram_capacity = models.CharField(max_length=30, blank=True, null=True, verbose_name=_("RAM (e.g. 6GB)"))
@@ -749,7 +891,6 @@ class PhoneExchangeTradeIn(TimeStampedModel):
         verbose_name=_("Old Device NTA MDMS Status")
     )
 
-    # Mathematical Valuation Breakdown
     market_base_value = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Benchmark Market Value (Pristine Condition) (NPR)")
@@ -767,7 +908,6 @@ class PhoneExchangeTradeIn(TimeStampedModel):
         verbose_name=_("Final Buy-Back / Trade-In Offer Value (NPR)")
     )
 
-    # Recommended Pre-Owned Inventory Classification
     recommended_condition_grade = models.CharField(
         max_length=25,
         choices=ItemInstance.CONDITION_CHOICES,
@@ -802,7 +942,6 @@ class PhoneExchangeTradeIn(TimeStampedModel):
         return f"{self.voucher_number} - {self.brand_name} {self.model_name} (Rs. {self.final_trade_in_value}) [{self.status}]"
 
     def save(self, *args, **kwargs):
-        # Robust bidirectional date and fiscal year synchronization
         sync_nepali_and_ad_dates(
             instance=self,
             ad_field_name='intake_date_ad',
@@ -814,7 +953,6 @@ class PhoneExchangeTradeIn(TimeStampedModel):
 class TradeInInspectionChecklist(TimeStampedModel):
     """
     10-Point Technical Diagnostic Inspection for Old Traded-In Phones.
-    Automatically scores functionality and calculates penalty deductions.
     """
     TOUCH_CHOICES = [
         ('PASS_FLAWLESS', 'Pass: Flawless Screen & Touch (0% Deduction)'),
@@ -887,7 +1025,6 @@ class TradeInInspectionChecklist(TimeStampedModel):
         PhoneExchangeTradeIn, on_delete=models.CASCADE, related_name='inspection_checklist'
     )
 
-    # 10 Diagnostic Criteria
     touch_and_display = models.CharField(max_length=30, choices=TOUCH_CHOICES, default='PASS_FLAWLESS')
     front_and_back_cameras = models.CharField(max_length=30, choices=CAMERA_CHOICES, default='BOTH_WORKING')
     charging_and_battery = models.CharField(max_length=30, choices=BATTERY_CHOICES, default='HEALTH_GOOD_85_PLUS')
@@ -912,7 +1049,6 @@ class TradeInInspectionChecklist(TimeStampedModel):
 class TradeInLegalUndertaking(TimeStampedModel):
     """
     Police-Compliant Customer Ownership Handover & Undertaking Record (जिम्मानामा तथा मञ्जुरीनामा).
-    Protects shop owners from legal liability, stolen property claims, and police investigations.
     """
     ID_TYPE_CHOICES = [
         ('CITIZENSHIP', _('Nepali Citizenship Card (नागरिकता प्रमाणपत्र)')),
@@ -925,7 +1061,6 @@ class TradeInLegalUndertaking(TimeStampedModel):
         PhoneExchangeTradeIn, on_delete=models.CASCADE, related_name='legal_undertaking'
     )
 
-    # Customer Identity Details
     customer_full_name = models.CharField(max_length=150, verbose_name=_("Customer Full Name (English/Nepali)"))
     customer_father_or_spouse_name = models.CharField(max_length=150, blank=True, null=True, verbose_name=_("Father / Spouse Name"))
 
@@ -937,7 +1072,6 @@ class TradeInLegalUndertaking(TimeStampedModel):
     permanent_address = models.CharField(max_length=255, verbose_name=_("Permanent Address (District, Ward, Municipality)"))
     current_address = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("Current Residence / Room Address"))
 
-    # KYC Uploads & Evidence Photos
     id_front_image = models.ImageField(
         upload_to=settings.TRADE_IN_DOCUMENT_UPLOAD_DIR, blank=True, null=True,
         verbose_name=_("Citizenship / NID Front Photo")
@@ -955,7 +1089,6 @@ class TradeInLegalUndertaking(TimeStampedModel):
         help_text=_("Base64 string of digital signature or thumbprint canvas data")
     )
 
-    # Legal Declaration & Acceptance (blank=True, default="" prevents Django Admin validation crashes)
     declaration_text = models.TextField(
         blank=True,
         default="",
@@ -998,7 +1131,6 @@ class TradeInLegalUndertaking(TimeStampedModel):
 class SalesReturn(TimeStampedModel):
     """
     Customer sales return or warranty replacement voucher.
-    HISTORICAL INTEGRITY: Supported by return_date_ad, return_date_bs, and fiscal_year.
     """
     return_number = models.CharField(max_length=50, unique=True, db_index=True, verbose_name=_("Return Voucher No."))
     original_estimate = models.ForeignKey(
@@ -1062,7 +1194,6 @@ class SalesReturn(TimeStampedModel):
         return f"{self.return_number} for {self.original_estimate.estimate_number} (Rs. {self.total_refund_amount})"
 
     def save(self, *args, **kwargs):
-        # Robust bidirectional date and fiscal year synchronization
         sync_nepali_and_ad_dates(
             instance=self,
             ad_field_name='return_date_ad',
@@ -1074,8 +1205,6 @@ class SalesReturn(TimeStampedModel):
 class SalesReturnItem(TimeStampedModel):
     """
     Line item within a customer sales return voucher.
-    Preserves original discount type, original entered discount value, actual discount amount,
-    and effective discount percentage for full reporting and audit trail continuity.
     """
     DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
 
@@ -1086,7 +1215,6 @@ class SalesReturnItem(TimeStampedModel):
     base_unit_quantity = models.DecimalField(max_digits=12, decimal_places=3, verbose_name=_("Base Unit Quantity"))
     refund_amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name=_("Net Refund Amount"))
 
-    # Preserved original discount audit fields
     discount_type = models.CharField(
         max_length=15,
         choices=DISCOUNT_TYPE_CHOICES,

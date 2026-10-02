@@ -1,33 +1,40 @@
 """
 Party-Wise Confirmation & Sub-Ledger Accounting Engine.
 
-Capabilities:
-1. Multi-Calendar Date & Fiscal Year Translation:
-   - Supports official Nepali Fiscal Years (e.g., '2080/81', '2081/82', '2082/83', '2083/84').
-   - Converts Bikram Sambat (BS) date inputs into Gregorian (AD) dates for database indexing.
-   - Accurately resolves Shrawan 1 to dynamic Ashadh end (30, 31, or 32 days).
-2. Clean Date Boundary Resolution:
-   - Avoids silent fallbacks to today's date when an earlier month or historical period within
-     the fiscal year is queried.
-   - Padded two-digit normalization for B.S. months and days.
-3. Dynamic Historical Opening Balance Calculator:
-   - Reconstructs exact opening balance as of the start date by summing all transactions
-     posted prior to that date (including the Mobilesoft/Hisaav migration opening journals).
-   - Customer (Trade Debtor / Dr Normal): Opening Bal = Total Prior Debits - Total Prior Credits.
-   - Supplier (Trade Creditor / Cr Normal): Opening Bal = Total Prior Credits - Total Prior Debits.
-4. Chronological Period Ledger Aggregation:
-   - Queries posted double-entry journal items filtered strictly to party control accounts
-     (excluding internal counter cash/bank lines to prevent voucher double-counting).
-5. Sequential Running Balance Math:
-   - Calculates line-by-line running balance with debit/credit turnover summaries.
-6. Formal Audit Confirmation Package:
-   - Returns party details, PAN, dates, ledger lines, closing balance, and legal confirmation text.
+Capabilities & Architectural Rules:
+1. Standard Double-Entry Subledger Running Balance Rules:
+   - For Suppliers (Creditors / Accounts Payable):
+     * Credit transactions (inward purchases, invoice adjustments) increase the payable balance (+).
+     * Debit transactions (cash payments, digital payouts, debit notes / purchase returns) decrease the payable balance (-).
+     * Net positive balance represents "Payable to Party" (Credit nature).
+     * Net negative balance represents "Advance to Supplier" (Debit nature).
+   - For Customers (Debtors / Accounts Receivable):
+     * Debit transactions (credit sales invoices, POS estimates) increase the receivable balance (+).
+     * Credit transactions (cash repayments, QR collections, credit notes / sales returns) decrease the receivable balance (-).
+     * Net positive balance represents "Receivable from Party" (Debit nature).
+     * Net negative balance represents "Advance from Customer" (Credit nature).
+2. Dynamic Historical Opening Balance Calculator:
+   - Evaluates all posted double-entry journal items strictly prior to start_date_ad.
+   - Accurately includes opening migration entries (e.g. from 2080 B.S.) and preceding fiscal periods.
+   - Computes dynamic "Balance Brought Forward (B/F)" with correct Dr/Cr nature tagging.
+3. Multi-Calendar Date & Fiscal Year Normalization:
+   - Parses arbitrary Bikram Sambat (BS) date strings (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD) and Devanagari numerals.
+   - Converts BS dates into Gregorian (AD) dates for database indexing without altering the displayed BS dates.
+   - Resolves official Nepali Fiscal Years (e.g. '2080/81', '2081/82', '2082/83', '2083/84') from Shrawan 1 to Ashadh 31/32.
+   - Prevents silent date jumps to today when querying earlier months or historical years.
+4. Robust Nepali/South Asian Number-to-Words Converter:
+   - Formats amounts into standard words (Crores, Lakhs, Thousands, Hundreds, Rupees, and Paisa).
+   - Handles zero balances ("Zero Rupees Only"), negative/credit offsets, and decimal paisa fractions accurately.
+5. Anti-Double Counting Subledger Query Filter:
+   - Scopes queries strictly to control accounts (ACCOUNTS_RECEIVABLE / ACCOUNTS_PAYABLE)
+     and non-clearing lines, preventing double-counting of counter cash/bank lines in multi-line vouchers.
 """
 
 import re
-from decimal import Decimal, ROUND_HALF_UP
+import logging
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import date, datetime
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 
 from django.db.models import Q, Sum
 from django.utils import timezone
@@ -44,13 +51,36 @@ from apps.core.utils.nepali_date_converter import (
     ad_to_bs_string
 )
 
-def number_to_words_nepali_format(amount: Decimal) -> str:
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# 1. SOUTH ASIAN / NEPALI NUMBER-TO-WORDS CONVERSION ENGINE
+# =============================================================================
+def number_to_words_nepali_format(amount: Union[int, float, Decimal, None]) -> str:
     """
-    Converts a Decimal amount into South Asian / Nepali standard words
-    (Crores, Lakhs, Thousands, Hundreds, Units and Paisa).
-    Example: 150250.75 -> 'Rupees One Lakh Fifty Thousand Two Hundred Fifty and Seventy Five Paisa Only'
+    Converts a numerical figure into South Asian / Nepali standard English words
+    (Crores, Lakhs, Thousands, Hundreds, Rupees, and Paisa).
+    
+    Examples:
+        293800.00 -> 'Two Lakh Ninety-Three Thousand Eight Hundred Rupees Only'
+        150250.75 -> 'One Lakh Fifty Thousand Two Hundred Fifty Rupees and Seventy-Five Paisa Only'
+        0.00      -> 'Zero Rupees Only'
     """
     if amount is None:
+        return "Zero Rupees Only"
+
+    try:
+        amount_dec = Decimal(str(amount)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError, TypeError):
+        return "Zero Rupees Only"
+
+    is_negative = (amount_dec < Decimal('0.00'))
+    abs_amount = abs(amount_dec)
+
+    total_rupees = int(abs_amount)
+    total_paisa = int(round((abs_amount - total_rupees) * 100))
+
+    if total_rupees == 0 and total_paisa == 0:
         return "Zero Rupees Only"
 
     units = [
@@ -62,14 +92,7 @@ def number_to_words_nepali_format(amount: Decimal) -> str:
         "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"
     ]
 
-    abs_amount = abs(amount)
-    rupees = int(abs_amount)
-    paisa = int(round((abs_amount - rupees) * 100))
-
-    if rupees == 0 and paisa == 0:
-        return "Zero Rupees Only"
-
-    def two_digits(n: int) -> str:
+    def _convert_two_digits(n: int) -> str:
         if n == 0:
             return ""
         if n < 20:
@@ -78,50 +101,59 @@ def number_to_words_nepali_format(amount: Decimal) -> str:
         unit_part = units[n % 10]
         return f"{ten_part} {unit_part}".strip()
 
-    def three_digits(n: int) -> str:
+    def _convert_three_digits(n: int) -> str:
         h = n // 100
-        rest = n % 100
+        rem = n % 100
         parts = []
         if h > 0:
             parts.append(f"{units[h]} Hundred")
-        if rest > 0:
-            parts.append(two_digits(rest))
+        if rem > 0:
+            parts.append(_convert_two_digits(rem))
         return " ".join(parts).strip()
 
-    crore = rupees // 10000000
-    rupees %= 10000000
+    def _convert_integer(n: int) -> str:
+        if n == 0:
+            return ""
+        if n < 1000:
+            return _convert_three_digits(n)
 
-    lakh = rupees // 100000
-    rupees %= 100000
+        parts = []
+        crore = n // 10000000
+        rem = n % 10000000
+        lakh = rem // 100000
+        rem = rem % 100000
+        thousand = rem // 1000
+        remainder = rem % 1000
 
-    thousand = rupees // 1000
-    rupees %= 1000
+        if crore > 0:
+            parts.append(f"{_convert_integer(crore)} Crore")
+        if lakh > 0:
+            parts.append(f"{_convert_two_digits(lakh)} Lakh")
+        if thousand > 0:
+            parts.append(f"{_convert_two_digits(thousand)} Thousand")
+        if remainder > 0:
+            parts.append(_convert_three_digits(remainder))
 
-    hundreds = rupees
+        return " ".join(parts).strip()
 
-    words_list = []
-    if crore > 0:
-        words_list.append(f"{three_digits(crore)} Crore")
-    if lakh > 0:
-        words_list.append(f"{two_digits(lakh)} Lakh")
-    if thousand > 0:
-        words_list.append(f"{two_digits(thousand)} Thousand")
-    if hundreds > 0:
-        words_list.append(three_digits(hundreds))
+    rupees_str = _convert_integer(total_rupees) if total_rupees > 0 else "Zero"
+    prefix = "Minus " if is_negative else ""
 
-    rupees_str = " ".join(words_list).strip() or "Zero"
-    prefix = "Minus " if amount < Decimal('0.00') else ""
+    if total_paisa > 0:
+        paisa_str = _convert_two_digits(total_paisa)
+        return f"{prefix}{rupees_str} Rupees and {paisa_str} Paisa Only"
+    return f"{prefix}{rupees_str} Rupees Only"
 
-    if paisa > 0:
-        paisa_str = two_digits(paisa)
-        return f"{prefix}Rupees {rupees_str} and {paisa_str} Paisa Only"
-    return f"{prefix}Rupees {rupees_str} Only"
-
+# =============================================================================
+# 2. PARTY CONFIRMATION & SUB-LEDGER CALCULATION ENGINE
+# =============================================================================
 class PartyLedgerService:
     """
-    Authoritative calculation engine for Customer & Supplier Confirmation Statements.
+    Authoritative double-entry subledger calculation engine for Customer & Supplier
+    balance confirmations, running transaction statements, and legal audit letters.
     """
 
+    # Internal payment clearing tags to prevent line doubling in double-entry vouchers
     PAYMENT_CLEARING_TAGS = [
         'CASH', 'BANK', 'FONEPAY', 'ESEWA', 'KHALTI',
         'CARD_CLEARING', 'SALES_REVENUE', 'COGS',
@@ -130,7 +162,7 @@ class PartyLedgerService:
 
     @classmethod
     def get_available_fiscal_years(cls) -> List[str]:
-        """Returns standard list of Nepali Fiscal Years (2080/81 to 2083/84)."""
+        """Returns ordered list of official Nepali Fiscal Years (e.g. '2083/84', '2082/83')."""
         fys = list(
             AccountingFiscalYear.objects.order_by('-start_date_ad').values_list('name', flat=True)
         )
@@ -141,9 +173,9 @@ class PartyLedgerService:
     @classmethod
     def _parse_date_input(cls, raw_val: Any) -> Optional[Tuple[date, str]]:
         """
-        Parses arbitrary date strings in either Gregorian AD or Nepali BS (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD)
-        with single or double-digit month/day padding.
-        Returns a clean (ad_date, bs_date_string) tuple or None if unparseable.
+        Parses arbitrary date strings in either Gregorian AD or Nepali BS
+        (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD, or Devanagari digits).
+        Returns a clean (gregorian_ad_date, standardized_bs_date_string) tuple or None.
         """
         if not raw_val:
             return None
@@ -156,10 +188,10 @@ class PartyLedgerService:
             return ad_d, f"{y:04d}-{m:02d}-{d:02d}"
 
         raw_str = str(raw_val).strip()
-        if not raw_str or raw_str.lower() in ['none', 'nan', 'null', '-', '--']:
+        if not raw_str or raw_str.lower() in ['none', 'nan', 'null', '-', '--', '']:
             return None
 
-        # 1. Try B.S. Date Parsing
+        # 1. Attempt Bikram Sambat (BS) date parsing
         try:
             bs_y, bs_m, bs_d = parse_bs_date_components(raw_str)
             ad_d = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
@@ -168,7 +200,7 @@ class PartyLedgerService:
         except Exception:
             pass
 
-        # 2. Try Gregorian AD Date Parsing (YYYY-MM-DD or YYYY/MM/DD)
+        # 2. Attempt Gregorian (AD) ISO date parsing (YYYY-MM-DD)
         clean = re.sub(r'[^\d]', '-', raw_str)
         parts = [int(p) for p in clean.split('-') if p]
         if len(parts) == 3 and 1970 <= parts[0] <= 2050:
@@ -188,15 +220,15 @@ class PartyLedgerService:
         Resolves query parameters into standardized date bounds:
         Returns: (start_date_ad, end_date_ad, start_date_bs, end_date_bs, fiscal_year_label)
 
-        Strictness Rules:
-        - When custom dates are supplied within an earlier month or historical fiscal year,
-          the end_date strictly respects that requested period and NEVER silently leaps forward to today!
+        Strict Date Boundary Rules:
+        - When custom dates are supplied within an earlier month or historical period,
+          the end_date strictly respects that requested period and NEVER silently defaults to today.
         - If a fiscal year preset is chosen, the entire range of that fiscal year is returned.
         - If no parameters are given, defaults to the ongoing active fiscal year.
         """
         fy_param = str(params.get('fiscal_year') or '').strip()
-        start_param = str(params.get('start_date') or '').strip()
-        end_param = str(params.get('end_date') or '').strip()
+        start_param = str(params.get('start_date') or params.get('start_date_bs') or '').strip()
+        end_param = str(params.get('end_date') or params.get('end_date_bs') or '').strip()
 
         parsed_start = cls._parse_date_input(start_param) if start_param else None
         parsed_end = cls._parse_date_input(end_param) if end_param else None
@@ -214,20 +246,19 @@ class PartyLedgerService:
             resolved_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
             return start_ad, end_ad, start_bs, end_bs, resolved_fy
 
-        # Case 2: Only Start Date is Provided -> Scope to that Month or Fiscal Year
+        # Case 2: Only Start Date is Provided -> Scope to the end of that specific B.S. Month
         if parsed_start and not parsed_end:
             start_ad, start_bs = parsed_start
             bs_y, bs_m, bs_d = parse_bs_date_components(start_bs)
             resolved_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
 
-            # End of that specific B.S. month
             max_days = NepaliCalendar.get_days_in_month(bs_y, bs_m)
             end_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, max_days)
             end_bs = f"{bs_y:04d}-{bs_m:02d}-{max_days:02d}"
 
             return start_ad, end_ad, start_bs, end_bs, resolved_fy
 
-        # Case 3: Only End Date is Provided -> Scope from Month Start to End Date
+        # Case 3: Only End Date is Provided -> Scope from the 1st of that B.S. Month to End Date
         if parsed_end and not parsed_start:
             end_ad, end_bs = parsed_end
             bs_y, bs_m, bs_d = parse_bs_date_components(end_bs)
@@ -238,7 +269,7 @@ class PartyLedgerService:
 
             return start_ad, end_ad, start_bs, end_bs, resolved_fy
 
-        # Case 4: Fiscal Year Preset Selected
+        # Case 4: Fiscal Year Preset Selected (e.g. '2083/84')
         if fy_param and fy_param.lower() not in ['all', 'none', '']:
             clean_fy = fy_param.replace('-', '/').strip()
             try:
@@ -272,7 +303,13 @@ class PartyLedgerService:
     ) -> Dict[str, Any]:
         """
         Produces the authoritative party ledger and confirmation statement payload.
-        Handles both migrated data and new fiscal year periods seamlessly.
+        Handles both historical migrated data and new fiscal year periods seamlessly.
+
+        Accounting Equation Enforced:
+        - Opening Balance (as of start_date_ad) = Net sum of all transactions prior to start_date_ad.
+        - For Debtors (Customers): Running Balance = Opening (Dr) + Debits - Credits.
+        - For Creditors (Suppliers): Running Balance = Opening (Cr) + Credits - Debits.
+        - Closing Balance = Running Balance at period end.
         """
         party_type_norm = str(party_type).strip().upper()
         if party_type_norm not in ['CUSTOMER', 'SUPPLIER']:
@@ -280,7 +317,9 @@ class PartyLedgerService:
 
         start_date_ad, end_date_ad, start_date_bs, end_date_bs, fiscal_year = cls.resolve_period_dates(params)
 
-        # 1. Resolve Party Profile
+        # -------------------------------------------------------------
+        # 1. Resolve Party Profile Entity
+        # -------------------------------------------------------------
         if party_type_norm == 'CUSTOMER':
             party = get_object_or_404(Customer, pk=party_id)
             party_name = party.name
@@ -290,6 +329,7 @@ class PartyLedgerService:
             party_address = party.address or "Kathmandu, Nepal"
             is_debtor = True
             control_tag = 'ACCOUNTS_RECEIVABLE'
+            control_code_prefix = '1210'
         else:
             party = get_object_or_404(Supplier, pk=party_id)
             party_name = party.company_name
@@ -299,8 +339,11 @@ class PartyLedgerService:
             party_address = party.address or "Kathmandu, Nepal"
             is_debtor = False
             control_tag = 'ACCOUNTS_PAYABLE'
+            control_code_prefix = '2110'
 
-        # 2. Base QuerySet Scoped to the Specific Party Control Lines
+        # -------------------------------------------------------------
+        # 2. Base QuerySet Scoped Strictly to Subledger Transactions
+        # -------------------------------------------------------------
         base_items = JournalItem.objects.filter(
             journal_entry__status='POSTED'
         ).select_related('journal_entry', 'account', 'journal_entry__branch')
@@ -310,8 +353,10 @@ class PartyLedgerService:
         else:
             party_filter = Q(supplier=party)
 
+        # Scope strictly to the party control ledger line (prevents doubling against counter cash lines)
         control_account_filter = (
             Q(account__system_tag=control_tag) |
+            Q(account__code__startswith=control_code_prefix) |
             ~Q(account__system_tag__in=cls.PAYMENT_CLEARING_TAGS)
         )
 
@@ -320,7 +365,9 @@ class PartyLedgerService:
         if branch:
             scoped_items = scoped_items.filter(journal_entry__branch=branch)
 
+        # -------------------------------------------------------------
         # 3. Dynamic Opening Balance Calculation (Prior to start_date_ad)
+        # -------------------------------------------------------------
         prior_agg = scoped_items.filter(
             journal_entry__entry_date__lt=start_date_ad
         ).aggregate(
@@ -332,23 +379,29 @@ class PartyLedgerService:
         prior_cr = prior_agg['prior_cr'] or Decimal('0.00')
 
         if is_debtor:
-            # Customer / Debtor: Normal Debit Nature (Dr increases debt, Cr decreases debt)
-            opening_balance = (prior_dr - prior_cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            opening_nature = 'Dr' if opening_balance >= Decimal('0.00') else 'Cr'
+            # Customer (Trade Debtor / Normal Debit Nature):
+            # Debits increase debt, Credits decrease debt.
+            signed_opening = (prior_dr - prior_cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            opening_nature = 'Dr' if signed_opening >= Decimal('0.00') else 'Cr'
         else:
-            # Supplier / Creditor: Normal Credit Nature (Cr increases payable, Dr decreases payable)
-            opening_balance = (prior_cr - prior_dr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            opening_nature = 'Cr' if opening_balance >= Decimal('0.00') else 'Dr'
+            # Supplier (Trade Creditor / Normal Credit Nature):
+            # Credits increase payable, Debits decrease payable.
+            signed_opening = (prior_cr - prior_dr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            opening_nature = 'Cr' if signed_opening >= Decimal('0.00') else 'Dr'
 
-        # 4. Period Transactions (start_date_ad <= date <= end_date_ad)
+        # -------------------------------------------------------------
+        # 4. Period Transactions (start_date_ad <= entry_date <= end_date_ad)
+        # -------------------------------------------------------------
         period_items = scoped_items.filter(
             journal_entry__entry_date__gte=start_date_ad,
             journal_entry__entry_date__lte=end_date_ad
         ).order_by('journal_entry__entry_date', 'journal_entry__id', 'id')
 
+        # -------------------------------------------------------------
         # 5. Sequential Running Balance Calculation Loop
+        # -------------------------------------------------------------
         ledger_lines: List[Dict[str, Any]] = []
-        running_bal = opening_balance
+        running_bal = signed_opening
         total_period_debit = Decimal('0.00')
         total_period_credit = Decimal('0.00')
 
@@ -358,10 +411,13 @@ class PartyLedgerService:
             total_period_debit += dr
             total_period_credit += cr
 
+            # Standard Subledger Running Balance Rules:
             if is_debtor:
+                # Customer: +Debit (Sales), -Credit (Receipts/Returns)
                 running_bal = running_bal + dr - cr
                 line_nature = 'Dr' if running_bal >= Decimal('0.00') else 'Cr'
             else:
+                # Supplier: +Credit (Purchases), -Debit (Payments/Returns)
                 running_bal = running_bal + cr - dr
                 line_nature = 'Cr' if running_bal >= Decimal('0.00') else 'Dr'
 
@@ -387,14 +443,30 @@ class PartyLedgerService:
             })
 
         closing_balance = running_bal.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        if is_debtor:
-            closing_nature = 'Dr' if closing_balance >= Decimal('0.00') else 'Cr'
-            status_text = "Receivable (Due to Shop)" if closing_balance >= Decimal('0.00') else "Advance from Customer"
-        else:
-            closing_nature = 'Cr' if closing_balance >= Decimal('0.00') else 'Dr'
-            status_text = "Payable (Owed by Shop)" if closing_balance >= Decimal('0.00') else "Advance to Supplier"
-
         closing_balance_abs = abs(closing_balance)
+
+        # Determine Closing Nature and Standard Status Wording:
+        if is_debtor:
+            if closing_balance > Decimal('0.00'):
+                closing_nature = 'Dr'
+                status_text = "Receivable from Party"
+            elif closing_balance < Decimal('0.00'):
+                closing_nature = 'Cr'
+                status_text = "Advance from Customer"
+            else:
+                closing_nature = 'Dr'
+                status_text = "Settled (Zero Balance)"
+        else:
+            if closing_balance > Decimal('0.00'):
+                closing_nature = 'Cr'
+                status_text = "Payable to Party"
+            elif closing_balance < Decimal('0.00'):
+                closing_nature = 'Dr'
+                status_text = "Advance to Supplier"
+            else:
+                closing_nature = 'Cr'
+                status_text = "Settled (Zero Balance)"
+
         amount_words = number_to_words_nepali_format(closing_balance_abs)
 
         return {
@@ -412,8 +484,8 @@ class PartyLedgerService:
             'end_date_ad': end_date_ad,
             'start_date_bs': start_date_bs,
             'end_date_bs': end_date_bs,
-            'opening_balance': abs(opening_balance).quantize(Decimal('0.01')),
-            'opening_balance_signed': opening_balance,
+            'opening_balance': abs(signed_opening).quantize(Decimal('0.01')),
+            'opening_balance_signed': signed_opening,
             'opening_nature': opening_nature,
             'total_debit': total_period_debit.quantize(Decimal('0.01')),
             'total_credit': total_period_credit.quantize(Decimal('0.01')),

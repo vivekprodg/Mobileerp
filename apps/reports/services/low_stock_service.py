@@ -1,11 +1,11 @@
 """
 Low Stock & Reorder Intelligence Business Logic Service.
-File Path: apps/reports/services/low_stock_service.py
 
 Calculates products reaching or falling below their minimum reorder thresholds,
 evaluates suggested replenishment orders using the standard retail formula:
     Suggested Order = (2 * low_stock_threshold) - current_quantity
 and retrieves the last active supplier from inward Goods Received Notes (GRN).
+Includes get_dashboard_reorder_summary() for fast radar display on the main dashboard.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -22,6 +22,44 @@ class LowStockService:
     """
     Business logic service for the Low Stock & Reorder Alert Report.
     """
+
+    @classmethod
+    def get_dashboard_reorder_summary(
+        cls,
+        branch=None,
+        user=None,
+        limit: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Fast lookup method for the Owner Dashboard tile and Radar table.
+        Returns total count of critical items and a sliced list of the most urgent products.
+        """
+        active_branch = branch or (
+            getattr(user, 'assigned_branch', None)
+            if user and not (user.is_superuser or getattr(user, 'role', '') == 'OWNER')
+            else None
+        )
+
+        qs = BranchStock.objects.filter(
+            product__is_active=True,
+            quantity__lte=F('low_stock_threshold'),
+            quantity__gt=Decimal('0.000')
+        )
+
+        if active_branch:
+            qs = qs.filter(branch=active_branch)
+
+        total_critical_count = qs.count()
+
+        urgent_items = list(
+            qs.select_related('product', 'product__category', 'product__base_unit', 'branch')
+            .order_by('quantity', 'product__name')[:limit]
+        )
+
+        return {
+            'low_stock_count': total_critical_count,
+            'low_stock_items': urgent_items,
+        }
 
     @classmethod
     def get_low_stock_data(

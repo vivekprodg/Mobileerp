@@ -1,2448 +1,1777 @@
 {% extends "core/base.html" %}
 {% load static humanize %}
 
-{% block title %}Goods Received Note (GRN) Inward | {{ SYS_CONFIG.company_name_en|default:COMPANY_NAME }}{% endblock %}
+{% block title %}GRN (Purchase) – Goods Received Note / Purchase Inward | {{ SYS_CONFIG.company_name_en|default:COMPANY_NAME }}{% endblock %}
 
 {% block extra_head %}
-<!-- FontAwesome 6 CDN for iconography -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-
 <style>
 /* ==========================================================================
-   MOBILE SOFT ERP - ULTRA-PREMIUM GRN INWARD (VERTICAL CARD LAYOUT)
+   ENTERPRISE GRN PURCHASE INWARD DESIGN SYSTEM (TEAL & SLATE CLONE)
    ========================================================================== */
 :root {
-    --grn-primary: #2563eb;
-    --grn-primary-hover: #1d4ed8;
-    --grn-primary-soft: #eff6ff;
-    --grn-primary-border: #bfdbfe;
-
-    --grn-slate-50: #f8fafc;
-    --grn-slate-100: #f1f5f9;
-    --grn-slate-200: #e2e8f0;
-    --grn-slate-300: #cbd5e1;
-    --grn-slate-400: #94a3b8;
-    --grn-slate-500: #64748b;
-    --grn-slate-600: #475569;
-    --grn-slate-700: #334155;
-    --grn-slate-800: #1e293b;
-    --grn-slate-900: #0f172a;
-
-    --grn-emerald-50: #ecfdf5;
-    --grn-emerald-100: #d1fae5;
-    --grn-emerald-600: #059669;
-    --grn-emerald-700: #047857;
-
-    --grn-amber-50: #fffbeb;
-    --grn-amber-600: #d97706;
-
-    --grn-rose-50: #fff1f2;
-    --grn-rose-100: #ffe4e6;
-    --grn-rose-600: #e11d48;
-    --grn-rose-700: #be123c;
-
-    --grn-purple-50: #faf5ff;
-    --grn-purple-600: #9333ea;
-
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
-    --radius-xl: 18px;
-
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
-    --shadow-card: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.04);
-    --shadow-hover: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
-    
-    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
-}
-
-/* Page Header */
-.grn-page-header {
-    background: #ffffff;
-    border: 1.5px solid var(--grn-slate-200);
-    border-radius: var(--radius-lg);
-    padding: 20px 26px;
-    margin-bottom: 24px;
-    box-shadow: var(--shadow-sm);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    position: relative;
-    overflow: hidden;
-}
-
-.grn-page-header::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 5px;
-    background: linear-gradient(180deg, var(--grn-primary), #3b82f6);
-}
-
-.header-text h1 {
-    font-size: 21px;
-    font-weight: 800;
-    color: var(--grn-slate-900);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    letter-spacing: -0.02em;
-    margin-bottom: 4px;
-}
-
-.header-text p {
-    font-size: 13px;
-    color: var(--grn-slate-500);
-    margin-bottom: 0;
-    max-width: 920px;
-}
-
-/* Base Card Styles */
-.erp-card {
-    background: #ffffff;
-    border: 1.5px solid var(--grn-slate-200);
-    border-radius: var(--radius-xl);
-    margin-bottom: 24px;
-    box-shadow: var(--shadow-card);
-    overflow: visible;
-}
-
-.erp-card-header {
-    padding: 18px 24px;
-    background: #fafbfc;
-    border-bottom: 1.5px solid var(--grn-slate-200);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
-}
-
-.erp-card-title {
-    font-size: 16px;
-    font-weight: 800;
-    color: var(--grn-slate-900);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    letter-spacing: -0.02em;
-}
-
-.erp-card-title i {
-    color: var(--grn-primary);
-}
-
-.erp-card-subtitle {
-    font-size: 12.5px;
-    color: var(--grn-slate-500);
-    margin-top: 3px;
-    font-weight: 400;
-}
-
-.erp-card-body {
-    padding: 24px;
-}
-
-/* Form Groups & Layout Grid */
-.grid {
-    display: grid;
-    gap: 18px;
-}
-
-.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
-.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
-.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
-
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.form-label {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--grn-slate-700);
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-bottom: 0;
-}
-
-.form-label .req {
-    color: var(--grn-rose-600);
-    font-weight: 800;
-}
-
-.form-label .hint {
-    font-size: 11px;
-    color: var(--grn-slate-400);
-    font-weight: 400;
-    margin-left: auto;
-}
-
-.input-wrap {
-    position: relative;
-    display: flex;
-    align-items: center;
-    width: 100%;
-}
-
-.input-prefix {
-    position: absolute;
-    left: 12px;
-    color: var(--grn-slate-400);
-    font-size: 13px;
-    font-weight: 700;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    z-index: 2;
-}
-
-.clickable-prefix {
-    pointer-events: auto !important;
-    cursor: pointer !important;
-    transition: color 0.15s ease, transform 0.15s ease;
-}
-
-.clickable-prefix:hover {
-    color: var(--grn-primary) !important;
-    transform: scale(1.1);
-}
-
-.form-control {
-    width: 100%;
-    height: 42px;
-    background: #ffffff;
-    border: 1.5px solid var(--grn-slate-200);
-    border-radius: var(--radius-md);
-    padding: 8px 14px;
-    font-size: 13.5px;
-    font-family: inherit;
-    color: var(--grn-slate-800);
-    transition: all 0.15s ease-in-out;
-    outline: none;
-}
-
-.form-control:focus {
-    border-color: var(--grn-primary);
-    box-shadow: 0 0 0 3.5px rgba(37, 99, 235, 0.15);
-}
-
-.has-prefix {
-    padding-left: 42px !important;
-}
-
-.font-mono-val {
-    font-family: var(--font-mono);
-    font-weight: 600;
-}
-
-textarea.form-control {
-    height: auto;
-    min-height: 84px;
-    resize: vertical;
-}
-
-/* Whole-Bill Consignment Discount Card */
-.consign-discount-card {
-    background: #f8fafc;
-    border: 1.5px dashed var(--grn-slate-300);
-    border-radius: var(--radius-md);
-    padding: 14px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.consign-disc-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.consign-disc-badge {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 800;
-    color: var(--grn-emerald-700);
-    background: var(--grn-emerald-50);
-    padding: 3px 8px;
-    border-radius: var(--radius-sm);
-    border: 1px solid #a7f3d0;
-}
-
-/* Segmented Control Component */
-.segmented-control {
-    display: inline-flex;
-    background: var(--grn-slate-200);
-    padding: 3px;
-    border-radius: 7px;
-    gap: 2px;
-}
-
-.seg-btn {
-    border: none;
-    background: transparent;
-    padding: 5px 12px;
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--grn-slate-600);
-    border-radius: 5px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    font-family: inherit;
-}
-
-.seg-btn.active {
-    background: #ffffff;
-    color: var(--grn-primary);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
-
-/* Compliance Toggles Bar */
-.compliance-bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 24px;
-    padding-top: 18px;
-    border-top: 1px solid var(--grn-slate-200);
-    margin-top: 18px;
-}
-
-.toggle-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    cursor: pointer;
-    user-select: none;
-    margin-bottom: 0;
-}
-
-.custom-switch {
-    position: relative;
-    width: 44px;
-    height: 24px;
-    background: var(--grn-slate-300);
-    border-radius: 12px;
-    transition: background 0.2s;
-}
-
-.custom-switch::after {
-    content: "";
-    position: absolute;
-    top: 2.5px;
-    left: 3px;
-    width: 19px;
-    height: 19px;
-    background: #ffffff;
-    border-radius: 50%;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-    transition: transform 0.2s ease;
-}
-
-input[type="checkbox"]:checked + .custom-switch {
-    background: var(--grn-primary);
-}
-
-input[type="checkbox"]:checked + .custom-switch::after {
-    transform: translateX(19px);
-}
-
-.compliance-pill {
-    font-size: 11px;
-    padding: 2px 7px;
-    border-radius: 4px;
-    font-weight: 700;
-    margin-left: 6px;
-}
-
-.pill-ird {
-    background: #eff6ff;
-    color: #1d4ed8;
-    border: 1px solid #bfdbfe;
-}
-
-.pill-mdms {
-    background: #ecfdf5;
-    color: #047857;
-    border: 1px solid #a7f3d0;
-}
-
-/* ==========================================================================
-   VERTICAL LINE ITEM CARD SYSTEM (TIERED & SPACIOUS)
-   ========================================================================== */
-.line-items-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 22px;
-}
-
-.line-item-card {
-    background: #ffffff;
-    border: 1.5px solid var(--grn-slate-200);
-    border-radius: var(--radius-lg);
-    padding: 20px 24px;
-    position: relative;
-    box-shadow: var(--shadow-sm);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.line-item-card:hover {
-    border-color: #cbd5e1;
-    box-shadow: var(--shadow-card);
-}
-
-.line-item-topbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 18px;
-    padding-bottom: 12px;
-    border-bottom: 1.5px solid var(--grn-slate-100);
-}
-
-.item-counter-badge {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 800;
-    font-size: 14px;
-    color: var(--grn-slate-900);
-}
-
-.counter-dot {
-    background: var(--grn-slate-900);
-    color: #ffffff;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-family: var(--font-mono);
-}
-
-.btn-remove-row {
-    background: var(--grn-rose-50);
-    border: 1px solid var(--grn-rose-100);
-    color: var(--grn-rose-600);
-    padding: 6px 14px;
-    border-radius: var(--radius-sm);
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition: all 0.15s ease;
-}
-
-.btn-remove-row:hover {
-    background: var(--grn-rose-600);
-    color: #ffffff;
-    border-color: var(--grn-rose-600);
-}
-
-/* Tier 3: High-Visibility Wide Discount Bar */
-.line-discount-vertical-card {
-    background: #f8fafc;
-    border: 1.5px solid #e2e8f0;
-    border-radius: var(--radius-md);
-    padding: 14px 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    transition: all 0.2s ease;
-}
-
-.line-discount-vertical-card.is-active {
-    background: #ffffff;
-    border-color: #93c5fd;
-    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.08);
-}
-
-.ld-top-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.ld-title-tag {
-    font-size: 12px;
-    font-weight: 800;
-    color: var(--grn-slate-700);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.ld-title-tag i {
-    color: var(--grn-primary);
-}
-
-.ld-rebate-tag {
-    font-family: var(--font-mono);
-    font-size: 12.5px;
-    font-weight: 800;
-    color: var(--grn-rose-700);
-    background: var(--grn-rose-100);
-    padding: 3px 10px;
-    border-radius: 6px;
-    border: 1px solid #fecdd3;
-    white-space: nowrap;
-}
-
-.ld-controls-flex {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    flex-wrap: wrap;
-}
-
-.ld-mode-switch {
-    display: inline-flex;
-    background: #e2e8f0;
-    padding: 3px;
-    border-radius: 8px;
-    gap: 2px;
-}
-
-.ld-mode-btn {
-    border: none;
-    background: transparent;
-    padding: 6px 14px;
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--grn-slate-600);
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    font-family: inherit;
-}
-
-.ld-mode-btn.active {
-    background: var(--grn-slate-900);
-    color: #ffffff;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-}
-
-.ld-input-box {
-    flex: 1;
-    min-width: 200px;
-    position: relative;
-    display: flex;
-    align-items: center;
-}
-
-.ld-prefix-sym {
-    position: absolute;
-    left: 12px;
-    font-size: 13px;
-    font-weight: 800;
-    color: var(--grn-slate-500);
-    pointer-events: none;
-}
-
-.ld-input-field {
-    width: 100%;
-    height: 40px;
-    background: #ffffff;
-    border: 1.5px solid var(--grn-slate-300);
-    border-radius: var(--radius-sm);
-    padding: 6px 12px 6px 32px;
-    font-size: 13.5px;
-    font-family: var(--font-mono);
-    font-weight: 700;
-    color: var(--grn-slate-900);
-    outline: none;
-    transition: all 0.15s ease;
-}
-
-.ld-input-field:focus {
-    border-color: var(--grn-primary);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.ld-input-field:disabled {
-    background: var(--grn-slate-100);
-    border-color: var(--grn-slate-200);
-    color: var(--grn-slate-400);
-    cursor: not-allowed;
-    padding-left: 12px;
-}
-
-/* Tier 4: Bottom Metrics Strip */
-.line-footer-strip {
-    margin-top: 18px;
-    background: #fafbfc;
-    border: 1px solid var(--grn-slate-200);
-    border-radius: var(--radius-md);
-    padding: 12px 18px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.metrics-pills-group {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 22px;
-    font-size: 13px;
-}
-
-.metric-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--grn-slate-600);
-}
-
-.metric-item strong {
-    font-family: var(--font-mono);
-    color: var(--grn-slate-900);
-}
-
-.cogs-landed-badge {
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    color: #ffffff;
-    padding: 6px 16px;
-    border-radius: var(--radius-md);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 12.5px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.cogs-landed-badge span.label {
-    color: #94a3b8;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 0.5px;
-}
-
-.cogs-landed-badge span.price {
-    font-family: var(--font-mono);
-    font-size: 14px;
-    font-weight: 800;
-    color: #38bdf8;
-}
-
-.btn-dual-imei {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12.5px;
-    color: var(--grn-primary);
-    background: var(--grn-primary-soft);
-    border: 1px solid var(--grn-primary-border);
-    padding: 7px 16px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-weight: 700;
-    transition: all 0.15s ease;
-}
-
-.btn-dual-imei:hover {
-    background: #dbeafe;
-}
-
-/* User Toggle: Phone vs Accessory */
-.imei-requirement-toggle {
-    display: inline-flex;
-    background: #e2e8f0;
-    padding: 2px;
-    border-radius: 8px;
-    gap: 2px;
-}
-
-.imei-toggle-btn {
-    border: none;
-    background: transparent;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 700;
-    color: #475569;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.imei-toggle-btn.active {
-    background: #0f172a;
-    color: #ffffff;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
-
-/* ==========================================================================
-   SECTION 3: 5 AUDITED KPI VALUATION SUMMARY CARDS
-   ========================================================================== */
-.kpi-deck {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 16px;
-}
-
-.kpi-tile {
-    background: #ffffff;
-    border: 1.5px solid var(--grn-slate-200);
-    border-radius: var(--radius-lg);
-    padding: 18px;
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    min-height: 145px;
-    box-shadow: var(--shadow-sm);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.kpi-tile:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-hover);
-}
-
-.kpi-tile::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-}
-
-.tile-blue::before { background: #2563eb; }
-.tile-emerald::before { background: #10b981; }
-.tile-amber::before { background: #f59e0b; }
-.tile-purple::before { background: #8b5cf6; }
-.tile-rose::before { background: #f43f5e; }
-
-.tile-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-}
-
-.tile-step-num {
-    font-size: 10.5px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    color: var(--grn-slate-400);
-}
-
-.tile-title {
-    font-size: 13px;
-    font-weight: 800;
-    color: var(--grn-slate-800);
-    margin-top: 3px;
-}
-
-.tile-icon-box {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-}
-
-.tile-blue .tile-icon-box { background: var(--grn-primary-soft); color: var(--grn-primary); }
-.tile-emerald .tile-icon-box { background: var(--grn-emerald-50); color: var(--grn-emerald-600); }
-.tile-amber .tile-icon-box { background: var(--grn-amber-50); color: var(--grn-amber-600); }
-.tile-purple .tile-icon-box { background: var(--grn-purple-50); color: var(--grn-purple-600); }
-.tile-rose .tile-icon-box { background: var(--grn-rose-50); color: var(--grn-rose-600); }
-
-.tile-amount {
-    font-size: 21px;
-    font-weight: 800;
-    font-family: var(--font-mono);
-    margin: 10px 0 4px;
-    letter-spacing: -0.5px;
-}
-
-.tile-blue .tile-amount { color: #1d4ed8; }
-.tile-emerald .tile-amount { color: #047857; }
-.tile-amber .tile-amount { color: #b45309; }
-.tile-purple .tile-amount { color: #6d28d9; }
-.tile-rose .tile-amount { color: #be123c; }
-
-.tile-footer {
-    font-size: 11.5px;
-    color: var(--grn-slate-500);
-    display: flex;
-    justify-content: space-between;
-    border-top: 1px dashed var(--grn-slate-200);
-    padding-top: 8px;
-    margin-top: 6px;
-}
-
-/* Action Footer Dock */
-.submit-dock-bar {
-    background: #ffffff;
-    border: 1.5px solid var(--grn-slate-200);
-    border-radius: var(--radius-lg);
-    padding: 16px 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    box-shadow: var(--shadow-sm);
-}
-
-.audit-msg {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    color: var(--grn-slate-600);
-}
-
-.audit-msg i {
-    color: var(--grn-emerald-600);
-    font-size: 16px;
-}
-
-.btn-verify-stock {
-    background: linear-gradient(180deg, #15803d, #166534);
-    color: #ffffff;
-    padding: 11px 26px;
-    font-size: 14px;
-    font-weight: 700;
-    border-radius: var(--radius-md);
-    box-shadow: 0 4px 10px rgba(21, 128, 61, 0.25);
-    cursor: pointer;
-    border: none;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: all 0.2s ease;
-}
-
-.btn-verify-stock:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 14px rgba(21, 128, 61, 0.35);
-}
-
-/* Responsive Rules */
-@media (max-width: 1200px) {
-    .kpi-deck { grid-template-columns: repeat(3, 1fr); }
-    .grid-cols-4 { grid-template-columns: repeat(2, 1fr); }
+  --primary: #0d9488;
+  --primary-hover: #0f766e;
+  --primary-light: #f0fdfa;
+  --primary-border: #99f6e4;
+  --success: #16a34a;
+  --success-hover: #15803d;
+  --danger: #dc2626;
+  --danger-light: #fef2f2;
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+  --surface: #ffffff;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+.grn-app-container {
+  max-width: 1560px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-family: var(--font-stack);
+  color: var(--slate-800);
+  font-size: 13px;
+  line-height: 1.45;
+  padding-bottom: 90px;
+}
+
+/* HEADER BLOCK */
+.page-header-grn {
+  background: var(--surface);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.header-titles h1 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--slate-900);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: -0.01em;
+  margin-bottom: 0;
+}
+
+.header-titles .subtitle {
+  font-size: 12px;
+  color: var(--slate-500);
+  margin-top: 2px;
+  font-weight: 400;
+}
+
+.header-badges {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.badge-grn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.badge-grn-primary {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid var(--primary-border);
+}
+
+.badge-grn-neutral {
+  background-color: var(--slate-100);
+  color: var(--slate-600);
+  border: 1px solid var(--slate-300);
+}
+
+/* CARDS */
+.card-grn {
+  background: var(--surface);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.card-title-grn {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--slate-800);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--slate-100);
+  padding-bottom: 8px;
+}
+
+.card-title-grn span.tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--slate-500);
+}
+
+/* GRID FORM LAYOUTS */
+.grid-grn {
+  display: grid;
+  gap: 12px 16px;
+}
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-6 { grid-template-columns: repeat(6, 1fr); }
+.col-span-2 { grid-column: span 2; }
+
+.form-group-grn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+
+.form-group-grn label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--slate-700);
+  margin-bottom: 0;
+}
+
+.required-star {
+  color: var(--danger);
+  margin-left: 2px;
+}
+
+/* FORM CONTROLS */
+.form-group-grn input[type="text"],
+.form-group-grn input[type="number"],
+.form-group-grn input[type="date"],
+.form-group-grn select,
+.form-group-grn textarea,
+.table-container input,
+.table-container select {
+  height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--slate-300);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--slate-800);
+  background-color: var(--surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  width: 100%;
+  outline: none;
+}
+
+.form-group-grn input:focus,
+.form-group-grn select:focus,
+.form-group-grn textarea:focus,
+.table-container input:focus,
+.table-container select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+}
+
+input.readonly-display,
+.table-container input.readonly-display {
+  background-color: var(--slate-100) !important;
+  color: var(--slate-600) !important;
+  border-color: var(--slate-200) !important;
+  cursor: not-allowed;
+  font-weight: 600;
+}
+
+textarea.form-control-grn {
+  height: 72px !important;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.input-prefix-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-prefix-wrap span.prefix {
+  position: absolute;
+  left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--slate-400);
+  pointer-events: none;
+}
+
+.input-prefix-wrap input {
+  padding-left: 30px !important;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+/* TOGGLE SWITCHES */
+.toggle-group-grn {
+  display: flex;
+  border: 1px solid var(--slate-300);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 34px;
+  background-color: var(--slate-100);
+}
+
+.toggle-btn-grn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--slate-600);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.toggle-btn-grn.active {
+  background-color: var(--primary);
+  color: #ffffff;
+}
+
+/* TABLE SECTION */
+.table-container {
+  overflow-x: auto;
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+table.items-table {
+  width: 100%;
+  min-width: 1540px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+table.items-table th {
+  background-color: var(--slate-100);
+  color: var(--slate-700);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--slate-300);
+  border-right: 1px solid var(--slate-200);
+  white-space: nowrap;
+}
+
+table.items-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--slate-200);
+  border-right: 1px solid var(--slate-200);
+  vertical-align: middle;
+  background-color: #fff;
+}
+
+table.items-table tr:hover td {
+  background-color: #fafbfc;
+}
+
+table.items-table input,
+table.items-table select {
+  height: 30px;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.text-right { text-align: right !important; }
+.text-center { text-align: center !important; }
+
+.btn-remove-row-grn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--slate-400);
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.btn-remove-row-grn:hover {
+  background-color: var(--danger-light);
+  color: var(--danger);
+  border-color: #fecaca;
+}
+
+.btn-secondary-grn {
+  background-color: var(--surface);
+  color: var(--slate-700);
+  border: 1px solid var(--slate-300);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s, border-color 0.15s;
+  text-decoration: none !important;
+}
+
+.btn-secondary-grn:hover {
+  background-color: var(--slate-100);
+  border-color: var(--slate-400);
+  color: var(--slate-900);
+}
+
+.btn-primary-outline-grn {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid var(--primary-border);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none !important;
+}
+
+.btn-primary-outline-grn:hover {
+  background-color: #ccfbf1;
+  border-color: var(--primary);
+  color: var(--primary-hover);
+}
+
+/* RECONCILIATION CARDS (SECTION 5) */
+.reconciliation-deck {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
+.recon-step-card {
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--slate-50);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-top: 3.5px solid var(--slate-400);
+  min-height: 105px;
+}
+
+.recon-step-card.step-1 { border-top-color: #3b82f6; }
+.recon-step-card.step-2 { border-top-color: #10b981; }
+.recon-step-card.step-3 { border-top-color: #f59e0b; }
+.recon-step-card.step-4 { border-top-color: #8b5cf6; background-color: #faf5ff; }
+.recon-step-card.step-5 { border-top-color: var(--primary); background-color: #f0fdfa; }
+
+.recon-step-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--slate-500);
+  margin-bottom: 2px;
+}
+
+.recon-step-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--slate-700);
+  margin-bottom: 6px;
+}
+
+.recon-step-value {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--slate-900);
+  letter-spacing: -0.01em;
+  font-family: var(--font-mono);
+}
+
+.recon-step-sub {
+  font-size: 11px;
+  color: var(--slate-500);
+  margin-top: 3px;
+}
+
+/* LOWER DECK */
+.lower-deck-grn {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 16px;
+  align-items: start;
+}
+
+/* SUMMARY PANEL */
+.summary-card-grn {
+  background: var(--surface);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.summary-row-grn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 12.5px;
+  color: var(--slate-600);
+  border-bottom: 1px dashed var(--slate-200);
+}
+
+.summary-row-grn .val {
+  font-weight: 600;
+  color: var(--slate-800);
+  font-family: var(--font-mono);
+}
+
+.summary-row-grn.total-row {
+  border-top: 2px solid var(--slate-300);
+  border-bottom: 2px solid var(--slate-800);
+  margin-top: 8px;
+  padding: 10px 0;
+  color: var(--slate-900);
+}
+
+.summary-row-grn.total-row .label {
+  font-size: 13.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.summary-row-grn.total-row .val {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--primary-hover);
+}
+
+.summary-row-grn.landed-total-row {
+  background: #faf5ff;
+  margin: 8px -10px 0 -10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid #e9d5ff;
+  color: #6b21a8;
+  font-weight: 700;
+}
+
+/* BOTTOM ACTION DOCK */
+.action-bar-grn {
+  background: var(--surface);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg);
+  padding: 14px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--shadow-md);
+  position: fixed;
+  bottom: 12px;
+  left: 16px;
+  right: 16px;
+  max-width: 1560px;
+  margin: 0 auto;
+  z-index: 1050;
+}
+
+.action-info-grn {
+  font-size: 11.5px;
+  color: var(--slate-500);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action-info-grn::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--success);
+  display: inline-block;
+}
+
+.btn-group-actions-grn {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn-action-grn {
+  padding: 8px 18px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  transition: background 0.15s, transform 0.05s;
+}
+
+.btn-action-grn:active { transform: scale(0.98); }
+
+.btn-action-primary-grn {
+  background-color: var(--primary);
+  color: #ffffff;
+  border: 1px solid var(--primary-hover);
+  box-shadow: 0 1px 2px rgba(13, 148, 136, 0.2);
+}
+.btn-action-primary-grn:hover { background-color: var(--primary-hover); color:#fff; }
+
+.btn-action-success-grn {
+  background-color: var(--success);
+  color: #ffffff;
+  border: 1px solid var(--success-hover);
+  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.2);
+}
+.btn-action-success-grn:hover { background-color: var(--success-hover); color:#fff; }
+
+/* AUTOCOMPLETE & FLOATING DROPDOWN */
+.search-wrapper-relative {
+  position: relative;
+  width: 100%;
+}
+
+.floating-results-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1090;
+  background: #ffffff;
+  border: 1px solid var(--slate-300);
+  border-radius: var(--radius-sm);
+  max-height: 250px;
+  overflow-y: auto;
+  box-shadow: var(--shadow-md);
+  margin-top: 2px;
+  display: none;
+}
+
+.floating-results-dropdown.show { display: block; }
+
+.dropdown-item-grn {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--slate-100);
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.dropdown-item-grn:hover { background-color: var(--primary-light); }
+
+/* TOAST NOTIFICATION */
+#toast-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--slate-900);
+  color: #ffffff;
+  padding: 12px 20px;
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+#toast-notification.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* RESPONSIVE */
+@media (max-width: 1100px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-6 { grid-template-columns: repeat(3, 1fr); }
+  .reconciliation-deck { grid-template-columns: repeat(2, 1fr); }
+  .lower-deck-grn { grid-template-columns: 1fr; }
+  .col-span-2 { grid-column: span 1; }
 }
 
 @media (max-width: 768px) {
-    .kpi-deck { grid-template-columns: 1fr; }
-    .grid-cols-3, .grid-cols-4 { grid-template-columns: 1fr; }
-    .submit-dock-bar { flex-direction: column; gap: 14px; align-items: stretch; }
-    .grn-page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .grid-4, .grid-3, .grid-6 { grid-template-columns: 1fr; }
+  .reconciliation-deck { grid-template-columns: 1fr; }
+  .col-span-2 { grid-column: span 1; }
+  .page-header-grn { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .action-bar-grn { flex-direction: column; gap: 10px; position: static; }
+  .btn-group-actions-grn { width: 100%; flex-wrap: wrap; }
+  .btn-group-actions-grn button { flex: 1; }
+}
+
+@media print {
+  body { background-color: #fff !important; }
+  .action-bar-grn, .btn-primary-outline-grn, .btn-remove-row-grn, .no-print, header, aside, footer {
+    display: none !important;
+  }
+  .card-grn { box-shadow: none !important; border: 1px solid #ccc !important; }
+  table.items-table { min-width: 100% !important; }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1480px;">
+<div class="grn-app-container">
 
-    <!-- Hidden Configuration Meta Tag to Communicate Master Switch to Frontend Scripts -->
-    <div id="grnMasterConfigMeta"
-         data-enforce-imei="{{ SYS_CONFIG.enforce_imei_tracking|yesno:'true,false' }}"
-         data-active-fiscal-year="{{ active_fiscal_year|default:'2083/84' }}"
-         style="display: none;">
+  <!-- TOP HEADER -->
+  <header class="page-header-grn">
+    <div class="header-titles">
+      <h1>GRN (Purchase)</h1>
+      <div class="subtitle">Goods Received Note / Purchase Inward – Physical stock receiving &amp; landed cost intake</div>
     </div>
-
-    <!-- CLEAN PAGE HEADER -->
-    <header class="grn-page-header">
-        <div class="header-text">
-            <h1>
-                <i class="fa-solid fa-boxes-packing" style="color: var(--grn-primary);"></i>
-                Goods Received Note (GRN) Inward
-                {% if not SYS_CONFIG.enforce_imei_tracking %}
-                <span class="badge bg-warning bg-opacity-10 text-dark border border-warning fs-xs ms-2">
-                    <i class="fa-solid fa-clock-rotate-left me-1"></i> Backlog Entry Mode: Phone IMEIs Optional
-                </span>
-                {% else %}
-                <span class="badge bg-success bg-opacity-10 text-success border border-success fs-xs ms-2">
-                    <i class="fa-solid fa-shield-check me-1"></i> Strict Mode: Mandatory IMEIs
-                </span>
-                {% endif %}
-            </h1>
-            <p>
-                Stock physical intake with Pre-VAT rate valuation, dual-mode discounts (Amount vs. %), dedicated 13% VAT, value-weighted shipping overhead distribution &amp; smart Dual-IMEI verification.
-            </p>
-        </div>
-        <div>
-            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold">
-                <i class="fa-solid fa-arrow-left me-1"></i> Back to GRN List
-            </a>
-        </div>
-    </header>
-
-    <form method="post" id="grnMasterForm" novalidate>
-        {% csrf_token %}
-
-        <!-- DETAILED ERROR SUMMARY BOX -->
-        {% if form.errors or formset.errors %}
-        <div class="alert alert-danger alert-dismissible fade show rounded-4 shadow-sm p-3 mb-4 border-0" role="alert">
-            <div class="d-flex align-items-center gap-2 mb-2">
-                <span class="badge bg-danger text-white rounded-pill px-2 py-1 fs-2xs">Validation Error</span>
-                <h6 class="fw-bold text-danger mb-0">Please resolve the following submission errors:</h6>
-            </div>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            <ul class="mb-0 fs-xs ps-3">
-                {% for field in form %}
-                    {% for err in field.errors %}
-                        <li><strong>{{ field.label }}:</strong> {{ err }}</li>
-                    {% endfor %}
-                {% endfor %}
-                {% for err in form.non_field_errors %}
-                    <li><strong>General Form Error:</strong> {{ err }}</li>
-                {% endfor %}
-                {% for f in formset %}
-                    {% for field in f %}
-                        {% for err in field.errors %}
-                            <li><strong>Line Item {{ forloop.parentloop.counter }} ({{ field.label }}):</strong> {{ err }}</li>
-                        {% endfor %}
-                    {% endfor %}
-                    {% for err in f.non_field_errors %}
-                        <li><strong>Line Item {{ forloop.counter }}:</strong> {{ err }}</li>
-                    {% endfor %}
-                {% endfor %}
-                {% for err in formset.non_form_errors %}
-                    <li><strong>Items List:</strong> {{ err }}</li>
-                {% endfor %}
-            </ul>
-        </div>
-        {% endif %}
-
-        <!-- SECTION 1: SUPPLIER & CONSIGNMENT INFORMATION (SYNCHRONIZED B.S. & A.D. DATES) -->
-        <section class="erp-card">
-            <div class="erp-card-header">
-                <div>
-                    <div class="erp-card-title">
-                        <i class="fa-solid fa-truck-ramp-box"></i>
-                        1. Supplier &amp; Consignment Information
-                    </div>
-                    <div class="erp-card-subtitle">
-                        Log supplier fiscal references, synchronized Bikram Sambat &amp; Gregorian dates, freight, and invoice discounts
-                    </div>
-                </div>
-            </div>
-
-            <div class="erp-card-body">
-                
-                <!-- Primary Supplier & Synchronized Date Grid (4 Columns) -->
-                <div class="grid grid-cols-4">
-                    
-                    <!-- Col 1: Supplier Lookup -->
-                    <div class="form-group">
-                        <label class="form-label">
-                            Supplier / Distributor Name <span class="req">*</span>
-                        </label>
-                        <div class="contextual-search-wrapper" 
-                             id="supplierSearchWrapper"
-                             data-search-url="/purchases/suppliers/api/search/" 
-                             data-search-type="supplier"
-                             data-placeholder="Search supplier by name, company, phone, PAN..."
-                             data-initial-id="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}"
-                             data-initial-title="{{ form.instance.supplier.company_name|default:'' }}"
-                             data-initial-subtitle="{% if form.instance.supplier.code %}Code: {{ form.instance.supplier.code }}{% endif %}">
-                            <input type="hidden" name="supplier" id="id_supplier" value="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}" required>
-                            <input type="text" class="form-control contextual-search-input async-search-input" 
-                                   id="grn_supplier_search_display"
-                                   data-search-url="/purchases/suppliers/api/search/"
-                                   placeholder="Search supplier by name, company, phone, PAN..." 
-                                   value="{% if form.instance.supplier %}{{ form.instance.supplier.company_name }}{% endif %}" 
-                                   autocomplete="off">
-                        </div>
-                        {% if form.supplier.errors %}
-                            <div class="text-danger fs-2xs mt-1">{{ form.supplier.errors|striptags }}</div>
-                        {% endif %}
-                    </div>
-
-                    <!-- Col 2: Supplier Bill Ref -->
-                    <div class="form-group">
-                        <label class="form-label">
-                            Supplier Invoice / Challan Ref No. <span class="req">*</span>
-                        </label>
-                        <div class="input-wrap">
-                            <span class="input-prefix"><i class="fa-solid fa-receipt"></i></span>
-                            <input type="text" name="supplier_bill_no" id="id_supplier_bill_no" class="form-control has-prefix font-mono-val" placeholder="e.g. INV-9908 / Chal-54" value="{{ form.supplier_bill_no.value|default:'' }}" required>
-                        </div>
-                        {% if form.supplier_bill_no.errors %}
-                            <div class="text-danger fs-2xs mt-1">{{ form.supplier_bill_no.errors|striptags }}</div>
-                        {% endif %}
-                    </div>
-
-                    <!-- Col 3: Synchronized Bill Date (B.S. Visual Datepicker Trigger) -->
-                    <div class="form-group">
-                        <label class="form-label">
-                            Bill Date (BS) <span class="hint text-primary fw-bold">नेपाली मिति</span>
-                        </label>
-                        <div class="input-wrap">
-                            <span class="input-prefix clickable-prefix" id="btn-trigger-bs-date" title="Click to open visual Nepali calendar">
-                                <i class="fa-regular fa-calendar-check text-primary"></i>
-                            </span>
-                            <input type="text" 
-                                   name="bill_date_bs" 
-                                   id="id_bill_date_bs" 
-                                   class="form-control has-prefix font-mono-val nepali-datepicker fw-bold text-primary" 
-                                   placeholder="YYYY-MM-DD (BS)" 
-                                   value="{{ form.bill_date_bs.value|default:'' }}" 
-                                   autocomplete="off">
-                        </div>
-                        <div class="d-flex align-items-center justify-content-between mt-1">
-                            <span class="badge bg-primary bg-opacity-10 text-primary font-mono fs-2xs" id="grnFyBadge">
-                                FY {{ active_fiscal_year|default:'2083/84' }}
-                            </span>
-                            <small class="text-muted fs-3xs" id="grnDateSyncState">Click input or icon for visual calendar</small>
-                        </div>
-                        {% if form.bill_date_bs.errors %}
-                            <div class="text-danger fs-2xs mt-1">{{ form.bill_date_bs.errors|striptags }}</div>
-                        {% endif %}
-                    </div>
-
-                    <!-- Col 4: Synchronized Bill Date (A.D. Gregorian Calendar) -->
-                    <div class="form-group">
-                        <label class="form-label">
-                            Bill / Challan Date (AD) <span class="req">*</span> <span class="hint">English</span>
-                        </label>
-                        <div class="input-wrap">
-                            <span class="input-prefix"><i class="fa-regular fa-calendar text-muted"></i></span>
-                            <input type="date" name="bill_date" id="id_bill_date" class="form-control has-prefix font-mono-val" 
-                                   value="{% if form.bill_date.value %}{% if form.bill_date.value.isoformat %}{{ form.bill_date.value|date:'Y-m-d' }}{% else %}{{ form.bill_date.value }}{% endif %}{% endif %}" required>
-                        </div>
-                        {% if form.bill_date.errors %}
-                            <div class="text-danger fs-2xs mt-1">{{ form.bill_date.errors|striptags }}</div>
-                        {% endif %}
-                    </div>
-
-                </div>
-
-                <!-- On-Screen Real-Time Fiscal Year Lock Warning Alert -->
-                <div id="grnFiscalLockWarning" class="alert alert-warning border border-warning border-opacity-50 d-none mt-3 p-3 rounded-4 shadow-xs" role="alert">
-                    <div class="d-flex align-items-start gap-3">
-                        <div class="rounded-circle bg-warning bg-opacity-25 p-2 text-warning-emphasis flex-shrink-0">
-                            <i class="fa-solid fa-triangle-exclamation fs-5"></i>
-                        </div>
-                        <div class="flex-grow-1 fs-xs">
-                            <strong class="text-dark d-block mb-1">
-                                <span class="badge bg-danger text-white me-1 font-mono">AUDITED &amp; LOCKED PERIOD</span>
-                                Selected date belongs to a Closed Fiscal Year (<span id="grnLockedFySpan" class="font-mono fw-bold">2080/81</span>)
-                            </strong>
-                            <p class="mb-1 text-secondary" id="grnFiscalLockWarningText">
-                                Financial posting to this date is blocked because the accounting period is formally closed and audited.
-                            </p>
-                            <div class="text-muted fs-2xs">
-                                <strong>Required Action:</strong> Either pick an inward date within the active open Fiscal Year (<strong class="text-primary">{{ active_fiscal_year|default:'2083/84' }}</strong>) or have a Store Owner temporarily unlock this historical period in the Accounting Settings dashboard.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Overheads Grid -->
-                <div class="grid grid-cols-4" style="margin-top: 18px;">
-                    
-                    <div class="form-group">
-                        <label class="form-label">
-                            Freight / Courier Charge <span class="hint">NPR</span>
-                        </label>
-                        <div class="input-wrap">
-                            <span class="input-prefix">Rs.</span>
-                            <input type="number" step="0.01" min="0" name="extra_freight_charge" id="overhead-freight" class="form-control has-prefix font-mono-val calc-trigger" value="{{ form.extra_freight_charge.value|default:'0.00' }}">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">
-                            Customs / Duty <span class="hint">NPR</span>
-                        </label>
-                        <div class="input-wrap">
-                            <span class="input-prefix">Rs.</span>
-                            <input type="number" step="0.01" min="0" name="customs_import_charge" id="overhead-customs" class="form-control has-prefix font-mono-val calc-trigger" value="{{ form.customs_import_charge.value|default:'0.00' }}">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">
-                            Handling / Insurance <span class="hint">NPR</span>
-                        </label>
-                        <div class="input-wrap">
-                            <span class="input-prefix">Rs.</span>
-                            <input type="number" step="0.01" min="0" name="other_handling_charge" id="overhead-handling" class="form-control has-prefix font-mono-val calc-trigger" value="{{ form.other_handling_charge.value|default:'0.00' }}">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">
-                            Spot Paid on Delivery <span class="hint">Deducted from Debt</span>
-                        </label>
-                        <div class="input-wrap">
-                            <span class="input-prefix">Rs.</span>
-                            <input type="number" step="0.01" min="0" name="paid_amount" id="overhead-spotpaid" class="form-control has-prefix font-mono-val calc-trigger" value="{{ form.paid_amount.value|default:'0.00' }}">
-                        </div>
-                    </div>
-
-                </div>
-
-                <!-- Whole-Bill Discount & Remarks -->
-                <div class="grid" style="grid-template-columns: 1.2fr 1.8fr; margin-top: 18px;">
-                    
-                    <div class="consign-discount-card">
-                        <div class="consign-disc-head">
-                            <span class="form-label" style="font-weight: 800;">
-                                <i class="fa-solid fa-tags" style="color: var(--grn-primary);"></i> Whole-Bill Consignment Discount
-                            </span>
-                            <span id="whole-disc-saved-tag" class="consign-disc-badge">-Rs. 0.00</span>
-                        </div>
-
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <select name="bill_discount_type" id="id_bill_discount_type" style="display: none;">
-                                <option value="NONE" {% if form.bill_discount_type.value == 'NONE' %}selected{% endif %}>None</option>
-                                <option value="PERCENTAGE" {% if form.bill_discount_type.value == 'PERCENTAGE' %}selected{% endif %}>Percentage</option>
-                                <option value="AMOUNT" {% if form.bill_discount_type.value == 'AMOUNT' %}selected{% endif %}>Amount</option>
-                            </select>
-
-                            <div class="segmented-control" id="whole-disc-type-group">
-                                <button type="button" class="seg-btn {% if form.bill_discount_type.value == 'NONE' or not form.bill_discount_type.value %}active{% endif %}" data-mode="NONE">None</button>
-                                <button type="button" class="seg-btn {% if form.bill_discount_type.value == 'PERCENTAGE' %}active{% endif %}" data-mode="PERCENTAGE">% Pct</button>
-                                <button type="button" class="seg-btn {% if form.bill_discount_type.value == 'AMOUNT' %}active{% endif %}" data-mode="AMOUNT">Rs. Cash</button>
-                            </div>
-
-                            <div class="input-wrap" style="flex: 1;">
-                                <span class="input-prefix" id="whole-disc-prefix" style="left: 10px;">Rs.</span>
-                                <input type="number" step="any" min="0" name="bill_discount_input_value" id="whole-disc-val" class="form-control font-mono-val calc-trigger" style="padding-left: 36px;" value="{{ form.bill_discount_input_value.value|default:'0.00' }}">
-                            </div>
-                        </div>
-
-                        <div style="font-size: 11.5px; color: var(--grn-slate-500);">
-                            Rebate distributed proportionally across all line items to lower true landed unit cost.
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label">Consignment Remarks / Stock Delivery Notes</label>
-                        <textarea name="remarks" id="id_remarks" class="form-control" placeholder="Optional notes: e.g. Checked outer cartons, sealed with manufacturer security tape...">{{ form.remarks.value|default:'' }}</textarea>
-                    </div>
-
-                </div>
-
-                <!-- Compliance Toggles -->
-                <div class="compliance-bar">
-                    <label class="toggle-row">
-                        <input type="checkbox" name="is_vat_bill" id="tax-vat-toggle" class="calc-trigger" {% if form.is_vat_bill.value %}checked{% endif %} style="display: none;">
-                        <div class="custom-switch"></div>
-                        <div style="font-size: 13px; font-weight: 700; color: var(--grn-slate-700);">
-                            13% VAT Calculation Included in Invoice (Annex 7 Tax Bill)
-                            <span class="compliance-pill pill-ird">IRD Nepal Compliant</span>
-                        </div>
-                    </label>
-
-                    <label class="toggle-row">
-                        <input type="checkbox" name="distributor_mdms_certified" id="id_distributor_mdms_certified" {% if form.distributor_mdms_certified.value|default:True %}checked{% endif %} style="display: none;">
-                        <div class="custom-switch"></div>
-                        <div style="font-size: 13px; font-weight: 700; color: var(--grn-slate-700);">
-                            Distributor NTA MDMS Certified Import
-                            <span class="compliance-pill pill-mdms">Official Nepal Legal Stock</span>
-                        </div>
-                    </label>
-                </div>
-
-            </div>
-        </section>
-
-        <!-- ==========================================================================
-             SECTION 2: VERTICAL LINE ITEMS, PRICING & SMART IMEI ROUTING
-             ========================================================================== -->
-        <section class="erp-card">
-            <div class="erp-card-header">
-                <div>
-                    <div class="erp-card-title">
-                        <i class="fa-solid fa-list-check"></i>
-                        2. Inward Line Items, Pricing &amp; Mandatory IMEIs
-                    </div>
-                    <div class="erp-card-subtitle">
-                        Spacious vertical line manifests. Smartphones prompt for IMEIs; earphones and accessories can be set to Non-IMEI without errors.
-                    </div>
-                </div>
-                <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold" id="btn-add-line">
-                    <i class="fa-solid fa-plus me-1"></i> Add Another Line
-                </button>
-            </div>
-
-            <div class="erp-card-body">
-                <!-- Django Formset Management Form -->
-                {{ formset.management_form }}
-
-                <div id="lines-container" class="line-items-stack">
-                    {% for item_form in formset %}
-                    <div class="line-item-card" data-row-index="{{ forloop.counter0 }}" id="line-item-{{ forloop.counter0 }}">
-                        {{ item_form.id }}
-
-                        <!-- Top Header Bar -->
-                        <div class="line-item-topbar">
-                            <div class="item-counter-badge">
-                                <span class="counter-dot">{{ forloop.counter }}</span>
-                                <span>Line Item Reference #{{ forloop.counter }}</span>
-                            </div>
-                            <button type="button" class="btn-remove-row" onclick="deleteLineRow('{{ forloop.counter0 }}')" {% if forloop.first and formset|length == 1 %}style="display:none;"{% endif %}>
-                                <i class="fa-regular fa-trash-can"></i> Remove Line
-                            </button>
-                            <div style="display: none;">
-                                {{ item_form.DELETE }}
-                            </div>
-                        </div>
-
-                        <!-- VERTICAL TIER 1: PRODUCT SEARCH (FULL WIDTH) -->
-                        <div class="form-group mb-3">
-                            <label class="form-label">Product / Handset Model <span class="req">*</span></label>
-                            <div class="contextual-search-wrapper" 
-                                 data-search-url="/products/api/search/?mode=simple" 
-                                 data-search-type="product"
-                                 data-placeholder="Scan barcode or type model/brand..."
-                                 data-initial-id="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}"
-                                 data-initial-title="{{ item_form.instance.product.name|default:'' }}"
-                                 data-initial-subtitle="{% if item_form.instance.product.sku %}SKU: {{ item_form.instance.product.sku }}{% endif %}">
-                                <input type="hidden" name="items-{{ forloop.counter0 }}-product" id="id_items-{{ forloop.counter0 }}-product" value="{{ item_form.instance.product.id|default:item_form.product.value|default:'' }}" class="grn-product-id-input" required>
-                                <input type="text" class="form-control contextual-search-input async-search-input grn-product-search-input" 
-                                       data-search-url="/products/api/search/?mode=simple"
-                                       placeholder="Scan barcode or type model/brand..." 
-                                       value="{% if item_form.instance.product %}{{ item_form.instance.product.name }}{% endif %}" 
-                                       autocomplete="off">
-                            </div>
-                            {% if item_form.product.errors %}
-                                <div class="text-danger fs-2xs mt-1">{{ item_form.product.errors|striptags }}</div>
-                            {% endif %}
-                        </div>
-
-                        <!-- VERTICAL TIER 2: QUANTITY, PRE-VAT RATE & TARGET MRP (3 EQUAL COLUMNS) -->
-                        <div class="grid grid-cols-3 mb-3">
-                            <div class="form-group">
-                                <label class="form-label">Qty (Units) <span class="req">*</span></label>
-                                <input type="number" step="any" min="1" 
-                                       name="items-{{ forloop.counter0 }}-purchased_quantity" 
-                                       id="id_items-{{ forloop.counter0 }}-purchased_quantity" 
-                                       class="form-control font-mono-val line-qty-input calc-trigger" 
-                                       value="{{ item_form.purchased_quantity.value|default:'1' }}" required>
-                                {% if item_form.purchased_quantity.errors %}
-                                    <div class="text-danger fs-2xs mt-1">{{ item_form.purchased_quantity.errors|striptags }}</div>
-                                {% endif %}
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Unit Rate (Pre-VAT) <span class="req">*</span></label>
-                                <div class="input-wrap">
-                                    <span class="input-prefix">Rs.</span>
-                                    <input type="number" step="any" min="0" 
-                                           name="items-{{ forloop.counter0 }}-purchase_rate" 
-                                           id="id_items-{{ forloop.counter0 }}-purchase_rate" 
-                                           class="form-control has-prefix font-mono-val line-rate-input calc-trigger" 
-                                           value="{{ item_form.purchase_rate.value|default:'0.00' }}" required>
-                                </div>
-                                {% if item_form.purchase_rate.errors %}
-                                    <div class="text-danger fs-2xs mt-1">{{ item_form.purchase_rate.errors|striptags }}</div>
-                                {% endif %}
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Target MRP <span class="hint">Retail (NPR)</span></label>
-                                <div class="input-wrap">
-                                    <span class="input-prefix">Rs.</span>
-                                    <input type="number" step="any" min="0" 
-                                           name="items-{{ forloop.counter0 }}-new_selling_price" 
-                                           id="id_items-{{ forloop.counter0 }}-new_selling_price" 
-                                           class="form-control has-prefix font-mono-val" 
-                                           value="{{ item_form.new_selling_price.value|default:'' }}" 
-                                           placeholder="Retail Price">
-                                </div>
-                                {% if item_form.new_selling_price.errors %}
-                                    <div class="text-danger fs-2xs mt-1">{{ item_form.new_selling_price.errors|striptags }}</div>
-                                {% endif %}
-                            </div>
-                        </div>
-
-                        <!-- VERTICAL TIER 3: FULL-WIDTH ROOMY LINE DISCOUNT BAR -->
-                        <div class="line-discount-vertical-card {% if item_form.discount_type.value != 'NONE' and item_form.discount_type.value %}is-active{% endif %}" id="line-disc-card-{{ forloop.counter0 }}">
-                            <div class="ld-top-bar">
-                                <div class="ld-title-tag">
-                                    <i class="fa-solid fa-tags"></i> Line Discount Rule
-                                </div>
-                                <span class="ld-rebate-tag" id="ld-badge-{{ forloop.counter0 }}">-Rs. 0.00</span>
-                            </div>
-
-                            <div class="ld-controls-flex">
-                                <select name="items-{{ forloop.counter0 }}-discount_type" id="id_items-{{ forloop.counter0 }}-discount_type" class="line-disc-type-select" style="display: none;">
-                                    <option value="NONE" {% if item_form.discount_type.value == 'NONE' or not item_form.discount_type.value %}selected{% endif %}>None</option>
-                                    <option value="PERCENTAGE" {% if item_form.discount_type.value == 'PERCENTAGE' %}selected{% endif %}>Percentage</option>
-                                    <option value="AMOUNT" {% if item_form.discount_type.value == 'AMOUNT' %}selected{% endif %}>Amount</option>
-                                </select>
-
-                                <div class="ld-mode-switch">
-                                    <button type="button" class="ld-mode-btn {% if item_form.discount_type.value == 'NONE' or not item_form.discount_type.value %}active{% endif %}" data-mode="NONE" onclick="setRowDiscType('{{ forloop.counter0 }}', 'NONE')">None</button>
-                                    <button type="button" class="ld-mode-btn {% if item_form.discount_type.value == 'PERCENTAGE' %}active{% endif %}" data-mode="PERCENTAGE" onclick="setRowDiscType('{{ forloop.counter0 }}', 'PERCENTAGE')">% Percentage</button>
-                                    <button type="button" class="ld-mode-btn {% if item_form.discount_type.value == 'AMOUNT' %}active{% endif %}" data-mode="AMOUNT" onclick="setRowDiscType('{{ forloop.counter0 }}', 'AMOUNT')">Rs. Flat</button>
-                                </div>
-
-                                <div class="ld-input-box">
-                                    <span class="ld-prefix-sym" id="ld-sym-{{ forloop.counter0 }}">
-                                        {% if item_form.discount_type.value == 'PERCENTAGE' %}%{% elif item_form.discount_type.value == 'AMOUNT' %}Rs.{% endif %}
-                                    </span>
-                                    <input type="number" step="any" min="0" 
-                                           name="items-{{ forloop.counter0 }}-discount_input_value" 
-                                           id="id_items-{{ forloop.counter0 }}-discount_input_value"
-                                           class="ld-input-field line-disc-val-input calc-trigger" 
-                                           value="{{ item_form.discount_input_value.value|default:'0.00' }}"
-                                           {% if item_form.discount_type.value == 'NONE' or not item_form.discount_type.value %}disabled placeholder="No discount"{% endif %}>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Hidden Scanned IMEI Storage & Indicator Flag (Defaults according to master setting) -->
-                        <input type="hidden" class="row-requires-imei-flag" value="{% if SYS_CONFIG.enforce_imei_tracking %}true{% else %}false{% endif %}">
-                        <div style="display: none;">
-                            <textarea name="items-{{ forloop.counter0 }}-scanned_imei_list" id="id_items-{{ forloop.counter0 }}-scanned_imei_list" class="scanned-imei-hidden-input">{{ item_form.scanned_imei_list.value|default:'' }}</textarea>
-                        </div>
-
-                        <!-- VERTICAL TIER 4: METRICS FOOTER STRIP & SMART DUAL-IMEIS -->
-                        <div class="line-footer-strip">
-                            <div class="metrics-pills-group">
-                                <div class="metric-item">
-                                    Line Gross: <strong id="metric-gross-{{ forloop.counter0 }}">Rs. 0.00</strong>
-                                </div>
-                                <div class="metric-item">
-                                    Net Pre-VAT Base: <strong id="metric-net-{{ forloop.counter0 }}" style="color: var(--grn-primary);">Rs. 0.00</strong>
-                                </div>
-                                <div class="metric-item">
-                                    Allocated Overhead: <strong id="metric-overhead-{{ forloop.counter0 }}" style="color: var(--grn-amber-600);">+Rs. 0.00</strong>
-                                </div>
-                            </div>
-
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <!-- Dynamic Mode Toggle Button: Phone IMEI vs Accessory Non-IMEI -->
-                                <div class="imei-requirement-toggle">
-                                    <button type="button" class="imei-toggle-btn {% if SYS_CONFIG.enforce_imei_tracking %}active{% endif %}" id="toggle-imei-yes-{{ forloop.counter0 }}" onclick="setRowImeiRequirement('{{ forloop.counter0 }}', true)">
-                                        <i class="fa-solid fa-mobile-screen"></i> Phone (IMEI)
-                                    </button>
-                                    <button type="button" class="imei-toggle-btn {% if not SYS_CONFIG.enforce_imei_tracking %}active{% endif %}" id="toggle-imei-no-{{ forloop.counter0 }}" onclick="setRowImeiRequirement('{{ forloop.counter0 }}', false)">
-                                        <i class="fa-solid fa-box"></i> Non-IMEI
-                                    </button>
-                                </div>
-
-                                <!-- Dual IMEI Button -->
-                                <button type="button" class="btn-dual-imei" id="btn-dual-imei-{{ forloop.counter0 }}" onclick="openDualImeiModal('{{ forloop.counter0 }}')" {% if not SYS_CONFIG.enforce_imei_tracking %}style="display:none;"{% endif %}>
-                                    <i class="fa-solid fa-barcode"></i> Dual-IMEIs (<span id="imei-count-tag-{{ forloop.counter0 }}">0 Units</span>)
-                                </button>
-
-                                <div class="cogs-landed-badge">
-                                    <span class="label">Unit Landed COGS:</span>
-                                    <span class="price" id="metric-cogs-{{ forloop.counter0 }}">Rs. 0.00</span>
-                                </div>
-                            </div>
-                        </div>
-
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </section>
-
-        <!-- SECTION 3: INWARD VALUATION & SUPPLIER BALANCE RECONCILIATION -->
-        <section class="erp-card">
-            <div class="erp-card-header">
-                <div>
-                    <div class="erp-card-title">
-                        <i class="fa-solid fa-chart-pie"></i>
-                        3. Inward Valuation &amp; Supplier Balance Reconciliation
-                    </div>
-                    <div class="erp-card-subtitle">
-                        Live audited summary split into taxable base, VAT liability, logistical overheads, and net payable debt.
-                    </div>
-                </div>
-            </div>
-
-            <div class="erp-card-body">
-                <div class="kpi-deck">
-
-                    <!-- 1. PRE-VAT -->
-                    <div class="kpi-tile tile-blue">
-                        <div>
-                            <div class="tile-top">
-                                <div>
-                                    <div class="tile-step-num">Step 1</div>
-                                    <div class="tile-title">PRE-VAT MERCHANDISE</div>
-                                </div>
-                                <div class="tile-icon-box"><i class="fa-solid fa-cubes"></i></div>
-                            </div>
-                            <div class="tile-amount" id="sum-pre-vat">Rs. 0.00</div>
-                        </div>
-                        <div class="tile-footer">
-                            <span>Gross: <b id="sum-gross-val">Rs. 0.00</b></span>
-                            <span>Disc: <b id="sum-disc-val" style="color: var(--grn-rose-600);">-Rs. 0.00</b></span>
-                        </div>
-                    </div>
-
-                    <!-- 2. VAT 13% -->
-                    <div class="kpi-tile tile-emerald">
-                        <div>
-                            <div class="tile-top">
-                                <div>
-                                    <div class="tile-step-num">Step 2</div>
-                                    <div class="tile-title">DEDICATED 13% VAT</div>
-                                </div>
-                                <div class="tile-icon-box"><i class="fa-solid fa-receipt"></i></div>
-                            </div>
-                            <div class="tile-amount" id="sum-vat-amt">Rs. 0.00</div>
-                        </div>
-                        <div class="tile-footer">
-                            <span id="vat-status-tag">Annex 7 Taxable</span>
-                            <span id="vat-rate-tag">Rate: 13.0%</span>
-                        </div>
-                    </div>
-
-                    <!-- 3. OVERHEADS -->
-                    <div class="kpi-tile tile-amber">
-                        <div>
-                            <div class="tile-top">
-                                <div>
-                                    <div class="tile-step-num">Step 3</div>
-                                    <div class="tile-title">SHIPPING &amp; OVERHEADS</div>
-                                </div>
-                                <div class="tile-icon-box"><i class="fa-solid fa-truck-fast"></i></div>
-                            </div>
-                            <div class="tile-amount" id="sum-overheads">Rs. 0.00</div>
-                        </div>
-                        <div class="tile-footer">
-                            <span>Freight + Customs + Ins.</span>
-                            <span id="sum-overhead-cnt">0 Items Shared</span>
-                        </div>
-                    </div>
-
-                    <!-- 4. TOTAL LANDED COGS -->
-                    <div class="kpi-tile tile-purple">
-                        <div>
-                            <div class="tile-top">
-                                <div>
-                                    <div class="tile-step-num">Step 4</div>
-                                    <div class="tile-title">TOTAL LANDED (COGS)</div>
-                                </div>
-                                <div class="tile-icon-box"><i class="fa-solid fa-warehouse"></i></div>
-                            </div>
-                            <div class="tile-amount" id="sum-total-cogs">Rs. 0.00</div>
-                        </div>
-                        <div class="tile-footer">
-                            <span>Taxable Base + Overheads</span>
-                            <span>Stock Capitalized</span>
-                        </div>
-                    </div>
-
-                    <!-- 5. NET DUE -->
-                    <div class="kpi-tile tile-rose">
-                        <div>
-                            <div class="tile-top">
-                                <div>
-                                    <div class="tile-step-num">Step 5</div>
-                                    <div class="tile-title">NET DUE (SUPPLIER DEBT)</div>
-                                </div>
-                                <div class="tile-icon-box"><i class="fa-solid fa-money-bill-wave"></i></div>
-                            </div>
-                            <div class="tile-amount" id="sum-net-due">Rs. 0.00</div>
-                        </div>
-                        <div class="tile-footer">
-                            <span>Bill: <b id="sum-bill-total">Rs. 0.00</b></span>
-                            <span>Paid: <b id="sum-paid-spot">Rs. 0.00</b></span>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-        </section>
-
-        <!-- SUBMISSION ACTION DOCK BAR -->
-        <div class="submit-dock-bar">
-            <div class="audit-msg">
-                <i class="fa-solid fa-shield-halved"></i>
-                <span>Pre-VAT valuation, proportional overheads, and inventory counters will be verified and posted atomically to warehouse stock and General Ledger.</span>
-            </div>
-            <div style="display: flex; gap: 12px;">
-                <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary px-4 rounded-pill">
-                    Cancel
-                </a>
-                <button type="submit" class="btn-verify-stock" id="btn-final-submit">
-                    <i class="fa-solid fa-circle-check"></i> Verify &amp; Update Warehouse Stock
-                </button>
-            </div>
-        </div>
-
-    </form>
-</div>
-
-<!-- DUAL IMEI SCANNER MODAL -->
-<div class="modal fade" id="imeiModal" tabindex="-1" aria-labelledby="imeiModalLabel" aria-hidden="true" data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
-        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-            <div class="modal-header bg-dark text-white border-0 py-3 px-4">
-                <div>
-                    <h5 class="modal-title fs-sm fw-bold mb-0" id="imeiModalLabel">
-                        <i class="fa-solid fa-barcode text-primary me-2"></i> Scan Mandatory Dual-IMEIs
-                    </h5>
-                    <small class="text-white-50 fs-2xs" id="imeiModalProductTitle">Model Name</small>
-                </div>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body p-4" style="max-height: 480px; overflow-y: auto;">
-                <div class="alert alert-info border-0 rounded-3 p-3 fs-xs mb-3">
-                    <i class="fa-solid fa-circle-info me-1"></i> Both IMEI 1 and IMEI 2 are validated against NTA MDMS schema to prevent grey-market white-listing errors.
-                </div>
-                <table class="table table-bordered table-sm fs-xs mb-0">
-                    <thead class="bg-light text-muted">
-                        <tr>
-                            <th width="40" class="text-center">#</th>
-                            <th>Primary IMEI 1 (15-digits)</th>
-                            <th>Secondary IMEI 2 (15-digits)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="imeiModalTableBody"></tbody>
-                </table>
-            </div>
-            <div class="modal-footer bg-light border-0 py-2 px-3 d-flex justify-content-between">
-                <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold" onclick="saveDualImeisFromModal()">
-                    <i class="fa-solid fa-check me-1"></i> Save IMEIs
-                </button>
-            </div>
-        </div>
+    <div class="header-badges">
+      <span class="badge-grn badge-grn-primary">Stock Inward Workflow</span>
+      <span class="badge-grn badge-grn-neutral font-mono" id="current-fiscal-year">FY {{ active_fiscal_year|default:'2083/84' }}</span>
     </div>
-</div>
+  </header>
 
-<!-- ==========================================================================
-     NATIVE HTML5 ROW TEMPLATE (INERT & NEVER PRE-INITIALIZED BY SCRIPTS)
-     ========================================================================== -->
-<template id="empty-row-template">
-    <div class="line-item-card" data-row-index="__prefix__" id="line-item-__prefix__">
-        <div class="line-item-topbar">
-            <div class="item-counter-badge">
-                <span class="counter-dot">#</span>
-                <span>Line Item Reference</span>
-            </div>
-            <button type="button" class="btn-remove-row" onclick="deleteLineRow('__prefix__')">
-                <i class="fa-regular fa-trash-can"></i> Remove Line
-            </button>
-            <div style="display: none;">
-                <input type="checkbox" name="items-__prefix__-DELETE" id="id_items-__prefix__-DELETE">
-            </div>
+  <!-- FORM WRAPPER -->
+  <form method="post" id="masterGrnForm" novalidate>
+    {% csrf_token %}
+    <input type="hidden" name="action" id="grnFormAction" value="verify_stock">
+
+    <!-- Management Form for Django Inline Formset -->
+    {{ formset.management_form }}
+
+    <!-- SECTION 1: SUPPLIER & DOCUMENT INFORMATION -->
+    <section class="card-grn mb-3">
+      <div class="card-title-grn">
+        <span>1. Supplier &amp; Document Information</span>
+        <span class="tag">Basic Inward Registry</span>
+      </div>
+      <div class="grid-grn grid-4">
+        <!-- GRN No -->
+        <div class="form-group-grn">
+          <label>GRN No. <span class="required-star">*</span></label>
+          <input type="text" name="grn_number" id="grnNo" value="{{ form.instance.grn_number|default:'Auto-Allocated on Save' }}" readonly class="readonly-display font-mono">
         </div>
 
-        <div class="form-group mb-3">
-            <label class="form-label">Product / Handset Model <span class="req">*</span></label>
-            <div class="contextual-search-wrapper" 
-                 data-search-url="/products/api/search/?mode=simple" 
-                 data-search-type="product"
-                 data-placeholder="Scan barcode or type model/brand...">
-                <input type="hidden" name="items-__prefix__-product" id="id_items-__prefix__-product" class="grn-product-id-input" required>
-                <input type="text" class="form-control contextual-search-input async-search-input grn-product-search-input" 
-                       data-search-url="/products/api/search/?mode=simple"
-                       placeholder="Scan barcode or type model/brand..." 
-                       autocomplete="off">
-            </div>
+        <!-- GRN Date (Bill Date AD) -->
+        <div class="form-group-grn">
+          <label for="billDate">GRN / Invoice Date <span class="required-star">*</span></label>
+          <input type="date" name="bill_date" id="billDate" value="{% if form.bill_date.value %}{% if form.bill_date.value.isoformat %}{{ form.bill_date.value|date:'Y-m-d' }}{% else %}{{ form.bill_date.value }}{% endif %}{% else %}{{ today|date:'Y-m-d' }}{% endif %}" required>
+          <input type="hidden" name="bill_date_bs" id="billDateBs" value="{{ form.bill_date_bs.value|default:today_bs }}">
         </div>
 
-        <div class="grid grid-cols-3 mb-3">
-            <div class="form-group">
-                <label class="form-label">Qty (Units) <span class="req">*</span></label>
-                <input type="number" step="any" min="1" 
-                       name="items-__prefix__-purchased_quantity" 
-                       id="id_items-__prefix__-purchased_quantity" 
-                       class="form-control font-mono-val line-qty-input calc-trigger" 
-                       value="1" required>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Unit Rate (Pre-VAT) <span class="req">*</span></label>
-                <div class="input-wrap">
-                    <span class="input-prefix">Rs.</span>
-                    <input type="number" step="any" min="0" 
-                           name="items-__prefix__-purchase_rate" 
-                           id="id_items-__prefix__-purchase_rate" 
-                           class="form-control has-prefix font-mono-val line-rate-input calc-trigger" 
-                           value="0.00" required>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Target MRP <span class="hint">Retail (NPR)</span></label>
-                <div class="input-wrap">
-                    <span class="input-prefix">Rs.</span>
-                    <input type="number" step="any" min="0" 
-                           name="items-__prefix__-new_selling_price" 
-                           id="id_items-__prefix__-new_selling_price" 
-                           class="form-control has-prefix font-mono-val" 
-                           placeholder="Retail Price">
-                </div>
-            </div>
+        <!-- Warehouse / Stock Location (Branch) -->
+        <div class="form-group-grn col-span-2">
+          <label for="warehouse">Warehouse / Stock Location <span class="required-star">*</span></label>
+          <select name="branch" id="warehouse" required>
+            {% for br in branches %}
+              <option value="{{ br.id }}" {% if form.branch.value == br.id|stringformat:"s" or active_branch.id == br.id %}selected{% endif %}>
+                {{ br.name }} ({{ br.code }}){% if br.is_main_branch %} - Central Main{% endif %}
+              </option>
+            {% endfor %}
+          </select>
         </div>
 
-        <div class="line-discount-vertical-card" id="line-disc-card-__prefix__">
-            <div class="ld-top-bar">
-                <div class="ld-title-tag">
-                    <i class="fa-solid fa-tags"></i> Line Discount Rule
-                </div>
-                <span class="ld-rebate-tag" id="ld-badge-__prefix__">-Rs. 0.00</span>
-            </div>
+        <!-- Supplier Autocomplete Search -->
+        <div class="form-group-grn col-span-2">
+          <label for="supplierName">Supplier / Distributor Name <span class="required-star">*</span></label>
+          <div class="search-wrapper-relative">
+            <input type="hidden" name="supplier" id="id_supplier" value="{{ form.instance.supplier.id|default:form.supplier.value|default:'' }}" required>
+            <input type="text" id="supplierName" placeholder="Search or enter supplier name..." 
+                   value="{% if form.instance.supplier %}{{ form.instance.supplier.company_name }}{% endif %}" autocomplete="off" required>
+            <div id="supplierDropdownMenu" class="floating-results-dropdown"></div>
+          </div>
+        </div>
 
-            <div class="ld-controls-flex">
-                <select name="items-__prefix__-discount_type" id="id_items-__prefix__-discount_type" class="line-disc-type-select" style="display: none;">
-                    <option value="NONE" selected>None</option>
-                    <option value="PERCENTAGE">Percentage</option>
-                    <option value="AMOUNT">Amount</option>
+        <!-- Supplier PAN -->
+        <div class="form-group-grn">
+          <label for="supplierPan">Supplier PAN / VAT No.</label>
+          <input type="text" id="supplierPan" placeholder="9-digit PAN/VAT" value="{% if form.instance.supplier %}{{ form.instance.supplier.pan_number|default:form.instance.supplier.vat_number|default:'' }}{% endif %}">
+        </div>
+
+        <!-- Supplier Mobile -->
+        <div class="form-group-grn">
+          <label for="supplierMobile">Supplier Mobile / Contact</label>
+          <input type="text" id="supplierMobile" placeholder="Contact number" value="{% if form.instance.supplier %}{{ form.instance.supplier.phone_number|default:'' }}{% endif %}">
+        </div>
+
+        <!-- Supplier Invoice / Bill Ref -->
+        <div class="form-group-grn">
+          <label for="supplierInvoiceNo">Supplier Invoice / Bill Ref <span class="required-star">*</span></label>
+          <input type="text" name="supplier_bill_no" id="supplierInvoiceNo" placeholder="e.g. INV-8849" value="{{ form.supplier_bill_no.value|default:'' }}" required>
+        </div>
+
+        <!-- Bill Date Copy -->
+        <div class="form-group-grn">
+          <label for="invoiceDateSecondary">Bill / Invoice Date <span class="required-star">*</span></label>
+          <input type="date" id="invoiceDateSecondary" value="{% if form.bill_date.value %}{% if form.bill_date.value.isoformat %}{{ form.bill_date.value|date:'Y-m-d' }}{% else %}{{ form.bill_date.value }}{% endif %}{% else %}{{ today|date:'Y-m-d' }}{% endif %}">
+        </div>
+
+        <!-- Delivery Challan No -->
+        <div class="form-group-grn">
+          <label for="challanNo">Challan / Delivery Ref No.</label>
+          <input type="text" name="challan_no" id="challanNo" placeholder="e.g. CH-2041" value="{{ form.challan_no.value|default:'' }}">
+        </div>
+
+        <!-- Challan Date -->
+        <div class="form-group-grn">
+          <label for="challanDate">Challan Date</label>
+          <input type="date" name="challan_date" id="challanDate" value="{% if form.challan_date.value %}{% if form.challan_date.value.isoformat %}{{ form.challan_date.value|date:'Y-m-d' }}{% else %}{{ form.challan_date.value }}{% endif %}{% else %}{{ today|date:'Y-m-d' }}{% endif %}">
+          <input type="hidden" name="challan_date_bs" id="challanDateBs" value="{{ form.challan_date_bs.value|default:today_bs }}">
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: TAX, DISCOUNT & ADDITIONAL CHARGES -->
+    <section class="card-grn mb-3">
+      <div class="card-title-grn">
+        <span>2. Tax, Discount &amp; Additional Charges</span>
+        <span class="tag">Overheads &amp; Landed Logistics</span>
+      </div>
+      <div class="grid-grn grid-6">
+        <!-- VAT Handling Mode Toggle -->
+        <div class="form-group-grn">
+          <label>VAT Handling Mode</label>
+          <input type="hidden" name="vat_handling_mode" id="id_vat_handling_mode" value="{{ form.vat_handling_mode.value|default:'EXCLUSIVE' }}">
+          <input type="hidden" name="is_vat_bill" id="id_is_vat_bill" value="{% if form.is_vat_bill.value %}true{% else %}true{% endif %}">
+          <div class="toggle-group-grn" id="vatModeToggle">
+            <button type="button" class="toggle-btn-grn {% if form.vat_handling_mode.value != 'INCLUSIVE' %}active{% endif %}" data-mode="EXCLUSIVE">VAT Excluded</button>
+            <button type="button" class="toggle-btn-grn {% if form.vat_handling_mode.value == 'INCLUSIVE' %}active{% endif %}" data-mode="INCLUSIVE">VAT Included</button>
+          </div>
+        </div>
+
+        <!-- Standard VAT Rate (%) -->
+        <div class="form-group-grn">
+          <label for="defaultVatRate">Standard VAT Rate (%)</label>
+          <input type="number" name="vat_rate" id="defaultVatRate" value="{{ form.vat_rate.value|default:default_vat_rate|default:'13.00' }}" step="0.5" min="0" max="100">
+        </div>
+
+        <!-- Whole Bill Discount -->
+        <div class="form-group-grn">
+          <label for="wholeBillDiscount">Whole Bill / Consignment Disc.</label>
+          <input type="hidden" name="bill_discount_type" id="id_bill_discount_type" value="AMOUNT">
+          <div class="input-prefix-wrap">
+            <span class="prefix">Rs.</span>
+            <input type="number" name="bill_discount_input_value" id="wholeBillDiscount" value="{{ form.bill_discount_input_value.value|default:'0.00' }}" step="0.01" min="0">
+          </div>
+        </div>
+
+        <!-- 1. Freight -->
+        <div class="form-group-grn">
+          <label for="freightCharge">Freight / Courier</label>
+          <div class="input-prefix-wrap">
+            <span class="prefix">Rs.</span>
+            <input type="number" name="extra_freight_charge" id="freightCharge" class="overhead-input" value="{{ form.extra_freight_charge.value|default:'0.00' }}" step="0.01" min="0">
+          </div>
+        </div>
+
+        <!-- 2. Customs / Duty -->
+        <div class="form-group-grn">
+          <label for="customsDuty">Customs / Duty</label>
+          <div class="input-prefix-wrap">
+            <span class="prefix">Rs.</span>
+            <input type="number" name="customs_import_charge" id="customsDuty" class="overhead-input" value="{{ form.customs_import_charge.value|default:'0.00' }}" step="0.01" min="0">
+          </div>
+        </div>
+
+        <!-- 3. Handling -->
+        <div class="form-group-grn">
+          <label for="handlingCharge">Handling &amp; Unloading</label>
+          <div class="input-prefix-wrap">
+            <span class="prefix">Rs.</span>
+            <input type="number" name="other_handling_charge" id="handlingCharge" class="overhead-input" value="{{ form.other_handling_charge.value|default:'0.00' }}" step="0.01" min="0">
+          </div>
+        </div>
+
+        <!-- 4. Transit Insurance -->
+        <div class="form-group-grn">
+          <label for="insuranceCharge">Transit Insurance</label>
+          <div class="input-prefix-wrap">
+            <span class="prefix">Rs.</span>
+            <input type="number" name="insurance_charge" id="insuranceCharge" class="overhead-input" value="{{ form.insurance_charge.value|default:'0.00' }}" step="0.01" min="0">
+          </div>
+        </div>
+
+        <!-- 5. Other Direct Overheads -->
+        <div class="form-group-grn">
+          <label for="otherOverheads">Other Direct Overheads</label>
+          <div class="input-prefix-wrap">
+            <span class="prefix">Rs.</span>
+            <input type="number" name="other_overheads_charge" id="otherOverheads" class="overhead-input" value="{{ form.other_overheads_charge.value|default:'0.00' }}" step="0.01" min="0">
+          </div>
+        </div>
+
+        <!-- Spot Paid on Delivery -->
+        <div class="form-group-grn">
+          <label for="spotPaidDelivery">Spot Paid on Delivery</label>
+          <div class="input-prefix-wrap">
+            <span class="prefix">Rs.</span>
+            <input type="number" name="paid_amount" id="spotPaidDelivery" value="{{ form.paid_amount.value|default:'0.00' }}" step="0.01" min="0">
+          </div>
+        </div>
+
+        <!-- Total Overheads Display -->
+        <div class="form-group-grn col-span-2" style="grid-column: span 3;">
+          <label>Total Overheads Capitalized to Landed Cost</label>
+          <input type="text" id="totalOverheadsDisplay" value="Rs. 0.00" readonly class="readonly-display font-mono" style="font-weight: 700; color: #b45309;">
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: RECEIVED ITEMS -->
+    <section class="card-grn mb-3">
+      <div class="card-title-grn">
+        <span>3. Received Items &amp; Landed Calculation</span>
+        <button type="button" class="btn-primary-outline-grn" id="btnAddRow">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Add Another Item
+        </button>
+      </div>
+
+      <div class="table-container">
+        <table class="items-table" id="itemsTable">
+          <thead>
+            <tr>
+              <th style="width: 38px;" class="text-center">S.N.</th>
+              <th style="width: 270px;">Product / Item Description <span class="required-star">*</span></th>
+              <th style="width: 120px;">Batch No.</th>
+              <th style="width: 170px;">Serial / IMEI Refs</th>
+              <th style="width: 85px;" class="text-right">Qty <span class="required-star">*</span></th>
+              <th style="width: 80px;">UOM</th>
+              <th style="width: 110px;" class="text-right">Rate (Pre-VAT) <span class="required-star">*</span></th>
+              <th style="width: 110px;" class="text-right">MRP / Retail</th>
+              <th style="width: 90px;">Disc. Type</th>
+              <th style="width: 85px;" class="text-right">Disc. Val</th>
+              <th style="width: 65px;" class="text-right">Tax %</th>
+              <th style="width: 110px;" class="text-right">Taxable Amt</th>
+              <th style="width: 95px;" class="text-right">VAT Amt</th>
+              <th style="width: 115px;" class="text-right">Net Amount</th>
+              <th style="width: 105px;" class="text-right">Alloc. Ovh</th>
+              <th style="width: 115px; background:#f5f3ff; color:#6b21a8;" class="text-right">Landed Unit Cost</th>
+              <th style="width: 44px;" class="text-center">Del</th>
+            </tr>
+          </thead>
+          <tbody id="itemsTableBody">
+            {% for item_form in formset %}
+            <tr class="item-row" data-row-idx="{{ forloop.counter0 }}">
+              <td class="text-center row-sn font-mono" style="font-weight:600; color:var(--slate-500);">{{ forloop.counter }}</td>
+              
+              <!-- Product Search Column -->
+              <td>
+                <div class="search-wrapper-relative">
+                  <input type="hidden" name="items-{{ forloop.counter0 }}-product" class="item-product-id" value="{{ item_form.product.value|default:'' }}" required>
+                  <input type="text" class="item-name" placeholder="Item name / SKU..." value="{% if item_form.instance.product %}{{ item_form.instance.product.name }}{% endif %}" autocomplete="off" required>
+                  <div class="floating-results-dropdown product-dropdown"></div>
+                </div>
+              </td>
+
+              <!-- Batch No -->
+              <td>
+                <input type="text" name="items-{{ forloop.counter0 }}-batch_number" class="item-batch font-mono" placeholder="Batch No" value="{{ item_form.batch_number.value|default:'' }}">
+              </td>
+
+              <!-- Serials / IMEIs -->
+              <td>
+                <input type="text" name="items-{{ forloop.counter0 }}-scanned_imei_list" class="item-serial font-mono" placeholder="IMEI / Serials" value="{{ item_form.scanned_imei_list.value|default:'' }}">
+              </td>
+
+              <!-- Qty -->
+              <td>
+                <input type="number" name="items-{{ forloop.counter0 }}-purchased_quantity" class="item-qty text-right font-mono" value="{{ item_form.purchased_quantity.value|default:'1.000' }}" min="0.001" step="any" required>
+              </td>
+
+              <!-- UOM -->
+              <td>
+                <select class="item-uom">
+                  <option value="Pcs" selected>Pcs</option>
+                  <option value="Box">Box</option>
+                  <option value="Set">Set</option>
+                  <option value="Kg">Kg</option>
+                  <option value="Unit">Unit</option>
                 </select>
+              </td>
 
-                <div class="ld-mode-switch">
-                    <button type="button" class="ld-mode-btn active" data-mode="NONE" onclick="setRowDiscType('__prefix__', 'NONE')">None</button>
-                    <button type="button" class="ld-mode-btn" data-mode="PERCENTAGE" onclick="setRowDiscType('__prefix__', 'PERCENTAGE')">% Percentage</button>
-                    <button type="button" class="ld-mode-btn" data-mode="AMOUNT" onclick="setRowDiscType('__prefix__', 'AMOUNT')">Rs. Flat</button>
-                </div>
+              <!-- Purchase Rate -->
+              <td>
+                <input type="number" name="items-{{ forloop.counter0 }}-purchase_rate" class="item-rate text-right font-mono" value="{{ item_form.purchase_rate.value|default:'0.00' }}" min="0" step="0.01" required>
+              </td>
 
-                <div class="ld-input-box">
-                    <span class="ld-prefix-sym" id="ld-sym-__prefix__"></span>
-                    <input type="number" step="any" min="0" 
-                           name="items-__prefix__-discount_input_value" 
-                           id="id_items-__prefix__-discount_input_value"
-                           class="ld-input-field line-disc-val-input calc-trigger" 
-                           value="0.00" disabled placeholder="No discount">
-                </div>
-            </div>
+              <!-- MRP -->
+              <td>
+                <input type="number" name="items-{{ forloop.counter0 }}-new_selling_price" class="item-mrp text-right font-mono" value="{{ item_form.new_selling_price.value|default:'0.00' }}" min="0" step="0.01">
+              </td>
+
+              <!-- Disc. Type -->
+              <td>
+                <select name="items-{{ forloop.counter0 }}-discount_type" class="item-disc-type">
+                  <option value="NONE" {% if item_form.discount_type.value == 'NONE' %}selected{% endif %}>None</option>
+                  <option value="PERCENTAGE" {% if item_form.discount_type.value == 'PERCENTAGE' %}selected{% endif %}>%</option>
+                  <option value="AMOUNT" {% if item_form.discount_type.value == 'AMOUNT' %}selected{% endif %}>Flat</option>
+                </select>
+              </td>
+
+              <!-- Disc. Value -->
+              <td>
+                <input type="number" name="items-{{ forloop.counter0 }}-discount_input_value" class="item-disc-val text-right font-mono" value="{{ item_form.discount_input_value.value|default:'0.00' }}" min="0" step="0.01">
+              </td>
+
+              <!-- Tax % -->
+              <td>
+                <input type="number" name="items-{{ forloop.counter0 }}-vat_rate" class="item-tax-percent text-right font-mono" value="{{ item_form.vat_rate.value|default:'13.00' }}" min="0" step="0.5">
+              </td>
+
+              <!-- Taxable Amount (Readonly) -->
+              <td>
+                <input type="text" class="item-taxable-amount text-right readonly-display font-mono" readonly value="0.00">
+              </td>
+
+              <!-- VAT Amount (Readonly) -->
+              <td>
+                <input type="text" class="item-vat-amount text-right readonly-display font-mono" readonly value="0.00">
+              </td>
+
+              <!-- Net Amount (Readonly) -->
+              <td>
+                <input type="text" class="item-net-amount text-right readonly-display font-mono" readonly value="0.00" style="font-weight:600;">
+              </td>
+
+              <!-- Alloc Overhead (Readonly) -->
+              <td>
+                <input type="text" class="item-alloc-overhead text-right readonly-display font-mono" readonly value="0.00" style="color:#b45309;">
+              </td>
+
+              <!-- Landed Unit Cost (Readonly) -->
+              <td>
+                <input type="text" class="item-landed-unit-cost text-right readonly-display font-mono" readonly value="0.00" style="font-weight:700; color:#6b21a8; background:#f5f3ff;">
+              </td>
+
+              <!-- Del Row -->
+              <td class="text-center">
+                <div style="display: none;">{{ item_form.DELETE }}</div>
+                <button type="button" class="btn-remove-row-grn" title="Remove Row">&times;</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <span style="font-size: 11.5px; color: var(--slate-500);" id="itemsCountBadge">Total Item Lines: 1 | Total Units: 1.00</span>
+        <button type="button" class="btn-secondary-grn" id="btnAddRowBottom">+ Add Row</button>
+      </div>
+    </section>
+
+    <!-- SECTION 5: LANDED COST RECONCILIATION -->
+    <section class="card-grn mb-3">
+      <div class="card-title-grn">
+        <span>5. Landed Cost Reconciliation</span>
+        <span class="tag">Audited Valuation Split</span>
+      </div>
+      <div class="reconciliation-deck">
+        <div class="recon-step-card step-1">
+          <div>
+            <div class="recon-step-label">Step 1</div>
+            <div class="recon-step-title">Pre-VAT Merchandise</div>
+          </div>
+          <div>
+            <div class="recon-step-value" id="reconStep1">Rs. 0.00</div>
+            <div class="recon-step-sub" id="reconStep1Sub">Gross item valuation</div>
+          </div>
         </div>
 
-        <!-- Hidden Scanned IMEI Storage & Indicator Flag -->
-        <input type="hidden" class="row-requires-imei-flag" value="{% if SYS_CONFIG.enforce_imei_tracking %}true{% else %}false{% endif %}">
-        <div style="display: none;">
-            <textarea name="items-__prefix__-scanned_imei_list" id="id_items-__prefix__-scanned_imei_list" class="scanned-imei-hidden-input"></textarea>
+        <div class="recon-step-card step-2">
+          <div>
+            <div class="recon-step-label">Step 2</div>
+            <div class="recon-step-title">VAT (Recoverable Input)</div>
+          </div>
+          <div>
+            <div class="recon-step-value" id="reconStep2">Rs. 0.00</div>
+            <div class="recon-step-sub" id="reconStep2Sub">Standard Tax on Taxable Base</div>
+          </div>
         </div>
 
-        <div class="line-footer-strip">
-            <div class="metrics-pills-group">
-                <div class="metric-item">
-                    Line Gross: <strong id="metric-gross-__prefix__">Rs. 0.00</strong>
-                </div>
-                <div class="metric-item">
-                    Net Pre-VAT Base: <strong id="metric-net-__prefix__" style="color: var(--grn-primary);">Rs. 0.00</strong>
-                </div>
-                <div class="metric-item">
-                    Allocated Overhead: <strong id="metric-overhead-__prefix__" style="color: var(--grn-amber-600);">+Rs. 0.00</strong>
-                </div>
-            </div>
-
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <!-- Dynamic Mode Toggle Button: Phone IMEI vs Accessory Non-IMEI -->
-                <div class="imei-requirement-toggle">
-                    <button type="button" class="imei-toggle-btn {% if SYS_CONFIG.enforce_imei_tracking %}active{% endif %}" id="toggle-imei-yes-__prefix__" onclick="setRowImeiRequirement('__prefix__', true)">
-                        <i class="fa-solid fa-mobile-screen"></i> Phone (IMEI)
-                    </button>
-                    <button type="button" class="imei-toggle-btn {% if not SYS_CONFIG.enforce_imei_tracking %}active{% endif %}" id="toggle-imei-no-__prefix__" onclick="setRowImeiRequirement('__prefix__', false)">
-                        <i class="fa-solid fa-box"></i> Non-IMEI
-                    </button>
-                </div>
-
-                <!-- Dual IMEI Button -->
-                <button type="button" class="btn-dual-imei" id="btn-dual-imei-__prefix__" onclick="openDualImeiModal('__prefix__')" {% if not SYS_CONFIG.enforce_imei_tracking %}style="display:none;"{% endif %}>
-                    <i class="fa-solid fa-barcode"></i> Dual-IMEIs (<span id="imei-count-tag-__prefix__">0 Units</span>)
-                </button>
-
-                <div class="cogs-landed-badge">
-                    <span class="label">Unit Landed COGS:</span>
-                    <span class="price" id="metric-cogs-__prefix__">Rs. 0.00</span>
-                </div>
-            </div>
+        <div class="recon-step-card step-3">
+          <div>
+            <div class="recon-step-label">Step 3</div>
+            <div class="recon-step-title">Shipping &amp; Overheads</div>
+          </div>
+          <div>
+            <div class="recon-step-value" id="reconStep3">Rs. 0.00</div>
+            <div class="recon-step-sub">5 Overheads Capitalized</div>
+          </div>
         </div>
+
+        <div class="recon-step-card step-4">
+          <div>
+            <div class="recon-step-label">Step 4</div>
+            <div class="recon-step-title">Total Landed Cost</div>
+          </div>
+          <div>
+            <div class="recon-step-value" id="reconStep4" style="color: #6b21a8;">Rs. 0.00</div>
+            <div class="recon-step-sub">Inventory asset capitalized cost</div>
+          </div>
+        </div>
+
+        <div class="recon-step-card step-5">
+          <div>
+            <div class="recon-step-label">Step 5</div>
+            <div class="recon-step-title">Supplier Payable</div>
+          </div>
+          <div>
+            <div class="recon-step-value" id="reconStep5" style="color: var(--primary);">Rs. 0.00</div>
+            <div class="recon-step-sub">Total invoice debt to supplier</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LOWER DECK: SETTLEMENT, NARRATIONS & PURCHASE SUMMARY -->
+    <div class="lower-deck-grn">
+      
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        
+        <!-- SECTION 6: PAYMENT & SUPPLIER SETTLEMENT -->
+        <div class="card-grn">
+          <div class="card-title-grn">
+            <span>6. Payment &amp; Supplier Settlement</span>
+            <span class="tag">A/P Liquidity</span>
+          </div>
+          <div class="grid-grn grid-3">
+            <div class="form-group-grn">
+              <label for="supplierPayableTotal">Total Supplier Payable</label>
+              <div class="input-prefix-wrap">
+                <span class="prefix">Rs.</span>
+                <input type="text" id="supplierPayableTotal" value="0.00" readonly class="readonly-display font-mono" style="font-weight: 700;">
+              </div>
+            </div>
+            <div class="form-group-grn">
+              <label for="cashPaidInput">Cash / Bank Paid Now</label>
+              <div class="input-prefix-wrap">
+                <span class="prefix">Rs.</span>
+                <input type="number" id="cashPaidInput" value="{{ form.paid_amount.value|default:'0.00' }}" step="0.01" min="0">
+              </div>
+            </div>
+            <div class="form-group-grn">
+              <label for="creditAmountOutput">Remaining Balance on Credit</label>
+              <div class="input-prefix-wrap">
+                <span class="prefix">Rs.</span>
+                <input type="text" id="creditAmountOutput" value="0.00" readonly class="readonly-display font-mono" style="font-weight: 700; color: #dc2626;">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 7: NARRATION & OBSERVATIONS -->
+        <div class="card-grn">
+          <div class="card-title-grn">
+            <span>7. Narration &amp; Warehouse Observations</span>
+            <span class="tag">Audit Records</span>
+          </div>
+          <div class="grid-grn grid-3">
+            <div class="form-group-grn">
+              <label for="consignmentNarration">General Consignment Narration</label>
+              <textarea name="consignment_narration" id="consignmentNarration" class="form-control-grn" placeholder="Enter transaction note for general ledger...">{{ form.consignment_narration.value|default:'' }}</textarea>
+            </div>
+            <div class="form-group-grn">
+              <label for="receivingNotes">Receiving / Physical Inspection Notes</label>
+              <textarea name="receiving_notes" id="receivingNotes" class="form-control-grn" placeholder="Seal conditions, carton numbers, driver remarks...">{{ form.receiving_notes.value|default:'' }}</textarea>
+            </div>
+            <div class="form-group-grn">
+              <label for="internalNotes">Internal Notes &amp; Audit Reference</label>
+              <textarea name="internal_notes" id="internalNotes" class="form-control-grn" placeholder="Approvals, QC test references, gate passes...">{{ form.internal_notes.value|default:'' }}</textarea>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SECTION 4: PURCHASE SUMMARY (RIGHT COLUMN) -->
+      <div class="summary-card-grn">
+        <div class="card-title-grn">
+          <span>4. Purchase Summary</span>
+          <span class="tag">Financial Breakdown</span>
+        </div>
+
+        <div class="summary-row-grn">
+          <span>Merchandise Subtotal</span>
+          <span class="val" id="sumMerchandiseSubtotal">Rs. 0.00</span>
+        </div>
+        <div class="summary-row-grn">
+          <span>Total Item Discount</span>
+          <span class="val" id="sumItemDiscount" style="color: #dc2626;">- Rs. 0.00</span>
+        </div>
+        <div class="summary-row-grn">
+          <span>Whole Bill Discount</span>
+          <span class="val" id="sumWholeBillDiscount" style="color: #dc2626;">- Rs. 0.00</span>
+        </div>
+        <div class="summary-row-grn">
+          <span>Non-Taxable Merchandise</span>
+          <span class="val" id="sumNonTaxable">Rs. 0.00</span>
+        </div>
+        <div class="summary-row-grn">
+          <span>Taxable Amount</span>
+          <span class="val" id="sumTaxableAmount">Rs. 0.00</span>
+        </div>
+        <div class="summary-row-grn">
+          <span>VAT Total (<span id="summaryVatPct">13</span>%)</span>
+          <span class="val" id="sumVatAmount">Rs. 0.00</span>
+        </div>
+        <div class="summary-row-grn">
+          <span>Freight &amp; Overheads</span>
+          <span class="val" id="sumOverheadsTotal">Rs. 0.00</span>
+        </div>
+        <div class="summary-row-grn">
+          <span>Spot Paid on Delivery</span>
+          <span class="val" id="sumSpotPaid" style="color: #dc2626;">- Rs. 0.00</span>
+        </div>
+
+        <div class="summary-row-grn total-row">
+          <span class="label">Total Purchase Amount</span>
+          <span class="val" id="sumGrandTotal">Rs. 0.00</span>
+        </div>
+
+        <div class="summary-row-grn landed-total-row">
+          <span>Total Capitalized Landed Cost</span>
+          <span id="sumTotalLandedCost" class="font-mono">Rs. 0.00</span>
+        </div>
+      </div>
+
     </div>
+
+    <!-- STICKY ACTION DOCK -->
+    <footer class="action-bar-grn">
+      <div class="action-info-grn">
+        ERP Database Synced • Landed cost prorated in real-time
+      </div>
+      <div class="btn-group-actions-grn">
+        <a href="{% url 'purchases:grn_list' %}" class="btn-secondary-grn" id="btnCancel">Cancel</a>
+        <button type="button" class="btn-secondary-grn" id="btnPrint">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+          Print GRN
+        </button>
+        <button type="button" class="btn-secondary-grn" id="btnSaveDraft">Save Draft</button>
+        <button type="button" class="btn-action-grn btn-action-primary-grn" id="btnVerifyGrn">Verify GRN</button>
+        <button type="submit" class="btn-action-grn btn-action-success-grn" id="btnUpdateStock">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          Verify &amp; Update Warehouse Stock
+        </button>
+      </div>
+    </footer>
+
+  </form>
+
+</div>
+
+<!-- TOAST NOTIFICATION CONTAINER -->
+<div id="toast-notification">Notification Message</div>
+
+<!-- TEMPLATE FOR DYNAMIC ROWS -->
+<template id="rowTemplate">
+  <tr class="item-row" data-row-idx="__prefix__">
+    <td class="text-center row-sn font-mono" style="font-weight:600; color:var(--slate-500);">1</td>
+    <td>
+      <div class="search-wrapper-relative">
+        <input type="hidden" name="items-__prefix__-product" class="item-product-id" value="" required>
+        <input type="text" class="item-name" placeholder="Item name / SKU..." value="" autocomplete="off" required>
+        <div class="floating-results-dropdown product-dropdown"></div>
+      </div>
+    </td>
+    <td>
+      <input type="text" name="items-__prefix__-batch_number" class="item-batch font-mono" placeholder="Batch No" value="">
+    </td>
+    <td>
+      <input type="text" name="items-__prefix__-scanned_imei_list" class="item-serial font-mono" placeholder="IMEI / Serials" value="">
+    </td>
+    <td>
+      <input type="number" name="items-__prefix__-purchased_quantity" class="item-qty text-right font-mono" value="1.000" min="0.001" step="any" required>
+    </td>
+    <td>
+      <select class="item-uom">
+        <option value="Pcs" selected>Pcs</option>
+        <option value="Box">Box</option>
+        <option value="Set">Set</option>
+        <option value="Kg">Kg</option>
+        <option value="Unit">Unit</option>
+      </select>
+    </td>
+    <td>
+      <input type="number" name="items-__prefix__-purchase_rate" class="item-rate text-right font-mono" value="0.00" min="0" step="0.01" required>
+    </td>
+    <td>
+      <input type="number" name="items-__prefix__-new_selling_price" class="item-mrp text-right font-mono" value="0.00" min="0" step="0.01">
+    </td>
+    <td>
+      <select name="items-__prefix__-discount_type" class="item-disc-type">
+        <option value="NONE" selected>None</option>
+        <option value="PERCENTAGE">%</option>
+        <option value="AMOUNT">Flat</option>
+      </select>
+    </td>
+    <td>
+      <input type="number" name="items-__prefix__-discount_input_value" class="item-disc-val text-right font-mono" value="0.00" min="0" step="0.01">
+    </td>
+    <td>
+      <input type="number" name="items-__prefix__-vat_rate" class="item-tax-percent text-right font-mono" value="13.00" min="0" step="0.5">
+    </td>
+    <td>
+      <input type="text" class="item-taxable-amount text-right readonly-display font-mono" readonly value="0.00">
+    </td>
+    <td>
+      <input type="text" class="item-vat-amount text-right readonly-display font-mono" readonly value="0.00">
+    </td>
+    <td>
+      <input type="text" class="item-net-amount text-right readonly-display font-mono" readonly value="0.00" style="font-weight:600;">
+    </td>
+    <td>
+      <input type="text" class="item-alloc-overhead text-right readonly-display font-mono" readonly value="0.00" style="color:#b45309;">
+    </td>
+    <td>
+      <input type="text" class="item-landed-unit-cost text-right readonly-display font-mono" readonly value="0.00" style="font-weight:700; color:#6b21a8; background:#f5f3ff;">
+    </td>
+    <td class="text-center">
+      <div style="display: none;"><input type="checkbox" name="items-__prefix__-DELETE"></div>
+      <button type="button" class="btn-remove-row-grn" title="Remove Row">&times;</button>
+    </td>
+  </tr>
 </template>
 
-<!-- ==========================================================================
-     REACTIVE MATHEMATICAL & DATE SYNCHRONIZATION ENGINE
-     ========================================================================== -->
 <script>
-let currentEditingModalRowIdx = null;
+(function () {
+  "use strict";
 
-// Read Master IMEI Policy Setting from Meta Element
-const configMetaEl = document.getElementById('grnMasterConfigMeta');
-const GLOBAL_ENFORCE_IMEI = configMetaEl ? (configMetaEl.dataset.enforceImei === 'true') : true;
-const ACTIVE_FISCAL_YEAR = (configMetaEl?.dataset.activeFiscalYear || '2083/84').trim();
-const LOCKED_FISCAL_YEARS = ['2080/81', '2081/82', '2082/83'];
+  // STATE & ELEMENTS
+  let vatMode = "{{ form.vat_handling_mode.value|default:'EXCLUSIVE' }}".toUpperCase();
+  const tableBody = document.getElementById('itemsTableBody');
+  const btnAddRow = document.getElementById('btnAddRow');
+  const btnAddRowBottom = document.getElementById('btnAddRowBottom');
+  const vatModeToggle = document.getElementById('vatModeToggle');
+  const vatModeHidden = document.getElementById('id_vat_handling_mode');
+  const defaultVatRateInput = document.getElementById('defaultVatRate');
+  const wholeBillDiscountInput = document.getElementById('wholeBillDiscount');
+  const spotPaidDeliveryInput = document.getElementById('spotPaidDelivery');
+  const cashPaidInput = document.getElementById('cashPaidInput');
+  const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+  const masterForm = document.getElementById('masterGrnForm');
+  const actionHidden = document.getElementById('grnFormAction');
+  const toast = document.getElementById('toast-notification');
+  const rowTemplate = document.getElementById('rowTemplate');
 
-// Currency Formatter
-function formatNPR(num) {
-    return 'Rs. ' + (Number(num) || 0).toLocaleString('en-IN', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-}
+  const overheadInputs = document.querySelectorAll('.overhead-input');
 
-// --------------------------------------------------------------------------
-// 0. BIDIRECTIONAL B.S. <-> A.D. DATE SYNCHRONIZER & FISCAL LOCK WATCHER
-// --------------------------------------------------------------------------
-function initGrnDateSynchronizer() {
-    const bsInput = document.getElementById('id_bill_date_bs');
-    const adInput = document.getElementById('id_bill_date');
-    const triggerIconBtn = document.getElementById('btn-trigger-bs-date');
-    const fyBadge = document.getElementById('grnFyBadge');
-    const syncStateText = document.getElementById('grnDateSyncState');
-    const lockWarningBox = document.getElementById('grnFiscalLockWarning');
-    const lockedFySpan = document.getElementById('grnLockedFySpan');
-    const warningText = document.getElementById('grnFiscalLockWarningText');
-    const submitBtn = document.getElementById('btn-final-submit');
+  function parseNum(val) {
+    const n = parseFloat(val);
+    return isNaN(n) ? 0 : n;
+  }
 
-    if (!bsInput || !adInput) return;
+  function formatCurrency(num) {
+    if (isNaN(num)) num = 0;
+    return "Rs. " + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
 
-    let isSyncing = false;
+  let toastTimeout;
+  function showToast(message, isSuccess = true) {
+    clearTimeout(toastTimeout);
+    toast.textContent = message;
+    toast.style.backgroundColor = isSuccess ? 'var(--slate-900)' : '#991b1b';
+    toast.classList.add('show');
+    toastTimeout = setTimeout(() => {
+      toast.classList.remove('show');
+    }, 3500);
+  }
 
-    // Helper: Derives official Nepali Fiscal Year from year and month
-    function deriveBsFiscalYear(bsYear, bsMonth) {
-        if (bsMonth >= 4) {
-            const nextShort = String(bsYear + 1).slice(-2);
-            return `${bsYear}/${nextShort}`;
-        } else {
-            const prevYear = bsYear - 1;
-            const currShort = String(bsYear).slice(-2);
-            return `${prevYear}/${currShort}`;
-        }
-    }
+  // VAT TOGGLE HANDLER
+  vatModeToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('.toggle-btn-grn');
+    if (!btn) return;
+    vatModeToggle.querySelectorAll('.toggle-btn-grn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    vatMode = btn.dataset.mode;
+    vatModeHidden.value = vatMode;
+    calculateAll();
+    showToast(`VAT Mode changed to: ${vatMode === 'EXCLUSIVE' ? 'VAT Excluded (Added on Top)' : 'VAT Included (Extracted from Rate)'}`);
+  });
 
-    // Helper: Evaluates fiscal year lock status and displays on-screen warning
-    function checkFiscalYearLock(bsDateString) {
-        if (!bsDateString) return;
-        const cleanBs = bsDateString.trim().replace(/\//g, '-').replace(/\./g, '-');
-        const parts = cleanBs.split('-').map(Number);
-        if (parts.length !== 3 || isNaN(parts[0]) || isNaN(parts[1])) return;
-
-        const [y, m] = parts;
-        const derivedFy = deriveBsFiscalYear(y, m);
-
-        if (fyBadge) {
-            fyBadge.innerText = `FY ${derivedFy}`;
-        }
-
-        const isLocked = LOCKED_FISCAL_YEARS.includes(derivedFy);
-
-        if (isLocked) {
-            if (lockWarningBox) {
-                lockWarningBox.classList.remove('d-none');
-                if (lockedFySpan) lockedFySpan.innerText = derivedFy;
-                if (warningText) {
-                    warningText.innerHTML = `Bill Date <strong>${cleanBs} BS</strong> falls inside Fiscal Year <strong>${derivedFy}</strong>, which is audited and permanently locked.`;
-                }
-            }
-            if (fyBadge) {
-                fyBadge.className = 'badge bg-danger text-white font-mono fs-2xs';
-            }
-            if (submitBtn) {
-                submitBtn.disabled = true;
-                submitBtn.title = `Posting blocked: Fiscal Year ${derivedFy} is audited and locked.`;
-            }
-        } else {
-            if (lockWarningBox) {
-                lockWarningBox.classList.add('d-none');
-            }
-            if (fyBadge) {
-                fyBadge.className = 'badge bg-primary bg-opacity-10 text-primary font-mono fs-2xs';
-            }
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.title = 'Verify & Update Warehouse Stock';
-            }
-        }
-    }
-
-    // 1. Direct Visual Datepicker Triggering
-    if (triggerIconBtn) {
-        triggerIconBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            bsInput.focus();
-            bsInput.click();
-        });
-    }
-
-    // Bind visual Nepali Datepicker popup
-    if (typeof HTMLElement.prototype.nepaliDatePicker !== 'undefined') {
-        try {
-            bsInput.nepaliDatePicker({
-                ndpYear: true,
-                ndpMonth: true,
-                ndpYearCount: 25,
-                readOnlyInput: false,
-                dateFormat: 'YYYY-MM-DD',
-                language: 'english',
-                onChange: function(e) {
-                    const pickedDate = (e && e.bs) ? e.bs : bsInput.value;
-                    if (pickedDate) {
-                        syncBsToAd(pickedDate);
-                    }
-                }
-            });
-            bsInput.dataset.ndpInitialized = 'true';
-        } catch (e) {
-            console.warn('[GRN] Direct nepaliDatePicker binding error:', e);
-        }
-    }
-
-    // Convert B.S. -> A.D.
-    async function syncBsToAd(bsVal) {
-        if (!bsVal || isSyncing) return;
-        const cleanBs = bsVal.trim().replace(/\//g, '-').replace(/\./g, '-');
-        if (!/^\d{4}-\d{1,2}-\d{1,2}$/.test(cleanBs)) return;
-
-        checkFiscalYearLock(cleanBs);
-
-        // Client-side library conversion
-        if (window.NepaliFunctions && typeof window.NepaliFunctions.BS2AD === 'function') {
-            try {
-                const parts = cleanBs.split('-').map(Number);
-                const adObj = window.NepaliFunctions.BS2AD({ year: parts[0], month: parts[1], day: parts[2] });
-                const adStr = window.NepaliFunctions.ConvertDateFormat(adObj, 'YYYY-MM-DD');
-                if (adStr) {
-                    isSyncing = true;
-                    adInput.value = adStr;
-                    if (syncStateText) syncStateText.innerText = `Synced to ${adStr} AD`;
-                    isSyncing = false;
-                    return;
-                }
-            } catch (e) {}
-        }
-
-        // Asynchronous conversion fallback
-        try {
-            isSyncing = true;
-            const res = await fetch(`{% url 'core:convert_date_api' %}?action=bs_to_ad&date=${encodeURIComponent(cleanBs)}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.status === 'success' && data.ad_date) {
-                    adInput.value = data.ad_date;
-                    if (syncStateText) syncStateText.innerText = `Synced to ${data.ad_date} AD`;
-                }
-            }
-        } catch (err) {
-            console.warn('[GRN] Date conversion error (BS to AD):', err);
-        } finally {
-            isSyncing = false;
-        }
-    }
-
-    // Convert A.D. -> B.S.
-    async function syncAdToBs(adVal) {
-        if (!adVal || isSyncing) return;
-        const cleanAd = adVal.trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanAd)) return;
-
-        // Client-side library conversion
-        if (window.NepaliFunctions && typeof window.NepaliFunctions.AD2BS === 'function') {
-            try {
-                const parts = cleanAd.split('-').map(Number);
-                const bsObj = window.NepaliFunctions.AD2BS({ year: parts[0], month: parts[1], day: parts[2] });
-                const bsStr = window.NepaliFunctions.ConvertDateFormat(bsObj, 'YYYY-MM-DD');
-                if (bsStr) {
-                    isSyncing = true;
-                    bsInput.value = bsStr;
-                    checkFiscalYearLock(bsStr);
-                    if (syncStateText) syncStateText.innerText = `Synced to ${bsStr} BS`;
-                    isSyncing = false;
-                    return;
-                }
-            } catch (e) {}
-        }
-
-        // Asynchronous conversion fallback
-        try {
-            isSyncing = true;
-            const res = await fetch(`{% url 'core:convert_date_api' %}?action=ad_to_bs&date=${encodeURIComponent(cleanAd)}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.status === 'success' && data.bs_en) {
-                    bsInput.value = data.bs_en;
-                    checkFiscalYearLock(data.bs_en);
-                    if (syncStateText) syncStateText.innerText = `Synced to ${data.bs_en} BS`;
-                }
-            }
-        } catch (err) {
-            console.warn('[GRN] Date conversion error (AD to BS):', err);
-        } finally {
-            isSyncing = false;
-        }
-    }
-
-    // Attach listeners
-    bsInput.addEventListener('input', (e) => syncBsToAd(e.target.value));
-    bsInput.addEventListener('change', (e) => syncBsToAd(e.target.value));
-    bsInput.addEventListener('dateSelect', (e) => {
-        const val = e.target.value || (e.detail && e.detail.value);
-        if (val) syncBsToAd(val);
+  // ATTACH ROW EVENT LISTENERS
+  function attachRowEvents(row) {
+    const inputs = row.querySelectorAll('input, select');
+    inputs.forEach(input => {
+      input.addEventListener('input', calculateAll);
+      input.addEventListener('change', calculateAll);
     });
 
-    adInput.addEventListener('input', (e) => syncAdToBs(e.target.value));
-    adInput.addEventListener('change', (e) => syncAdToBs(e.target.value));
-
-    // Baseline check on load
-    if (bsInput.value.trim()) {
-        checkFiscalYearLock(bsInput.value.trim());
-        if (!adInput.value.trim()) {
-            syncBsToAd(bsInput.value.trim());
-        }
-    } else if (adInput.value.trim()) {
-        syncAdToBs(adInput.value.trim());
-    }
-
-    // Global datepicker bootstrap hook
-    if (typeof window.initNepaliDatepickers === 'function') {
-        window.initNepaliDatepickers(bsInput.parentElement);
-    }
-}
-
-// --------------------------------------------------------------------------
-// 1. Line Discount Mode Controller
-// --------------------------------------------------------------------------
-function setRowDiscType(idx, mode) {
-    const card = document.getElementById(`line-disc-card-${idx}`);
-    const select = document.getElementById(`id_items-${idx}-discount_type`);
-    const input = document.getElementById(`id_items-${idx}-discount_input_value`);
-    const sym = document.getElementById(`ld-sym-${idx}`);
-
-    if (select) select.value = mode;
-
-    if (card) {
-        card.querySelectorAll('.ld-mode-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.mode === mode);
-        });
-        card.classList.toggle('is-active', mode !== 'NONE');
-    }
-
-    if (input) {
-        if (mode === 'NONE') {
-            input.value = '0.00';
-            input.disabled = true;
-            input.placeholder = 'No discount';
-            if (sym) sym.textContent = '';
-        } else if (mode === 'PERCENTAGE') {
-            input.disabled = false;
-            if (sym) sym.textContent = '%';
-            if (Number(input.value) > 100) input.value = '5.0';
-        } else if (mode === 'AMOUNT') {
-            input.disabled = false;
-            if (sym) sym.textContent = 'Rs.';
-        }
-    }
-
-    recalculateFinancials();
-}
-
-// --------------------------------------------------------------------------
-// 2. Whole-Bill Consignment Discount Controller
-// --------------------------------------------------------------------------
-function initWholeBillDiscountControls() {
-    const group = document.getElementById('whole-disc-type-group');
-    const typeSelect = document.getElementById('id_bill_discount_type');
-    const inputVal = document.getElementById('whole-disc-val');
-    const sym = document.getElementById('whole-disc-prefix');
-
-    if (!group) return;
-
-    const initialMode = typeSelect?.value || 'NONE';
-    if (initialMode === 'NONE' && inputVal) {
-        inputVal.disabled = true;
-    } else if (initialMode === 'PERCENTAGE' && sym) {
-        sym.textContent = '%';
-    }
-
-    group.querySelectorAll('.seg-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            group.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            const mode = btn.dataset.mode;
-            if (typeSelect) typeSelect.value = mode;
-
-            if (mode === 'NONE') {
-                inputVal.value = '0.00';
-                inputVal.disabled = true;
-                if (sym) sym.textContent = 'Rs.';
-            } else if (mode === 'PERCENTAGE') {
-                inputVal.disabled = false;
-                if (sym) sym.textContent = '%';
-                if (Number(inputVal.value) > 100) inputVal.value = '2.0';
-            } else {
-                inputVal.disabled = false;
-                if (sym) sym.textContent = 'Rs.';
-            }
-            recalculateFinancials();
-        });
-    });
-}
-
-// --------------------------------------------------------------------------
-// 3. User Toggle: Set Line Requirement (Phone vs Accessory)
-// --------------------------------------------------------------------------
-function setRowImeiRequirement(idx, isRequired) {
-    const row = document.getElementById(`line-item-${idx}`);
-    if (!row) return;
-
-    const flagInput = row.querySelector('.row-requires-imei-flag');
-    if (flagInput) flagInput.value = isRequired ? 'true' : 'false';
-
-    const btnYes = row.querySelector(`#toggle-imei-yes-${idx}`);
-    const btnNo = row.querySelector(`#toggle-imei-no-${idx}`);
-    const imeiBtn = row.querySelector(`#btn-dual-imei-${idx}`);
-
-    if (btnYes) btnYes.classList.toggle('active', isRequired);
-    if (btnNo) btnNo.classList.toggle('active', !isRequired);
-
-    if (imeiBtn) {
-        imeiBtn.style.display = isRequired ? 'inline-flex' : 'none';
-    }
-
-    if (!isRequired) {
-        const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
-        if (hiddenImeiField) hiddenImeiField.value = '';
-        const tag = row.querySelector(`#imei-count-tag-${idx}`);
-        if (tag) tag.textContent = '0 Units';
-    }
-}
-
-// Helper: Smart check if product is an accessory (earphones, chargers, cables, glass, cases)
-function isAccessoryByName(name = '') {
-    const text = (name || '').toLowerCase();
-    const accessoryWords = [
-        'earbud', 'earbuds', 'earphone', 'earphones', 'headphone', 'headphones',
-        'charger', 'chargers', 'cable', 'cables', 'cover', 'covers', 'case', 'cases',
-        'glass', 'tempered', 'protector', 'adapter', 'powerbank', 'battery', 'part', 'strap'
-    ];
-    return accessoryWords.some(word => text.includes(word));
-}
-
-// --------------------------------------------------------------------------
-// 4. Mathematical Recalculation Engine
-// --------------------------------------------------------------------------
-function recalculateFinancials() {
-    const freight = Math.max(0, Number(document.getElementById('overhead-freight')?.value) || 0);
-    const customs = Math.max(0, Number(document.getElementById('overhead-customs')?.value) || 0);
-    const handling = Math.max(0, Number(document.getElementById('overhead-handling')?.value) || 0);
-    const spotPaid = Math.max(0, Number(document.getElementById('overhead-spotpaid')?.value) || 0);
-    const isVatActive = document.getElementById('tax-vat-toggle')?.checked || false;
-
-    const totalOverheads = freight + customs + handling;
-
-    let totalGrossMerchandise = 0;
-    let totalLineDiscounts = 0;
-    const lineComputations = [];
-
-    const activeRows = document.querySelectorAll('#lines-container .line-item-card');
-
-    activeRows.forEach(row => {
-        if (row.style.display === 'none') return;
-        const deleteCheck = row.querySelector('input[name$="-DELETE"]');
-        if (deleteCheck && deleteCheck.checked) return;
-
-        const idx = row.dataset.rowIndex;
-        const qty = Math.max(0, Number(row.querySelector('.line-qty-input')?.value) || 0);
-        const rate = Math.max(0, Number(row.querySelector('.line-rate-input')?.value) || 0);
-        const discType = row.querySelector('.line-disc-type-select')?.value || 'NONE';
-        const discInputVal = Math.max(0, Number(row.querySelector('.line-disc-val-input')?.value) || 0);
-
-        const lineGross = qty * rate;
-        let lineDiscAmount = 0;
-
-        if (discType === 'PERCENTAGE') {
-            lineDiscAmount = lineGross * (Math.min(discInputVal, 100) / 100);
-        } else if (discType === 'AMOUNT') {
-            lineDiscAmount = Math.min(discInputVal, lineGross);
-        }
-
-        const netPreVatBase = Math.max(0, lineGross - lineDiscAmount);
-        totalGrossMerchandise += lineGross;
-        totalLineDiscounts += lineDiscAmount;
-
-        lineComputations.push({
-            idx: idx,
-            qty: qty,
-            gross: lineGross,
-            discAmount: lineDiscAmount,
-            netBase: netPreVatBase
-        });
-
-        // Update row preview tags
-        const rowBadge = document.getElementById(`ld-badge-${idx}`);
-        const mGross = document.getElementById(`metric-gross-${idx}`);
-        const mNet = document.getElementById(`metric-net-${idx}`);
-
-        if (rowBadge) rowBadge.textContent = `-${formatNPR(lineDiscAmount)}`;
-        if (mGross) mGross.textContent = formatNPR(lineGross);
-        if (mNet) mNet.textContent = formatNPR(netPreVatBase);
-    });
-
-    const netLinesSubtotal = Math.max(0, totalGrossMerchandise - totalLineDiscounts);
-
-    // Whole-Bill Discount Calculation
-    const billDiscType = document.getElementById('id_bill_discount_type')?.value || 'NONE';
-    const billDiscVal = Math.max(0, Number(document.getElementById('whole-disc-val')?.value) || 0);
-    let billDiscountTotal = 0;
-
-    if (billDiscType === 'PERCENTAGE') {
-        billDiscountTotal = netLinesSubtotal * (Math.min(billDiscVal, 100) / 100);
-    } else if (billDiscType === 'AMOUNT') {
-        billDiscountTotal = Math.min(billDiscVal, netLinesSubtotal);
-    }
-
-    const wholeDiscTag = document.getElementById('whole-disc-saved-tag');
-    if (wholeDiscTag) wholeDiscTag.textContent = `-${formatNPR(billDiscountTotal)}`;
-
-    const finalTaxableBase = Math.max(0, netLinesSubtotal - billDiscountTotal);
-
-    // Proportional Landed Overhead Allocation per row
-    lineComputations.forEach(item => {
-        const ratio = netLinesSubtotal > 0 ? (item.netBase / netLinesSubtotal) : (1 / (lineComputations.length || 1));
-        const allocatedBillDisc = billDiscountTotal * ratio;
-        const allocatedOverhead = totalOverheads * ratio;
-
-        const lineFinalLanded = Math.max(0, (item.netBase - allocatedBillDisc) + allocatedOverhead);
-        const unitLanded = item.qty > 0 ? (lineFinalLanded / item.qty) : 0;
-
-        const mOverhead = document.getElementById(`metric-overhead-${item.idx}`);
-        const mCogs = document.getElementById(`metric-cogs-${item.idx}`);
-
-        if (mOverhead) mOverhead.textContent = `+${formatNPR(allocatedOverhead)}`;
-        if (mCogs) mCogs.textContent = `${formatNPR(unitLanded)} / unit`;
-    });
-
-    // Taxes and Payable Liabilities
-    const vatAmount = isVatActive ? (finalTaxableBase * 0.13) : 0;
-    const totalLandedCogs = finalTaxableBase + totalOverheads;
-    const invoiceGrossTotal = finalTaxableBase + vatAmount + totalOverheads;
-    const netDueDebt = Math.max(0, invoiceGrossTotal - spotPaid);
-
-    // Update Section 3 KPI Summary Cards
-    const sPreVat = document.getElementById('sum-pre-vat');
-    const sGross = document.getElementById('sum-gross-val');
-    const sDisc = document.getElementById('sum-disc-val');
-    const sVatAmt = document.getElementById('sum-vat-amt');
-    const sVatStatus = document.getElementById('vat-status-tag');
-    const sVatRate = document.getElementById('vat-rate-tag');
-    const sOverheads = document.getElementById('sum-overheads');
-    const sOverheadCnt = document.getElementById('sum-overhead-cnt');
-    const sTotalCogs = document.getElementById('sum-total-cogs');
-    const sNetDue = document.getElementById('sum-net-due');
-    const sBillTotal = document.getElementById('sum-bill-total');
-    const sPaidSpot = document.getElementById('sum-paid-spot');
-
-    if (sPreVat) sPreVat.textContent = formatNPR(finalTaxableBase);
-    if (sGross) sGross.textContent = formatNPR(totalGrossMerchandise);
-    if (sDisc) sDisc.textContent = `-${formatNPR(totalLineDiscounts + billDiscountTotal)}`;
-
-    if (sVatAmt) sVatAmt.textContent = formatNPR(vatAmount);
-    if (sVatStatus) sVatStatus.textContent = isVatActive ? "Annex 7 Taxable" : "Non-VAT / Exempt";
-    if (sVatRate) sVatRate.textContent = isVatActive ? "Rate: 13.0%" : "Rate: 0.0%";
-
-    if (sOverheads) sOverheads.textContent = formatNPR(totalOverheads);
-    if (sOverheadCnt) sOverheadCnt.textContent = `${lineComputations.length} Products Shared`;
-
-    if (sTotalCogs) sTotalCogs.textContent = formatNPR(totalLandedCogs);
-
-    if (sNetDue) sNetDue.textContent = formatNPR(netDueDebt);
-    if (sBillTotal) sBillTotal.textContent = formatNPR(invoiceGrossTotal);
-    if (sPaidSpot) sPaidSpot.textContent = formatNPR(spotPaid);
-}
-
-// --------------------------------------------------------------------------
-// 5. Dynamic Row Insertion & Deletion
-// --------------------------------------------------------------------------
-document.getElementById('btn-add-line').addEventListener('click', () => {
-    const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
-    const container = document.getElementById('lines-container');
-    const templateEl = document.getElementById('empty-row-template');
-
-    if (!totalFormsInput || !container || !templateEl) return;
-
-    const currentCount = parseInt(totalFormsInput.value, 10);
-    const templateHtml = templateEl.innerHTML;
-    const newRowHtml = templateHtml.replace(/__prefix__/g, currentCount);
-
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = newRowHtml;
-    const newRow = tempDiv.firstElementChild;
-
-    // Sanitize the new row: Strip any stale initialization flags and clean UI wrappers
-    newRow.querySelectorAll('[data-async-search-initialized]').forEach(el => {
-        delete el.dataset.asyncSearchInitialized;
-    });
-    newRow.querySelectorAll('.async-controls-wrap, .async-search-dropdown, .async-selected-chip').forEach(el => {
-        el.remove();
-    });
-    newRow.querySelectorAll('.async-search-input').forEach(input => {
-        input.classList.remove('d-none');
-        input.value = '';
-        delete input.dataset.asyncSearchInitialized;
-    });
-
-    container.appendChild(newRow);
-    totalFormsInput.value = currentCount + 1;
-
-    renumberRows();
-
-    // Freshly initialize contextual search on the new row
-    if (typeof window.initContextualSearch === 'function') {
-        window.initContextualSearch(newRow);
-    }
-
-    attachRowCalculationTriggers(newRow);
-    recalculateFinancials();
-});
-
-function deleteLineRow(idx) {
-    const row = document.getElementById(`line-item-${idx}`);
-    if (!row) return;
-
-    const deleteCheck = row.querySelector('input[name$="-DELETE"]');
-    if (deleteCheck) {
+    // Delete row
+    const btnRemove = row.querySelector('.btn-remove-row-grn');
+    btnRemove.addEventListener('click', () => {
+      const activeRows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
+      if (activeRows.length <= 1) {
+        showToast("At least one line item is required.", false);
+        return;
+      }
+      const deleteCheck = row.querySelector('input[name$="-DELETE"]');
+      if (deleteCheck) {
         deleteCheck.checked = true;
         row.style.display = 'none';
-    } else {
+      } else {
         row.remove();
-    }
+      }
+      renumberRows();
+      calculateAll();
+    });
 
+    // Autocomplete Product
+    initProductAutocomplete(row);
+  }
+
+  function renumberRows() {
+    const activeRows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
+    activeRows.forEach((row, idx) => {
+      row.querySelector('.row-sn').textContent = idx + 1;
+    });
+    document.getElementById('itemsCountBadge').textContent = `Total Item Lines: ${activeRows.length}`;
+  }
+
+  // ADD NEW ITEM ROW
+  function addNewItem() {
+    const currentCount = parseInt(totalFormsInput.value, 10);
+    const html = rowTemplate.innerHTML.replace(/__prefix__/g, currentCount);
+    const tempDiv = document.createElement('tbody');
+    tempDiv.innerHTML = html;
+    const newRow = tempDiv.firstElementChild;
+
+    tableBody.appendChild(newRow);
+    totalFormsInput.value = currentCount + 1;
+
+    attachRowEvents(newRow);
     renumberRows();
-    recalculateFinancials();
-}
+    calculateAll();
+    return newRow;
+  }
 
-function renumberRows() {
-    const visibleCards = Array.from(document.querySelectorAll('#lines-container .line-item-card')).filter(card => card.style.display !== 'none');
-    visibleCards.forEach((card, i) => {
-        const dot = card.querySelector('.counter-dot');
-        const badgeSpan = card.querySelector('.item-counter-badge span:last-child');
-        const removeBtn = card.querySelector('.btn-remove-row');
-        if (dot) dot.textContent = i + 1;
-        if (badgeSpan) badgeSpan.textContent = `Line Item Reference #${i + 1}`;
-        if (removeBtn) {
-            removeBtn.style.display = visibleCards.length === 1 ? 'none' : 'flex';
-        }
+  btnAddRow.addEventListener('click', () => {
+    const r = addNewItem();
+    r.querySelector('.item-name').focus();
+  });
+
+  btnAddRowBottom.addEventListener('click', () => {
+    const r = addNewItem();
+    r.querySelector('.item-name').focus();
+  });
+
+  // COMPREHENSIVE RECONCILIATION & MATH ENGINE
+  function calculateAll() {
+    const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
+    let totalPreVatMerchandise = 0;
+    let totalItemDiscount = 0;
+    let totalTaxableBeforeWholeBillDisc = 0;
+    let totalNonTaxable = 0;
+    let totalItemUnits = 0;
+
+    // 1. Gather Overheads
+    const freight = parseNum(document.getElementById('freightCharge').value);
+    const customs = parseNum(document.getElementById('customsDuty').value);
+    const handling = parseNum(document.getElementById('handlingCharge').value);
+    const insurance = parseNum(document.getElementById('insuranceCharge').value);
+    const otherOvh = parseNum(document.getElementById('otherOverheads').value);
+    const totalOverheads = freight + customs + handling + insurance + otherOvh;
+
+    document.getElementById('totalOverheadsDisplay').value = formatCurrency(totalOverheads);
+
+    const wholeBillDiscount = parseNum(wholeBillDiscountInput.value);
+    const spotPaid = parseNum(spotPaidDeliveryInput.value);
+    cashPaidInput.value = spotPaid.toFixed(2); // sync settlement paid
+
+    const rowCalculations = [];
+
+    // First Pass: Gross, Discounts & Taxable Base
+    rows.forEach(row => {
+      const qty = parseNum(row.querySelector('.item-qty').value);
+      const rate = parseNum(row.querySelector('.item-rate').value);
+      const discType = row.querySelector('.item-disc-type').value;
+      const discVal = parseNum(row.querySelector('.item-disc-val').value);
+      const taxPercent = parseNum(row.querySelector('.item-tax-percent').value);
+
+      totalItemUnits += qty;
+      let rawGross = qty * rate;
+      let lineDisc = 0;
+
+      if (discType === 'PERCENTAGE') {
+        lineDisc = rawGross * (discVal / 100);
+      } else if (discType === 'AMOUNT' || discType === 'Flat') {
+        lineDisc = discVal;
+      }
+      if (lineDisc > rawGross) lineDisc = rawGross;
+
+      let taxableBase = Math.max(0, rawGross - lineDisc);
+      let effectiveGross = rawGross;
+
+      // Extract pre-VAT base if VAT Included
+      if (vatMode === 'INCLUSIVE' && taxPercent > 0) {
+        const divisor = 1 + (taxPercent / 100);
+        taxableBase = taxableBase / divisor;
+        effectiveGross = taxableBase + lineDisc;
+      }
+
+      totalPreVatMerchandise += effectiveGross;
+      totalItemDiscount += lineDisc;
+
+      if (taxPercent === 0) {
+        totalNonTaxable += taxableBase;
+      } else {
+        totalTaxableBeforeWholeBillDisc += taxableBase;
+      }
+
+      rowCalculations.push({
+        row, qty, rate, gross: effectiveGross, lineDisc, taxableBase, taxPercent
+      });
     });
-}
 
-function attachRowCalculationTriggers(containerEl) {
-    containerEl.querySelectorAll('.calc-trigger').forEach(el => {
-        el.addEventListener('input', recalculateFinancials);
-        el.addEventListener('change', recalculateFinancials);
+    // Second Pass: Whole Bill Discount & Overhead Proration
+    let netTaxableSum = 0;
+    let totalVatAmount = 0;
+
+    rowCalculations.forEach(item => {
+      let effectiveTaxable = item.taxableBase;
+
+      // Allocate whole bill discount proportionally
+      if (totalTaxableBeforeWholeBillDisc > 0 && item.taxPercent > 0 && wholeBillDiscount > 0) {
+        const share = (item.taxableBase / totalTaxableBeforeWholeBillDisc) * wholeBillDiscount;
+        effectiveTaxable = Math.max(0, effectiveTaxable - share);
+      }
+
+      let vatAmt = 0;
+      if (item.taxPercent > 0) {
+        vatAmt = effectiveTaxable * (item.taxPercent / 100);
+      }
+
+      const netLineAmount = effectiveTaxable + vatAmt;
+
+      // Overhead allocation proportional to pre-VAT merchandise base
+      let rowAllocOverhead = 0;
+      if (totalPreVatMerchandise > 0) {
+        rowAllocOverhead = (item.taxableBase / (totalTaxableBeforeWholeBillDisc || totalPreVatMerchandise)) * totalOverheads;
+      } else if (totalItemUnits > 0) {
+        rowAllocOverhead = (item.qty / totalItemUnits) * totalOverheads;
+      }
+
+      // Landed Cost per Unit = (Taxable Base + Prorated Overhead) / Qty
+      let landedUnitCost = 0;
+      if (item.qty > 0) {
+        landedUnitCost = (effectiveTaxable + rowAllocOverhead) / item.qty;
+      }
+
+      netTaxableSum += effectiveTaxable;
+      totalVatAmount += vatAmt;
+
+      // Update DOM values
+      item.row.querySelector('.item-taxable-amount').value = effectiveTaxable.toFixed(2);
+      item.row.querySelector('.item-vat-amount').value = vatAmt.toFixed(2);
+      item.row.querySelector('.item-net-amount').value = netLineAmount.toFixed(2);
+      item.row.querySelector('.item-alloc-overhead').value = rowAllocOverhead.toFixed(2);
+      item.row.querySelector('.item-landed-unit-cost').value = landedUnitCost.toFixed(2);
     });
 
-    containerEl.addEventListener('item-selected', (e) => {
-        const item = e.detail;
-        if (!item) return;
+    // FINAL VALUATIONS
+    const grandTotalPurchase = netTaxableSum + totalNonTaxable + totalVatAmount;
+    const totalLandedCost = netTaxableSum + totalNonTaxable + totalOverheads;
+    const supplierPayable = Math.max(0, grandTotalPurchase - spotPaid);
+    const cashPaid = parseNum(cashPaidInput.value);
+    const remainingCredit = Math.max(0, (netTaxableSum + totalNonTaxable + totalVatAmount) - cashPaid);
 
-        const row = e.target.closest('.line-item-card');
-        if (!row) return;
+    // Section 4: Purchase Summary Panel
+    document.getElementById('sumMerchandiseSubtotal').textContent = formatCurrency(totalPreVatMerchandise);
+    document.getElementById('sumItemDiscount').textContent = "- " + formatCurrency(totalItemDiscount);
+    document.getElementById('sumWholeBillDiscount').textContent = "- " + formatCurrency(wholeBillDiscount);
+    document.getElementById('sumNonTaxable').textContent = formatCurrency(totalNonTaxable);
+    document.getElementById('sumTaxableAmount').textContent = formatCurrency(netTaxableSum);
+    document.getElementById('sumVatAmount').textContent = formatCurrency(totalVatAmount);
+    document.getElementById('sumOverheadsTotal').textContent = formatCurrency(totalOverheads);
+    document.getElementById('sumSpotPaid').textContent = "- " + formatCurrency(spotPaid);
+    document.getElementById('sumGrandTotal').textContent = formatCurrency(grandTotalPurchase);
+    document.getElementById('sumTotalLandedCost').textContent = formatCurrency(totalLandedCost);
 
-        const idx = row.dataset.rowIndex;
-        const rateInput = row.querySelector('.line-rate-input');
-        const mrpInput = row.querySelector('input[name$="-new_selling_price"]');
+    // Section 5: Landed Cost Reconciliation Step Cards
+    document.getElementById('reconStep1').textContent = formatCurrency(totalPreVatMerchandise - totalItemDiscount - wholeBillDiscount);
+    document.getElementById('reconStep2').textContent = formatCurrency(totalVatAmount);
+    document.getElementById('reconStep3').textContent = formatCurrency(totalOverheads);
+    document.getElementById('reconStep4').textContent = formatCurrency(totalLandedCost);
+    document.getElementById('reconStep5').textContent = formatCurrency(supplierPayable);
 
-        const cost = item.purchase_price || item.cost_price || (item.extra_data && item.extra_data.cost_price);
-        const price = item.selling_price || item.price || (item.extra_data && item.extra_data.selling_price);
+    // Section 6: Payment & Settlement
+    document.getElementById('supplierPayableTotal').value = grandTotalPurchase.toFixed(2);
+    document.getElementById('creditAmountOutput').value = remainingCredit.toFixed(2);
 
-        if (rateInput && (!rateInput.value || Number(rateInput.value) === 0) && cost) {
-            rateInput.value = parseFloat(cost).toFixed(2);
+    document.getElementById('itemsCountBadge').textContent = `Total Item Lines: ${rows.length} | Total Received Units: ${totalItemUnits.toFixed(2)}`;
+  }
+
+  // PRODUCT AUTOCOMPLETE
+  function initProductAutocomplete(row) {
+    const input = row.querySelector('.item-name');
+    const hiddenId = row.querySelector('.item-product-id');
+    const dropdown = row.querySelector('.product-dropdown');
+    let timer = null;
+
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 1) {
+        dropdown.classList.remove('show');
+        dropdown.innerHTML = '';
+        return;
+      }
+
+      timer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/products/api/search/?mode=simple&q=${encodeURIComponent(q)}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          const items = Array.isArray(data) ? data : (data.results || []);
+
+          if (items.length === 0) {
+            dropdown.innerHTML = '<div class="p-2 text-muted fs-xs">No matching products found.</div>';
+            dropdown.classList.add('show');
+            return;
+          }
+
+          let html = '';
+          items.slice(0, 8).forEach(p => {
+            const cost = p.purchase_price || p.cost_price || (p.extra_data && p.extra_data.cost_price) || 0;
+            const price = p.selling_price || p.price || 0;
+            html += `
+              <div class="dropdown-item-grn" data-id="${p.id}" data-name="${p.name}" data-cost="${cost}" data-price="${price}">
+                <div>
+                  <strong>${p.name}</strong>
+                  <div style="font-size:10.5px; color:#64748b;">SKU: ${p.sku || '-'}</div>
+                </div>
+                <div class="text-right font-mono" style="font-size:11px;">
+                  Rs. ${parseFloat(cost).toFixed(2)}
+                </div>
+              </div>
+            `;
+          });
+          dropdown.innerHTML = html;
+          dropdown.classList.add('show');
+
+          dropdown.querySelectorAll('.dropdown-item-grn').forEach(itemEl => {
+            itemEl.addEventListener('click', () => {
+              hiddenId.value = itemEl.dataset.id;
+              input.value = itemEl.dataset.name;
+              
+              const rateInput = row.querySelector('.item-rate');
+              const mrpInput = row.querySelector('.item-mrp');
+              if (rateInput && (!rateInput.value || parseNum(rateInput.value) === 0)) {
+                rateInput.value = parseFloat(itemEl.dataset.cost).toFixed(2);
+              }
+              if (mrpInput && (!mrpInput.value || parseNum(mrpInput.value) === 0)) {
+                mrpInput.value = parseFloat(itemEl.dataset.price).toFixed(2);
+              }
+
+              dropdown.classList.remove('show');
+              calculateAll();
+            });
+          });
+        } catch (err) {
+          console.warn('Product search failed:', err);
         }
-        if (mrpInput && (!mrpInput.value || Number(mrpInput.value) === 0) && price) {
-            mrpInput.value = parseFloat(price).toFixed(2);
-        }
-
-        // Smart Detection: If it's an earbud/charger/case, automatically set it to Non-IMEI
-        const prodName = item.name || item.title || '';
-        const isAccessory = isAccessoryByName(prodName);
-
-        if (isAccessory) {
-            setRowImeiRequirement(idx, false);
-        } else {
-            const extra = item.extra_data || {};
-            const isExplicitPhone = Boolean(
-                item.requires_imei || 
-                item.requires_imei_tracking || 
-                extra.requires_imei || 
-                extra.requires_imei_tracking || 
-                item.is_serialized
-            );
-
-            // DYNAMIC MASTER SETTING SENSITIVITY
-            if (!GLOBAL_ENFORCE_IMEI) {
-                setRowImeiRequirement(idx, false);
-            } else {
-                setRowImeiRequirement(idx, isExplicitPhone);
-            }
-        }
-
-        recalculateFinancials();
+      }, 180);
     });
 
-    containerEl.addEventListener('item-cleared', (e) => {
-        const row = e.target.closest('.line-item-card');
-        if (row) {
-            const idx = row.dataset.rowIndex;
-            setRowImeiRequirement(idx, false);
-            recalculateFinancials();
-        }
+    document.addEventListener('click', (e) => {
+      if (!dropdown.contains(e.target) && e.target !== input) {
+        dropdown.classList.remove('show');
+      }
     });
-}
+  }
 
-// --------------------------------------------------------------------------
-// 6. Dual IMEI Modal Management
-// --------------------------------------------------------------------------
-function openDualImeiModal(rowIdx) {
-    currentEditingModalRowIdx = rowIdx;
-    const row = document.getElementById(`line-item-${rowIdx}`);
-    if (!row) return;
+  // SUPPLIER AUTOCOMPLETE
+  function initSupplierAutocomplete() {
+    const sInput = document.getElementById('supplierName');
+    const sHidden = document.getElementById('id_supplier');
+    const sDropdown = document.getElementById('supplierDropdownMenu');
+    const sPan = document.getElementById('supplierPan');
+    const sMobile = document.getElementById('supplierMobile');
+    let timer = null;
 
-    const prodSearchInput = row.querySelector('.grn-product-search-input');
-    const prodName = prodSearchInput ? prodSearchInput.value : 'Device Handset';
-    const qty = Math.max(1, parseInt(row.querySelector('.line-qty-input')?.value, 10) || 1);
+    sInput.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = sInput.value.trim();
+      if (q.length < 1) {
+        sDropdown.classList.remove('show');
+        sDropdown.innerHTML = '';
+        return;
+      }
 
-    document.getElementById('imeiModalProductTitle').textContent = `Product: ${prodName} | Required: ${qty} Pair(s)`;
+      timer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/purchases/suppliers/api/search/?q=${encodeURIComponent(q)}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          const suppliers = data.results || [];
 
-    const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
-    const existingLines = hiddenImeiField ? hiddenImeiField.value.trim().split('\n').filter(Boolean) : [];
+          if (suppliers.length === 0) {
+            sDropdown.innerHTML = '<div class="p-2 text-muted fs-xs">No suppliers found.</div>';
+            sDropdown.classList.add('show');
+            return;
+          }
 
-    const tbody = document.getElementById('imeiModalTableBody');
-    tbody.innerHTML = '';
+          let html = '';
+          suppliers.slice(0, 8).forEach(s => {
+            html += `
+              <div class="dropdown-item-grn" data-id="${s.id}" data-name="${s.company_name}" data-pan="${s.pan_number || ''}" data-phone="${s.phone_number || ''}">
+                <div>
+                  <strong>${s.company_name}</strong>
+                  <div style="font-size:10.5px; color:#64748b;">${s.contact_person} &bull; ${s.phone_number}</div>
+                </div>
+                <div class="font-mono" style="font-size:11px; color:#dc2626;">
+                  ${s.balance_badge_text || ''}
+                </div>
+              </div>
+            `;
+          });
+          sDropdown.innerHTML = html;
+          sDropdown.classList.add('show');
 
-    for (let i = 0; i < qty; i++) {
-        let im1 = '';
-        let im2 = '';
-        if (existingLines[i]) {
-            const parts = existingLines[i].split('|');
-            im1 = parts[0] ? parts[0].trim() : '';
-            im2 = parts[1] ? parts[1].trim() : '';
+          sDropdown.querySelectorAll('.dropdown-item-grn').forEach(el => {
+            el.addEventListener('click', () => {
+              sHidden.value = el.dataset.id;
+              sInput.value = el.dataset.name;
+              if (sPan) sPan.value = el.dataset.pan;
+              if (sMobile) sMobile.value = el.dataset.phone;
+              sDropdown.classList.remove('show');
+            });
+          });
+        } catch (e) {
+          console.warn('Supplier search failed:', e);
         }
+      }, 180);
+    });
 
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="text-center font-monospace fw-bold text-muted">${i + 1}</td>
-            <td>
-                <input type="text" maxlength="16" class="form-control form-control-sm font-mono-val modal-imei-1" placeholder="Primary IMEI 1 (e.g. 867543058...)" value="${im1}">
-            </td>
-            <td>
-                <input type="text" maxlength="16" class="form-control form-control-sm font-mono-val modal-imei-2" placeholder="Secondary IMEI 2 (e.g. 867543059...)" value="${im2}">
-            </td>
-        `;
-        tbody.appendChild(tr);
+    document.addEventListener('click', (e) => {
+      if (!sDropdown.contains(e.target) && e.target !== sInput) {
+        sDropdown.classList.remove('show');
+      }
+    });
+  }
+
+  // GLOBAL LISTENERS FOR OVERHEADS & SUMMARY INPUTS
+  overheadInputs.forEach(inp => inp.addEventListener('input', calculateAll));
+  wholeBillDiscountInput.addEventListener('input', calculateAll);
+  spotPaidDeliveryInput.addEventListener('input', calculateAll);
+  cashPaidInput.addEventListener('input', () => {
+    spotPaidDeliveryInput.value = cashPaidInput.value;
+    calculateAll();
+  });
+  defaultVatRateInput.addEventListener('input', () => {
+    document.querySelectorAll('.item-tax-percent').forEach(el => el.value = defaultVatRateInput.value);
+    document.getElementById('summaryVatPct').textContent = defaultVatRateInput.value;
+    calculateAll();
+  });
+
+  // DATE SYNCHRONIZERS
+  const billDate = document.getElementById('billDate');
+  const billDateSec = document.getElementById('invoiceDateSecondary');
+  billDate.addEventListener('change', () => billDateSec.value = billDate.value);
+  billDateSec.addEventListener('change', () => billDate.value = billDateSec.value);
+
+  // ACTION BUTTONS BEHAVIOR
+  document.getElementById('btnPrint').addEventListener('click', () => window.print());
+
+  document.getElementById('btnSaveDraft').addEventListener('click', () => {
+    actionHidden.value = 'save_draft';
+    showToast("Saving GRN Draft into local store...");
+    masterForm.submit();
+  });
+
+  document.getElementById('btnVerifyGrn').addEventListener('click', () => {
+    const invNo = document.getElementById('supplierInvoiceNo').value.trim();
+    if (!invNo) {
+      showToast("Supplier Invoice Ref is mandatory for verification.", false);
+      document.getElementById('supplierInvoiceNo').focus();
+      return;
+    }
+    showToast("GRN verified successfully. Ready for warehouse ledger inward.");
+  });
+
+  document.getElementById('btnUpdateStock').addEventListener('click', (e) => {
+    actionHidden.value = 'verify_stock';
+    const supplierId = document.getElementById('id_supplier').value;
+    const invNo = document.getElementById('supplierInvoiceNo').value.trim();
+    const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
+
+    if (!supplierId && !document.getElementById('supplierName').value.trim()) {
+      e.preventDefault();
+      showToast("Validation Error: Please select or enter a valid Supplier.", false);
+      document.getElementById('supplierName').focus();
+      return;
     }
 
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('imeiModal')).show();
-}
+    if (!invNo) {
+      e.preventDefault();
+      showToast("Validation Error: Supplier Invoice / Bill Ref No is required.", false);
+      document.getElementById('supplierInvoiceNo').focus();
+      return;
+    }
 
-function saveDualImeisFromModal() {
-    if (currentEditingModalRowIdx === null) return;
-
-    const row = document.getElementById(`line-item-${currentEditingModalRowIdx}`);
-    if (!row) return;
-
-    const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
-    const rows = document.querySelectorAll('#imeiModalTableBody tr');
-    const imeiTokens = [];
-    let filledCount = 0;
-
+    let hasInvalidItem = false;
     rows.forEach(r => {
-        const im1 = r.querySelector('.modal-imei-1').value.trim();
-        const im2 = r.querySelector('.modal-imei-2').value.trim();
-        if (im1 || im2) {
-            imeiTokens.push(`${im1}|${im2}`);
-            filledCount++;
-        }
+      const pId = r.querySelector('.item-product-id').value;
+      const pName = r.querySelector('.item-name').value.trim();
+      const qty = parseNum(r.querySelector('.item-qty').value);
+      if ((!pId && !pName) || qty <= 0) hasInvalidItem = true;
     });
 
-    if (hiddenImeiField) {
-        hiddenImeiField.value = imeiTokens.join('\n');
+    if (hasInvalidItem) {
+      e.preventDefault();
+      showToast("Validation Error: Please ensure all lines have product names and valid quantities.", false);
+      return;
     }
+  });
 
-    const tag = document.getElementById(`imei-count-tag-${currentEditingModalRowIdx}`);
-    if (tag) tag.textContent = `${filledCount} Units`;
+  // INITIALIZE ON LOAD
+  tableBody.querySelectorAll('.item-row').forEach(row => attachRowEvents(row));
+  initSupplierAutocomplete();
+  calculateAll();
 
-    bootstrap.Modal.getInstance(document.getElementById('imeiModal'))?.hide();
-}
-
-function initImeiBadges() {
-    document.querySelectorAll('#lines-container .line-item-card').forEach(row => {
-        const idx = row.dataset.rowIndex;
-        const hiddenImeiField = row.querySelector('.scanned-imei-hidden-input');
-        if (hiddenImeiField && hiddenImeiField.value.trim()) {
-            const count = hiddenImeiField.value.trim().split('\n').filter(Boolean).length;
-            const tag = document.getElementById(`imei-count-tag-${idx}`);
-            if (tag) tag.textContent = `${count} Units`;
-        }
-    });
-}
-
-// --------------------------------------------------------------------------
-// 7. Form Submission Validation Guard (Respects Master Policy Switch)
-// --------------------------------------------------------------------------
-document.getElementById('grnMasterForm').addEventListener('submit', function(e) {
-    let hasError = false;
-
-    // Enable disabled inputs so default 0.00 discount values are included in POST
-    document.querySelectorAll('#grnMasterForm :disabled').forEach(el => {
-        el.disabled = false;
-    });
-
-    document.querySelectorAll('#lines-container .line-item-card').forEach(row => {
-        if (row.style.display === 'none') return;
-        const deleteCheck = row.querySelector('input[name$="-DELETE"]');
-        if (deleteCheck && deleteCheck.checked) return;
-
-        const prodId = row.querySelector('.grn-product-id-input')?.value;
-        const qty = parseInt(row.querySelector('.line-qty-input')?.value, 10) || 0;
-        const imeiVal = row.querySelector('.scanned-imei-hidden-input')?.value.trim();
-        const imeiLines = imeiVal ? imeiVal.split('\n').filter(Boolean) : [];
-        const isImeiRequired = row.querySelector('.row-requires-imei-flag')?.value === 'true';
-
-        if (prodId) {
-            // STRICT MODE
-            if (GLOBAL_ENFORCE_IMEI && isImeiRequired) {
-                if (imeiLines.length !== qty) {
-                    hasError = true;
-                    const rowNumber = row.querySelector('.counter-dot')?.textContent || '';
-                    alert(`IMEI Count Incomplete on Row #${rowNumber}: This handset requires exactly ${qty} IMEI pair(s), but ${imeiLines.length} were entered.\n\nTip: If entering old backlog bills, turn off 'Enforce Mandatory IMEI' in Settings.`);
-                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    return;
-                }
-            } 
-            // BACKLOG MODE
-            else if (!GLOBAL_ENFORCE_IMEI) {
-                if (imeiLines.length > 0 && imeiLines.length !== qty) {
-                    hasError = true;
-                    const rowNumber = row.querySelector('.counter-dot')?.textContent || '';
-                    alert(`IMEI Count Mismatch on Row #${rowNumber}: You entered ${imeiLines.length} IMEI(s) for ${qty} unit(s).\n\nIn Backlog Mode, please either leave the IMEI field completely empty or enter all ${qty} IMEI pair(s).`);
-                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    return;
-                }
-            }
-        }
-    });
-
-    if (hasError) {
-        e.preventDefault();
-    }
-});
-
-// Initialize on Document Load
-document.addEventListener('DOMContentLoaded', () => {
-    initGrnDateSynchronizer();
-    initWholeBillDiscountControls();
-    initImeiBadges();
-    attachRowCalculationTriggers(document);
-    recalculateFinancials();
-});
+})();
 </script>
 {% endblock %}

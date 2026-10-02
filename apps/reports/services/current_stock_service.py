@@ -1,10 +1,10 @@
 """
 Current Stock Snapshot Business Logic Service.
-File Path: apps/reports/services/current_stock_service.py
 
 Executes high-speed real-time snapshot queries on active warehouse stock,
 evaluating live quantities, reserved orders, defective quarantine allocations,
 and dynamic landed-cost & retail asset valuations without historical date-range loops.
+Includes get_dashboard_stock_summary() for instant owner dashboard aggregations.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -22,6 +22,63 @@ class CurrentStockService:
     """
     Business logic service for the Current Stock Snapshot Report.
     """
+
+    @classmethod
+    def get_dashboard_stock_summary(
+        cls,
+        branch=None,
+        user=None
+    ) -> Dict[str, Any]:
+        """
+        Lightweight valuation method designed for executive KPI tiles.
+        Computes landed inventory value and total physical pieces directly in PostgreSQL.
+        """
+        active_branch = branch or (
+            getattr(user, 'assigned_branch', None)
+            if user and not (user.is_superuser or getattr(user, 'role', '') == 'OWNER')
+            else None
+        )
+
+        qs = BranchStock.objects.filter(product__is_active=True)
+        if active_branch:
+            qs = qs.filter(branch=active_branch)
+
+        cost_expr = ExpressionWrapper(
+            F('quantity') * F('product__purchase_price'),
+            output_field=DecimalField(max_digits=18, decimal_places=2)
+        )
+        retail_expr = ExpressionWrapper(
+            F('quantity') * F('product__selling_price'),
+            output_field=DecimalField(max_digits=18, decimal_places=2)
+        )
+
+        totals = qs.aggregate(
+            total_qty=Coalesce(
+                Sum('quantity'),
+                Value(Decimal('0.000'), output_field=DecimalField(max_digits=18, decimal_places=3))
+            ),
+            total_cost_val=Coalesce(
+                Sum(cost_expr),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            total_retail_val=Coalesce(
+                Sum(retail_expr),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            total_skus=Count('id')
+        )
+
+        total_cost = totals['total_cost_val']
+        total_retail = totals['total_retail_val']
+        projected_margin = max(Decimal('0.00'), total_retail - total_cost)
+
+        return {
+            'total_stock_quantity': totals['total_qty'],
+            'current_stock_valuation': total_cost,
+            'current_stock_retail': total_retail,
+            'current_stock_margin': projected_margin,
+            'total_skus_count': totals['total_skus'],
+        }
 
     @classmethod
     def get_current_stock_data(

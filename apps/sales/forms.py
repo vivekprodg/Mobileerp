@@ -2,6 +2,8 @@
 Sales & POS Module Forms.
 
 Capabilities:
+- SalesEstimateEditForm: Counter and manager interface for safely editing bill metadata
+  (Dates, Customer Name, Phone, PAN, Remarks) with strict lockout guards for cancelled bills.
 - Robust KYC Document image validation handling both fresh UploadedFile streams
   and existing FieldFile storage handles without stream pointer locks.
 - TradeInDeviceIntakeForm, TradeIn10PointChecklistForm, TradeInLegalUndertakingForm.
@@ -9,11 +11,10 @@ Capabilities:
 - Unified ManagerDiscountOverrideForm supporting supervisor PIN verification and
   dual-mode commercial justifications.
 - Architectural Model Cleanup: Deprecation of legacy SalesBillHoldForm.
-  Active cart parking/suspension is managed exclusively by `apps.pos.models.POSHoldCart`
-  and the `/pos/api/hold-carts/` endpoints in `apps.pos`.
 """
 
 import io
+import re
 import warnings
 from decimal import Decimal
 from PIL import Image
@@ -29,6 +30,115 @@ from apps.sales.models import (
 )
 from apps.customers.models import Customer
 from apps.inventory.models import Product
+from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
+
+# ==============================================================================
+# SALES ESTIMATE SAFE EDIT FORM
+# ==============================================================================
+class SalesEstimateEditForm(forms.ModelForm):
+    """
+    Counter interface for correcting bill mistakes (Date, Customer details, Notes).
+    
+    Security & Forensic Safeguards:
+    1. Financial Totals (Grand Total, VAT, Subtotal) are strictly excluded from this form
+       to prevent cashier tampering.
+    2. CANCELLED, RETURNED, and PARTIALLY_RETURNED bills are locked. If submitted,
+       raises validation errors immediately.
+    3. Bidirectional BS/AD date conversion validates that historical Nepali dates are legitimate.
+    """
+    class Meta:
+        model = SalesEstimate
+        fields = [
+            'bill_date_bs',
+            'bill_date_ad',
+            'customer_name_manual',
+            'customer_phone_manual',
+            'customer_pan',
+            'notes'
+        ]
+        widgets = {
+            'bill_date_bs': forms.TextInput(attrs={
+                'class': 'form-control font-monospace nepali-datepicker text-center fw-bold text-primary',
+                'placeholder': 'YYYY-MM-DD (BS)',
+                'autocomplete': 'off'
+            }),
+            'bill_date_ad': forms.DateInput(attrs={
+                'class': 'form-control font-monospace text-center',
+                'type': 'date'
+            }),
+            'customer_name_manual': forms.TextInput(attrs={
+                'class': 'form-control',
+                'placeholder': 'Customer / Business Full Name'
+            }),
+            'customer_phone_manual': forms.TextInput(attrs={
+                'class': 'form-control font-monospace',
+                'placeholder': '98XXXXXXXX'
+            }),
+            'customer_pan': forms.TextInput(attrs={
+                'class': 'form-control font-monospace fw-bold',
+                'placeholder': '9-Digit Tax PAN',
+                'maxlength': '15'
+            }),
+            'notes': forms.Textarea(attrs={
+                'class': 'form-control',
+                'rows': 3,
+                'placeholder': 'Explain the reason for this bill correction (e.g., date typo correction)...'
+            }),
+        }
+        labels = {
+            'bill_date_bs': _('Bill Date (BS) / नेपाली मिति'),
+            'bill_date_ad': _('Bill Date (AD) / अंग्रेजी मिति'),
+            'customer_name_manual': _('Customer / Recipient Name'),
+            'customer_phone_manual': _('Customer Phone Number'),
+            'customer_pan': _('Customer PAN Number (Optional)'),
+            'notes': _('Correction Remarks / Justification'),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+
+        # 1. Lockout Guard: Cancelled or returned bills cannot be edited
+        if self.instance and self.instance.pk:
+            if self.instance.status == 'CANCELLED':
+                raise forms.ValidationError(
+                    _("Security Lockout: Bill %(bill_no)s is Cancelled / Voided and cannot be modified from the counter."),
+                    params={'bill_no': self.instance.estimate_number}
+                )
+            if self.instance.status in ['RETURNED', 'PARTIALLY_RETURNED']:
+                raise forms.ValidationError(
+                    _("Security Lockout: Bill %(bill_no)s has already had items returned. Modifications are prohibited."),
+                    params={'bill_no': self.instance.estimate_number}
+                )
+
+        # 2. Validate Bikram Sambat Date format if provided
+        raw_bs = cleaned_data.get('bill_date_bs')
+        if raw_bs and str(raw_bs).strip():
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(str(raw_bs).strip())
+                # Verify that Nepali calendar can convert it cleanly
+                NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                cleaned_data['bill_date_bs'] = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+            except Exception as e:
+                self.add_error('bill_date_bs', _(f"Invalid Bikram Sambat date format: '{raw_bs}'. Please use YYYY-MM-DD."))
+
+        # 3. Clean PAN Number (9 digits or blank)
+        pan = str(cleaned_data.get('customer_pan') or '').strip()
+        if pan:
+            clean_pan = re.sub(r'\D', '', pan)
+            if clean_pan and len(clean_pan) != 9:
+                self.add_error('customer_pan', _("PAN number must contain exactly 9 numeric digits."))
+            else:
+                cleaned_data['customer_pan'] = clean_pan or None
+
+        # 4. Clean Phone Number
+        phone = str(cleaned_data.get('customer_phone_manual') or '').strip()
+        if phone:
+            clean_phone = re.sub(r'\D', '', phone)
+            if clean_phone and len(clean_phone) < 9:
+                self.add_error('customer_phone_manual', _("Please enter a valid mobile number (e.g. 98XXXXXXXX)."))
+
+        return cleaned_data
 
 # ==============================================================================
 # KYC DOCUMENT FILE VALIDATION UTILITY
@@ -48,17 +158,14 @@ def validate_kyc_document_image(file_obj, field_label="Uploaded document"):
     if not file_obj:
         return file_obj
 
-    # If file is already persisted in the database and not being re-uploaded, bypass check
     if isinstance(file_obj, FieldFile) and not hasattr(file_obj, 'file'):
         return file_obj
 
-    # Enforce file size limit
     if hasattr(file_obj, 'size') and file_obj.size > KYC_MAX_FILE_SIZE:
         raise forms.ValidationError(
             _(f"{field_label} exceeds the 10MB maximum file size limit.")
         )
 
-    # Validate file extension
     file_name = getattr(file_obj, 'name', '')
     ext = file_name.split('.')[-1].lower() if '.' in file_name else ''
     if ext not in KYC_ALLOWED_IMAGE_EXTENSIONS:
@@ -66,7 +173,6 @@ def validate_kyc_document_image(file_obj, field_label="Uploaded document"):
             _(f"{field_label} must be a valid image file (.jpg, .jpeg, .png, .webp).")
         )
 
-    # Validate MIME type if available on uploaded file
     if hasattr(file_obj, 'content_type') and file_obj.content_type:
         content_type = file_obj.content_type.lower()
         if content_type not in KYC_ALLOWED_MIME_TYPES:
@@ -74,7 +180,6 @@ def validate_kyc_document_image(file_obj, field_label="Uploaded document"):
                 _(f"{field_label} format is invalid ({content_type}). Please upload a genuine JPG, PNG, or WebP image.")
             )
 
-    # Deep Image Integrity Check via Pillow (Only for newly uploaded streams)
     if isinstance(file_obj, UploadedFile) or hasattr(file_obj, 'seek'):
         try:
             if hasattr(file_obj, 'seek'):
@@ -207,13 +312,7 @@ class SalesReturnProcessForm(forms.Form):
 class SalesBillHoldForm(forms.ModelForm):
     """
     DEPRECATED (Legacy Unused Form).
-    
-    Architectural Notice:
-    Cart parking and suspension is handled exclusively by `apps.pos.models.POSHoldCart`
-    and the `/pos/api/hold-carts/` endpoint in the `apps.pos` module.
-    
-    This class stub is maintained solely for backward-compatibility to prevent import
-    errors in any existing scripts. Do not use this form for new implementations.
+    Cart parking and suspension is handled exclusively by `apps.pos.models.POSHoldCart`.
     """
     class Meta:
         model = SalesEstimate
@@ -237,9 +336,6 @@ class SalesBillHoldForm(forms.ModelForm):
 class ManagerDiscountOverrideForm(forms.Form):
     """
     Unified Manager Discount & Price Override Authorization Form.
-    Accepts supervisor PIN verification, defines target discount scope,
-    calculates percentage or fixed NPR concessions (AMOUNT), and captures standardized
-    commercial reasons for forensic audit trail accountability.
     """
     DISCOUNT_SCOPE_CHOICES = [
         ('ITEM', _('Line Item Discount')),
@@ -330,7 +426,6 @@ class ManagerDiscountOverrideForm(forms.Form):
         reason = cleaned_data.get('discount_reason')
         notes = (cleaned_data.get('reason_notes') or '').strip()
 
-        # Normalize legacy FIXED alias to AMOUNT
         if disc_type == 'FIXED':
             cleaned_data['discount_type'] = 'AMOUNT'
             disc_type = 'AMOUNT'

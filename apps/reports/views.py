@@ -129,7 +129,6 @@ from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
 from apps.users.models import User
 
-
 # ==============================================================================
 # BASE PERMISSION MIXIN FOR REPORTS
 # ==============================================================================
@@ -150,7 +149,6 @@ class ReportAccessMixin(LoginRequiredMixin, UserPassesTestMixin):
             "Permission Denied: Access to business intelligence, inventory audits, and financial reports is restricted to Store Owners, Managers, and Accountants."
         )
         return redirect('core:dashboard')
-
 
 # ==============================================================================
 # SALES REPORT 1: SALES SUMMARY REPORT (DATE-WISE ROLLUP)
@@ -232,7 +230,6 @@ class SalesSummaryReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # SALES REPORT 2: ITEM-WISE DETAILED SALES REPORT
@@ -320,7 +317,6 @@ class ItemWiseSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # SALES REPORT 3: PRODUCT-WISE SALES REPORT
 # ==============================================================================
@@ -394,7 +390,6 @@ class ProductWiseSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # SALES REPORT 4: BRAND-WISE SALES REPORT
 # ==============================================================================
@@ -462,7 +457,6 @@ class BrandWiseSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # SALES REPORT 5: CATEGORY-WISE SALES REPORT
 # ==============================================================================
@@ -528,7 +522,6 @@ class CategoryWiseSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # SALES REPORT 6: SOLD IMEI & HANDSET REGISTRY REPORT
@@ -601,7 +594,6 @@ class SoldIMEIRegistryReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # SALES REPORT 7: SALESPERSON PERFORMANCE REPORT
 # ==============================================================================
@@ -670,7 +662,6 @@ class SalespersonSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # SALES REPORT 8: CASHIER-WISE COLLECTION REPORT
@@ -741,7 +732,6 @@ class CashierSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # SALES REPORT 9: PAYMENT METHOD-WISE REPORT
 # ==============================================================================
@@ -798,7 +788,6 @@ class PaymentMethodSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # SALES REPORT 10: DISCOUNT & PRICE OVERRIDE REPORT
@@ -873,7 +862,6 @@ class DiscountOverrideReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # SALES REPORT 11: TRADE-IN EXCHANGE SALES REPORT
 # ==============================================================================
@@ -941,7 +929,6 @@ class TradeInExchangeSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # SALES REPORT 12: GROSS PROFIT & MARGIN REALIZATION REPORT
@@ -1013,7 +1000,6 @@ class GrossProfitMarginReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # SALES REPORT 13: TOP-SELLING PRODUCTS REPORT
 # ==============================================================================
@@ -1084,7 +1070,6 @@ class TopSellingSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # SALES REPORT 14: SLOW-SELLING PRODUCTS & DORMANT STOCK REPORT
 # ==============================================================================
@@ -1154,7 +1139,6 @@ class SlowSellingSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # SALES REPORT 15: CANCELLED & VOIDED SALES AUDIT REPORT (PART A)
@@ -1268,7 +1252,6 @@ class CancelledSalesAuditReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 # ==============================================================================
 # REPORT 16: CORE INVENTORY & LEDGER (SUMMARY, DETAIL, SNAPSHOTS)
 # ==============================================================================
@@ -1376,7 +1359,6 @@ class StockSummaryReportView(ReportAccessMixin, View):
 
         return render(request, self.template_name, context)
 
-
 class StockDetailReportView(ReportAccessMixin, View):
     template_name = 'reports/stock_detail.html'
     print_template_name = 'reports/stock_detail_print.html'
@@ -1478,7 +1460,6 @@ class StockDetailReportView(ReportAccessMixin, View):
 
         return render(request, self.template_name, context)
 
-
 class CurrentStockReportView(ReportAccessMixin, View):
     template_name = 'reports/current_stock.html'
 
@@ -1518,7 +1499,6 @@ class CurrentStockReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 class LowStockReportView(ReportAccessMixin, View):
     template_name = 'reports/low_stock.html'
 
@@ -1557,7 +1537,6 @@ class LowStockReportView(ReportAccessMixin, View):
             'selected_branch': selected_branch,
         }
         return render(request, self.template_name, context)
-
 
 class OutOfStockReportView(ReportAccessMixin, View):
     template_name = 'reports/out_of_stock.html'
@@ -1599,7 +1578,6 @@ class OutOfStockReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 class IMEIStockReportView(ReportAccessMixin, View):
     template_name = 'reports/imei_stock.html'
 
@@ -1640,7 +1618,6 @@ class IMEIStockReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 class IMEILifecycleReportView(ReportAccessMixin, View):
     template_name = 'reports/imei_lifecycle.html'
 
@@ -1656,7 +1633,6 @@ class IMEILifecycleReportView(ReportAccessMixin, View):
             'is_found': data['is_found'],
         }
         return render(request, self.template_name, context)
-
 
 class StockTransferReportView(ReportAccessMixin, View):
     template_name = 'reports/stock_transfer_report.html'
@@ -1694,7 +1670,6 @@ class StockTransferReportView(ReportAccessMixin, View):
             'end_date': result['end_date'],
         }
         return render(request, self.template_name, context)
-
 
 class StockAdjustmentReportView(ReportAccessMixin, View):
     template_name = 'reports/stock_adjustment_report.html'
@@ -1747,7 +1722,6 @@ class StockAdjustmentReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 class StockAgingReportView(ReportAccessMixin, View):
     template_name = 'reports/stock_aging.html'
 
@@ -1786,7 +1760,6 @@ class StockAgingReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 class SlowMovingStockReportView(ReportAccessMixin, View):
     template_name = 'reports/slow_moving.html'
 
@@ -1822,7 +1795,6 @@ class SlowMovingStockReportView(ReportAccessMixin, View):
             'filters': filters,
         }
         return render(request, self.template_name, context)
-
 
 class TradeInInventoryReportView(ReportAccessMixin, View):
     template_name = 'reports/trade_in_inventory.html'
@@ -1862,7 +1834,6 @@ class TradeInInventoryReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 class BatchStockReportView(ReportAccessMixin, View):
     template_name = 'reports/batch_stock.html'
 
@@ -1897,7 +1868,6 @@ class BatchStockReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 class DamagedStockReportView(ReportAccessMixin, View):
     template_name = 'reports/damaged_stock.html'
 
@@ -1928,7 +1898,6 @@ class DamagedStockReportView(ReportAccessMixin, View):
             'selected_branch': result['selected_branch'],
         }
         return render(request, self.template_name, context)
-
 
 class VendorRMAReportView(ReportAccessMixin, View):
     template_name = 'reports/vendor_rma_report.html'
@@ -1970,7 +1939,6 @@ class VendorRMAReportView(ReportAccessMixin, View):
             'selected_branch': result['selected_branch'],
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # REPORT 17: PURCHASE DOMAIN REPORTING SUITE
@@ -2023,7 +1991,6 @@ class PurchaseRegisterReportView(ReportAccessMixin, View):
         except Exception:
             return render(request, self.fallback_template_name, context)
 
-
 class SupplierPurchaseReportView(ReportAccessMixin, View):
     template_name = 'reports/supplier_purchase_report.html'
 
@@ -2065,7 +2032,6 @@ class SupplierPurchaseReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
-
 
 class ProductPurchaseReportView(ReportAccessMixin, View):
     template_name = 'reports/product_purchase_report.html'
@@ -2114,22 +2080,40 @@ class ProductPurchaseReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
-
 class SupplierOutstandingReportView(ReportAccessMixin, View):
+    """
+    Supplier Outstanding & Accounts Payable Aging Report.
+    Audits supplier payables, agreed credit terms, aging liabilities, and structured bank payout details.
+    """
     template_name = 'reports/supplier_outstanding_report.html'
 
     def get(self, request, *args, **kwargs):
         active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
+        # Step 1: Capture the Supplier Query Parameter from the URL
+        supplier_id = request.GET.get('supplier', '').strip()
+
+        # Step 4: Retrieve the Supplier Database Object safely
+        selected_supplier = None
+        if supplier_id:
+            try:
+                selected_supplier = Supplier.objects.filter(id=supplier_id).first()
+            except (ValueError, TypeError):
+                selected_supplier = None
+
+        # Step 2: Add the Supplier Key into the Filters Dictionary
         filters = {
             'start_date': request.GET.get('start_date', ''),
             'end_date': request.GET.get('end_date', ''),
             'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),
+            'supplier': supplier_id,
+            'supplier_id': supplier_id,
             'supplier_type': request.GET.get('supplier_type', '').strip(),
             'status': request.GET.get('status', 'due').strip(),
             'q': request.GET.get('q', '').strip(),
         }
 
+        # Step 3: Pass the Supplier Filter to the Domain Service
         data = SupplierOutstandingService.get_supplier_outstanding_data(filters=filters, user=request.user)
         records = data['records']
         totals = data['totals']
@@ -2142,6 +2126,7 @@ class SupplierOutstandingReportView(ReportAccessMixin, View):
         paginator = Paginator(records, 40)
         page_obj = paginator.get_page(request.GET.get('page', 1))
 
+        # Step 5: Expose both the Filters and Selected Supplier to the Template Context
         context = {
             'records': page_obj,
             'page_obj': page_obj,
@@ -2150,6 +2135,7 @@ class SupplierOutstandingReportView(ReportAccessMixin, View):
             'branches': data['branches'],
             'supplier_types': data['supplier_types'],
             'selected_branch': data['selected_branch'],
+            'selected_supplier': selected_supplier,
             'filters': filters,
             'start_date': data['start_date'],
             'end_date': data['end_date'],
@@ -2157,7 +2143,6 @@ class SupplierOutstandingReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # REPORT 17B: CANCELLED & VOIDED PURCHASES AUDIT REPORT (PART B - NEW)
@@ -2263,7 +2248,6 @@ class CancelledPurchasesReportView(ReportAccessMixin, View):
             'date_basis': data.get('date_basis', 'bill_date'),
         }
         return render(request, self.template_name, context)
-
 
 # ==============================================================================
 # REPORT 18: FINANCIALS & HISTORICAL AUDITS
@@ -2428,7 +2412,6 @@ class DailySalesReportView(ReportAccessMixin, TemplateView):
         })
         return context
 
-
 class InventoryValuationReportView(ReportAccessMixin, ListView):
     model = BranchStock
     template_name = 'reports/inventory_valuation.html'
@@ -2567,7 +2550,6 @@ class InventoryValuationReportView(ReportAccessMixin, ListView):
         })
         return context
 
-
 class CustomerUdhaariReportView(ReportAccessMixin, TemplateView):
     template_name = 'reports/customer_udhaari.html'
 
@@ -2586,7 +2568,6 @@ class CustomerUdhaariReportView(ReportAccessMixin, TemplateView):
             'total_outstanding': total_debt,
         })
         return context
-
 
 class ProductPriceHistoryReportView(ReportAccessMixin, ListView):
     model = ProductCostHistory
@@ -2649,7 +2630,6 @@ class ProductPriceHistoryReportView(ReportAccessMixin, ListView):
             'end_date': self.request.GET.get('end_date', ''),
         })
         return context
-
 
 # ==============================================================================
 # UNIVERSAL CSV EXPORTER DISPATCHER
@@ -2867,10 +2847,14 @@ class ExportReportCSVView(ReportAccessMixin, View):
                 return CSVExportEngine.export_product_purchases_csv(res['records'], res['totals'])
 
         elif report_type in ['supplier_outstanding', 'supplier-outstanding', 'supplier_payables']:
+            # Synchronized supplier filter parameters for CSV export
+            supplier_id = request.GET.get('supplier', '').strip()
             filters = {
                 'start_date': request.GET.get('start_date', ''),
                 'end_date': request.GET.get('end_date', ''),
                 'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),
+                'supplier': supplier_id,
+                'supplier_id': supplier_id,
                 'supplier_type': request.GET.get('supplier_type', '').strip(),
                 'status': request.GET.get('status', 'due').strip(),
                 'q': request.GET.get('q', '').strip(),

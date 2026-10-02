@@ -7,10 +7,15 @@ Aligned with:
 - Bidirectional Bikram Sambat (BS) and Gregorian (AD) Date Synchronization.
 - Safe Police-Compliant Undertaking Administration.
 - Forensic Financial Audit Trail with Role-Based Permission Scoping.
+- Admin-Level Backend Override Capabilities:
+  1. Superusers and Store Owners can safely modify bill dates, customer details,
+     and remarks even on cancelled invoices.
+  2. Status transitions to CANCELLED in the admin panel are intercepted to execute
+     atomic inventory restock, phone IMEI release, debt reversal, and GL balancing.
 """
 
 from decimal import Decimal
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
@@ -19,6 +24,8 @@ from apps.sales.models import (
     SalesPaymentTransaction, SalesReturn, SalesReturnItem,
     PhoneExchangeTradeIn, TradeInInspectionChecklist, TradeInLegalUndertaking
 )
+from apps.sales.services import SalesPOSService
+from apps.core.models import AuditLog
 
 # =============================================================================
 # 1. SALES ESTIMATE LINE ITEMS & PAYMENT INLINES
@@ -83,12 +90,12 @@ class SalesPaymentTransactionInline(admin.TabularInline):
     payment_mode_badge.short_description = _("Payment Mode")
 
 # =============================================================================
-# 2. SALES ESTIMATE / INVOICE ADMIN (TURNOVER ACCOUNTING & DATE EDITING)
+# 2. SALES ESTIMATE / INVOICE ADMIN (TURNOVER ACCOUNTING & OVERRIDES)
 # =============================================================================
 @admin.register(SalesEstimate)
 class SalesEstimateAdmin(admin.ModelAdmin):
     list_display = [
-        'estimate_number', 'branch', 'recipient_display_name',
+        'estimate_number', 'bill_type_badge', 'branch', 'recipient_display_name',
         'customer_phone_display', 'customer_pan_display',
         'bill_date_ad', 'bill_date_bs', 'fiscal_year',
         'taxable_amount_display', 'vat_amount_display', 'grand_total_display',
@@ -96,7 +103,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         'net_payable_display', 'paid_amount', 'due_amount', 'status_badge', 'payment_status_badge'
     ]
     list_filter = [
-        'status', 'payment_status', 'fiscal_year', 'bill_discount_type',
+        'bill_type', 'status', 'payment_status', 'fiscal_year', 'bill_discount_type',
         'has_trade_in_exchange', 'is_vat_applicable', 'branch',
         'salesperson', 'cashier', 'bill_date_ad'
     ]
@@ -112,10 +119,11 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         (_("1. Transaction & Historical Date Information"), {
             'description': _(
                 "Updating either Bill Date (BS) or Bill Date (AD) will bidirectionally "
-                "recalculate the corresponding date and Nepali Fiscal Year automatically upon saving."
+                "recalculate the corresponding date, Nepali Fiscal Year, and synchronize downstream "
+                "General Ledger entries, sold phone warranty dates, and debt ledgers automatically upon saving."
             ),
             'fields': (
-                ('estimate_number', 'branch'),
+                ('estimate_number', 'branch', 'bill_type'),
                 ('bill_date_ad', 'bill_date_bs', 'fiscal_year'),
                 ('cashier', 'salesperson')
             )
@@ -165,12 +173,19 @@ class SalesEstimateAdmin(admin.ModelAdmin):
                 'notes'
             )
         }),
+        (_("8. Audit Metadata & System Timestamps"), {
+            'classes': ('collapse',),
+            'fields': (
+                ('created_at', 'updated_at'),
+            )
+        }),
     )
 
     def get_readonly_fields(self, request, obj=None):
         """
-        Locks accounting numbers to prevent subledger corruption while permitting
-        authorized managers/superusers to adjust historical bill dates or notes.
+        Locks accounting calculation totals to prevent accidental financial corruption,
+        while empowering Superusers and Store Owners to modify historical dates, customer metadata,
+        notes, or status even on cancelled bills.
         """
         permanent_readonly = [
             'estimate_number', 'branch', 'fiscal_year',
@@ -190,20 +205,84 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         )
 
         if is_privileged:
-            # Allows privileged staff to update historical dates, customer info, or notes
+            # Privileged staff can edit: bill_type, dates (AD/BS), customer fields, status, reasons, and notes
             return permanent_readonly
 
-        # Non-privileged users have full read-only access
+        # Non-privileged staff have full read-only view
         return [f.name for f in SalesEstimate._meta.fields] + [
             'net_customer_payable_display', 'effective_trade_in_tender_display', 'excess_trade_in_credit_display'
         ]
 
+    def save_model(self, request, obj, form, change):
+        """
+        Backend Save Interceptor:
+        1. If an admin changes a bill's status to 'CANCELLED', intercept and route through
+           SalesPOSService.cancel_sales_estimate() to ensure inventory stock, phone IMEIs,
+           customer debt, and General Ledger double-entry journals are fully reversed.
+        2. If updating historical dates or metadata, obj.save() bidirectionally updates BS/AD
+           dates and auto-propagates them down to ItemInstances, component warranties, and journals.
+        """
+        old_status = form.initial.get('status') if change else None
+        new_status = obj.status
+
+        # Case 1: Status changed to CANCELLED via Admin Panel
+        if change and old_status != 'CANCELLED' and new_status == 'CANCELLED':
+            reason = (
+                form.cleaned_data.get('cancellation_reason') or
+                obj.cancellation_reason or
+                f"Cancelled via Django Admin Panel by {request.user.username}"
+            ).strip()
+
+            try:
+                SalesPOSService.cancel_sales_estimate(
+                    estimate=obj,
+                    reason=reason,
+                    user=request.user
+                )
+                self.message_user(
+                    request,
+                    f"Bill '{obj.estimate_number}' was successfully cancelled. "
+                    f"Sold merchandise stock, phone IMEIs, customer debt, and accounting journals have been safely reversed.",
+                    level=messages.SUCCESS
+                )
+                return
+            except Exception as err:
+                self.message_user(
+                    request,
+                    f"Cancellation failed for bill '{obj.estimate_number}': {str(err)}",
+                    level=messages.ERROR
+                )
+                # Keep original status to prevent database inconsistency
+                obj.status = old_status
+                return
+
+        # Case 2: Standard Admin Save (Metadata or Historical Date Correction)
+        super().save_model(request, obj, form, change)
+
+        # Forensic Audit Trail for Admin Panel Changes
+        if change and form.changed_data:
+            AuditLog.objects.create(
+                user=request.user,
+                branch=obj.branch,
+                action_type='UPDATE',
+                module='Admin_SalesEstimate_Override',
+                object_repr=obj.estimate_number,
+                details={
+                    'changed_fields': list(form.changed_data),
+                    'status': obj.status,
+                    'bill_date_ad': str(obj.bill_date_ad),
+                    'bill_date_bs': obj.bill_date_bs,
+                    'fiscal_year': obj.fiscal_year,
+                    'notes': obj.notes,
+                }
+            )
+
     def has_add_permission(self, request):
-        # Invoices must be generated through the POS Billing Counter Terminal
+        # Invoices must be generated through the POS Counter Terminal
         return False
 
     def has_delete_permission(self, request, obj=None):
-        # Bills must be voided through the dedicated cancellation service
+        # Bills cannot be hard-deleted; they must be voided to preserve audit continuity
         return False
 
     def has_change_permission(self, request, obj=None):
@@ -213,6 +292,16 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         )
 
     # --- Formatted Column Helpers ---
+    def bill_type_badge(self, obj):
+        if obj.is_official_vat_bill:
+            return format_html(
+                '<span style="color: #1e40af; background-color: #dbeafe; border: 1px solid #bfdbfe; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">VAT BILL</span>'
+            )
+        return format_html(
+            '<span style="color: #6b21a8; background-color: #f3e8ff; border: 1px solid #e9d5ff; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">ESTIMATE</span>'
+        )
+    bill_type_badge.short_description = _("Doc Type")
+
     def customer_phone_display(self, obj):
         phone = obj.customer_phone_manual or (obj.customer.phone_number if obj.customer else None)
         if phone:
@@ -223,6 +312,8 @@ class SalesEstimateAdmin(admin.ModelAdmin):
     def customer_pan_display(self, obj):
         if obj.customer_pan:
             return format_html('<span class="font-monospace fw-bold text-primary">{}</span>', obj.customer_pan)
+        elif obj.customer and obj.customer.pan_number:
+            return format_html('<span class="font-monospace text-muted">{}</span>', obj.customer.pan_number)
         return format_html('<span style="color: #94a3b8;">-</span>')
     customer_pan_display.short_description = _("Customer PAN")
 
@@ -231,7 +322,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
     taxable_amount_display.short_description = _("Taxable Base")
 
     def vat_amount_display(self, obj):
-        if obj.vat_amount > 0:
+        if obj.vat_amount > Decimal('0.00'):
             return format_html('<span style="color: #1e40af; font-weight: 700;">Rs. {:,.2f}</span>', obj.vat_amount)
         return format_html('<span style="color: #94a3b8;">Rs. 0.00</span>')
     vat_amount_display.short_description = _("13% VAT")
@@ -242,8 +333,8 @@ class SalesEstimateAdmin(admin.ModelAdmin):
 
     def merchandise_discount_display(self, obj):
         tot_disc = obj.total_sales_discount
-        if tot_disc > 0:
-            type_tag = f" ({obj.get_bill_discount_type_display()})" if obj.bill_discount_amount > 0 else ""
+        if tot_disc > Decimal('0.00'):
+            type_tag = f" ({obj.get_bill_discount_type_display()})" if obj.bill_discount_amount > Decimal('0.00') else ""
             return format_html(
                 '<span style="color: #dc2626; font-weight: 700; font-family: monospace;">-Rs. {:,.2f}{}</span>',
                 tot_disc, type_tag
@@ -252,7 +343,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
     merchandise_discount_display.short_description = _("Sales Discount")
 
     def trade_in_tender_display(self, obj):
-        if obj.has_trade_in_exchange and obj.trade_in_discount_amount > 0:
+        if obj.has_trade_in_exchange and obj.trade_in_discount_amount > Decimal('0.00'):
             return format_html(
                 '<span style="color: #92400e; font-weight: 700; font-family: monospace;">-Rs. {:,.2f}</span>',
                 obj.trade_in_discount_amount
@@ -398,6 +489,12 @@ class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
                 'recommended_condition_grade',
                 ('restocked_product', 'restocked_item_instance'),
                 'evaluation_notes'
+            )
+        }),
+        (_("4. Timestamps & Audit Logs"), {
+            'classes': ('collapse',),
+            'fields': (
+                ('created_at', 'updated_at'),
             )
         }),
     )
@@ -562,6 +659,12 @@ class SalesReturnAdmin(admin.ModelAdmin):
                 'total_refund_amount',
                 'reason',
                 'technician_notes'
+            )
+        }),
+        (_("Audit Metadata"), {
+            'classes': ('collapse',),
+            'fields': (
+                ('created_at', 'updated_at'),
             )
         }),
     )

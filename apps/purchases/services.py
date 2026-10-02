@@ -2,34 +2,29 @@
 Purchase GRN & Commercial Purchase Return (Debit Note) Services.
 
 Core Capabilities:
-1. Strict Pre-VAT Line Valuation:
-   - Unit Purchase Rate is strictly treated as Pre-VAT (before tax).
-   - Line Gross = Purchased Quantity * Unit Purchase Rate.
-2. Two-Way Line Discount Logic:
-   - Supports flat cash discount (AMOUNT) and percentage discount (PERCENTAGE).
-   - Computes exact rupee deductions and syncs equivalent percentage for analytics.
-3. Proportional Whole-Bill Discount Allocation:
-   - Invoice-level discounts (Amount or %) are distributed across items based on
-     their net merchandise values.
-4. Pre-VAT Subtotal (Taxable Base) & Dedicated 13% VAT Calculation:
-   - Computes true Pre-VAT Taxable Base: Gross Lines - Total Discounts.
-   - When 13% VAT toggle is ON, 13% VAT is calculated strictly on top of the Pre-VAT Taxable Base.
-   - When OFF, VAT is strictly Rs. 0.00.
-5. Value-Based Overhead Allocation (Landed Cost / COGS):
-   - Freight, customs duty, and insurance/handling fees are distributed proportionally
-     based on each item's net pre-tax value to derive exact unit landed costs.
-6. Final Supplier Payable & Udhaari Debt with Verified Historical Dates:
-   - Net Invoice Total = Pre-VAT Base + 13% VAT + Overheads.
-   - Due Balance = Net Invoice Total - Paid Amount.
-   - Posts `entry_date` and `entry_date_bs` to `SupplierUdhaariLedger` using verified historical bill dates.
-   - Calibrates `ProductBatch.purchase_date`, `ItemInstance.purchase_date`, and `Supplier.last_purchase_date`
-     to the historical invoice date.
-7. Master-Switch Sensitive Serialized & Dual-IMEI Enforcement:
-   - In Strict Mode (enforce_imei_tracking=True): Requires exact 1-to-1 match between handset quantities and scanned IMEIs.
-   - In Backlog Mode (enforce_imei_tracking=False): Allows phone inward entry without IMEIs, creating FIFO ProductBatch
-     records to safeguard inventory valuation from ghost stock.
-8. Thread-Safe Supplier Ledger Reconciliation & Fail-Closed General Ledger Posting:
-   - Row-level locking (select_for_update) on supplier ledger and automatic double-entry GL postings.
+1. Dual VAT Mode Calculations:
+   - When VAT Excluded (EXCLUSIVE): Purchase rate is treated directly as pre-VAT base.
+   - When VAT Included (INCLUSIVE): Pre-VAT base is extracted:
+     Pre-VAT Base = (Gross - Line Discount) / (1 + (Tax Rate / 100))
+     Gross Pre-VAT = Pre-VAT Base + Line Discount.
+2. 5-Tier Proportional Landed Cost Overhead Allocation:
+   - Distributes all 5 overhead categories (Freight, Customs Duty, Handling & Unloading,
+     Transit Insurance, and Other Overheads) proportionally across line items based on net merchandise value.
+   - Accurately establishes the unit landed cost for inventory COGS asset valuation.
+3. Custom Physical Batch Number Persistence:
+   - Preserves user-entered batch identifiers (`item.batch_number`, e.g. BT-2026-A1) on `ProductBatch`
+     and links them to individual `ItemInstance` records instead of falling back to computer-generated hashes.
+4. Save Draft vs. Final Verify Split:
+   - `save_grn_draft()`: Calculates line financials, taxes, and landed costs without adjusting stock,
+     without creating serial instances, and without touching accounting ledgers.
+   - `process_grn_approval_and_stock_in()`: Performs strict validation, updates physical warehouse stock,
+     registers IMEI instances, creates FIFO batches, updates supplier debt, and posts double-entry GL journals.
+5. Master-Switch Sensitive Serialized & Dual-IMEI Enforcement:
+   - In Strict Mode (`enforce_imei_tracking=True`): Mandates exact 1-to-1 match between handset quantities and scanned IMEIs on approval.
+   - In Backlog Mode (`enforce_imei_tracking=False`): Allows phone inward entry without IMEIs, creating FIFO ProductBatches.
+   - Non-serialized accessories always bypass serial checks.
+6. Thread-Safe Supplier Ledger Reconciliation & Fail-Closed General Ledger Posting:
+   - Row-level locking (`select_for_update`) on supplier balances and synchronized double-entry GL vouchers.
 """
 
 import re
@@ -166,6 +161,65 @@ class PurchaseService:
     Executes mathematically strict, Nepal tax-compliant procurement workflows.
     """
 
+    # =========================================================================
+    # PATH 1: SAVE DRAFT (NO STOCK MODIFICATION, NO GL POSTING)
+    # =========================================================================
+    @classmethod
+    @transaction.atomic
+    def save_grn_draft(
+        cls,
+        grn: GoodsReceivedNote,
+        items: Optional[List[GRNItem]] = None,
+        user=None
+    ) -> GoodsReceivedNote:
+        """
+        Saves an in-progress GRN voucher as a draft.
+        - Synchronizes dates and derives the Nepali Fiscal Year.
+        - Executes financial valuation and prorates 5-tier overheads on line items.
+        - Leaves stock counters untouched, skips serial creation, and skips GL journals.
+        """
+        if grn.status == 'RECEIVED':
+            raise ValidationError("Cannot revert an already received and approved GRN to draft.")
+
+        cls._harmonize_grn_dates(grn)
+
+        if items is None:
+            items = list(grn.items.select_related('product', 'product__base_unit', 'unit_conversion').all())
+
+        # Mathematical Valuation & Landed Proration on in-memory line items
+        cls._calculate_financials_only(grn=grn, items=items)
+
+        grn.status = 'DRAFT'
+        grn.save()
+
+        # Save line item projections
+        for item in items:
+            item.grn = grn
+            item.save()
+
+        AuditLog.objects.create(
+            user=user,
+            branch=grn.branch,
+            action_type='UPDATE' if grn.pk else 'CREATE',
+            module='PurchaseGRN',
+            object_repr=grn.grn_number,
+            details={
+                'action': 'SAVE_DRAFT',
+                'supplier': grn.supplier.company_name if grn.supplier else 'None',
+                'bill_no': grn.supplier_bill_no,
+                'challan_no': grn.challan_no or '',
+                'gross_amount': str(grn.gross_amount),
+                'total_landed_cost': str(grn.total_landed_cost),
+                'net_total_amount': str(grn.net_total_amount),
+                'status': 'DRAFT'
+            }
+        )
+
+        return grn
+
+    # =========================================================================
+    # PATH 2: PROCESS APPROVAL & STOCK INWARD
+    # =========================================================================
     @classmethod
     @transaction.atomic
     def process_grn_approval_and_stock_in(
@@ -175,8 +229,9 @@ class PurchaseService:
     ) -> GoodsReceivedNote:
         """
         Main transactional entry point coordinating complete GRN verification,
-        two-way discount calculation, proportional overhead distribution, stock inward,
-        historical date integrity, supplier debt ledger updates, and fail-closed General Ledger posting.
+        dual VAT handling (exclusive vs inclusive), 5-tier proportional overhead distribution,
+        custom batch numbers, stock inward, historical dates, supplier debt updates,
+        and fail-closed General Ledger posting.
         """
         if grn.status == 'RECEIVED':
             raise ValidationError("This GRN voucher has already been verified and received.")
@@ -191,7 +246,7 @@ class PurchaseService:
         # Step 1: Pre-Validation of Serialized / Dual-IMEI Quantities & Master Setting Sensitivity
         cls._validate_grn_lines(grn, items)
 
-        # Step 2: Full Mathematical Valuation & Proportional Overhead Allocation
+        # Step 2: Full Mathematical Valuation, Proportional Overhead Allocation & Stock Inward
         cls._calculate_and_apply_financials_and_stock(
             grn=grn,
             items=items,
@@ -212,9 +267,10 @@ class PurchaseService:
     @staticmethod
     def _harmonize_grn_dates(grn: GoodsReceivedNote) -> None:
         """
-        Ensures that grn.bill_date (AD), grn.bill_date_bs (BS), and grn.fiscal_year
-        are accurately synchronized before inventory batches and ledger entries are minted.
+        Ensures that grn.bill_date (AD), grn.bill_date_bs (BS), grn.fiscal_year,
+        and challan dates are accurately synchronized before inventory records are created.
         """
+        # Bill Date Synchronization
         if grn.bill_date_bs and str(grn.bill_date_bs).strip():
             try:
                 bs_y, bs_m, bs_d = parse_bs_date_components(str(grn.bill_date_bs).strip())
@@ -236,6 +292,24 @@ class PurchaseService:
                     grn.fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
             except Exception as e:
                 logger.warning(f"[PurchaseService] Could not convert grn.bill_date to BS: {e}")
+
+        # Challan Date Synchronization
+        if grn.challan_date_bs and str(grn.challan_date_bs).strip():
+            try:
+                c_y, c_m, c_d = parse_bs_date_components(str(grn.challan_date_bs).strip())
+                grn.challan_date = NepaliCalendar.bs_to_ad(c_y, c_m, c_d)
+                grn.challan_date_bs = f"{c_y:04d}-{c_m:02d}-{c_d:02d}"
+            except Exception as e:
+                logger.warning(f"[PurchaseService] Could not parse grn.challan_date_bs '{grn.challan_date_bs}': {e}")
+        elif grn.challan_date:
+            c_ad = grn.challan_date.date() if isinstance(grn.challan_date, datetime) else grn.challan_date
+            grn.challan_date = c_ad
+            try:
+                c_y, c_m, c_d = NepaliCalendar.ad_to_bs(c_ad)
+                if not grn.challan_date_bs:
+                    grn.challan_date_bs = NepaliCalendar.format_bs(c_y, c_m, c_d, lang='en')
+            except Exception:
+                pass
 
     # =========================================================================
     # STEP 1: SERIALIZED QUANTITIES & MASTER SETTING VALIDATION
@@ -277,7 +351,7 @@ class PurchaseService:
                 scanned_raw = (item.scanned_imei_list or '').strip()
                 has_imeis = bool(scanned_raw)
 
-                # BACKLOG MODE: If IMEI enforcement is OFF and staff provided no IMEIs, bypass!
+                # BACKLOG MODE: If IMEI enforcement is OFF and staff provided no IMEIs, bypass
                 if not enforce_imei and not has_imeis:
                     continue
 
@@ -355,26 +429,21 @@ class PurchaseService:
                             )
 
     # =========================================================================
-    # STEP 2: MATHEMATICAL CALCULATION & OVERHEAD ALLOCATION ENGINE
+    # STEP 2: MATHEMATICAL VALUATION & OVERHEAD ALLOCATION (FINANCIALS ONLY)
     # =========================================================================
     @classmethod
-    def _calculate_and_apply_financials_and_stock(
+    def _calculate_financials_only(
         cls,
         grn: GoodsReceivedNote,
-        items: List[GRNItem],
-        user=None
-    ) -> None:
+        items: List[GRNItem]
+    ) -> Decimal:
         """
-        Executes complete mathematical valuation:
-        1. Pre-VAT Line Gross = Quantity * Purchase Rate (Pre-VAT).
-        2. Two-way Line Discounts (AMOUNT or PERCENTAGE).
-        3. Whole-bill Discount computed and distributed proportionally.
-        4. Pre-VAT Taxable Base = Total Line Gross - Consolidated Discounts.
-        5. Dedicated 13% VAT calculated strictly on Taxable Base when VAT toggle is ON.
-        6. Proportional value-based overhead distribution for exact unit landed cost.
-        7. Net Invoice Total = Pre-VAT Base + 13% VAT + Overheads.
-        8. Live branch stock counters, FIFO batches (safeguarding non-serialized & backlog items),
-           and physical IMEI ItemInstance records created with verified historical bill dates.
+        Executes unified mathematical valuation across line items and whole-bill overheads:
+        - Resolves VAT Exclusive vs. Inclusive modes.
+        - Calculates line discounts (AMOUNT or PERCENTAGE).
+        - Prorates whole-bill discount.
+        - Prorates all 5 overhead expense categories across items.
+        - Updates line unit landed costs and GRN header valuation totals in memory.
         """
         total_line_gross = Decimal('0.00')
         total_line_discount = Decimal('0.00')
@@ -382,23 +451,22 @@ class PurchaseService:
         # Phase 1: Line Item Gross & Line Discount Computations
         for item in items:
             qty = item.purchased_quantity if (item.purchased_quantity and item.purchased_quantity > Decimal('0.000')) else Decimal('1.000')
-            rate = item.purchase_rate or Decimal('0.00')
-            line_gross = (qty * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            item.gross_amount = line_gross
+            raw_rate = item.purchase_rate or Decimal('0.00')
+            raw_gross = (qty * raw_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             disc_type = item.discount_type or 'NONE'
             disc_input = item.discount_input_value or Decimal('0.00')
 
             if disc_type == 'PERCENTAGE':
                 pct = min(Decimal('100.00'), max(Decimal('0.00'), disc_input))
-                rupee_disc = (line_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item.item_discount_amount = min(rupee_disc, line_gross)
+                rupee_disc = (raw_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.item_discount_amount = min(rupee_disc, raw_gross)
                 item.discount_percent = pct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             elif disc_type == 'AMOUNT':
                 amt = max(Decimal('0.00'), disc_input)
-                item.item_discount_amount = min(amt, line_gross)
-                if line_gross > Decimal('0.00'):
-                    item.discount_percent = ((item.item_discount_amount / line_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.item_discount_amount = min(amt, raw_gross)
+                if raw_gross > Decimal('0.00'):
+                    item.discount_percent = ((item.item_discount_amount / raw_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 else:
                     item.discount_percent = Decimal('0.00')
             else:
@@ -407,11 +475,24 @@ class PurchaseService:
                 item.item_discount_amount = Decimal('0.00')
                 item.discount_percent = Decimal('0.00')
 
-            item.line_total = line_gross - item.item_discount_amount
-            total_line_gross += line_gross
+            taxable_line_raw = max(Decimal('0.00'), raw_gross - item.item_discount_amount)
+
+            # VAT Handling Mode: If INCLUSIVE, extract the pre-VAT base
+            item_vat_rate = item.vat_rate if (item.vat_rate and item.vat_rate > Decimal('0.00')) else Decimal('13.00')
+            is_vat = grn.is_vat_bill or item.is_vat_applicable
+
+            if getattr(grn, 'vat_handling_mode', 'EXCLUSIVE') == 'INCLUSIVE' and is_vat and item_vat_rate > Decimal('0.00'):
+                tax_divisor = Decimal('1.00') + (item_vat_rate / Decimal('100.00'))
+                taxable_base = (taxable_line_raw / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.gross_amount = (taxable_base + item.item_discount_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.line_total = taxable_base
+            else:
+                item.gross_amount = raw_gross
+                item.line_total = taxable_line_raw
+
+            total_line_gross += item.gross_amount
             total_line_discount += item.item_discount_amount
 
-        # Merchandise subtotal after line discounts
         net_lines_subtotal = max(Decimal('0.00'), total_line_gross - total_line_discount)
 
         # Phase 2: Whole-Bill Discount Calculation
@@ -442,21 +523,17 @@ class PurchaseService:
         else:
             vat_amount = Decimal('0.00')
 
-        # Phase 5: Overheads (Freight, Customs, Handling)
-        overheads = (
-            (grn.extra_freight_charge or Decimal('0.00')) +
-            (grn.customs_import_charge or Decimal('0.00')) +
-            (grn.other_handling_charge or Decimal('0.00'))
-        ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # Phase 5: Overheads (Aggregating all 5 Overhead Categories)
+        overheads = grn.overhead_total
 
         # Phase 6: Landed Cost Valuation & Final Bill Total
         total_landed_valuation = (taxable_base + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        net_invoice_total = (taxable_base + vat_amount + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        net_invoice_total = (taxable_base + vat_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         paid = grn.paid_amount or Decimal('0.00')
         net_due = max(Decimal('0.00'), net_invoice_total - paid)
 
-        # Update GRN Header
+        # Update GRN Header In-Memory Values
         grn.gross_amount = total_line_gross
         grn.total_line_discount = total_line_discount
         grn.discount_amount = consolidated_discounts
@@ -465,19 +542,14 @@ class PurchaseService:
         grn.total_landed_cost = total_landed_valuation
         grn.net_total_amount = net_invoice_total
         grn.due_amount = net_due
-        grn.status = 'RECEIVED'
-        grn.received_by = user
-        grn.save()
 
         # Phase 7: Value-Based Overhead & Bill-Discount Allocation to Line Items
         item_count = len(items)
         for item in items:
-            product = item.product
             factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
             base_qty = (item.purchased_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
             item.base_unit_quantity = base_qty
 
-            # Proportional value weighting based on net pre-tax line value
             if net_lines_subtotal > Decimal('0.00'):
                 weight = item.line_total / net_lines_subtotal
             else:
@@ -486,7 +558,7 @@ class PurchaseService:
             line_bill_disc = (grn.bill_discount_amount * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             line_overhead = (overheads * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            # Net landed cost for this line (Net Line - Bill Disc Share + Overhead Share)
+            # Net landed cost for this line item (Merchandise Net - Bill Disc Share + Overhead Share)
             line_landed_total = item.line_total - line_bill_disc + line_overhead
 
             if base_qty > Decimal('0.000'):
@@ -494,21 +566,48 @@ class PurchaseService:
             else:
                 item.unit_landed_cost = Decimal('0.00')
 
+        return overheads
+
+    # =========================================================================
+    # STEP 2 (FULL): CALCULATE FINANCIALS AND APPLY PHYSICAL STOCK INWARD
+    # =========================================================================
+    @classmethod
+    def _calculate_and_apply_financials_and_stock(
+        cls,
+        grn: GoodsReceivedNote,
+        items: List[GRNItem],
+        user=None
+    ) -> None:
+        """
+        Executes complete mathematical valuation and commits physical stock counters,
+        FIFO batches, and ItemInstance records.
+        """
+        # Execute unified valuation across all items
+        cls._calculate_financials_only(grn=grn, items=items)
+
+        grn.status = 'RECEIVED'
+        grn.received_by = user
+        grn.save()
+
+        for item in items:
+            product = item.product
+            base_qty = item.base_unit_quantity or item.purchased_quantity
             item.save()
 
-            # A. Update Physical Branch Inventory Counters
+            # 1. Update Physical Branch Inventory Counters
+            date_label = grn.bill_date_bs or str(grn.bill_date)
             InventoryService.adjust_stock(
                 product=product,
                 branch=grn.branch,
                 quantity_delta=base_qty,
                 movement_type='PURCHASE',
                 reference_doc=grn.grn_number,
-                remarks=f"GRN Inward: {grn.supplier_bill_no} from {grn.supplier.company_name} on {grn.bill_date_bs or grn.bill_date}",
+                remarks=f"GRN Inward: {grn.supplier_bill_no} from {grn.supplier.company_name} on {date_label}",
                 user=user,
                 allow_negative=True
             )
 
-            # B. Price Fluctuation Audit, Master Selling Price & FIFO Batch Creation (Calibrated to grn.bill_date)
+            # 2. Update Master Selling Price & Create FIFO Batch (Preserving Custom Batch Numbers)
             batch_id = cls._update_product_master_and_batches(
                 grn=grn,
                 item=item,
@@ -517,7 +616,7 @@ class PurchaseService:
                 user=user
             )
 
-            # C. Register Physical ItemInstance Records (Dual-IMEI & MDMS) with verified grn.bill_date
+            # 3. Register Physical ItemInstance Records (Dual-IMEI & MDMS)
             cls._register_imei_instances(
                 grn=grn,
                 item=item,
@@ -535,8 +634,8 @@ class PurchaseService:
     ) -> str:
         """
         Updates product master purchase price to the latest landed cost, adjusts MRP if provided,
-        logs historical price transitions, and creates date-specific FIFO batches calibrated
-        strictly to the verified historical `grn.bill_date`.
+        logs historical price transitions, and creates date-specific FIFO batches.
+        Preserves custom physical batch numbers (`item.batch_number`) entered by user.
         """
         old_cost = product.purchase_price
         old_sell = product.selling_price
@@ -560,7 +659,15 @@ class PurchaseService:
             product.selling_price = item.new_selling_price
         product.save(update_fields=['purchase_price', 'selling_price', 'updated_at'])
 
-        batch_id = f"BATCH-{grn.grn_number}-{product.id}"
+        # Priority: Use user-entered physical batch code if provided; else fallback to auto-generated string
+        user_batch = (item.batch_number or '').strip()
+        if user_batch:
+            batch_id = user_batch
+        else:
+            batch_id = f"BATCH-{grn.grn_number}-{product.id}"
+            item.batch_number = batch_id
+            item.save(update_fields=['batch_number'])
+
         has_imeis = bool(item.scanned_imei_list and item.scanned_imei_list.strip())
         is_serialized = product.requires_imei_tracking or product.requires_serial_tracking
 

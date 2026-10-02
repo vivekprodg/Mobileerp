@@ -12,7 +12,7 @@ Capabilities:
 5. Party-Wise Confirmation Ledger & Audit Statement: Sub-ledger statement tracking individual Customer
    (Debtor) or Supplier (Creditor) balances across old migrated data and new fiscal year periods.
 6. Formal Printable A4 Party Confirmation: Official balance confirmation statement with legal text,
-   words conversion, and bilateral signature/stamp blocks.
+   words conversion, company logo, tax PAN, and bilateral signature/stamp blocks.
 7. Trial Balance: Multi-column statement verifying Sum(Debits) == Sum(Credits).
 8. Profit & Loss (Income Statement): Operating Revenue, COGS, Gross Profit, and Net Operating Profit.
 9. Balance Sheet: Statement of Financial Position enforcing Assets == Liabilities + Equity.
@@ -616,11 +616,14 @@ class PartyLedgerView(LoginRequiredMixin, View):
     Sub-Ledger Confirmation & Transaction Statement View.
     Enables viewing and filtering party-wise ledgers (Debtors / Creditors)
     across historical migrated periods and current fiscal years.
+    Supplies full organization branding and metadata context.
     """
     template_name = 'accounting/party_ledger.html'
 
     def get(self, request):
-        branch = getattr(request, 'active_branch', None)
+        branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        config = SystemConfiguration.get_solo() if hasattr(SystemConfiguration, 'get_solo') else SystemConfiguration.objects.first()
+
         party_type = request.GET.get('party_type', 'CUSTOMER').strip().upper()
         if party_type not in ['CUSTOMER', 'SUPPLIER']:
             party_type = 'CUSTOMER'
@@ -630,7 +633,7 @@ class PartyLedgerView(LoginRequiredMixin, View):
         start_date = request.GET.get('start_date', '')
         end_date = request.GET.get('end_date', '')
 
-        # Resolve party candidates for dropdown selectors
+        # Resolve party candidates for dropdown selectors and autocomplete API
         all_customers = Customer.objects.filter(is_active=True).order_by('name')
         all_suppliers = Supplier.objects.filter(status='ACTIVE').order_by('company_name') if hasattr(Supplier, 'status') else Supplier.objects.filter(is_active=True).order_by('company_name')
 
@@ -661,6 +664,9 @@ class PartyLedgerView(LoginRequiredMixin, View):
                 branch=branch
             )
 
+        company_name = getattr(branch, 'display_company_name', None) or getattr(config, 'company_name_en', 'Smart Mobile Hub & Retailers')
+        company_name_np = getattr(branch, 'display_company_name_np', None) or getattr(config, 'company_name_np', 'स्मार्ट मोबाइल हब')
+
         context = {
             'party_type': party_type,
             'selected_party_id': selected_party_id,
@@ -668,21 +674,28 @@ class PartyLedgerView(LoginRequiredMixin, View):
             'all_customers': all_customers,
             'all_suppliers': all_suppliers,
             'available_fiscal_years': PartyLedgerService.get_available_fiscal_years(),
+            'config': config,
+            'SYS_CONFIG': config,
+            'COMPANY_NAME': company_name,
+            'COMPANY_NAME_NP': company_name_np,
+            'active_branch': branch,
             'active_tab': 'party_ledger'
         }
         return render(request, self.template_name, context)
-
 
 class PartyConfirmationStatementPrintView(LoginRequiredMixin, View):
     """
     Formal Printable A4 Balance Confirmation Statement & Audit Letter.
     Formatted for direct physical printing, signed audit confirmations,
     and client reconciliation sign-offs.
+    Supplies official vector company logo, full legal name, PAN/VAT, and signature blocks.
     """
     template_name = 'accounting/party_confirmation_a4.html'
 
     def get(self, request):
-        branch = getattr(request, 'active_branch', None)
+        branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        config = SystemConfiguration.get_solo() if hasattr(SystemConfiguration, 'get_solo') else SystemConfiguration.objects.first()
+
         party_type = request.GET.get('party_type', 'CUSTOMER').strip().upper()
         party_id = request.GET.get('party_id') or request.GET.get('customer_id') or request.GET.get('supplier_id')
 
@@ -709,16 +722,28 @@ class PartyConfirmationStatementPrintView(LoginRequiredMixin, View):
             branch=branch
         )
 
-        config = SystemConfiguration.get_solo() if hasattr(SystemConfiguration, 'get_solo') else None
+        # Resolve authoritative corporate profile branding
+        company_name = getattr(branch, 'display_company_name', None) or getattr(config, 'company_name_en', 'Smart Mobile Hub & Retailers')
+        company_name_np = getattr(branch, 'display_company_name_np', None) or getattr(config, 'company_name_np', '')
+        company_pan = getattr(config, 'pan_number', '') or getattr(config, 'vat_number', '') or '601928374'
+        company_phone = getattr(branch, 'phone_number', None) or getattr(config, 'company_phone', '+977-01-4256789')
+        company_address = getattr(branch, 'address', None) or getattr(config, 'company_address', 'New Road, Kathmandu, Nepal')
+        company_email = getattr(branch, 'email', None) or getattr(config, 'company_email', 'accounts@smartmobilehub.com.np')
+        company_logo_url = getattr(branch, 'logo_url', None) or getattr(config, 'logo_url', '')
 
         context = {
             'statement': statement,
             'config': config,
-            'company_name': getattr(config, 'company_name', 'Mobile Shop Management System'),
-            'company_pan': getattr(config, 'pan_number', ''),
-            'company_phone': getattr(config, 'company_phone', ''),
-            'company_address': getattr(config, 'company_address', 'Kathmandu, Nepal'),
-            'company_email': getattr(config, 'company_email', ''),
+            'SYS_CONFIG': config,
+            'company_name': company_name,
+            'company_name_np': company_name_np,
+            'company_pan': company_pan,
+            'company_phone': company_phone,
+            'company_address': company_address,
+            'company_email': company_email,
+            'company_logo_url': company_logo_url,
+            'has_company_logo': bool(company_logo_url),
+            'active_branch': branch,
             'printed_by': request.user,
             'printed_at': timezone.now()
         }

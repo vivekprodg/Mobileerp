@@ -834,10 +834,10 @@ body {
          ========================================================================= -->
     <header class="hisaav-top-bar position-relative">
         <div style="display: flex; align-items: center; gap: 14px;">
-            <!-- Bill Type Selector (Sales vs Estimates) -->
+            <!-- Bill Type Selector (Sales vs Estimates) with Active Class Binding -->
             <div class="bill-type-pills">
-                <button type="button" class="bill-pill-btn active" id="btnBillTypeSales">Sales Bill</button>
-                <button type="button" class="bill-pill-btn" id="btnBillTypeEstimate">Estimates</button>
+                <button type="button" class="bill-pill-btn active" id="btnBillTypeSales" title="Official Tax / Sales Bill">Sales Bill</button>
+                <button type="button" class="bill-pill-btn" id="btnBillTypeEstimate" title="Internal Quotation / Estimation Slip">Estimates</button>
             </div>
 
             <!-- Quick Operational Tools -->
@@ -1050,10 +1050,8 @@ body {
                     <span class="pos-items-header-title">Invoice Items</span>
                 </div>
 
-                <!-- Dynamic Item Cards Stack Container -->
-                <div id="itemsContainer">
-                    <!-- Populated dynamically via pos_engine.js -->
-                </div>
+                <!-- Dynamic Item Cards Stack Container (Populated dynamically via pos_engine.js) -->
+                <div id="itemsContainer"></div>
 
                 <!-- Bottom Add Item Strip -->
                 <div class="table-add-strip">
@@ -1349,15 +1347,18 @@ body {
     </div>
 </div>
 
-<!-- MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL -->
+<!-- =========================================================================
+     MODAL 3: 80mm THERMAL RECEIPT SLIP POPUP MODAL (DYNAMIC SALES VS ESTIMATE)
+     ========================================================================= -->
 <div class="modal fade" id="receiptModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <!-- Modal Header (Dynamic Title: Sales Bill vs Estimation Slip) -->
             <div class="modal-header bg-dark text-white py-2 px-3 d-flex justify-content-between align-items-center">
-                <h6 class="modal-title fs-sm fw-bold mb-0 text-white">
-                    <i class="fas fa-print text-warning me-1"></i> Estimation Bill Slip
+                <h6 class="modal-title fs-sm fw-bold mb-0 text-white" id="recModalTitle">
+                    <i class="fas fa-file-invoice text-success me-1"></i> Sales Bill / Tax Invoice
                 </h6>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closeReceiptBtn"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closeReceiptBtn" aria-label="Close"></button>
             </div>
             
             <div class="modal-body p-3 bg-light text-center">
@@ -1371,21 +1372,27 @@ body {
                     <div class="text-center" style="font-size: 9px;">PAN: {{ config.pan_number|default:SYS_CONFIG.pan_number }}</div>
                     {% endif %}
                     
-                    <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 5px 0;" class="text-center fw-bold">
-                        *** {{ SYS_CONFIG.bill_header_title|default:BILL_HEADER_TITLE|default:"ESTIMATION SLIP" }} ***
+                    <!-- Dynamic Receipt Slip Header Banner -->
+                    <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 5px 0;" class="text-center fw-bold" id="recBillHeaderBanner">
+                        <span id="recBillTitle">*** TAX INVOICE / SALES BILL ***</span>
                     </div>
 
-                    <div>Slip No : <strong id="recSlipNo">EST-000000</strong></div>
+                    <div>Slip No : <strong id="recSlipNo">INV-000000</strong></div>
                     <div>Date    : <span id="recBillDate">{{ CURRENT_BS_DATE_EN|default:"" }} BS</span></div>
                     <div>Customer: <span id="recCustomer">Walk-in Customer</span></div>
                     
                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
+                    <!-- Dynamic Line Items Container -->
                     <div id="recItemsContainer"></div>
                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
 
                     <div class="d-flex justify-content-between">
                         <span>Subtotal:</span>
                         <strong id="recSubtotal">Rs. 0.00</strong>
+                    </div>
+                    <div class="d-flex justify-content-between text-danger" id="recDiscountRow" style="display: none;">
+                        <span>Discount:</span>
+                        <strong id="recDiscount">-Rs. 0.00</strong>
                     </div>
                     <div class="d-flex justify-content-between text-danger" id="recExchangeRow" style="display: none;">
                         <span>Exchange Credit:</span>
@@ -1406,7 +1413,8 @@ body {
                 <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal" id="finishReceiptBtn">
                     Next Bill
                 </button>
-                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold shadow-sm" id="printThermalReceiptModalBtn">
+                <!-- Dedicated Print Button Bound Directly to Thermal Print Controller -->
+                <button type="button" class="btn btn-primary btn-sm px-4 rounded-pill fw-bold shadow-sm" id="printThermalReceiptModalBtn" data-print-url="">
                     <i class="fas fa-print me-1"></i> Print Slip
                 </button>
             </div>
@@ -1477,9 +1485,10 @@ body {
 {% endblock %}
 
 {% block extra_scripts %}
-<!-- Hardware & POS Client Scripts -->
+<!-- Hardware & POS Client Scripts with Dedicated Thermal Printer Inclusion -->
 <script src="{% static 'js/barcode_scanner_listener.js' %}"></script>
 <script src="{% static 'js/camera_barcode_scanner.js' %}"></script>
+<script src="{% static 'js/thermal_printer.js' %}"></script>
 <script src="{% static 'js/pos_engine.js' %}"></script>
 
 <script>

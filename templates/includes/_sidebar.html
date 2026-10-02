@@ -210,6 +210,15 @@
         <span class="sidebar-label-wrap">General Ledger</span>
     </a>
 
+    <!-- Party-Wise Confirmation Ledger & Audit Statements (NEW) -->
+    <a href="{% url 'accounting:party_ledger' %}" 
+       class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and 'party' in request.resolver_match.url_name %}active{% endif %}"
+       data-bs-toggle="tooltip" data-bs-placement="right" title="Party Confirmation Ledger (Debtors &amp; Creditors)">
+        <i class="fas fa-file-invoice-dollar text-primary"></i>
+        <span class="sidebar-label-wrap">Party Confirmation Ledger</span>
+        <span class="badge bg-primary bg-opacity-10 text-primary ms-auto fs-3xs">A4 AUDIT</span>
+    </a>
+
     <!-- Trial Balance -->
     <a href="{% url 'accounting:trial_balance' %}" 
        class="sidebar-nav-item {% if request.resolver_match.app_name == 'accounting' and request.resolver_match.url_name == 'trial_balance' %}active{% endif %}"
@@ -359,23 +368,27 @@
         </div>
     </div>
 
-    <!-- Sub-Group A: Financial Ledgers & Taxation Suite (Enhanced with Day-Wise VAT Ledger) -->
+    <!-- Sub-Group A: Financial Ledgers & Taxation Suite (Enhanced with Party Confirmation Ledger) -->
     <div class="sidebar-subgroup-wrap">
         <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupA', this)">
             <i class="fas fa-landmark text-success"></i>
             <span class="sidebar-label-wrap flex-grow-1">Customer &amp; Tax Books</span>
             <i class="fas fa-chevron-right fs-2xs text-muted accordion-arrow"></i>
         </div>
-        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'customer_udhaari' and request.resolver_match.app_name != 'taxation' %}d-none{% endif %}" id="subgroupA">
-            <!-- Customer Udhaari -->
+        <div class="sidebar-subgroup-content {% if request.resolver_match.url_name not in 'customer_udhaari,party_ledger,party_confirmation_print' and request.resolver_match.app_name != 'taxation' %}d-none{% endif %}" id="subgroupA">
+            <!-- Customer Udhaari Summary -->
             <a href="{% url 'reports:customer_udhaari' %}" class="sidebar-subgroup-link {% if request.resolver_match.url_name == 'customer_udhaari' %}active{% endif %}">
                 <i class="fas fa-hand-holding-dollar fs-2xs me-1 text-warning"></i> Customer Udhaari Book
+            </a>
+            <!-- Party Balance Confirmation Ledger (Sub-Ledger Audit) -->
+            <a href="{% url 'accounting:party_ledger' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'accounting' and 'party' in request.resolver_match.url_name %}active{% endif %}">
+                <i class="fas fa-file-invoice-dollar fs-2xs me-1 text-primary"></i> Party Confirmation Ledger
             </a>
             <!-- VAT Overview Dashboard -->
             <a href="{% url 'taxation:dashboard' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
                 <i class="fas fa-chart-pie fs-2xs me-1 text-primary"></i> VAT Overview
             </a>
-            <!-- Day-Wise VAT Ledger (NEW) -->
+            <!-- Day-Wise VAT Ledger -->
             <a href="{% url 'taxation:daily_vat_report' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'daily_vat_report' %}active{% endif %}">
                 <i class="fas fa-calendar-days fs-2xs me-1 text-danger"></i> Day-Wise VAT Ledger
             </a>

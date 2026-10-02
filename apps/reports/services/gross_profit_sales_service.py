@@ -1,6 +1,5 @@
 """
 Gross Profit, Markup & Margin Tier Realization Service.
-File Path: apps/reports/services/gross_profit_sales_service.py
 
 Capabilities:
 1. Reconciles net merchandise revenue against true landed acquisition COGS.
@@ -10,6 +9,7 @@ Capabilities:
    - Slim Margin (3% to 10%): High-turnover official smartphones (iPhone, Galaxy)
    - Negative Margin (< 0%): Loss-making / heavy clearance sales
 3. Exposes margin bracket distribution percentages to guide pricing and promotional strategy.
+4. Exposes lightweight get_today_gross_profit_summary() for instantaneous owner dashboard loads.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -17,7 +17,7 @@ from datetime import date, datetime
 from typing import Dict, Any, List, Tuple, Optional
 
 from django.db.models import (
-    Q, Sum, Count, DecimalField, Value
+    Q, Sum, Count, DecimalField, Value, F, ExpressionWrapper
 )
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -32,6 +32,79 @@ class GrossProfitSalesService:
     """
     Business logic engine for Report 12: Gross Profit & Margin Realization Report.
     """
+
+    @classmethod
+    def get_today_gross_profit_summary(
+        cls,
+        branch=None,
+        user=None
+    ) -> Dict[str, Any]:
+        """
+        Lightweight executive calculation for today's gross margin.
+        Eliminates row-by-row iteration and performs direct database aggregations
+        on completed sales estimates finalized today.
+        """
+        today_ad = timezone.now().date()
+        active_branch = branch or (
+            getattr(user, 'assigned_branch', None)
+            if user and not (user.is_superuser or getattr(user, 'role', '') == 'OWNER')
+            else None
+        )
+
+        items_qs = SalesEstimateItem.objects.filter(
+            estimate__status__in=['COMPLETED', 'PARTIALLY_RETURNED'],
+            estimate__bill_date_ad=today_ad
+        )
+
+        if active_branch:
+            items_qs = items_qs.filter(estimate__branch=active_branch)
+
+        cogs_expr = ExpressionWrapper(
+            F('cost_price') * F('base_unit_quantity'),
+            output_field=DecimalField(max_digits=18, decimal_places=2)
+        )
+
+        agg = items_qs.aggregate(
+            gross_revenue=Coalesce(
+                Sum('line_total'),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            tax_sum=Coalesce(
+                Sum('tax_amount'),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            discounts_sum=Coalesce(
+                Sum('discount_amount'),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            total_cogs=Coalesce(
+                Sum(cogs_expr),
+                Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+            ),
+            bills_count=Count('estimate_id', distinct=True)
+        )
+
+        gross_revenue = agg['gross_revenue']
+        tax_sum = agg['tax_sum']
+        total_cogs = agg['total_cogs']
+        bills_count = agg['bills_count']
+
+        net_revenue = max(Decimal('0.00'), gross_revenue - tax_sum)
+        gross_profit = (net_revenue - total_cogs).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        margin_percent = (
+            ((gross_profit / net_revenue) * Decimal('100.00')).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+            if net_revenue > Decimal('0.00') else Decimal('0.0')
+        )
+
+        return {
+            'today_sales_total': gross_revenue,
+            'today_net_revenue': net_revenue,
+            'today_cogs_total': total_cogs,
+            'today_profit': gross_profit,
+            'today_profit_margin_pct': margin_percent,
+            'today_bills_count': bills_count,
+        }
 
     @classmethod
     def resolve_date_range(cls, raw_params: Dict[str, Any]) -> Tuple[date, date, str, str]:

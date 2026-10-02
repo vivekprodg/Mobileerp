@@ -71,18 +71,6 @@
     padding: 8px 10px;
     font-size: 0.75rem;
 }
-
-.void-warning-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    background-color: #fee2e2;
-    color: #dc2626;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.25rem;
-}
 </style>
 {% endblock %}
 
@@ -116,6 +104,13 @@
                     <span class="badge bg-secondary bg-opacity-10 text-secondary fw-bold px-3 py-1 rounded-pill fs-xs">
                         {{ estimate.get_status_display }}
                     </span>
+                {% endif %}
+
+                <!-- Document Type Tag -->
+                {% if estimate.bill_type == 'SALES' or estimate.estimate_number|slice:":3" == "INV" %}
+                    <span class="badge bg-primary text-white px-2 py-1 rounded-pill fs-2xs fw-bold">Official VAT Bill</span>
+                {% else %}
+                    <span class="badge bg-secondary text-white px-2 py-1 rounded-pill fs-2xs fw-bold">Internal Estimate</span>
                 {% endif %}
 
                 <!-- Payment Status Badge -->
@@ -159,7 +154,16 @@
                 <i class="fas fa-file-invoice me-1"></i> Print A4 Invoice
             </a>
 
-            <!-- Itemized Return Action Button -->
+            <!-- SAFE COUNTER EDIT BUTTON: Only accessible if bill can be edited -->
+            {% if estimate.can_be_edited %}
+                <a href="{% url 'sales:estimate_edit' estimate.pk %}" 
+                   class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold"
+                   title="Edit bill date, customer, or remarks">
+                    <i class="fas fa-pen-to-square me-1"></i> Edit Details
+                </a>
+            {% endif %}
+
+            <!-- Itemized Return Action Button (Locked if cancelled or fully returned) -->
             {% if estimate.status != 'CANCELLED' and estimate.status != 'RETURNED' %}
                 <a href="{% url 'sales:return_create' estimate.pk %}" 
                    class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs" 
@@ -168,17 +172,15 @@
                 </a>
             {% endif %}
 
-            <!-- Restricted Bill Void Action: Opens Reason Modal -->
-            {% if estimate.status != 'CANCELLED' and estimate.status != 'RETURNED' %}
-                {% if user.is_superuser or user.role == 'OWNER' or user.role == 'MANAGER' %}
+            <!-- Restricted Bill Void Action: Only accessible if NOT cancelled and user is supervisor -->
+            {% if estimate.can_be_voided and is_supervisor %}
                 <button type="button" 
                         class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold shadow-xs" 
                         data-bs-toggle="modal" 
                         data-bs-target="#voidBillConfirmModal"
-                        title="Void sales estimate and safely reverse inventory, debt, and journals">
+                        title="Void sales bill and safely reverse inventory, debt, and journals">
                     <i class="fas fa-ban me-1"></i> Void Bill
                 </button>
-                {% endif %}
             {% endif %}
 
             <a href="{% url 'sales:estimate_list' %}" 
@@ -187,6 +189,25 @@
             </a>
         </div>
     </div>
+
+    <!-- PROMINENT CANCELLED / VOIDED BILL WARNING BANNER -->
+    {% if estimate.status == 'CANCELLED' %}
+    <div class="alert alert-danger bg-danger bg-opacity-10 border border-danger rounded-4 p-4 mb-4 shadow-xs">
+        <div class="d-flex align-items-start gap-3">
+            <span class="badge bg-danger p-3 rounded-circle fs-4 text-white"><i class="fas fa-ban"></i></span>
+            <div class="flex-grow-1">
+                <h5 class="fw-bold text-danger mb-1">THIS BILL HAS BEEN CANCELLED / VOIDED (रद्द गरिएको बिल)</h5>
+                <p class="fs-xs text-dark mb-2">
+                    This transaction was officially cancelled on <strong>{{ estimate.updated_at|date:"M d, Y H:i" }}</strong>.
+                    All physical inventory items and phone IMEIs have been returned to active stock, customer debt has been reversed, and balancing cancellation entries were posted to the General Ledger.
+                </p>
+                <div class="p-2.5 bg-white border border-danger border-opacity-25 rounded-3 fs-xs text-danger fw-semibold">
+                    <i class="fas fa-comment-dots me-1"></i> <strong>Mandatory Void Reason:</strong> {{ estimate.cancellation_reason|default:"Cashier Entry Typo / Operational Cancellation" }}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Non-IRD Estimation Notice Header Banner -->
     <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 fs-xs text-dark">
@@ -284,7 +305,6 @@
                                 <td class="ps-4 py-3">
                                     <div class="fw-bold text-dark fs-sm">{{ item.product.name }}</div>
                                     
-                                    <!-- RAM / ROM / Color Variant Tag -->
                                     {% if item.product.ram and item.product.internal_storage %}
                                         <div class="text-muted fs-2xs mt-1">
                                             <span class="badge bg-light text-secondary border">
@@ -297,7 +317,6 @@
                                         </div>
                                     {% endif %}
 
-                                    <!-- Cashier Price Override Concession Indicator -->
                                     {% if item.official_unit_price and item.official_unit_price > item.unit_price %}
                                         <div class="text-danger fs-2xs font-monospace mt-1">
                                             <i class="fas fa-arrow-trend-down me-1"></i>Catalog MRP: 
@@ -308,10 +327,8 @@
                                         </div>
                                     {% endif %}
 
-                                    <!-- DUAL-IMEI BADGES WITH ONE-CLICK CLIPBOARD COPY -->
                                     {% if item.imei_number or item.secondary_imei %}
                                     <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
-                                        <!-- Primary IMEI 1 Badge -->
                                         {% if item.imei_number %}
                                         <div class="imei-badge-container bg-primary bg-opacity-10 border-primary border-opacity-25 text-primary">
                                             <span><strong>IMEI 1:</strong> <span id="imei1_{{ item.id }}">{{ item.imei_number }}</span></span>
@@ -324,7 +341,6 @@
                                         </div>
                                         {% endif %}
 
-                                        <!-- Secondary IMEI 2 Badge -->
                                         {% if item.secondary_imei %}
                                         <div class="imei-badge-container bg-info bg-opacity-10 border-info border-opacity-25 text-info">
                                             <span><strong>IMEI 2:</strong> <span id="imei2_{{ item.id }}">{{ item.secondary_imei }}</span></span>
@@ -337,7 +353,6 @@
                                         </div>
                                         {% endif %}
 
-                                        <!-- Serial Number -->
                                         {% if item.serial_number and item.serial_number != item.imei_number and item.serial_number != item.secondary_imei %}
                                         <div class="imei-badge-container bg-secondary bg-opacity-10 text-secondary border">
                                             <span><strong>S/N:</strong> {{ item.serial_number }}</span>
@@ -352,7 +367,6 @@
                                     </div>
                                     {% endif %}
 
-                                    <!-- NTA MDMS & Warranty Badges -->
                                     <div class="d-flex flex-wrap align-items-center gap-1 mt-2">
                                         {% if item.item_instance %}
                                             {% if item.item_instance.mdms_status == 'REGISTERED_OFFICIAL' %}
@@ -376,20 +390,16 @@
 
                                 <td class="text-center font-monospace">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</td>
                                 
-                                <!-- Selling Rate -->
                                 <td class="text-end font-monospace">
                                     Rs. {{ item.unit_price|floatformat:2|intcomma }}
                                 </td>
 
-                                <!-- Detailed Dual-Mode Line-Item Discount Analysis -->
                                 <td class="text-end font-monospace">
                                     {% if item.discount_amount > 0 or item.item_discount_amount > 0 %}
-                                        <!-- Actual Deducted Discount Amount -->
                                         <div class="text-danger fw-bold fs-xs">
                                             -Rs. {{ item.item_discount_amount|default:item.discount_amount|floatformat:2|intcomma }}
                                         </div>
 
-                                        <!-- Badge: Amount vs Percentage with Raw Typed Value -->
                                         <div class="mt-1 d-flex justify-content-end gap-1 flex-wrap">
                                             {% if item.discount_type == 'AMOUNT' or item.discount_type == 'FIXED' %}
                                                 <span class="disc-type-pill bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25" title="Cashier typed flat amount">
@@ -406,19 +416,16 @@
                                             {% endif %}
                                         </div>
 
-                                        <!-- Effective Percentage Calculated -->
                                         <div class="text-muted fs-2xs mt-1">
                                             Eff: <strong>{{ item.effective_discount_percent|default:item.discount_percent|floatformat:1 }}%</strong>
                                         </div>
 
-                                        <!-- Multi-Quantity Per-Unit Discount Detail -->
                                         {% if item.quantity > 1 and item.unit_discount_amount > 0 %}
                                             <div class="text-muted fs-2xs">
                                                 (Rs. {{ item.unit_discount_amount|floatformat:2|intcomma }}/unit)
                                             </div>
                                         {% endif %}
 
-                                        <!-- Allocated Bill Discount Component (if present) -->
                                         {% if item.allocated_bill_discount_amount > 0 %}
                                             <div class="text-secondary fs-2xs mt-1" title="Proportionate share of bill-level discount">
                                                 +Bill Disc: Rs. {{ item.allocated_bill_discount_amount|floatformat:2|intcomma }}
@@ -433,7 +440,6 @@
                                     <td class="text-end font-monospace text-warning-emphasis">Rs. {{ item.tax_amount|floatformat:2|intcomma }}</td>
                                 {% endif %}
 
-                                <!-- Net Line Total -->
                                 <td class="text-end pe-4 font-monospace fw-bold text-dark">
                                     Rs. {{ item.line_total|floatformat:2|intcomma }}
                                 </td>
@@ -511,7 +517,6 @@
         <!-- Right Column (4 Cols): Financial Summary & Settlement -->
         <div class="col-12 col-lg-4">
             
-            <!-- Financial Summary Card (Merchandise Discounts & Commercial Approvals) -->
             <div class="invoice-detail-card p-4 mb-4">
                 <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
                     <i class="fas fa-receipt text-primary me-2"></i> Invoice Calculation
@@ -523,7 +528,6 @@
                         <td class="text-end font-monospace fw-semibold">Rs. {{ estimate.subtotal|floatformat:2|intcomma }}</td>
                     </tr>
                     
-                    <!-- Line Items Discount Total -->
                     {% if estimate.item_discount_total > 0 %}
                     <tr>
                         <td class="text-muted">Line Items Discount:</td>
@@ -531,7 +535,6 @@
                     </tr>
                     {% endif %}
 
-                    <!-- Dual-Mode Bill-Level Discount with Typed Input vs Effective % -->
                     {% if estimate.bill_discount_amount > 0 %}
                     <tr>
                         <td class="text-muted">
@@ -552,7 +555,6 @@
                     </tr>
                     {% endif %}
 
-                    <!-- Total Sales Concession -->
                     {% if estimate.item_discount_total > 0 and estimate.bill_discount_amount > 0 %}
                     <tr class="border-top border-light">
                         <td class="text-muted fw-bold">Total Sales Discount:</td>
@@ -560,7 +562,6 @@
                     </tr>
                     {% endif %}
 
-                    <!-- Price Override Concessions (Catalog Reductions) -->
                     {% if estimate.price_override_total > 0 %}
                     <tr>
                         <td class="text-muted">Catalog Price Overrides:</td>
@@ -568,7 +569,6 @@
                     </tr>
                     {% endif %}
 
-                    <!-- Taxes -->
                     {% if estimate.vat_amount > 0 %}
                         {% if estimate.taxable_amount > 0 %}
                         <tr>
@@ -590,7 +590,6 @@
                     </tr>
                 </table>
 
-                <!-- SUPERVISOR APPROVAL & COMMERCIAL REASON AUDIT INSET -->
                 {% if estimate.manager_override_by or estimate.discount_reason %}
                 <div class="supervisor-auth-box mt-3">
                     <div class="d-flex align-items-center gap-1 text-dark fw-bold fs-xs mb-1">
@@ -614,13 +613,12 @@
                 {% endif %}
             </div>
 
-            <!-- Dedicated Settlement Section (Trade-In Buy-Back Credit Strictly Separated) -->
+            <!-- Settlement & Tender Breakdown Card -->
             <div class="settlement-card p-4 mb-4">
                 <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
                     <i class="fas fa-hand-holding-dollar text-success me-2"></i> Settlement &amp; Tendered Payments
                 </h6>
 
-                <!-- Trade-In Buy-Back Credit Display -->
                 {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
                 <div class="p-3 bg-white border border-warning border-opacity-50 rounded-3 mb-3 shadow-xs">
                     <div class="d-flex justify-content-between align-items-center mb-1">
@@ -657,7 +655,6 @@
                     {% endif %}
                 </table>
 
-                <!-- Payment Split Breakdown -->
                 <div class="border-top pt-2">
                     <span class="text-uppercase text-muted fw-bold fs-2xs d-block mb-2">Tender Breakdown</span>
                     {% for p in payments %}
@@ -702,6 +699,7 @@
 <!-- =========================================================================
      MODAL: VOID / CANCEL SALES ESTIMATE CONFIRMATION MODAL
      ========================================================================= -->
+{% if estimate.can_be_voided and is_supervisor %}
 <div class="modal fade" id="voidBillConfirmModal" tabindex="-1" aria-labelledby="voidBillConfirmModalLabel" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
@@ -719,7 +717,6 @@
                 </div>
 
                 <div class="modal-body p-4">
-                    <!-- Impact Notice Alert -->
                     <div class="alert alert-danger bg-danger bg-opacity-10 border-danger border-opacity-25 rounded-3 p-3 fs-xs mb-3 text-dark">
                         <strong class="d-block text-danger mb-1"><i class="fas fa-shield-halved me-1"></i> Irreversible Action Safeguard:</strong>
                         <ul class="mb-0 ps-3 text-muted">
@@ -733,22 +730,17 @@
                         </ul>
                     </div>
 
-                    <!-- Commercial Justification Dropdown -->
                     <div class="mb-3">
                         <label class="form-label fs-xs fw-bold text-dark mb-1">
                             Operational Justification / Category <span class="text-danger">*</span>
                         </label>
                         <select id="voidCommercialReasonCategory" class="form-select form-select-sm fw-semibold">
-                            <option value="CASHIER_ENTRY_MISTAKE" selected>Cashier Entry Mistake / Typo (काउन्टरमा इन्ट्री गल्ती)</option>
-                            <option value="CUSTOMER_CHANGED_MIND">Customer Changed Mind Before Handover (ग्राहकले सामान लिन नचाहेको)</option>
-                            <option value="DUPLICATE_BILLING">Duplicate Bill Generated (दोहोरो बिल बनेको)</option>
-                            <option value="INCORRECT_PRICING_DISCOUNT">Incorrect Pricing or Discount Applied (मूल्य वा छुट गलत भएको)</option>
-                            <option value="PAYMENT_METHOD_DISCREPANCY">Payment Method Discrepancy (भुक्तानी माध्यम त्रुटि)</option>
-                            <option value="OTHER">Other Operational Reason (अन्य कारण खुलाउनुहोस्)</option>
+                            {% for cat_val, cat_label in void_reason_choices %}
+                                <option value="{{ cat_val }}" {% if forloop.first %}selected{% endif %}>{{ cat_label }}</option>
+                            {% endfor %}
                         </select>
                     </div>
 
-                    <!-- Mandatory Detailed Cancellation Reason Input -->
                     <div class="mb-2">
                         <label class="form-label fs-xs fw-bold text-dark mb-1">
                             Detailed Cancellation Reason <span class="text-danger">*</span>
@@ -766,13 +758,12 @@
                         </div>
                     </div>
 
-                    <!-- Inline Error Notification -->
                     <div id="voidFormValidationAlert" class="alert alert-danger p-2 fs-2xs d-none mb-0 mt-2"></div>
                 </div>
 
                 <div class="modal-footer bg-light border-0 py-2 px-4 d-flex justify-content-between">
                     <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">
-                        Keep Bill (Cancel)
+                        Keep Bill
                     </button>
                     <button type="submit" class="btn btn-danger btn-sm px-4 rounded-pill fw-bold shadow-sm" id="confirmVoidSubmitBtn">
                         <i class="fas fa-ban me-1"></i> Confirm &amp; Void Bill
@@ -782,6 +773,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <script>
 function copyToClipboard(text, btnElement) {
@@ -802,9 +794,6 @@ function copyToClipboard(text, btnElement) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // =========================================================================
-    // VOID BILL CONFIRMATION MODAL LOGIC & REASON FORMATTING
-    // =========================================================================
     const voidForm = document.getElementById('voidEstimateForm');
     const reasonCategory = document.getElementById('voidCommercialReasonCategory');
     const reasonTextarea = document.getElementById('voidDetailedReasonTextarea');
@@ -841,7 +830,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
 
-            // Standardize structured justification format: "[CATEGORY] Detailed note"
             const finalReason = `[${categoryText}] ${detailedText}`;
             reasonTextarea.value = finalReason;
 

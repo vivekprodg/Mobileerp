@@ -7,21 +7,25 @@ Key Architectural Upgrades:
    - Preserves user input (`discount_input_value`), rupee deductions (`item_discount_amount`),
      and synchronized secondary percentages (`discount_percent`).
    - GRN Bill Header supports overall invoice discounts (Amount or Percentage) applied on merchandise.
-2. Strict Pre-VAT Pricing & 13% VAT Calculation (Nepal Tax Standard):
-   - All unit purchase rates and gross calculations are strictly Pre-VAT.
+2. Dual VAT Handling Modes (Exclusive vs. Inclusive):
+   - Supports 'EXCLUSIVE' (VAT added on top of Pre-VAT base) and 'INCLUSIVE' (VAT extracted from rates).
    - When `is_vat_bill` is enabled, 13% VAT is calculated on the Pre-VAT Taxable Base
      (Gross Lines - Total Discounts). When disabled, VAT is strictly Rs. 0.00.
-3. Proportional Landed Cost Overhead Allocation:
-   - Overhead charges (Freight, Customs/Duty, and Handling/Insurance) are dynamically distributed
-     across line items proportional to their net pre-VAT merchandise value.
-   - Produces exact unit landed costs (`unit_landed_cost`) for inventory COGS valuation.
-4. Bidirectional Historical Date & Fiscal Year Synchronization:
-   - Ensures that if `bill_date_bs` is provided, it overrides the `timezone.now` default on `bill_date`,
-     converts to Gregorian AD date, and derives the accurate Nepali Fiscal Year (e.g. 2080/81 to 2083/84).
-   - Applied symmetrically to GoodsReceivedNote, PurchaseOrder, and PurchaseReturn.
-5. Explicit Historical Dates on SupplierUdhaariLedger:
-   - Added `entry_date` and `entry_date_bs` so retroactive bills and payouts maintain true dates.
-   - Strict `recalculate_balance_from_ledger()` guarantees double-entry integrity with `SupplierUdhaariLedger`.
+3. 5-Tier Proportional Landed Cost Overhead Allocation:
+   - Complete support for Freight, Customs/Duty, Handling & Unloading, Transit Insurance, and Other Overheads.
+   - Overhead charges are dynamically distributed across line items proportional to their net pre-VAT
+     merchandise value to produce exact unit landed costs (`unit_landed_cost`) for inventory COGS valuation.
+4. Independent Delivery Challan & Multiple Observation Fields:
+   - Separate tracking for `challan_no`, `challan_date`, and `challan_date_bs`.
+   - Distinct audit fields: `consignment_narration`, `receiving_notes`, and `internal_notes`.
+5. Custom Physical Batch Number on Items:
+   - Line-level `batch_number` on `GRNItem` allowing direct capture of manufacturer/vendor batch identifiers.
+6. Bidirectional Historical Date & Fiscal Year Synchronization:
+   - Ensures that if `bill_date_bs` or `challan_date_bs` is provided, it accurately standardizes
+     and derives Gregorian AD dates and Nepali Fiscal Years (e.g. 2080/81 to 2083/84).
+7. Explicit Historical Dates on SupplierUdhaariLedger:
+   - Preserves `entry_date` and `entry_date_bs` so retroactive bills and payouts maintain true business dates.
+   - Strict `recalculate_balance_from_ledger()` guarantees double-entry integrity.
 """
 
 import re
@@ -579,9 +583,10 @@ class PurchaseOrderItem(TimeStampedModel):
 class GoodsReceivedNote(TimeStampedModel):
     """
     Goods Received Note (GRN) Inward Procurement Voucher.
-    Tracks supplier invoices, Pre-VAT merchandise values, flexible bill-level discounts,
-    dedicated 13% VAT, value-based overhead distribution (Landed Cost/COGS),
-    NTA MDMS certification, and historical purchase dates.
+    Tracks supplier invoices, separate delivery challans, Pre-VAT merchandise values,
+    flexible bill-level discounts, dual VAT handling modes (exclusive vs. inclusive),
+    5-tier value-based overhead distribution (Landed Cost/COGS), NTA MDMS certification,
+    independent observations, and historical purchase dates.
     """
     GRN_STATUS = [
         ('DRAFT', 'Draft / In-Inspection'),
@@ -595,6 +600,11 @@ class GoodsReceivedNote(TimeStampedModel):
         ('AMOUNT', _('Flat Amount (रू)')),
     ]
 
+    VAT_MODE_CHOICES = [
+        ('EXCLUSIVE', _('VAT Excluded (Added on Top of Rate)')),
+        ('INCLUSIVE', _('VAT Included (Extracted from Rate)')),
+    ]
+
     grn_number = models.CharField(max_length=50, unique=True, db_index=True, verbose_name=_("GRN No."))
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='goods_receipts')
     branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name='goods_receipts')
@@ -602,18 +612,33 @@ class GoodsReceivedNote(TimeStampedModel):
         PurchaseOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name='grn_vouchers'
     )
     
+    # Supplier Invoice / Bill Reference
     supplier_bill_no = models.CharField(
-        max_length=100, verbose_name=_("Supplier Invoice / Challan Ref No."), db_index=True
+        max_length=100, verbose_name=_("Supplier Invoice / Bill Ref No."), db_index=True
     )
     supplier_product_code = models.CharField(
         max_length=100, blank=True, null=True, verbose_name=_("Supplier Batch / Product Code")
     )
 
-    # Date Trackers (Allows Historical Imports from 2080 B.S.)
+    # Distinct Delivery Challan Reference
+    challan_no = models.CharField(
+        max_length=100, blank=True, null=True, db_index=True,
+        verbose_name=_("Challan / Delivery Ref No.")
+    )
+    challan_date = models.DateField(
+        blank=True, null=True, db_index=True,
+        verbose_name=_("Challan Date (AD)")
+    )
+    challan_date_bs = models.CharField(
+        max_length=15, blank=True, null=True, db_index=True,
+        verbose_name=_("Challan Date (BS)")
+    )
+
+    # Invoice Date Trackers (Allows Historical Imports from 2080 B.S.)
     bill_date = models.DateField(
         default=timezone.now,
         db_index=True,
-        verbose_name=_("Bill / Challan Date (AD)"),
+        verbose_name=_("Bill / Invoice Date (AD)"),
         help_text=_("Gregorian date for indexing. Automatically synced with B.S. date.")
     )
     bill_date_bs = models.CharField(
@@ -682,7 +707,12 @@ class GoodsReceivedNote(TimeStampedModel):
         help_text=_("Net pre-VAT merchandise value (Gross Lines - Total Discounts).")
     )
     
-    # Nepal 13% VAT Module
+    # VAT Handling Mode & Calculations
+    vat_handling_mode = models.CharField(
+        max_length=15, choices=VAT_MODE_CHOICES, default='EXCLUSIVE', db_index=True,
+        verbose_name=_("VAT Handling Mode"),
+        help_text=_("Exclusive: VAT calculated on top. Inclusive: VAT broken out from entered rate.")
+    )
     is_vat_bill = models.BooleanField(
         default=False,
         verbose_name=_("13% VAT Inward Tax Bill"),
@@ -698,20 +728,31 @@ class GoodsReceivedNote(TimeStampedModel):
         help_text=_("13% VAT on Pre-VAT Taxable Base when VAT toggle is ON; Rs. 0.00 when OFF.")
     )
     
-    # Overhead Expenses (Distributed to Landed Cost)
+    # 5 Overhead Expense Fields (Distributed to Landed Cost)
     extra_freight_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Freight / Courier Charge (NPR)")
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Freight / Courier Charge (NPR)")
     )
     customs_import_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Customs / Duty / Tax (NPR)")
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Customs / Duty / Tax (NPR)")
     )
     other_handling_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Insurance / Handling Cost (NPR)")
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Handling & Unloading Cost (NPR)")
+    )
+    insurance_charge = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Transit Insurance (NPR)")
+    )
+    other_overheads_charge = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Other Direct Overheads (NPR)")
     )
     total_landed_cost = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Total Landed Cost Valuation / COGS (NPR)"),
-        help_text=_("Pre-VAT Taxable Merchandise Base + Total Freight, Customs & Handling Overheads.")
+        help_text=_("Pre-VAT Taxable Merchandise Base + Total Freight, Customs, Handling, Insurance & Other Overheads.")
     )
     
     # Supplier Settlement & Due Tracking
@@ -748,7 +789,28 @@ class GoodsReceivedNote(TimeStampedModel):
     received_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='received_grns'
     )
-    remarks = models.TextField(blank=True, null=True)
+    
+    # Multi-field Audit Narrations & Observations
+    consignment_narration = models.TextField(
+        blank=True, null=True,
+        verbose_name=_("General Consignment Narration"),
+        help_text=_("Transaction note for general ledger.")
+    )
+    receiving_notes = models.TextField(
+        blank=True, null=True,
+        verbose_name=_("Receiving / Physical Inspection Notes"),
+        help_text=_("Seal conditions, carton numbers, driver remarks, etc.")
+    )
+    internal_notes = models.TextField(
+        blank=True, null=True,
+        verbose_name=_("Internal Notes & Audit Reference"),
+        help_text=_("Approvals, QC test references, gate passes, etc.")
+    )
+    remarks = models.TextField(
+        blank=True, null=True,
+        verbose_name=_("Consolidated Remarks (Legacy)"),
+        help_text=_("Maintained for backward compatibility.")
+    )
 
     class Meta:
         db_table = 'pur_goods_received_notes'
@@ -760,6 +822,7 @@ class GoodsReceivedNote(TimeStampedModel):
             models.Index(fields=['fiscal_year', 'branch'], name='idx_grn_fy_branch'),
             models.Index(fields=['supplier', 'bill_date'], name='idx_grn_supplier_date'),
             models.Index(fields=['supplier_bill_no'], name='idx_grn_supp_bill'),
+            models.Index(fields=['challan_no'], name='idx_grn_challan_no'),
             models.Index(fields=['grn_number'], name='idx_grn_num'),
         ]
 
@@ -767,12 +830,27 @@ class GoodsReceivedNote(TimeStampedModel):
         return f"{self.grn_number} | {self.supplier.company_name} | Rs. {self.net_total_amount}"
 
     def save(self, *args, **kwargs):
+        # 1. Synchronize Bill Date (AD <-> BS) and derive Fiscal Year
         sync_nepali_and_ad_dates(
             instance=self,
             ad_field_name='bill_date',
             bs_field_name='bill_date_bs',
             fy_field_name='fiscal_year'
         )
+        # 2. Synchronize Challan Date (AD <-> BS) if provided
+        if self.challan_date or self.challan_date_bs:
+            sync_nepali_and_ad_dates(
+                instance=self,
+                ad_field_name='challan_date',
+                bs_field_name='challan_date_bs',
+                fy_field_name=None
+            )
+        # 3. Synchronize legacy remarks with consignment_narration if empty
+        if not self.remarks and self.consignment_narration:
+            self.remarks = self.consignment_narration
+        elif not self.consignment_narration and self.remarks:
+            self.consignment_narration = self.remarks
+
         super().save(*args, **kwargs)
 
     @property
@@ -782,47 +860,50 @@ class GoodsReceivedNote(TimeStampedModel):
 
     @property
     def overhead_total(self) -> Decimal:
-        """Total landed shipping, customs duties, and handling overheads."""
+        """Total landed shipping, customs duties, handling, insurance, and other direct overheads."""
         return (
             (self.extra_freight_charge or Decimal('0.00')) +
             (self.customs_import_charge or Decimal('0.00')) +
-            (self.other_handling_charge or Decimal('0.00'))
+            (self.other_handling_charge or Decimal('0.00')) +
+            (self.insurance_charge or Decimal('0.00')) +
+            (self.other_overheads_charge or Decimal('0.00'))
         )
 
     def recalculate_financials(self, save=True):
         """
         Calculates all procurement financials, VAT, and distributes overheads to line items.
         Strict Rules:
-        1. gross_amount = Sum of line item Pre-VAT gross values.
-        2. total_line_discount = Sum of line item discount deductions.
-        3. bill_discount_amount = Bill-level discount computed on merchandise after line discounts.
-        4. taxable_amount = gross_amount - total discounts (Pre-VAT Base).
-        5. vat_amount = 13% of taxable_amount when is_vat_bill is True; else 0.00.
-        6. overhead_total distributed proportionally by line pre-vat net value to compute unit_landed_cost.
-        7. net_total_amount = taxable_amount + vat_amount.
-        8. due_amount = net_total_amount - paid_amount.
+        1. Evaluates VAT mode (EXCLUSIVE vs INCLUSIVE) on item rates to derive pre-VAT bases.
+        2. gross_amount = Sum of line item Pre-VAT gross values.
+        3. total_line_discount = Sum of line item discount deductions.
+        4. bill_discount_amount = Bill-level discount computed on merchandise after line discounts.
+        5. taxable_amount = gross_amount - total discounts (Pre-VAT Base).
+        6. vat_amount = 13% of taxable_amount when is_vat_bill is True; else 0.00.
+        7. overhead_total (5-tier sum) distributed proportionally by line pre-vat net value to compute unit_landed_cost.
+        8. net_total_amount = taxable_amount + vat_amount.
+        9. due_amount = net_total_amount - paid_amount.
         """
         items = list(self.items.all())
         sum_line_gross = Decimal('0.00')
         sum_line_discount = Decimal('0.00')
 
-        # Step 1: Calculate Line Gross, Line Discounts, and Line Totals
+        # Step 1: Calculate Line Gross, Line Discounts, and Line Totals (Respecting VAT Mode)
         for item in items:
             qty = item.purchased_quantity if (item.purchased_quantity and item.purchased_quantity > Decimal('0.000')) else Decimal('1.000')
-            rate = item.purchase_rate or Decimal('0.00')
-            line_gross = (qty * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            item.gross_amount = line_gross
+            raw_rate = item.purchase_rate or Decimal('0.00')
+            raw_gross = (qty * raw_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+            # Compute line discount
             if item.discount_type == 'PERCENTAGE':
                 pct = item.discount_input_value or Decimal('0.00')
-                disc = (line_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item.item_discount_amount = min(disc, line_gross)
+                disc = (raw_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.item_discount_amount = min(disc, raw_gross)
                 item.discount_percent = pct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             elif item.discount_type == 'AMOUNT':
                 amt = (item.discount_input_value or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item.item_discount_amount = min(amt, line_gross)
-                if line_gross > Decimal('0.00'):
-                    item.discount_percent = ((item.item_discount_amount / line_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.item_discount_amount = min(amt, raw_gross)
+                if raw_gross > Decimal('0.00'):
+                    item.discount_percent = ((item.item_discount_amount / raw_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 else:
                     item.discount_percent = Decimal('0.00')
             else:
@@ -831,8 +912,20 @@ class GoodsReceivedNote(TimeStampedModel):
                 item.item_discount_amount = Decimal('0.00')
                 item.discount_percent = Decimal('0.00')
 
-            item.line_total = line_gross - item.item_discount_amount
-            sum_line_gross += line_gross
+            taxable_line_raw = max(Decimal('0.00'), raw_gross - item.item_discount_amount)
+
+            # VAT Handling Mode: If INCLUSIVE, extract the pre-VAT base
+            item_vat_rate = item.vat_rate if (item.vat_rate and item.vat_rate > Decimal('0.00')) else Decimal('13.00')
+            if self.vat_handling_mode == 'INCLUSIVE' and (self.is_vat_bill or item.is_vat_applicable) and item_vat_rate > Decimal('0.00'):
+                tax_divisor = Decimal('1.00') + (item_vat_rate / Decimal('100.00'))
+                taxable_base = (taxable_line_raw / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.gross_amount = (taxable_base + item.item_discount_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.line_total = taxable_base
+            else:
+                item.gross_amount = raw_gross
+                item.line_total = taxable_line_raw
+
+            sum_line_gross += item.gross_amount
             sum_line_discount += item.item_discount_amount
 
         net_lines = max(Decimal('0.00'), sum_line_gross - sum_line_discount)
@@ -864,7 +957,7 @@ class GoodsReceivedNote(TimeStampedModel):
         else:
             self.vat_amount = Decimal('0.00')
 
-        # Step 5: Overheads & Landed COGS Valuation
+        # Step 5: Overheads (Aggregating all 5 Overheads) & Landed COGS Valuation
         overheads = self.overhead_total
         self.total_landed_cost = (self.taxable_amount + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
@@ -902,14 +995,16 @@ class GoodsReceivedNote(TimeStampedModel):
             super(GoodsReceivedNote, self).save(update_fields=[
                 'gross_amount', 'bill_discount_type', 'bill_discount_input_value',
                 'bill_discount_amount', 'total_line_discount', 'discount_amount',
-                'taxable_amount', 'vat_rate', 'vat_amount', 'total_landed_cost',
+                'taxable_amount', 'vat_handling_mode', 'vat_rate', 'vat_amount',
+                'extra_freight_charge', 'customs_import_charge', 'other_handling_charge',
+                'insurance_charge', 'other_overheads_charge', 'total_landed_cost',
                 'net_total_amount', 'paid_amount', 'due_amount', 'updated_at'
             ])
 
 class GRNItem(TimeStampedModel):
     """
-    Line item in GRN with package unit conversion, dual-mode discounts (Amount vs. Percentage),
-    proportional unit landed cost, target selling price, and MDMS/serial barcode tracking.
+    Line item in GRN with package unit conversion, custom batch numbers, dual-mode discounts
+    (Amount vs. Percentage), proportional unit landed cost, target selling price, and MDMS/serial tracking.
     """
     DISCOUNT_TYPE_CHOICES = [
         ('NONE', _('No Discount')),
@@ -922,6 +1017,11 @@ class GRNItem(TimeStampedModel):
     
     supplier_item_code = models.CharField(
         max_length=100, blank=True, null=True, verbose_name=_("Supplier Item SKU / Code")
+    )
+    batch_number = models.CharField(
+        max_length=100, blank=True, null=True, db_index=True,
+        verbose_name=_("Batch Number"),
+        help_text=_("Physical manufacturer / supplier batch code (e.g. BT-2026-A1)")
     )
     unit_conversion = models.ForeignKey(
         UnitConversion, on_delete=models.SET_NULL, null=True, blank=True,
@@ -940,10 +1040,10 @@ class GRNItem(TimeStampedModel):
         help_text=_("Effective units added to live stock counter")
     )
     
-    # Pre-VAT Purchase Rate & Discounts
+    # Purchase Rate & Discounts
     purchase_rate = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
-        verbose_name=_("Unit Purchase Rate (Pre-VAT NPR)")
+        verbose_name=_("Unit Purchase Rate (NPR)")
     )
     gross_amount = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal('0.00'),
@@ -986,7 +1086,7 @@ class GRNItem(TimeStampedModel):
     unit_landed_cost = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Unit Landed Cost (NPR)"),
-        help_text=_("Final Pre-VAT unit cost including allocated freight, customs, and bill discounts.")
+        help_text=_("Final Pre-VAT unit cost including allocated freight, customs, insurance, handling, and bill discounts.")
     )
     new_selling_price = models.DecimalField(
         max_digits=12, decimal_places=2, blank=True, null=True,
@@ -1017,10 +1117,12 @@ class GRNItem(TimeStampedModel):
         verbose_name_plural = _('GRN Item Lines')
         indexes = [
             models.Index(fields=['grn', 'product'], name='idx_grn_item_grn_prod'),
+            models.Index(fields=['batch_number'], name='idx_grn_item_batch_no'),
         ]
 
     def __str__(self):
-        return f"{self.product.name} ({self.base_unit_quantity} {self.product.base_unit.code})"
+        batch_tag = f" [Batch: {self.batch_number}]" if self.batch_number else ""
+        return f"{self.product.name}{batch_tag} ({self.base_unit_quantity} {self.product.base_unit.code})"
 
     def save(self, *args, **kwargs):
         factor = self.conversion_factor if (self.conversion_factor and self.conversion_factor > Decimal('0.000')) else Decimal('1.000')
@@ -1028,18 +1130,18 @@ class GRNItem(TimeStampedModel):
         self.base_unit_quantity = (qty * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
 
         rate = self.purchase_rate or Decimal('0.00')
-        self.gross_amount = (qty * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        raw_gross = (qty * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         if self.discount_type == 'PERCENTAGE':
             pct = self.discount_input_value or Decimal('0.00')
-            disc = (self.gross_amount * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            self.item_discount_amount = min(disc, self.gross_amount)
+            disc = (raw_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            self.item_discount_amount = min(disc, raw_gross)
             self.discount_percent = pct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         elif self.discount_type == 'AMOUNT':
             amt = (self.discount_input_value or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            self.item_discount_amount = min(amt, self.gross_amount)
-            if self.gross_amount > Decimal('0.00'):
-                self.discount_percent = ((self.item_discount_amount / self.gross_amount) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            self.item_discount_amount = min(amt, raw_gross)
+            if raw_gross > Decimal('0.00'):
+                self.discount_percent = ((self.item_discount_amount / raw_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             else:
                 self.discount_percent = Decimal('0.00')
         else:
@@ -1048,7 +1150,8 @@ class GRNItem(TimeStampedModel):
             self.item_discount_amount = Decimal('0.00')
             self.discount_percent = Decimal('0.00')
 
-        self.line_total = self.gross_amount - self.item_discount_amount
+        self.gross_amount = raw_gross
+        self.line_total = max(Decimal('0.00'), raw_gross - self.item_discount_amount)
 
         if not self.unit_landed_cost or self.unit_landed_cost <= Decimal('0.00'):
             if self.base_unit_quantity > Decimal('0.000'):

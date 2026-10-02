@@ -11,20 +11,22 @@ Capabilities:
 3. Joins SalesPaymentTransaction to break down daily collections into:
    Cash, FonePay QR, eSewa, Khalti, Card, Bank Transfer, and Customer Credit (Udhaari).
 4. Synchronizes dual-calendar date fields: Gregorian AD and Nepali Bikram Sambat (BS).
+5. Exposes get_dashboard_trend_data() for fast 7-day and 6-month sales vs purchase trend curves.
 """
 
 import re
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, Any, List, Tuple, Optional
 
 from django.db.models import (
     Q, Sum, Count, F, DecimalField, Value, Case, When
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncMonth
 from django.utils import timezone
 
 from apps.sales.models import SalesEstimate, SalesEstimateItem, SalesPaymentTransaction
+from apps.purchases.models import GoodsReceivedNote
 from apps.branches.models import Branch
 from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
@@ -32,8 +34,116 @@ from apps.core.utils.nepali_date_converter import ad_to_bs_string
 
 class SalesSummaryService:
     """
-    Business logic engine for Report 1: Sales Summary Report (Date-Wise Rollup).
+    Business logic engine for Report 1: Sales Summary Report (Date-Wise Rollup)
+    and Executive Trend Analytics.
     """
+
+    @classmethod
+    def get_dashboard_trend_data(
+        cls,
+        branch=None,
+        user=None
+    ) -> Dict[str, Any]:
+        """
+        Computes high-speed daily (7-day) and monthly (6-month) comparative
+        sales revenue vs inward purchase expenditure arrays for the executive chart.
+        """
+        today = timezone.now().date()
+        active_branch = branch or (
+            getattr(user, 'assigned_branch', None)
+            if user and not (user.is_superuser or getattr(user, 'role', '') == 'OWNER')
+            else None
+        )
+
+        sales_base = SalesEstimate.objects.filter(
+            status__in=['COMPLETED', 'PARTIALLY_RETURNED']
+        )
+        grn_base = GoodsReceivedNote.objects.filter(
+            status='RECEIVED'
+        )
+
+        if active_branch:
+            sales_base = sales_base.filter(branch=active_branch)
+            grn_base = grn_base.filter(branch=active_branch)
+
+        # -----------------------------------------------------------------
+        # 1. Daily 7-Day Trend Curve
+        # -----------------------------------------------------------------
+        start_date_7d = today - timedelta(days=6)
+        sales_7d_dict = dict(
+            sales_base.filter(bill_date_ad__gte=start_date_7d, bill_date_ad__lte=today)
+            .values('bill_date_ad')
+            .annotate(total=Sum('grand_total'))
+            .values_list('bill_date_ad', 'total')
+        )
+        grn_7d_dict = dict(
+            grn_base.filter(bill_date__gte=start_date_7d, bill_date__lte=today)
+            .values('bill_date')
+            .annotate(total=Sum('net_total_amount'))
+            .values_list('bill_date', 'total')
+        )
+
+        daily_labels: List[str] = []
+        daily_sales: List[float] = []
+        daily_purchases: List[float] = []
+
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            label = 'Today' if i == 0 else d.strftime('%a')
+            daily_labels.append(label)
+            daily_sales.append(float(sales_7d_dict.get(d) or Decimal('0.00')))
+            daily_purchases.append(float(grn_7d_dict.get(d) or Decimal('0.00')))
+
+        # -----------------------------------------------------------------
+        # 2. Monthly 6-Month Trend Curve
+        # -----------------------------------------------------------------
+        months_list: List[Tuple[int, int]] = []
+        cur_year, cur_month = today.year, today.month
+        for i in range(5, -1, -1):
+            m = cur_month - i
+            y = cur_year
+            while m <= 0:
+                m += 12
+                y -= 1
+            months_list.append((y, m))
+
+        first_month_date = date(months_list[0][0], months_list[0][1], 1)
+
+        sales_monthly_dict = dict(
+            sales_base.filter(bill_date_ad__gte=first_month_date)
+            .annotate(month=TruncMonth('bill_date_ad'))
+            .values('month')
+            .annotate(total=Sum('grand_total'))
+            .values_list('month', 'total')
+        )
+        grn_monthly_dict = dict(
+            grn_base.filter(bill_date__gte=first_month_date)
+            .annotate(month=TruncMonth('bill_date'))
+            .values('month')
+            .annotate(total=Sum('net_total_amount'))
+            .values_list('month', 'total')
+        )
+
+        monthly_labels: List[str] = []
+        monthly_sales: List[float] = []
+        monthly_purchases: List[float] = []
+
+        for y, m in months_list:
+            dt_key = date(y, m, 1)
+            monthly_labels.append(dt_key.strftime('%b %Y'))
+            s_val = sum(v for k, v in sales_monthly_dict.items() if k and k.year == y and k.month == m)
+            p_val = sum(v for k, v in grn_monthly_dict.items() if k and k.year == y and k.month == m)
+            monthly_sales.append(float(s_val or Decimal('0.00')))
+            monthly_purchases.append(float(p_val or Decimal('0.00')))
+
+        return {
+            'daily_labels': daily_labels,
+            'daily_sales': daily_sales,
+            'daily_purchases': daily_purchases,
+            'monthly_labels': monthly_labels,
+            'monthly_sales': monthly_sales,
+            'monthly_purchases': monthly_purchases,
+        }
 
     @classmethod
     def get_available_fiscal_years(cls) -> List[str]:
@@ -99,14 +209,9 @@ class SalesSummaryService:
         """
         Resolves query dates and Nepali Fiscal Year with multi-format support:
         1. Fiscal Year parameter (e.g. '2080/81', '2081/82', '2080-81').
-           Accurately resolves Shrawan 1 to Ashadh 31/32 (variable month length).
         2. Direct Nepali BS dates (e.g. '2080-04-01' or '2080/04/01').
         3. Gregorian AD dates (e.g. '2023-07-17').
         4. Default fallback: 1st day of the ongoing BS month through today.
-
-        Returns:
-            Tuple[date, date, str, str, str]:
-            (start_date_ad, end_date_ad, start_date_bs, end_date_bs, fiscal_year)
         """
         today_ad = timezone.now().date()
         today_bs_y, today_bs_m, today_bs_d = NepaliCalendar.ad_to_bs(today_ad)
@@ -127,7 +232,7 @@ class SalesSummaryService:
                 except Exception:
                     pass
 
-        # Case 2: Parse custom start and end date inputs (supporting both AD and BS formats)
+        # Case 2: Parse custom start and end date inputs
         start_date = None
         end_date = None
         start_date_bs = ""

@@ -5,20 +5,20 @@ Key Capabilities:
 1. Supplier Directory & Sub-Ledger: Full accounts payable lifecycle with credit limits and settlement histories.
 2. Supplier Confirmation Statement Linkage: Exposes active Nepali Fiscal Year in context to directly
    launch the official multi-year Party Confirmation Ledger & audit sign-off letters.
-3. Supplier Search API: High-performance endpoint for autocomplete/typeahead in PO, GRN, and return forms.
+3. Supplier & GRN Search APIs: High-performance endpoints for autocomplete/typeahead in PO, GRN, and return forms.
 4. Supplier Payouts:
    - Atomically updates supplier debt balance strictly through sub-ledger records with row-level locking.
    - Automatically posts double-entry General Ledger payment vouchers without swallowing errors.
 5. Purchase Orders (PO): Requisitions with approval workflows, line item formsets, and delivery tracking.
 6. Goods Received Notes (GRN):
-   - Removed manual view calculations; delegates complete mathematical valuation to PurchaseService.
-   - Supports two-way line discounts (Amount vs. %) and whole-bill discount parameters.
-   - Calculates dedicated 13% VAT strictly on top of the Pre-VAT Taxable Base.
-   - Proportional value-based overhead distribution (freight, customs, handling).
-   - Strict serialized & dual-IMEI enforcement.
+   - Dual-Action Controller: Distinguishes between "Save Draft" (without modifying stock or ledgers)
+     and "Verify & Update Warehouse Stock" (live stock inward, serial registration, GL posting).
+   - Rich Context & Autocomplete: Injects active fiscal years, available branch warehouses, default VAT rates,
+     and pre-populated supplier registries for instant client-side math.
+   - Direct Print Support: Passes print-ready metadata and layout toggles.
    - Immediate supplier sub-ledger reconciliation to the exact paisa.
    - Dual-entry General Ledger auto-posting.
-   - Dedicated manager cancellation workflow (cancel_grn_view / GRNCancelView) that safely
+   - Dedicated manager cancellation workflow (`cancel_grn_view` / `GRNCancelView`) that safely
      reverses warehouse stock, archives unsold handset IMEIs, clears supplier AP balance,
      and writes an immutable forensic AuditLog record.
 7. Commercial Purchase Returns (Debit Notes):
@@ -247,6 +247,7 @@ class GRNSearchAPIView(PurchaseModuleAccessMixin, View):
             qs = qs.filter(
                 Q(grn_number__icontains=query) |
                 Q(supplier_bill_no__icontains=query) |
+                Q(challan_no__icontains=query) |
                 Q(supplier__company_name__icontains=query) |
                 Q(bill_date_bs__icontains=query)
             )
@@ -259,6 +260,7 @@ class GRNSearchAPIView(PurchaseModuleAccessMixin, View):
                 'id': grn.id,
                 'grn_number': grn.grn_number,
                 'supplier_bill_no': grn.supplier_bill_no,
+                'challan_no': grn.challan_no or '',
                 'supplier_id': grn.supplier_id,
                 'supplier_name': grn.supplier.company_name,
                 'supplier_code': grn.supplier.code,
@@ -689,6 +691,7 @@ class GRNListView(PurchaseModuleAccessMixin, ListView):
 
         query = self.request.GET.get('q', '').strip()
         status_filter = self.request.GET.get('status', '').strip()
+        vat_mode = self.request.GET.get('vat_mode', '').strip()
         is_vat = self.request.GET.get('is_vat', '').strip()
         supplier_id = self.request.GET.get('supplier', '').strip()
         start_date = self.request.GET.get('start_date', '').strip()
@@ -698,12 +701,15 @@ class GRNListView(PurchaseModuleAccessMixin, ListView):
             qs = qs.filter(
                 Q(grn_number__icontains=query) |
                 Q(supplier_bill_no__icontains=query) |
+                Q(challan_no__icontains=query) |
                 Q(supplier__company_name__icontains=query) |
                 Q(fiscal_year__icontains=query) |
                 Q(bill_date_bs__icontains=query)
             )
         if status_filter:
             qs = qs.filter(status=status_filter)
+        if vat_mode:
+            qs = qs.filter(vat_handling_mode=vat_mode)
         if is_vat == 'true':
             qs = qs.filter(is_vat_bill=True)
         elif is_vat == 'false':
@@ -721,7 +727,6 @@ class GRNListView(PurchaseModuleAccessMixin, ListView):
         context = super().get_context_data(**kwargs)
         base_qs = self.get_queryset()
 
-        # Section 3 Macro Summary Aggregations
         aggregates = base_qs.aggregate(
             total_gross=Sum('gross_amount'),
             total_vat=Sum('vat_amount'),
@@ -749,6 +754,8 @@ class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['items'] = self.object.items.select_related('product', 'product__base_unit', 'unit_conversion').all()
+        context['is_print'] = (self.request.GET.get('print') == 'true')
+        context['SYS_CONFIG'] = SystemConfiguration.get_solo()
 
         # Section 3 Executive Summary Card Payload
         context['summary_cards'] = {
@@ -766,57 +773,136 @@ class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
 class GRNCreateView(PurchaseModuleAccessMixin, View):
     """
     Inward Procurement Verification Controller.
-    Saves raw user input (including whole-bill discount and dual line-discount modes),
-    then invokes PurchaseService to execute unified Pre-VAT valuation, proportional
-    overhead distribution, dedicated 13% VAT, stock adjustments, and GL posting.
+    Supports dual-action workflow:
+    1. 'Save Draft': Validates partial data, calculates line projections, and saves as DRAFT
+       without touching physical inventory or posting to GL.
+    2. 'Verify & Update Warehouse Stock': Executes complete approval, updates live inventory,
+       registers physical IMEIs, creates FIFO batches, and dispatches General Ledger postings.
     """
     template_name = 'purchases/grn_form.html'
 
     def get(self, request, *args, **kwargs):
-        branch = getattr(request, 'active_branch', None)
-        if not branch:
-            messages.error(request, "Please switch to an active store/branch before creating GRN.")
-            return redirect('purchases:grn_list')
+        branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        config = SystemConfiguration.get_solo()
 
-        form = GoodsReceivedNoteForm()
-        formset = GRNItemFormSet()
+        today = timezone.now().date()
+        try:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+            current_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            today_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+        except Exception:
+            current_fy = '2083/84'
+            today_bs = ''
+
+        initial_header = {
+            'bill_date': today,
+            'bill_date_bs': today_bs,
+            'challan_date': today,
+            'challan_date_bs': today_bs,
+            'branch': branch,
+            'vat_handling_mode': 'EXCLUSIVE',
+            'is_vat_bill': (getattr(config, 'tax_system_mode', 'VAT') == 'VAT'),
+            'vat_rate': getattr(config, 'default_vat_rate', Decimal('13.00')),
+        }
 
         po_id = request.GET.get('po_id')
         if po_id:
             po = PurchaseOrder.objects.filter(id=po_id, status__in=['ISSUED', 'PARTIALLY_RECEIVED']).first()
             if po:
-                form = GoodsReceivedNoteForm(initial={
+                initial_header.update({
                     'supplier': po.supplier,
                     'purchase_order': po,
-                    'bill_date': timezone.now().date(),
                     'supplier_bill_no': f"PO-{po.po_number}",
                 })
 
-        return render(request, self.template_name, {'form': form, 'formset': formset})
+        form = GoodsReceivedNoteForm(initial=initial_header)
+        formset = GRNItemFormSet()
+
+        context = {
+            'form': form,
+            'formset': formset,
+            'active_branch': branch,
+            'branches': Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
+            'suppliers': Supplier.objects.filter(status='ACTIVE').order_by('company_name'),
+            'active_fiscal_year': current_fy,
+            'default_vat_rate': getattr(config, 'default_vat_rate', Decimal('13.00')),
+            'today': today,
+            'today_bs': today_bs,
+            'SYS_CONFIG': config,
+            'config': config,
+        }
+        return render(request, self.template_name, context)
 
     def post(self, request, *args, **kwargs):
-        branch = getattr(request, 'active_branch', None)
-        if not branch:
-            messages.error(request, "Active branch session expired. Please select a branch.")
-            return redirect('purchases:grn_list')
+        branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        config = SystemConfiguration.get_solo()
 
-        form = GoodsReceivedNoteForm(request.POST)
-        formset = GRNItemFormSet(request.POST)
+        # Action Detection: Save Draft vs Verify Stock
+        action = (request.POST.get('action') or request.POST.get('submit_action') or '').strip().lower()
+        is_draft = (action in ['save_draft', 'draft'] or 'save_draft' in request.POST)
+
+        form = GoodsReceivedNoteForm(request.POST, is_draft=is_draft)
+        formset = GRNItemFormSet(request.POST, is_draft=is_draft)
 
         if form.is_valid() and formset.is_valid():
             try:
                 with transaction.atomic():
-                    # 1. Instantiate GRN Header with whole-bill discount and VAT parameters
+                    # 1. Resolve Warehouse / Branch selection
                     grn = form.save(commit=False)
+                    selected_branch_id = request.POST.get('branch') or request.POST.get('warehouse')
+                    if selected_branch_id:
+                        br_obj = Branch.objects.filter(id=selected_branch_id, is_active=True).first()
+                        if br_obj:
+                            branch = br_obj
                     grn.branch = branch
-                    grn.grn_number = BranchDocumentSequence.get_next_sequence_number(
-                        branch=branch,
-                        document_type='GOODS_RECEIPT'
-                    )
+
+                    # 2. Sequential GRN Number Allocation
+                    if not grn.grn_number:
+                        grn.grn_number = BranchDocumentSequence.get_next_sequence_number(
+                            branch=branch,
+                            document_type='GOODS_RECEIPT'
+                        )
+
+                    # -------------------------------------------------------------
+                    # PATH A: SAVE AS DRAFT (NO STOCK MUTATION / NO GL ENTRIES)
+                    # -------------------------------------------------------------
+                    if is_draft:
+                        grn.status = 'DRAFT'
+                        grn.save()
+
+                        items = formset.save(commit=False)
+                        for item in items:
+                            item.grn = grn
+                            if item.product_id:
+                                factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
+                                item.base_unit_quantity = (item.purchased_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+                                item.save()
+
+                        for del_item in formset.deleted_objects:
+                            del_item.delete()
+
+                        # Calculate draft projections in memory
+                        PurchaseService.save_grn_draft(grn=grn, items=None, user=request.user)
+
+                        msg = f"GRN Draft {grn.grn_number} saved successfully into local store."
+                        if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+                            return JsonResponse({
+                                'status': 'success',
+                                'message': msg,
+                                'grn_id': grn.id,
+                                'grn_number': grn.grn_number,
+                                'redirect_url': reverse('purchases:grn_detail', kwargs={'pk': grn.pk})
+                            })
+
+                        messages.success(request, msg)
+                        return redirect('purchases:grn_detail', pk=grn.pk)
+
+                    # -------------------------------------------------------------
+                    # PATH B: FINAL VERIFICATION & PHYSICAL STOCK INWARD
+                    # -------------------------------------------------------------
                     grn.status = 'DRAFT'
                     grn.save()
 
-                    # 2. Attach Line Items with raw user discounts (Amount or %) without manual calculation
                     items = formset.save(commit=False)
                     valid_items_count = 0
 
@@ -834,45 +920,76 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
                     if valid_items_count == 0:
                         raise ValidationError("Please add at least one product line item with quantity > 0.")
 
-                    # 3. Delegate complete calculation and stock-in to the PurchaseService Engine:
-                    # - Pre-VAT Line Valuation
-                    # - Two-Way Line Discount logic (AMOUNT vs PERCENTAGE)
-                    # - Proportional Whole-Bill Discount allocation
-                    # - Dedicated 13% VAT calculation
-                    # - Proportional Value-Based Overhead Allocation (Freight/Customs/Handling)
-                    # - Dual-IMEI verification & ItemInstance creation
-                    # - Live branch stock increment & FIFO batch creation
-                    # - Double-Entry General Ledger journal posting
+                    # Full Approval & Stock Update Pipeline
                     PurchaseService.process_grn_approval_and_stock_in(grn=grn, user=request.user)
 
-                    # 4. Immediate Supplier Ledger Reconciliation
-                    # Recalculates master current_balance strictly from sub-ledger entries to the exact paisa
-                    grn.supplier.recalculate_balance_from_ledger(save=True)
+                    # Reconcile master supplier debt balance to the exact paisa
+                    if grn.supplier:
+                        grn.supplier.recalculate_balance_from_ledger(save=True)
 
-                    # 5. Close linked Purchase Order if applicable
+                    # Close linked Purchase Order if applicable
                     if grn.purchase_order:
                         po = grn.purchase_order
                         po.status = 'COMPLETED'
                         po.save(update_fields=['status', 'updated_at'])
 
-                messages.success(
-                    request,
-                    f"GRN Voucher {grn.grn_number} verified successfully! "
-                    f"Warehouse stock updated. Total Bill: Rs. {grn.net_total_amount:,.2f} "
-                    f"(Pre-VAT Base: Rs. {grn.taxable_amount:,.2f}, 13% VAT: Rs. {grn.vat_amount:,.2f}, Net Due: Rs. {grn.due_amount:,.2f})."
+                success_msg = (
+                    f"GRN Voucher {grn.grn_number} verified successfully! Warehouse stock updated. "
+                    f"Total Bill: Rs. {grn.net_total_amount:,.2f} (Pre-VAT Base: Rs. {grn.taxable_amount:,.2f}, "
+                    f"13% VAT: Rs. {grn.vat_amount:,.2f}, Net Due: Rs. {grn.due_amount:,.2f})."
                 )
+
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': success_msg,
+                        'grn_id': grn.id,
+                        'grn_number': grn.grn_number,
+                        'redirect_url': reverse('purchases:grn_detail', kwargs={'pk': grn.pk})
+                    })
+
+                messages.success(request, success_msg)
                 return redirect('purchases:grn_detail', pk=grn.pk)
 
             except ValidationError as ve:
                 err_text = str(ve.message if hasattr(ve, 'message') else ve)
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+                    return JsonResponse({'status': 'error', 'message': err_text}, status=400)
                 messages.error(request, f"Validation Error: {err_text}")
+
             except Exception as e:
                 logger.error(f"[GRN Create Error]: {e}", exc_info=True)
-                messages.error(request, f"Error processing inward consignment: {str(e)}")
+                err_text = f"Error processing inward consignment: {str(e)}"
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+                    return JsonResponse({'status': 'error', 'message': err_text}, status=500)
+                messages.error(request, err_text)
+
         else:
             messages.error(request, "Validation errors occurred. Please check all line entries, discounts, and IMEI fields.")
 
-        return render(request, self.template_name, {'form': form, 'formset': formset})
+        today = timezone.now().date()
+        try:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+            current_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            today_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+        except Exception:
+            current_fy = '2083/84'
+            today_bs = ''
+
+        context = {
+            'form': form,
+            'formset': formset,
+            'active_branch': branch,
+            'branches': Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
+            'suppliers': Supplier.objects.filter(status='ACTIVE').order_by('company_name'),
+            'active_fiscal_year': current_fy,
+            'default_vat_rate': getattr(config, 'default_vat_rate', Decimal('13.00')),
+            'today': today,
+            'today_bs': today_bs,
+            'SYS_CONFIG': config,
+            'config': config,
+        }
+        return render(request, self.template_name, context)
 
 # ==============================================================================
 # DEDICATED PURCHASE BILL (GRN) CANCELLATION CONTROLLER

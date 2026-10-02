@@ -1,14 +1,37 @@
+"""
+Inventory Management & Business Logic Service.
+
+Key Capabilities:
+1. Atomic Stock Adjustments & Movement Logs:
+   - Row-level database locking (`select_for_update`) on BranchStock.
+   - Comprehensive audit logging via StockMovementLog.
+   - Automatic Double-Entry General Ledger postings for physical audit variances:
+     * ADJUSTMENT_SUB: Dr. 6160 Inventory Shrinkage / Cr. 1310 Merchandise Inventory Asset.
+     * ADJUSTMENT_ADD: Dr. 1310 Merchandise Inventory Asset / Cr. 4030 Inventory Audit Surplus Gain.
+2. User-Entered Batch Prioritization & FIFO Tracking (`record_inward_stock_batch`):
+   - Prioritizes custom vendor batch numbers entered in the GRN line item table (up to 100 chars).
+   - Generates clean sequential fallback batch strings (`BATCH-{YYMMDD}-{PRODUCT_ID}-{UUID}`)
+     only if the batch number field was left blank by the user.
+   - Tracks FIFO batches for non-serialized accessories and backlog phones received without IMEIs.
+3. Inward IMEI Registration & Dual-SIM Compliance (`register_inward_imei_unit`):
+   - Registers physical device instances, associates them with the user's custom batch number,
+     and tags NTA MDMS compliance status.
+4. Component-Level Customer Warranty Schedules (`initialize_device_component_warranties`):
+   - Generates exact calendar expiration dates for Main Body (12M/365D), Battery (6M/180D),
+     and Screen (3M/90D) while stamping statutory damage exclusion terms.
+"""
+
 import uuid
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, timedelta
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from django.db import transaction
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from apps.inventory.models import (
-    Product, BranchStock, ItemInstance,
+    Product, BranchStock, ProductBatch, ItemInstance,
     DeviceComponentWarranty, StockMovementLog
 )
 from apps.branches.models import Branch
@@ -17,11 +40,13 @@ logger = logging.getLogger(__name__)
 
 class InventoryService:
     """
-    Business logic service handling atomic stock updates,
-    IMEI handset lifecycles, component-level warranty calculations,
-    and automatic Double-Entry General Ledger write-down / surplus postings.
+    Authoritative service handling atomic stock adjustments, user-defined FIFO batch
+    registrations, IMEI handset lifecycles, and synchronized Double-Entry General Ledger postings.
     """
 
+    # =========================================================================
+    # 1. ATOMIC STOCK ADJUSTMENTS & AUDIT LEDGERS
+    # =========================================================================
     @classmethod
     @transaction.atomic
     def adjust_stock(
@@ -39,16 +64,17 @@ class InventoryService:
         """
         Atomically modifies branch stock balance with database row-level locking,
         records an immutable stock movement log, and dispatches Double-Entry
-        General Ledger postings for manual inventory adjustments:
-        - ADJUSTMENT_SUB (Damaged/Lost): Dr. Inventory Shrinkage Expense / Cr. Merchandise Inventory Asset
-        - ADJUSTMENT_ADD (Found/Surplus): Dr. Merchandise Inventory Asset / Cr. Inventory Audit Surplus Gain
-
-        If GL posting fails, the entire transaction rolls back cleanly.
+        General Ledger postings for physical inventory discrepancies.
         """
         branch_stock, _ = BranchStock.objects.select_for_update().get_or_create(
             branch=branch,
             product=product,
-            defaults={'quantity': Decimal('0.000'), 'reserved_quantity': Decimal('0.000')}
+            defaults={
+                'quantity': Decimal('0.000'),
+                'reserved_quantity': Decimal('0.000'),
+                'quarantined_defective_quantity': Decimal('0.000'),
+                'low_stock_threshold': product.reorder_level or Decimal('5.00')
+            }
         )
 
         previous_qty = branch_stock.quantity
@@ -78,9 +104,7 @@ class InventoryService:
             user=user
         )
 
-        # ---------------------------------------------------------------------
-        # GENERAL LEDGER AUTOMATIC DOUBLE-ENTRY POSTING FOR STOCK DISCREPANCIES
-        # ---------------------------------------------------------------------
+        # Dispatch Double-Entry GL Vouchers for Physical Discrepancies
         if movement_type in ['ADJUSTMENT_SUB', 'ADJUSTMENT_ADD']:
             cls._post_adjustment_to_gl(
                 product=product,
@@ -106,12 +130,9 @@ class InventoryService:
         user=None
     ) -> None:
         """
-        Posts balanced double-entry vouchers to the General Ledger for inventory adjustments:
-        - ADJUSTMENT_SUB: Dr. Inventory Shrinkage Expense / Cr. Merchandise Inventory Asset
-        - ADJUSTMENT_ADD: Dr. Merchandise Inventory Asset / Cr. Inventory Audit Surplus Gain
-
-        Strictly enforces GL synchronization without swallowing errors. If account resolution
-        or voucher posting fails, raises ValidationError to abort the outer transaction.
+        Posts balanced double-entry vouchers to the General Ledger:
+        - ADJUSTMENT_SUB: Dr. 6160 Inventory Shrinkage / Cr. 1310 Merchandise Inventory Asset.
+        - ADJUSTMENT_ADD: Dr. 1310 Merchandise Inventory Asset / Cr. 4030 Inventory Audit Surplus Gain.
         """
         try:
             from apps.accounting.models import JournalEntry
@@ -132,15 +153,16 @@ class InventoryService:
             if total_valuation <= Decimal('0.00'):
                 return
 
+            # Aligned with Nepal Standard Chart of Accounts (COA 1310)
             inv_asset_acc = AutoPostingService.get_or_create_control_account(
-                branch, 'INVENTORY_ASSET', '1040', 'Merchandise Inventory Asset', 'ASSET', 'DEBIT'
+                branch, 'INVENTORY_ASSET', '1310', 'Merchandise Inventory Asset', 'ASSET', 'DEBIT'
             )
 
             lines = []
             if movement_type == 'ADJUSTMENT_SUB':
-                # Write-down: Debit Shrinkage Expense, Credit Inventory Asset
+                # Write-down: Debit 6160 Shrinkage Expense, Credit 1310 Inventory Asset
                 shrinkage_acc = AutoPostingService.get_or_create_control_account(
-                    branch, 'INVENTORY_SHRINKAGE', '5040', 'Inventory Shrinkage & Damage Expense', 'INDIRECT_EXPENSE', 'DEBIT'
+                    branch, 'INVENTORY_SHRINKAGE', '6160', 'Inventory Shrinkage, Breakage & Loss', 'INDIRECT_EXPENSE', 'DEBIT'
                 )
                 line_narr = f"Inventory write-down: {product.name} x {qty_abs} ({remarks or 'Stock Reduction'})"
                 lines.append({
@@ -158,7 +180,7 @@ class InventoryService:
                 entry_narration = f"Inventory Shrinkage & Damage Write-off: {product.name} x {qty_abs} (Loss: Rs. {total_valuation:.2f})"
 
             else:  # ADJUSTMENT_ADD
-                # Audit Surplus: Debit Inventory Asset, Credit Stock Surplus Gain
+                # Audit Surplus: Debit 1310 Inventory Asset, Credit 4030 Stock Surplus Gain
                 surplus_acc = AutoPostingService.get_or_create_control_account(
                     branch, 'INVENTORY_SURPLUS', '4030', 'Inventory Audit Surplus & Stock Gain', 'REVENUE', 'CREDIT'
                 )
@@ -195,6 +217,127 @@ class InventoryService:
                 f"Failed to post General Ledger voucher for inventory adjustment on '{product.name}': {err}"
             ) from err
 
+    # =========================================================================
+    # 2. INWARD FIFO BATCH RECORDING (USER-DEFINED BATCH PRIORITIZATION)
+    # =========================================================================
+    @classmethod
+    @transaction.atomic
+    def record_inward_stock_batch(
+        cls,
+        product: Product,
+        branch: Branch,
+        quantity: Decimal,
+        cost_price: Decimal,
+        selling_price: Optional[Decimal] = None,
+        purchase_date: Optional[date] = None,
+        batch_number: Optional[str] = None,
+        supplier_name: str = "",
+        grn_reference: str = "",
+        expiry_date: Optional[date] = None
+    ) -> ProductBatch:
+        """
+        Registers an inward FIFO inventory batch:
+        - Strictly prioritizes the user-entered batch number from the GRN row (e.g. BT-2026-A1).
+        - If left blank or empty, generates an internal fallback code: BATCH-{YYMMDD}-{PRODUCT_ID}-{UUID}.
+        - Correctly initializes `quantity_received` and `quantity_remaining`.
+        - Tracks FIFO inventory for non-serialized accessories and backlog phones received without IMEIs.
+        """
+        if quantity <= Decimal('0.000'):
+            raise ValidationError(f"Batch quantity for '{product.name}' must be greater than zero.")
+
+        # 1. Prioritize user-entered physical batch code
+        clean_batch_no = str(batch_number or '').strip()
+        if not clean_batch_no:
+            date_str = (purchase_date or timezone.now().date()).strftime('%y%m%d')
+            clean_batch_no = f"BATCH-{date_str}-{product.id}-{uuid.uuid4().hex[:4].upper()}"
+        else:
+            # Clean and truncate to schema limit (max 100 characters)
+            clean_batch_no = clean_batch_no[:100]
+
+        target_purchase_date = purchase_date or timezone.now().date()
+        target_selling_price = selling_price if (selling_price is not None and selling_price > Decimal('0.00')) else product.selling_price
+
+        batch = ProductBatch.objects.create(
+            batch_number=clean_batch_no,
+            product=product,
+            branch=branch,
+            purchase_date=target_purchase_date,
+            cost_price=cost_price,
+            selling_price=target_selling_price,
+            quantity_received=quantity,
+            quantity_remaining=quantity,
+            is_depleted=(quantity <= Decimal('0.000')),
+            supplier_name=supplier_name or "",
+            grn_reference=grn_reference or "",
+            expiry_date=expiry_date
+        )
+
+        return batch
+
+    # Convenient method alias
+    record_inward_batch = record_inward_stock_batch
+
+    # =========================================================================
+    # 3. FIFO BATCH DEPLETION ENGINE (FOR SALES & RETURNS)
+    # =========================================================================
+    @classmethod
+    @transaction.atomic
+    def deplete_fifo_batches(
+        cls,
+        product: Product,
+        branch: Branch,
+        quantity: Decimal
+    ) -> Tuple[Decimal, Optional[str]]:
+        """
+        Depletes active FIFO batches for non-serialized items or backlog handsets:
+        - Orders batches by oldest purchase_date first.
+        - Atomically decrements quantity_remaining with row-level locks.
+        - Sets is_depleted=True when quantity_remaining hits 0.000.
+        - Returns: (weighted_average_cost_price, last_depleted_batch_reference)
+        """
+        available_batches = ProductBatch.objects.select_for_update().filter(
+            product=product,
+            branch=branch,
+            is_depleted=False
+        ).order_by('purchase_date', 'created_at', 'id')
+
+        remaining_needed = quantity
+        weighted_cost_sum = Decimal('0.00')
+        total_depleted = Decimal('0.000')
+        last_batch_ref = None
+
+        for batch in available_batches:
+            if remaining_needed <= Decimal('0.000'):
+                break
+
+            last_batch_ref = batch.batch_number
+
+            if batch.quantity_remaining >= remaining_needed:
+                weighted_cost_sum += (remaining_needed * batch.cost_price)
+                total_depleted += remaining_needed
+                batch.quantity_remaining -= remaining_needed
+                batch.is_depleted = (batch.quantity_remaining <= Decimal('0.000'))
+                batch.save(update_fields=['quantity_remaining', 'is_depleted', 'updated_at'])
+                remaining_needed = Decimal('0.000')
+                break
+            else:
+                weighted_cost_sum += (batch.quantity_remaining * batch.cost_price)
+                total_depleted += batch.quantity_remaining
+                remaining_needed -= batch.quantity_remaining
+                batch.quantity_remaining = Decimal('0.000')
+                batch.is_depleted = True
+                batch.save(update_fields=['quantity_remaining', 'is_depleted', 'updated_at'])
+
+        if total_depleted > Decimal('0.000'):
+            actual_unit_cost = (weighted_cost_sum / total_depleted).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            actual_unit_cost = product.purchase_price or Decimal('0.00')
+
+        return actual_unit_cost, last_batch_ref
+
+    # =========================================================================
+    # 4. INWARD IMEI SERIAL REGISTRATION
+    # =========================================================================
     @classmethod
     @transaction.atomic
     def register_inward_imei_unit(
@@ -210,15 +353,19 @@ class InventoryService:
         batch_ref: str = "",
         supplier_name: str = "",
         landed_cost: Decimal = Decimal('0.00'),
-        purchase_date: date = None
+        purchase_date: Optional[date] = None,
+        mdms_status: str = 'REGISTERED_OFFICIAL'
     ) -> ItemInstance:
         """
         Registers a physical handset instance during inward purchase or GRN receiving.
-        Normalizes IMEI 2 to None if not provided or empty to prevent unique constraint crashes.
+        - Links the user-defined custom `batch_ref` directly to `ItemInstance.batch_reference`.
+        - Normalizes empty strings to None to prevent database unique constraint collisions.
+        - Automatically detects Dual-SIM configuration and sets `imei_2_pending_scan` flag.
         """
-        clean_imei_1 = imei_1.strip() if imei_1 and imei_1.strip() else None
-        clean_imei_2 = imei_2.strip() if imei_2 and imei_2.strip() else None
-        clean_sn = serial_number.strip() if serial_number and serial_number.strip() else None
+        clean_imei_1 = str(imei_1).strip() if imei_1 and str(imei_1).strip() else None
+        clean_imei_2 = str(imei_2).strip() if imei_2 and str(imei_2).strip() else None
+        clean_sn = str(serial_number).strip() if serial_number and str(serial_number).strip() else None
+        clean_batch_ref = str(batch_ref).strip()[:100] if batch_ref and str(batch_ref).strip() else None
 
         if clean_imei_1:
             existing = ItemInstance.objects.filter(imei_1=clean_imei_1, status='IN_STOCK').first()
@@ -245,14 +392,18 @@ class InventoryService:
             activation_status=activation_status,
             status='IN_STOCK',
             purchase_reference=purchase_ref,
-            batch_reference=batch_ref,
+            batch_reference=clean_batch_ref,
             supplier_name=supplier_name,
             landed_cost=landed_cost,
-            purchase_date=purchase_date or date.today(),
+            purchase_date=purchase_date or timezone.now().date(),
+            mdms_status=mdms_status,
             device_barcode=clean_imei_1 or clean_sn or product.barcode
         )
         return instance
 
+    # =========================================================================
+    # 5. DEVICE COMPONENT WARRANTY SCHEDULES
+    # =========================================================================
     @classmethod
     @transaction.atomic
     def initialize_device_component_warranties(
@@ -262,21 +413,21 @@ class InventoryService:
         custom_warranty_months: Optional[int] = None
     ) -> List[DeviceComponentWarranty]:
         """
-        Creates individual component warranty ledger records upon POS phone sale:
+        Creates individual component warranty ledger records upon POS phone checkout:
         - Main Body (12M): Exactly 365 days from sale date.
         - Battery (6M): Exactly 180 days from sale date.
         - Screen (3M): Exactly 90 days from sale date.
 
-        Carries over the statutory exclusion note:
+        Stamps the statutory exclusion note:
         "Covers manufacturing defects only. Void if physical drop cracks or liquid damage found."
-        into the customer's permanent warranty record.
+        into the customer's permanent warranty certificate.
         """
         product = item_instance.product
         created_records = []
         rules = product.component_warranty_rules.all()
 
         standard_exclusion = (
-            "Covers manufacturing defects only. "
+            "Covers genuine manufacturing defects only. "
             "Void if physical drop cracks or liquid damage found."
         )
 
@@ -285,10 +436,7 @@ class InventoryService:
                 comp_type = (rule.component_type or '').upper()
                 months = rule.warranty_months if rule.warranty_months is not None else 0
 
-                # Compute exact expiration dates:
-                # - Screen Expiry Date: Exactly 90 days (3 months) from purchase.
-                # - Battery Expiry Date: Exactly 180 days (6 months) from purchase.
-                # - Main Body Expiry Date: Exactly 365 days (12 months) from purchase.
+                # Compute exact calendar durations
                 if months == 0:
                     duration_days = 0
                 elif comp_type == 'SCREEN' and months == 3:
@@ -309,8 +457,6 @@ class InventoryService:
                     duration_days = 0
 
                 end_date = sale_date + timedelta(days=duration_days)
-
-                # Carry over the exclusion note into the permanent record
                 rule_conditions = (rule.coverage_conditions or "").strip()
                 remarks = rule_conditions or standard_exclusion
 

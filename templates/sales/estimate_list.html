@@ -1,32 +1,51 @@
 {% extends "core/base.html" %}
+{% load humanize static %}
 
-{% block title %}Sales Estimation Slips | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+{% block title %}Sales Estimation Slips &amp; Invoices | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4">
-    <!-- Header -->
+<div class="container-fluid px-4 py-4" style="max-width: 1600px;">
+    <!-- Page Header -->
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-            <h4 class="fw-bold text-dark mb-0">Sales Estimation Slips (Internal Vouchers)</h4>
-            <p class="text-muted fs-xs mb-0">Internal proforma slips, counter sales, and customer warranty estimation records</p>
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0">Sales Invoices &amp; Estimation Slips</h4>
+                <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2.5 py-1 rounded-pill fs-2xs fw-bold">
+                    Total: {{ page_obj.paginator.count|default:estimates|length }} Vouchers
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">Official VAT sales invoices, counter retail slips, proforma estimates, and warranty records</p>
         </div>
-        <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning rounded-pill px-4 fw-bold shadow-sm text-dark">
-            <i class="fas fa-plus-circle me-1"></i> New POS Bill [F2]
-        </a>
+        <div class="d-flex gap-2">
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning rounded-pill px-4 fw-bold shadow-sm text-dark">
+                <i class="fas fa-plus-circle me-1"></i> New POS Bill [F2]
+            </a>
+        </div>
     </div>
 
     <!-- Search & Filter Bar -->
     <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2">
-            <div class="col-12 col-md-5">
-                <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control form-control-sm bg-light border-0" placeholder="Search by Slip No, Customer Name, or Phone...">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-12 col-md-4">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
+                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search Slip #, Customer Name, Phone, PAN...">
+                </div>
             </div>
-            <div class="col-6 col-md-3">
+            <div class="col-6 col-md-2">
+                <select name="bill_type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Document Types</option>
+                    <option value="SALES" {% if request.GET.bill_type == 'SALES' %}selected{% endif %}>Official Sales Invoice (INV)</option>
+                    <option value="ESTIMATE" {% if request.GET.bill_type == 'ESTIMATE' %}selected{% endif %}>Estimate Slip (EST)</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
                 <select name="status" class="form-select form-select-sm bg-light border-0">
                     <option value="">All Bill Statuses</option>
                     <option value="COMPLETED" {% if request.GET.status == 'COMPLETED' %}selected{% endif %}>Completed (सम्पन्न)</option>
-                    <option value="CANCELLED" {% if request.GET.status == 'CANCELLED' %}selected{% endif %}>Cancelled (रद्द)</option>
+                    <option value="CANCELLED" {% if request.GET.status == 'CANCELLED' %}selected{% endif %}>Cancelled / Voided (रद्द)</option>
                     <option value="PARTIALLY_RETURNED" {% if request.GET.status == 'PARTIALLY_RETURNED' %}selected{% endif %}>Partially Returned</option>
+                    <option value="RETURNED" {% if request.GET.status == 'RETURNED' %}selected{% endif %}>Fully Returned</option>
                 </select>
             </div>
             <div class="col-6 col-md-2">
@@ -37,21 +56,24 @@
                     <option value="DUE" {% if request.GET.payment_status == 'DUE' %}selected{% endif %}>Full Udhaari</option>
                 </select>
             </div>
-            <div class="col-12 col-md-2">
+            <div class="col-6 col-md-2 d-flex gap-1">
                 <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.q or request.GET.status or request.GET.payment_status or request.GET.bill_type %}
+                    <a href="{% url 'sales:estimate_list' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
             </div>
         </form>
     </div>
 
-    <!-- Slips Table -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+    <!-- Slips Master Table -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 fs-sm">
-                <thead class="bg-light text-muted text-uppercase fs-xs">
+                <thead class="bg-light text-muted text-uppercase fs-2xs">
                     <tr>
-                        <th class="ps-4">Slip No</th>
+                        <th class="ps-4">Slip / Invoice No</th>
                         <th>Date (AD / BS)</th>
-                        <th>Customer</th>
+                        <th>Customer / Recipient</th>
                         <th>Cashier</th>
                         <th>Grand Total</th>
                         <th>Paid</th>
@@ -62,55 +84,321 @@
                 </thead>
                 <tbody>
                     {% for est in estimates %}
-                    <tr>
+                    <tr class="{% if est.status == 'CANCELLED' %}bg-light opacity-75{% endif %}">
+                        <!-- 1. Slip Number Linked to Detailed Bill View -->
                         <td class="ps-4 font-monospace fw-bold">
-                            <a href="{% url 'sales:estimate_thermal_slip' est.pk %}" target="_blank" class="text-decoration-none text-dark">
+                            <a href="{% url 'sales:estimate_detail' est.pk %}" class="text-decoration-none {% if est.status == 'CANCELLED' %}text-decoration-line-through text-danger{% else %}text-primary{% endif %}" title="View Complete Bill Details">
                                 {{ est.estimate_number }}
                             </a>
+                            <div class="fs-3xs text-muted font-sans">
+                                {% if est.bill_type == 'SALES' or est.estimate_number|slice:":3" == "INV" %}
+                                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 py-0 px-1">VAT Bill</span>
+                                {% else %}
+                                    <span class="badge bg-secondary bg-opacity-10 text-secondary py-0 px-1">Estimate</span>
+                                {% endif %}
+                            </div>
                         </td>
+
+                        <!-- 2. Date AD & BS -->
                         <td>
-                            {{ est.bill_date_ad }}
-                            {% if est.bill_date_bs %}<br><small class="text-muted">{{ est.bill_date_bs }} BS</small>{% endif %}
+                            <strong class="text-dark">{{ est.bill_date_ad }}</strong>
+                            {% if est.bill_date_bs %}
+                                <div class="text-muted fs-2xs font-monospace">{{ est.bill_date_bs }} BS</div>
+                            {% endif %}
                         </td>
+
+                        <!-- 3. Customer Info (Safely Handled for Walk-in & Registered Customers) -->
                         <td>
-                            <strong>{{ est.recipient_display_name }}</strong>
-                            {% if est.customer_phone_manual %}<br><small class="text-muted">{{ est.customer_phone_manual }}</small>{% endif %}
+                            <strong class="text-dark">{{ est.recipient_display_name }}</strong>
+                            {% if est.customer_phone_manual %}
+                                <div class="text-muted fs-2xs font-monospace">
+                                    <i class="fas fa-phone fs-3xs text-success me-1"></i>{{ est.customer_phone_manual }}
+                                </div>
+                            {% elif est.customer and est.customer.phone_number %}
+                                <div class="text-muted fs-2xs font-monospace">
+                                    <i class="fas fa-phone fs-3xs text-success me-1"></i>{{ est.customer.phone_number }}
+                                </div>
+                            {% endif %}
+                            {% if est.customer_pan %}
+                                <div class="text-muted fs-3xs font-monospace">PAN: {{ est.customer_pan }}</div>
+                            {% elif est.customer and est.customer.pan_number %}
+                                <div class="text-muted fs-3xs font-monospace">PAN: {{ est.customer.pan_number }}</div>
+                            {% endif %}
                         </td>
-                        <td>{{ est.cashier.username }}</td>
-                        <td class="fw-bold text-primary">Rs. {{ est.grand_total|floatformat:2 }}</td>
-                        <td class="text-success fw-semibold">Rs. {{ est.paid_amount|floatformat:2 }}</td>
+
+                        <!-- 4. Cashier -->
+                        <td>
+                            <span class="badge bg-light text-dark border">{{ est.cashier.username }}</span>
+                        </td>
+
+                        <!-- 5. Grand Total -->
+                        <td class="fw-bold {% if est.status == 'CANCELLED' %}text-muted text-decoration-line-through{% else %}text-primary{% endif %} font-monospace">
+                            Rs. {{ est.grand_total|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 6. Paid Amount -->
+                        <td class="text-success fw-semibold font-monospace">
+                            Rs. {{ est.paid_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 7. Due Amount -->
                         <td>
                             {% if est.due_amount > 0 %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold">
-                                    Rs. {{ est.due_amount|floatformat:2 }}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace">
+                                    Rs. {{ est.due_amount|floatformat:2|intcomma }}
                                 </span>
                             {% else %}
                                 <span class="text-muted fs-xs"><i class="fas fa-check text-success me-1"></i> Clear</span>
                             {% endif %}
                         </td>
+
+                        <!-- 8. Status Badge -->
                         <td>
-                            <span class="badge bg-{% if est.status == 'COMPLETED' %}success{% elif est.status == 'CANCELLED' %}danger{% else %}warning text-dark{% endif %} fs-xs">
-                                {{ est.get_status_display }}
-                            </span>
+                            {% if est.status == 'COMPLETED' %}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold px-2 py-1 fs-2xs">
+                                    <i class="fas fa-check-circle me-1"></i> Completed
+                                </span>
+                            {% elif est.status == 'CANCELLED' %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold px-2 py-1 fs-2xs">
+                                    <i class="fas fa-ban me-1"></i> Cancelled (Void)
+                                </span>
+                            {% elif est.status == 'PARTIALLY_RETURNED' %}
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold px-2 py-1 fs-2xs">
+                                    <i class="fas fa-rotate-left me-1"></i> Partial Return
+                                </span>
+                            {% elif est.status == 'RETURNED' %}
+                                <span class="badge bg-purple bg-opacity-10 text-purple fw-bold px-2 py-1 fs-2xs">
+                                    <i class="fas fa-rotate-left me-1"></i> Fully Returned
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary px-2 py-1 fs-2xs">{{ est.get_status_display }}</span>
+                            {% endif %}
                         </td>
+
+                        <!-- 9. Actions Button Group -->
                         <td class="text-end pe-4">
-                            <a href="{% url 'sales:estimate_thermal_slip' est.pk %}" class="btn btn-outline-dark btn-sm rounded-pill px-3" target="_blank">
-                                <i class="fas fa-print me-1"></i> Print Slip
-                            </a>
+                            <div class="d-inline-flex align-items-center gap-1">
+                                <!-- A. View Bill Details -->
+                                <a href="{% url 'sales:estimate_detail' est.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-2.5 py-1" title="View Full Bill Details">
+                                    <i class="fas fa-eye me-1"></i> View
+                                </a>
+
+                                <!-- B. Print Dropdown Menu -->
+                                <div class="dropdown d-inline-block">
+                                    <button class="btn btn-outline-dark btn-sm rounded-pill px-2.5 py-1 dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Print Options">
+                                        <i class="fas fa-print me-1"></i> Print
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0 fs-xs p-1">
+                                        <li>
+                                            <a class="dropdown-item py-1.5 rounded-2" href="{% url 'sales:estimate_thermal_slip' est.pk %}" target="_blank">
+                                                <i class="fas fa-receipt me-2 text-dark"></i> 80mm Thermal Receipt
+                                            </a>
+                                        </li>
+                                        <li>
+                                            <a class="dropdown-item py-1.5 rounded-2" href="{% url 'sales:estimate_detail' est.pk %}?format=a4" target="_blank">
+                                                <i class="fas fa-file-invoice me-2 text-primary"></i> Formal A4 Invoice Sheet
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <!-- C. Safe Counter Edit Button (Hidden if Cancelled or Returned) -->
+                                {% if est.can_be_edited %}
+                                    <a href="{% url 'sales:estimate_edit' est.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-2.5 py-1" title="Edit Date, Customer, or Notes">
+                                        <i class="fas fa-pen-to-square me-1"></i> Edit
+                                    </a>
+                                {% endif %}
+
+                                <!-- D. Supervisor Void / Cancel Button -->
+                                {% if est.can_be_voided and is_supervisor %}
+                                    <button type="button" 
+                                            class="btn btn-outline-danger btn-sm rounded-pill px-2.5 py-1 btn-open-void-modal"
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#listVoidConfirmModal"
+                                            data-estimate-id="{{ est.pk }}"
+                                            data-estimate-number="{{ est.estimate_number }}"
+                                            data-grand-total="{{ est.grand_total|floatformat:2|intcomma }}"
+                                            title="Void / Cancel this Bill and reverse stock">
+                                        <i class="fas fa-ban me-1"></i> Void
+                                    </button>
+                                {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
                         <td colspan="9" class="text-center py-5 text-muted">
-                            <i class="fas fa-receipt fs-1 text-secondary opacity-25 d-block mb-2"></i>
-                            No sales estimation slips generated yet.
+                            <i class="fas fa-receipt fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Estimation Slips or Invoices Found</h6>
+                            <p class="text-muted fs-xs mb-0">No transaction records matched your search parameters.</p>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
     </div>
-    {% include "includes/_pagination.html" %}
 </div>
+
+<!-- =========================================================================
+     MODAL: MASTER LIST VOID / CANCEL CONFIRMATION MODAL
+     ========================================================================= -->
+<div class="modal fade" id="listVoidConfirmModal" tabindex="-1" aria-labelledby="listVoidConfirmModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <form action="" method="post" id="listVoidEstimateForm" novalidate>
+                {% csrf_token %}
+                <input type="hidden" name="next" value="list">
+                
+                <div class="modal-header bg-danger text-white py-3 px-4 border-0">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fas fa-triangle-exclamation fs-5"></i>
+                        <div>
+                            <h6 class="modal-title fs-sm fw-bold text-white mb-0" id="listVoidConfirmModalLabel">Confirm Bill Cancellation (Void)</h6>
+                            <small class="text-white-50 fs-2xs font-monospace" id="modalDispSlipNo">INV-000000</small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body p-4">
+                    <!-- Impact Notice Alert -->
+                    <div class="alert alert-danger bg-danger bg-opacity-10 border-danger border-opacity-25 rounded-3 p-3 fs-xs mb-3 text-dark">
+                        <strong class="d-block text-danger mb-1"><i class="fas fa-shield-halved me-1"></i> Irreversible Action Safeguard:</strong>
+                        <ul class="mb-0 ps-3 text-muted">
+                            <li>All merchandise items will be <strong>restocked to sellable inventory</strong>.</li>
+                            <li>Sold smartphone IMEIs will be released and marked as <strong>IN_STOCK</strong>.</li>
+                            <li>Customer warranties for this transaction will be <strong>voided</strong>.</li>
+                            <li>Customer debt (Udhaari) will be <strong>reversed</strong> from ledger.</li>
+                            <li>Accounting General Ledger will post an <strong>automatic reversal journal</strong>.</li>
+                        </ul>
+                    </div>
+
+                    <!-- Operational Category Dropdown -->
+                    <div class="mb-3">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">
+                            Operational Justification / Category <span class="text-danger">*</span>
+                        </label>
+                        <select id="modalReasonCategory" class="form-select form-select-sm fw-semibold">
+                            {% for cat_val, cat_label in void_reason_choices %}
+                                <option value="{{ cat_val }}" {% if forloop.first %}selected{% endif %}>{{ cat_label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Mandatory Detailed Cancellation Reason Input -->
+                    <div class="mb-2">
+                        <label class="form-label fs-xs fw-bold text-dark mb-1">
+                            Detailed Cancellation Reason <span class="text-danger">*</span>
+                        </label>
+                        <textarea name="cancellation_reason" 
+                                  id="modalReasonTextarea" 
+                                  class="form-control form-control-sm" 
+                                  rows="3" 
+                                  minlength="5" 
+                                  placeholder="Please provide explicit details justifying this cancellation (minimum 5 characters)..." 
+                                  required></textarea>
+                        <div class="d-flex justify-content-between text-muted fs-2xs mt-1">
+                            <span>Minimum 5 characters required for audit trail.</span>
+                            <span id="modalCharCountDisplay">0 / 5 min</span>
+                        </div>
+                    </div>
+
+                    <div id="modalValidationAlert" class="alert alert-danger p-2 fs-2xs d-none mb-0 mt-2"></div>
+                </div>
+
+                <div class="modal-footer bg-light border-0 py-2 px-4 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">
+                        Keep Bill
+                    </button>
+                    <button type="submit" class="btn btn-danger btn-sm px-4 rounded-pill fw-bold shadow-sm" id="modalConfirmSubmitBtn">
+                        <i class="fas fa-ban me-1"></i> Confirm &amp; Void Bill
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const voidForm = document.getElementById('listVoidEstimateForm');
+    const modalDispSlipNo = document.getElementById('modalDispSlipNo');
+    const reasonCategory = document.getElementById('modalReasonCategory');
+    const reasonTextarea = document.getElementById('modalReasonTextarea');
+    const charCountDisplay = document.getElementById('modalCharCountDisplay');
+    const validationAlert = document.getElementById('modalValidationAlert');
+    const confirmSubmitBtn = document.getElementById('modalConfirmSubmitBtn');
+
+    // Dynamically wire the modal when any "Void" button on the table is clicked
+    document.querySelectorAll('.btn-open-void-modal').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const estId = btn.dataset.estimateId;
+            const estNum = btn.dataset.estimateNumber;
+            const grandTotal = btn.dataset.grandTotal;
+
+            if (voidForm) {
+                voidForm.action = `/sales/estimates/${estId}/cancel/`;
+            }
+            if (modalDispSlipNo) {
+                modalDispSlipNo.innerText = `${estNum} (Total: Rs. ${grandTotal})`;
+            }
+            if (reasonTextarea) {
+                reasonTextarea.value = '';
+            }
+            if (charCountDisplay) {
+                charCountDisplay.innerText = '0 / 5 min';
+                charCountDisplay.className = 'text-muted fs-2xs';
+            }
+            if (validationAlert) {
+                validationAlert.classList.add('d-none');
+                validationAlert.innerText = '';
+            }
+        });
+    });
+
+    if (reasonTextarea) {
+        reasonTextarea.addEventListener('input', () => {
+            const length = reasonTextarea.value.trim().length;
+            if (charCountDisplay) {
+                charCountDisplay.innerText = `${length} / 5 min`;
+                charCountDisplay.className = length >= 5 ? 'text-success fw-bold fs-2xs' : 'text-muted fs-2xs';
+            }
+            if (validationAlert && length >= 5) {
+                validationAlert.classList.add('d-none');
+                validationAlert.innerText = '';
+            }
+        });
+    }
+
+    if (voidForm) {
+        voidForm.addEventListener('submit', (e) => {
+            const categoryText = reasonCategory.options[reasonCategory.selectedIndex].text;
+            const detailedText = reasonTextarea.value.trim();
+
+            if (!detailedText || detailedText.length < 5) {
+                e.preventDefault();
+                if (validationAlert) {
+                    validationAlert.innerText = 'A valid, detailed cancellation reason is required (minimum 5 characters).';
+                    validationAlert.classList.remove('d-none');
+                }
+                reasonTextarea.focus();
+                return false;
+            }
+
+            const finalReason = `[${categoryText}] ${detailedText}`;
+            reasonTextarea.value = finalReason;
+
+            if (confirmSubmitBtn) {
+                confirmSubmitBtn.disabled = true;
+                confirmSubmitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Voiding Bill...';
+            }
+        });
+    }
+});
+</script>
 {% endblock %}

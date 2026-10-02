@@ -1,7 +1,12 @@
+"""
+Sales & POS Billing URL Configuration.
+"""
+
 from django.urls import path, include
 from apps.sales.views import (
     POSTerminalView, POSCheckoutAPIView, SalesEstimateListView,
-    SalesEstimateDetailView, SalesEstimateThermalSlipView, SalesEstimateCancelView,
+    SalesEstimateDetailView, SalesEstimateThermalSlipView,
+    SalesEstimateUpdateView, SalesEstimateCancelView,
     SalesReturnListView, SalesReturnCreateView, SalesReturnDetailView, SalesReturnThermalSlipView,
     TradeInListView, TradeInEvaluationWizardView, TradeInDetailView,
     TradeInPoliceUndertakingPrintView
@@ -30,6 +35,7 @@ urlpatterns = [
     path('pos/', POSTerminalView.as_view(), name='pos_terminal'),
     path('estimates/', SalesEstimateListView.as_view(), name='estimate_list'),
     path('estimates/<int:pk>/', SalesEstimateDetailView.as_view(), name='estimate_detail'),
+    path('estimates/<int:pk>/edit/', SalesEstimateUpdateView.as_view(), name='estimate_edit'),
     path('estimates/<int:pk>/thermal-slip/', SalesEstimateThermalSlipView.as_view(), name='estimate_thermal_slip'),
     path('estimates/<int:pk>/cancel/', SalesEstimateCancelView.as_view(), name='estimate_cancel'),
 

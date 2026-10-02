@@ -5,11 +5,15 @@ Commercial Purchase Returns (Debit Notes) & Supplier Udhaari Ledgers.
 Synchronized with `apps/purchases/models.py`:
 - Inward GRN features 5-Section Financial Summary Cards:
     1. Gross Merchandise Value (Pre-VAT Base)
-    2. Dedicated 13% VAT Amount
-    3. Total Overheads (Freight + Customs + Unloading)
-    4. Total Landed Valuation / Inventory COGS
+    2. Dedicated 13% VAT Amount (Respects Exclusive vs. Inclusive mode)
+    3. Total Overheads (Freight + Customs + Handling + Transit Insurance + Other Overheads)
+    4. Total Landed Valuation / Inventory COGS (Taxable Base + 5-tier Overheads)
     5. Net Due / Supplier Debt (Total Bill - Paid Amount)
 - Inline item support for dual discount types: Flat Amount (रू) vs Percentage (%).
+- Line-item physical Batch Number (`batch_number`) tracking.
+- Distinct delivery challan reference fields (`challan_no`, `challan_date`, `challan_date_bs`).
+- Dual VAT Handling Modes (`vat_handling_mode`: 'EXCLUSIVE' vs 'INCLUSIVE').
+- Multi-field audit observations: `consignment_narration`, `receiving_notes`, and `internal_notes`.
 - Automatic overhead landed cost allocation across line items upon save.
 - Comprehensive date synchronization between Gregorian (AD) and Bikram Sambat (BS).
 - Explicit entry_date and entry_date_bs visibility in SupplierUdhaariLedger.
@@ -63,10 +67,10 @@ class GRNItemInline(admin.TabularInline):
     extra = 0
     autocomplete_fields = ['product', 'unit_conversion']
     fields = [
-        'product', 'supplier_item_code', 'purchased_quantity', 'conversion_factor',
+        'product', 'supplier_item_code', 'batch_number', 'purchased_quantity', 'conversion_factor',
         'base_unit_quantity', 'purchase_rate', 'gross_amount',
         'discount_type', 'discount_input_value', 'item_discount_amount', 'discount_percent',
-        'line_total', 'unit_landed_cost', 'is_vat_applicable',
+        'line_total', 'unit_landed_cost', 'is_vat_applicable', 'vat_rate',
         'new_selling_price', 'default_mdms_status', 'scanned_imei_list'
     ]
     readonly_fields = [
@@ -298,19 +302,19 @@ class PurchaseOrderItemAdmin(admin.ModelAdmin):
 @admin.register(GoodsReceivedNote)
 class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     list_display = [
-        'grn_number', 'supplier', 'branch', 'supplier_bill_no',
+        'grn_number', 'supplier', 'branch', 'supplier_bill_no', 'challan_no',
         'bill_date', 'bill_date_bs', 'fiscal_year',
-        'status_badge', 'mdms_badge', 'is_vat_badge',
+        'status_badge', 'vat_mode_badge', 'is_vat_badge',
         'formatted_gross_amount', 'formatted_taxable_amount',
         'formatted_vat_amount', 'formatted_landed_cost',
         'formatted_net_total', 'formatted_due'
     ]
     list_filter = [
-        'status', 'is_vat_bill', 'distributor_mdms_certified',
+        'status', 'vat_handling_mode', 'is_vat_bill', 'distributor_mdms_certified',
         'fiscal_year', 'branch', 'bill_date'
     ]
     search_fields = [
-        'grn_number', 'supplier_bill_no', 'supplier_product_code',
+        'grn_number', 'supplier_bill_no', 'challan_no', 'supplier_product_code',
         'mdms_tax_invoice_ref', 'supplier__company_name', 'fiscal_year', 'bill_date_bs'
     ]
     readonly_fields = [
@@ -324,16 +328,18 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     actions = ['recalculate_all_grn_totals']
 
     fieldsets = (
-        (_("1. Supplier & Inward Metadata (Historical Dates Supported)"), {
+        (_("1. Supplier & Document Registry (Historical Dates Supported)"), {
             'description': _(
                 "Updating either Bill Date (BS) or Bill Date (AD) will bidirectionally "
-                "recalculate the corresponding date and Nepali Fiscal Year automatically upon saving."
+                "recalculate the corresponding date and Nepali Fiscal Year automatically upon saving. "
+                "Challan references are tracked distinctly from tax invoice numbers."
             ),
             'fields': (
                 ('grn_number', 'status'),
                 ('supplier', 'branch', 'purchase_order'),
                 ('supplier_bill_no', 'supplier_product_code'),
-                ('bill_date', 'bill_date_bs', 'fiscal_year')
+                ('bill_date', 'bill_date_bs', 'fiscal_year'),
+                ('challan_no', 'challan_date', 'challan_date_bs')
             )
         }),
         (_("2. NTA MDMS & Customs Clearance Compliance"), {
@@ -343,14 +349,15 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
             )
         }),
         (_("3. Procurement Financial Valuation & Landed COGS Summary"), {
-            'description': _("Live breakdown of Pre-VAT Gross, Line & Bill Discounts, 13% VAT, Overheads, and Net Payable."),
+            'description': _("Live breakdown of Pre-VAT Gross, Line & Bill Discounts, VAT Mode, 13% VAT, 5-tier Overheads, and Net Payable."),
             'fields': (
                 'financial_summary_card',
                 ('gross_amount', 'total_line_discount'),
                 ('bill_discount_type', 'bill_discount_input_value', 'bill_discount_amount'),
                 ('discount_amount', 'taxable_amount'),
-                ('is_vat_bill', 'vat_rate', 'vat_amount'),
+                ('vat_handling_mode', 'is_vat_bill', 'vat_rate', 'vat_amount'),
                 ('extra_freight_charge', 'customs_import_charge', 'other_handling_charge'),
+                ('insurance_charge', 'other_overheads_charge'),
                 ('total_landed_cost', 'net_total_amount'),
                 ('paid_amount', 'due_amount')
             )
@@ -358,11 +365,18 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         (_("4. Supplier Warranty & Support Center"), {
             'fields': (
                 ('warranty_provider', 'warranty_months'),
-                'authorized_service_center',
+                'authorized_service_center'
+            )
+        }),
+        (_("5. Multi-Field Observations & Audit Observations"), {
+            'fields': (
+                'consignment_narration',
+                'receiving_notes',
+                'internal_notes',
                 'remarks'
             )
         }),
-        (_("5. Audit & Approval"), {
+        (_("6. Audit & Approval"), {
             'fields': (
                 ('received_by', 'estimate_disclaimer_noted'),
                 ('created_at', 'updated_at')
@@ -384,7 +398,8 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         landed = obj.total_landed_cost or Decimal('0.00')
         due = obj.due_amount or Decimal('0.00')
 
-        vat_status = "13% VAT Active" if obj.is_vat_bill else "Non-VAT (0.00)"
+        vat_mode_label = " (Mode: Incl)" if obj.vat_handling_mode == 'INCLUSIVE' else " (Mode: Excl)"
+        vat_status = ("13% VAT Active" + vat_mode_label) if obj.is_vat_bill else "Non-VAT (0.00)"
         vat_color = "#059669" if obj.is_vat_bill else "#64748b"
 
         return format_html(
@@ -404,18 +419,18 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
                     <div style="font-size: 11px; color: {}; font-weight: 600; margin-top: 2px;">{}</div>
                 </div>
 
-                <!-- 3. Total Overheads -->
+                <!-- 3. Total Overheads (5-Tier Sum) -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid #d97706; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">3. Total Overheads</div>
                     <div style="font-size: 18px; font-weight: 800; color: #b45309; margin-top: 4px;">Rs. {:,.2f}</div>
-                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Freight + Customs + Unloading</div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Freight + Duty + Handl + Ins + Ovh</div>
                 </div>
 
                 <!-- 4. Total Landed Valuation -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid #7c3aed; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">4. Total Landed (COGS)</div>
                     <div style="font-size: 18px; font-weight: 800; color: #6d28d9; margin-top: 4px;">Rs. {:,.2f}</div>
-                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Pre-VAT Taxable + Overheads</div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Pre-VAT Taxable + 5 Overheads</div>
                 </div>
 
                 <!-- 5. Net Due / Supplier Debt -->
@@ -439,6 +454,18 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     financial_summary_card.short_description = _("Section 3: Executive Financial Summary")
 
     # --- Badges & Formatted Table Columns ---
+    def vat_mode_badge(self, obj):
+        if obj.vat_handling_mode == 'INCLUSIVE':
+            return format_html(
+                '<span style="color: #6b21a8; background-color: #faf5ff; border: 1px solid #e9d5ff; '
+                'padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">VAT INCL</span>'
+            )
+        return format_html(
+            '<span style="color: #0369a1; background-color: #f0f9ff; border: 1px solid #bae6fd; '
+            'padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">VAT EXCL</span>'
+        )
+    vat_mode_badge.short_description = _("VAT Mode")
+
     def is_vat_badge(self, obj):
         if obj.is_vat_bill:
             return format_html(
@@ -446,7 +473,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
                 'padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">13% VAT</span>'
             )
         return format_html('<span style="color: #64748b; font-size: 10px; font-weight: 600;">PAN (0%)</span>')
-    is_vat_badge.short_description = _("VAT")
+    is_vat_badge.short_description = _("Tax Invoice")
 
     def mdms_badge(self, obj):
         if obj.distributor_mdms_certified:
@@ -532,14 +559,14 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
 @admin.register(GRNItem)
 class GRNItemAdmin(admin.ModelAdmin):
     list_display = [
-        'grn', 'product', 'purchased_quantity', 'base_unit_quantity',
+        'grn', 'product', 'batch_number', 'purchased_quantity', 'base_unit_quantity',
         'purchase_rate', 'gross_amount', 'discount_type', 'item_discount_amount',
         'line_total', 'unit_landed_cost', 'default_mdms_status'
     ]
     list_filter = ['discount_type', 'is_vat_applicable', 'default_mdms_status', 'grn__branch']
     search_fields = [
-        'grn__grn_number', 'grn__supplier_bill_no', 'product__name',
-        'supplier_item_code', 'scanned_imei_list'
+        'grn__grn_number', 'grn__supplier_bill_no', 'grn__challan_no',
+        'product__name', 'supplier_item_code', 'batch_number', 'scanned_imei_list'
     ]
     autocomplete_fields = ['grn', 'product', 'unit_conversion']
     readonly_fields = [

@@ -4,26 +4,31 @@ Procurement, Supplier Udhaari & Purchase Return Forms.
 Upgraded Capabilities:
 1. GoodsReceivedNoteForm:
    - Full bidirectional date synchronization between `bill_date` (A.D.) and `bill_date_bs` (B.S.).
+   - Distinct delivery challan synchronization: `challan_no`, `challan_date` (AD), and `challan_date_bs` (BS).
    - Explicit Fiscal Year Lock Enforcement: Rejects bills falling within closed/audited fiscal years.
-   - Exposes whole-bill discount controls: `bill_discount_type` and `bill_discount_input_value`.
-   - Exposes Nepal 13% VAT toggle (`is_vat_bill`) and custom `vat_rate`.
-2. GRNItemForm:
-   - Exposes dual-mode line discounts: `discount_type` (Amount vs %) and `discount_input_value`.
+   - Dual VAT Handling Modes: `vat_handling_mode` ('EXCLUSIVE' vs. 'INCLUSIVE').
+   - 5-Tier Overhead Expense Controls: Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads.
+   - Multi-Field Observations: `consignment_narration`, `receiving_notes`, and `internal_notes`.
+   - Flexible Draft Saving: Allows saving in-progress vouchers as drafts without failing on incomplete mandatory fields.
+2. GRNItemForm & BaseGRNItemFormSet:
+   - Captures physical vendor batch numbers via `batch_number`.
    - Dynamic Master Switch IMEI Enforcement:
-     * When `enforce_imei_tracking=True` (Strict Mode): Enforces exact 1-to-1 match between handset quantity and scanned IMEIs.
+     * When `enforce_imei_tracking=True` (Strict Mode): Enforces exact 1-to-1 match between handset quantity and scanned IMEIs on final verification.
      * When `enforce_imei_tracking=False` (Backlog Mode): Allows phones to be saved as quantity-only entries without IMEIs.
+     * Draft Mode (`is_draft=True`): Relaxes IMEI count checks so warehouse staff can save partially scanned consignments.
      * Accessories: Always bypass IMEI requirements regardless of mode.
 3. Strict Serialized & Dual-IMEI Validation:
-   - Validates numeric IMEI format and prevents duplicate entries within the same handset unit.
+   - Validates numeric IMEI format and prevents internal duplicates within the consignment.
 4. PurchaseReturnForm & SupplierPaymentForm:
    - Synchronized historical date inputs with closed fiscal year validation guards.
 """
 
 import re
+import uuid
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from django import forms
-from django.forms import inlineformset_factory
+from django.forms import inlineformset_factory, BaseInlineFormSet
 from django.utils.translation import gettext_lazy as _
 
 from apps.purchases.models import (
@@ -325,71 +330,102 @@ PurchaseOrderItemFormSet = inlineformset_factory(
 )
 
 # ==============================================================================
-# 3. GOODS RECEIVED NOTE (GRN) HEADER FORM (WITH BIDIRECTIONAL SYNC & FY CHECK)
+# 3. GOODS RECEIVED NOTE (GRN) HEADER FORM
 # ==============================================================================
 class GoodsReceivedNoteForm(forms.ModelForm):
     """
     Inward Procurement Header Form.
     Features:
     - Bidirectional date synchronization between `bill_date` (AD) and `bill_date_bs` (BS).
+    - Distinct delivery challan synchronization: `challan_no`, `challan_date` (AD), `challan_date_bs` (BS).
     - Fiscal Year Locking Guard: Prevents entering bills into closed fiscal years (e.g. 2080/81 to 2082/83).
     - Dedicated whole-bill discount controls (`bill_discount_type`, `bill_discount_input_value`).
-    - Dedicated Nepal 13% VAT toggle (`is_vat_bill`) and rate.
-    - Landed overhead expenses (Freight, Customs, Handling).
+    - Dual VAT handling modes: `vat_handling_mode` ('EXCLUSIVE' vs 'INCLUSIVE') with Nepal 13% VAT toggle.
+    - 5 Overhead expenses (Freight, Customs, Handling & Unloading, Transit Insurance, Other Overheads).
+    - Multi-field observations (`consignment_narration`, `receiving_notes`, `internal_notes`).
+    - Flexible Draft Mode: Relaxed validation rules when saving in-progress vouchers.
     """
 
     class Meta:
         model = GoodsReceivedNote
         fields = [
-            'supplier', 'purchase_order', 'supplier_bill_no', 'supplier_product_code',
-            'bill_date', 'bill_date_bs',
+            'supplier', 'branch', 'purchase_order',
+            # Invoice Reference
+            'supplier_bill_no', 'supplier_product_code', 'bill_date', 'bill_date_bs',
+            # Challan Reference
+            'challan_no', 'challan_date', 'challan_date_bs',
             # Bill-Level Discount & VAT Controls
             'bill_discount_type', 'bill_discount_input_value',
-            'is_vat_bill', 'vat_rate',
-            # Compliance & Overheads
-            'distributor_mdms_certified', 'mdms_tax_invoice_ref',
+            'vat_handling_mode', 'is_vat_bill', 'vat_rate',
+            # 5 Overhead Expense Fields
             'extra_freight_charge', 'customs_import_charge', 'other_handling_charge',
+            'insurance_charge', 'other_overheads_charge',
+            # Compliance & Settlement
+            'distributor_mdms_certified', 'mdms_tax_invoice_ref',
             'paid_amount', 'warranty_provider', 'warranty_months',
-            'authorized_service_center', 'remarks'
+            'authorized_service_center',
+            # Multi-field Observations
+            'consignment_narration', 'receiving_notes', 'internal_notes', 'remarks'
         ]
         widgets = {
             'supplier': forms.Select(attrs={'class': 'form-select select2-enable'}),
+            'branch': forms.Select(attrs={'class': 'form-select'}),
             'purchase_order': forms.Select(attrs={'class': 'form-select'}),
-            'supplier_bill_no': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. INV-9908 / Chal-54'}),
+            'supplier_bill_no': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'e.g. INV-9908'}),
             'supplier_product_code': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. BATCH-SAM-2024-Q3'}),
             'bill_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
             'bill_date_bs': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'YYYY-MM-DD (BS)'}),
+            'challan_no': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'e.g. CH-2041'}),
+            'challan_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'challan_date_bs': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'YYYY-MM-DD (BS)'}),
             'bill_discount_type': forms.Select(attrs={'class': 'form-select'}),
             'bill_discount_input_value': forms.NumberInput(attrs={
                 'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00', 'placeholder': '0.00'
             }),
+            'vat_handling_mode': forms.Select(attrs={'class': 'form-select'}),
             'is_vat_bill': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'vat_rate': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
-            'distributor_mdms_certified': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
-            'mdms_tax_invoice_ref': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. NTA-PP-2081-82/9012 or Customs PP No.'}),
             'extra_freight_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'customs_import_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'other_handling_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
+            'insurance_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
+            'other_overheads_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
+            'distributor_mdms_certified': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+            'mdms_tax_invoice_ref': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. NTA-PP-2081-82/9012 or Customs PP No.'}),
             'paid_amount': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'warranty_provider': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Samsung Nepal Official / IMS'}),
             'warranty_months': forms.NumberInput(attrs={'class': 'form-control', 'step': '1', 'min': '0'}),
             'authorized_service_center': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. CTC Mall 5th Floor Service Center'}),
-            'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Stock receiving remarks...'}),
+            'consignment_narration': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'General transaction note for general ledger...'}),
+            'receiving_notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Seal conditions, carton numbers, driver remarks...'}),
+            'internal_notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Approvals, QC test references, gate passes...'}),
+            'remarks': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Additional remarks...'}),
         }
 
     def __init__(self, *args, **kwargs):
+        self.is_draft = kwargs.pop('is_draft', False)
         super().__init__(*args, **kwargs)
-        self.fields['supplier'].required = True
-        self.fields['supplier_bill_no'].required = True
-        self.fields['bill_date'].required = True
+
+        if not self.is_draft:
+            self.fields['supplier'].required = True
+            self.fields['supplier_bill_no'].required = True
+            self.fields['bill_date'].required = True
+        else:
+            self.fields['supplier'].required = False
+            self.fields['supplier_bill_no'].required = False
+            self.fields['bill_date'].required = False
 
         optional_fields = [
-            'purchase_order', 'supplier_product_code', 'bill_date_bs',
-            'bill_discount_type', 'bill_discount_input_value', 'is_vat_bill', 'vat_rate',
+            'branch', 'purchase_order', 'supplier_product_code', 'bill_date_bs',
+            'challan_no', 'challan_date', 'challan_date_bs',
+            'bill_discount_type', 'bill_discount_input_value',
+            'vat_handling_mode', 'is_vat_bill', 'vat_rate',
             'distributor_mdms_certified', 'mdms_tax_invoice_ref',
             'extra_freight_charge', 'customs_import_charge', 'other_handling_charge',
+            'insurance_charge', 'other_overheads_charge',
             'paid_amount', 'warranty_provider', 'warranty_months',
-            'authorized_service_center', 'remarks'
+            'authorized_service_center', 'consignment_narration', 'receiving_notes',
+            'internal_notes', 'remarks'
         ]
         for f in optional_fields:
             if f in self.fields:
@@ -398,12 +434,16 @@ class GoodsReceivedNoteForm(forms.ModelForm):
         if not self.instance.pk:
             today = date.today()
             self.fields['bill_date'].initial = today
+            self.fields['challan_date'].initial = today
             try:
                 bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
-                self.fields['bill_date_bs'].initial = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                bs_str = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                self.fields['bill_date_bs'].initial = bs_str
+                self.fields['challan_date_bs'].initial = bs_str
             except Exception:
                 pass
 
+            self.fields['vat_handling_mode'].initial = 'EXCLUSIVE'
             self.fields['bill_discount_type'].initial = 'NONE'
             self.fields['bill_discount_input_value'].initial = Decimal('0.00')
             self.fields['vat_rate'].initial = Decimal('13.00')
@@ -411,6 +451,8 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             self.fields['extra_freight_charge'].initial = Decimal('0.00')
             self.fields['customs_import_charge'].initial = Decimal('0.00')
             self.fields['other_handling_charge'].initial = Decimal('0.00')
+            self.fields['insurance_charge'].initial = Decimal('0.00')
+            self.fields['other_overheads_charge'].initial = Decimal('0.00')
             self.fields['paid_amount'].initial = Decimal('0.00')
             self.fields['distributor_mdms_certified'].initial = True
 
@@ -424,15 +466,20 @@ class GoodsReceivedNoteForm(forms.ModelForm):
         cleaned_data = super().clean()
         bill_date = cleaned_data.get('bill_date')
         bill_date_bs = (cleaned_data.get('bill_date_bs') or '').strip()
+        challan_date = cleaned_data.get('challan_date')
+        challan_date_bs = (cleaned_data.get('challan_date_bs') or '').strip()
+
+        # If saving as draft and no invoice number is provided, supply a safe draft placeholder
+        if self.is_draft and not (cleaned_data.get('supplier_bill_no') or '').strip():
+            cleaned_data['supplier_bill_no'] = f"DRAFT-{uuid.uuid4().hex[:6].upper()}"
 
         target_date_ad = None
         target_date_bs = None
         target_fiscal_year = None
 
         # -------------------------------------------------------------
-        # 1. Bidirectional Date Synchronization
+        # 1. Bidirectional Date Synchronization (Bill Date)
         # -------------------------------------------------------------
-        # If bill_date_bs is provided, it takes priority and converts to Gregorian AD
         if bill_date_bs:
             try:
                 bs_y, bs_m, bs_d = parse_bs_date_components(bill_date_bs)
@@ -445,7 +492,7 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             except ValueError as ve:
                 self.add_error('bill_date_bs', _(f"Invalid Bikram Sambat date: {ve}"))
                 return cleaned_data
-            except Exception as e:
+            except Exception:
                 self.add_error('bill_date_bs', _("Could not convert Nepali date to Gregorian calendar."))
                 return cleaned_data
         elif bill_date:
@@ -458,15 +505,40 @@ class GoodsReceivedNoteForm(forms.ModelForm):
 
                 cleaned_data['bill_date'] = target_date_ad
                 cleaned_data['bill_date_bs'] = target_date_bs
-            except Exception as e:
+            except Exception:
                 self.add_error('bill_date', _("Could not convert Gregorian date to Nepali calendar."))
                 return cleaned_data
-        else:
+        elif not self.is_draft:
             self.add_error('bill_date', _("Bill date is mandatory."))
             return cleaned_data
+        else:
+            # Fallback for draft with empty date
+            today = date.today()
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+            cleaned_data['bill_date'] = today
+            cleaned_data['bill_date_bs'] = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
 
         # -------------------------------------------------------------
-        # 2. Fiscal Year Lock Validation
+        # 2. Bidirectional Date Synchronization (Challan Date)
+        # -------------------------------------------------------------
+        if challan_date_bs:
+            try:
+                c_y, c_m, c_d = parse_bs_date_components(challan_date_bs)
+                cleaned_data['challan_date'] = NepaliCalendar.bs_to_ad(c_y, c_m, c_d)
+                cleaned_data['challan_date_bs'] = f"{c_y:04d}-{c_m:02d}-{c_d:02d}"
+            except Exception:
+                pass
+        elif challan_date:
+            try:
+                c_ad = challan_date.date() if isinstance(challan_date, datetime) else challan_date
+                c_y, c_m, c_d = NepaliCalendar.ad_to_bs(c_ad)
+                cleaned_data['challan_date'] = c_ad
+                cleaned_data['challan_date_bs'] = NepaliCalendar.format_bs(c_y, c_m, c_d, lang='en')
+            except Exception:
+                pass
+
+        # -------------------------------------------------------------
+        # 3. Fiscal Year Lock Validation
         # -------------------------------------------------------------
         if target_fiscal_year:
             locked_fy = AccountingFiscalYear.objects.filter(
@@ -485,7 +557,7 @@ class GoodsReceivedNoteForm(forms.ModelForm):
                 self.add_error('bill_date', error_msg)
 
         # -------------------------------------------------------------
-        # 3. Bill Discount Validation
+        # 4. Bill Discount Validation
         # -------------------------------------------------------------
         b_type = cleaned_data.get('bill_discount_type')
         b_input = cleaned_data.get('bill_discount_input_value') or Decimal('0.00')
@@ -504,21 +576,22 @@ class GRNItemForm(forms.ModelForm):
     """
     Line Item Input Validator for Goods Received Notes (GRN).
     Features:
-    - Unit Purchase Rate is strictly treated as Pre-VAT.
+    - Captures physical vendor batch code via `batch_number`.
+    - Unit Purchase Rate accepts Pre-VAT or Post-VAT rates depending on selected VAT handling mode.
     - Two-Way Line Discount: Flat Amount (रू) or Percentage (%).
-    - Automatic validation preventing discount amount > line gross value.
     - Dynamic Master Switch IMEI Enforcement:
-      * When enforce_imei_tracking is ON: Exact 1-to-1 match between handset quantity and scanned IMEIs.
+      * When enforce_imei_tracking is ON: Exact 1-to-1 match between handset quantity and scanned IMEIs on verification.
       * When enforce_imei_tracking is OFF (Backlog Mode): Allows phones to be saved as quantity-only entries with empty IMEIs.
+      * When is_draft is True: Allows partial/in-progress scanning without blocking the draft save.
       * Accessories: Always bypass IMEI requirements regardless of mode.
     """
 
     class Meta:
         model = GRNItem
         fields = [
-            'product', 'supplier_item_code', 'unit_conversion',
+            'product', 'supplier_item_code', 'batch_number', 'unit_conversion',
             'purchased_quantity', 'conversion_factor', 'purchase_rate',
-            # Upgraded Discount Controls
+            # Discount Controls
             'discount_type', 'discount_input_value',
             # Pricing & Tax
             'new_selling_price', 'is_vat_applicable', 'vat_rate',
@@ -528,6 +601,7 @@ class GRNItemForm(forms.ModelForm):
         widgets = {
             'product': forms.Select(attrs={'class': 'form-select grn-product-select select2-enable'}),
             'supplier_item_code': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Supplier SKU'}),
+            'batch_number': forms.TextInput(attrs={'class': 'form-control font-monospace item-batch', 'placeholder': 'e.g. BT-2026-A1'}),
             'unit_conversion': forms.Select(attrs={'class': 'form-select grn-conversion-select'}),
             'purchased_quantity': forms.NumberInput(attrs={'class': 'form-control font-monospace grn-qty', 'step': '0.001', 'min': '0.001'}),
             'conversion_factor': forms.NumberInput(attrs={'class': 'form-control font-monospace grn-factor', 'step': '0.001', 'min': '0.001'}),
@@ -554,13 +628,20 @@ class GRNItemForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
+        self.is_draft = kwargs.pop('is_draft', False)
         super().__init__(*args, **kwargs)
-        self.fields['product'].required = True
-        self.fields['purchased_quantity'].required = True
-        self.fields['purchase_rate'].required = True
+
+        if not self.is_draft:
+            self.fields['product'].required = True
+            self.fields['purchased_quantity'].required = True
+            self.fields['purchase_rate'].required = True
+        else:
+            self.fields['product'].required = False
+            self.fields['purchased_quantity'].required = False
+            self.fields['purchase_rate'].required = False
 
         optional_fields = [
-            'supplier_item_code', 'unit_conversion', 'conversion_factor',
+            'supplier_item_code', 'batch_number', 'unit_conversion', 'conversion_factor',
             'discount_type', 'discount_input_value', 'new_selling_price',
             'is_vat_applicable', 'vat_rate', 'default_mdms_status',
             'warranty_months', 'warranty_provider', 'scanned_imei_list'
@@ -585,7 +666,7 @@ class GRNItemForm(forms.ModelForm):
     def clean_purchase_rate(self):
         val = self.cleaned_data.get('purchase_rate')
         if val is None or val < Decimal('0.00'):
-            raise forms.ValidationError(_("Unit purchase rate cannot be negative."))
+            return Decimal('0.00') if self.is_draft else Decimal('0.00')
         return val
 
     def clean_discount_input_value(self):
@@ -603,19 +684,23 @@ class GRNItemForm(forms.ModelForm):
         disc_input = cleaned_data.get('discount_input_value') or Decimal('0.00')
         scanned_raw = (cleaned_data.get('scanned_imei_list') or '').strip()
 
-        # 1. Validate Discount Logic Against Pre-VAT Gross Value
+        # If saving as draft with an empty line, skip strict row errors
+        if self.is_draft and not product:
+            return cleaned_data
+
+        # 1. Validate Discount Logic Against Line Gross Value
         line_gross = (quantity * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if disc_type == 'PERCENTAGE':
             if disc_input > Decimal('100.00'):
                 self.add_error('discount_input_value', _("Percentage discount cannot exceed 100%."))
         elif disc_type == 'AMOUNT':
-            if disc_input > line_gross:
+            if disc_input > line_gross and line_gross > Decimal('0.00'):
                 self.add_error(
                     'discount_input_value',
                     _(f"Discount amount (Rs. {disc_input:,.2f}) cannot exceed total line value (Rs. {line_gross:,.2f}).")
                 )
 
-        # 2. Dynamic Serialized IMEI Tracking Validation (Master Switch Sensitive)
+        # 2. Dynamic Serialized IMEI Tracking Validation
         if product and (product.requires_imei_tracking or product.requires_serial_tracking):
             factor = cleaned_data.get('conversion_factor') or Decimal('1.000')
             base_units = (quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
@@ -629,10 +714,14 @@ class GRNItemForm(forms.ModelForm):
             expected_units = int(base_units)
             tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
 
+            # DRAFT MODE: Allow saving in-progress vouchers even if IMEIs are not fully scanned yet
+            if self.is_draft:
+                return cleaned_data
+
             sys_config = SystemConfiguration.get_solo()
             enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
 
-            # BACKLOG MODE: If IMEI enforcement is OFF and user left the box blank, allow saving phone as quantity-only!
+            # BACKLOG MODE: If master switch is OFF and user left box blank, allow quantity-only
             if not enforce_imei and len(tokens) == 0:
                 return cleaned_data
 
@@ -651,7 +740,7 @@ class GRNItemForm(forms.ModelForm):
                           f"In Backlog Mode, please either leave the IMEI field completely empty or enter all {expected_units} IMEI pair(s).")
                     )
 
-            # Validate structure and format of any tokens provided
+            # Validate format of any tokens provided
             for token in tokens:
                 parts = token.split('|')
                 im1 = parts[0].strip() if len(parts) > 0 and parts[0].strip() else ''
@@ -666,10 +755,26 @@ class GRNItemForm(forms.ModelForm):
 
         return cleaned_data
 
+class BaseGRNItemFormSet(BaseInlineFormSet):
+    """
+    Custom FormSet to propagate draft mode flag to child forms and cleanly handle tabular deletions.
+    """
+    def __init__(self, *args, **kwargs):
+        self.is_draft = kwargs.pop('is_draft', False)
+        super().__init__(*args, **kwargs)
+        for form in self.forms:
+            form.is_draft = self.is_draft
+
+    def clean(self):
+        if self.is_draft:
+            return
+        super().clean()
+
 GRNItemFormSet = inlineformset_factory(
     GoodsReceivedNote,
     GRNItem,
     form=GRNItemForm,
+    formset=BaseGRNItemFormSet,
     extra=1,
     can_delete=True
 )
