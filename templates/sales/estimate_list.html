@@ -3,28 +3,117 @@
 
 {% block title %}Sales Estimation Slips &amp; Invoices | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
+{% block extra_head %}
+<style>
+/* ==========================================================================
+   ESTIMATE & INVOICE LIST - 100% ZERO-SCROLL FIT STYLES
+   Eliminates all horizontal overflow on standard laptop screens
+   ========================================================================== */
+.estimates-master-table {
+    font-size: 0.8rem !important;
+}
+
+.estimates-master-table th,
+.estimates-master-table td {
+    padding: 0.4rem 0.35rem !important;
+    vertical-align: middle;
+}
+
+.estimates-master-table th {
+    font-size: 0.67rem !important;
+    letter-spacing: 0.03em;
+    font-weight: 700;
+}
+
+.estimates-master-table th.col-actions,
+.estimates-master-table td.col-actions {
+    width: 80px;
+    white-space: nowrap;
+    text-align: right;
+    padding-right: 0.5rem !important;
+}
+
+.btn-actions-dropdown {
+    font-size: 0.72rem !important;
+    font-weight: 700 !important;
+    padding: 3px 8px !important;
+    border-radius: 999px !important;
+    line-height: 1.2 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+.currency-cell {
+    white-space: nowrap !important;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace) !important;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.78rem !important;
+}
+
+.recipient-cell {
+    max-width: 175px;
+    line-height: 1.2;
+}
+
+.badge-status-compact {
+    font-size: 0.65rem !important;
+    padding: 2.5px 6px !important;
+    white-space: nowrap;
+}
+
+.actions-dropdown-menu {
+    min-width: 190px;
+    border-radius: 12px;
+    padding: 5px;
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
+}
+
+.actions-dropdown-menu .dropdown-item {
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background-color 0.15s ease;
+}
+
+.actions-dropdown-menu .dropdown-item:hover {
+    background-color: var(--erp-slate-100, #f1f5f9);
+}
+
+.actions-dropdown-menu .dropdown-item.text-danger:hover {
+    background-color: #fee2e2;
+    color: #dc2626 !important;
+}
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1600px;">
+<div class="container-fluid px-2 px-md-3 py-3" style="max-width: 100%;">
     <!-- Page Header -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-3">
         <div>
             <div class="d-flex align-items-center gap-2">
-                <h4 class="fw-bold text-dark mb-0">Sales Invoices &amp; Estimation Slips</h4>
-                <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2.5 py-1 rounded-pill fs-2xs fw-bold">
+                <h4 class="fw-bold text-dark mb-0 fs-5">Sales Invoices &amp; Estimation Slips</h4>
+                <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2 py-0.5 rounded-pill fs-2xs fw-bold">
                     Total: {{ page_obj.paginator.count|default:estimates|length }} Vouchers
                 </span>
             </div>
-            <p class="text-muted fs-xs mb-0 mt-1">Official VAT sales invoices, counter retail slips, proforma estimates, and warranty records</p>
+            <p class="text-muted fs-xs mb-0 mt-0.5">Official VAT sales invoices, counter retail slips, proforma estimates, and warranty records</p>
         </div>
         <div class="d-flex gap-2">
-            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning rounded-pill px-4 fw-bold shadow-sm text-dark">
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning rounded-pill px-3 py-1 fw-bold shadow-sm text-dark fs-xs">
                 <i class="fas fa-plus-circle me-1"></i> New POS Bill [F2]
             </a>
         </div>
     </div>
 
     <!-- Search & Filter Bar -->
-    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
+    <div class="card border-0 shadow-sm rounded-4 p-2.5 bg-white mb-3">
         <form method="get" class="row g-2 align-items-center">
             <div class="col-12 col-md-4">
                 <div class="input-group input-group-sm">
@@ -66,31 +155,31 @@
     </div>
 
     <!-- Slips Master Table -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-3">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 fs-sm">
-                <thead class="bg-light text-muted text-uppercase fs-2xs">
+            <table class="table table-hover align-middle mb-0 estimates-master-table">
+                <thead class="bg-light text-muted text-uppercase">
                     <tr>
-                        <th class="ps-4">Slip / Invoice No</th>
-                        <th>Date (AD / BS)</th>
-                        <th>Customer / Recipient</th>
-                        <th>Cashier</th>
-                        <th>Grand Total</th>
-                        <th>Paid</th>
-                        <th>Due (Udhaari)</th>
-                        <th>Status</th>
-                        <th class="text-end pe-4">Actions</th>
+                        <th class="ps-3" style="width: 125px;">Slip No</th>
+                        <th style="width: 95px;">Date</th>
+                        <th>Customer</th>
+                        <th style="width: 65px;">Cashier</th>
+                        <th class="text-end" style="width: 105px;">Total</th>
+                        <th class="text-end" style="width: 95px;">Paid</th>
+                        <th class="text-end" style="width: 95px;">Due</th>
+                        <th style="width: 95px;">Status</th>
+                        <th class="col-actions">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for est in estimates %}
                     <tr class="{% if est.status == 'CANCELLED' %}bg-light opacity-75{% endif %}">
                         <!-- 1. Slip Number Linked to Detailed Bill View -->
-                        <td class="ps-4 font-monospace fw-bold">
+                        <td class="ps-3 font-monospace fw-bold text-nowrap">
                             <a href="{% url 'sales:estimate_detail' est.pk %}" class="text-decoration-none {% if est.status == 'CANCELLED' %}text-decoration-line-through text-danger{% else %}text-primary{% endif %}" title="View Complete Bill Details">
                                 {{ est.estimate_number }}
                             </a>
-                            <div class="fs-3xs text-muted font-sans">
+                            <div class="fs-3xs text-muted font-sans mt-0.5">
                                 {% if est.bill_type == 'SALES' or est.estimate_number|slice:":3" == "INV" %}
                                     <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 py-0 px-1">VAT Bill</span>
                                 {% else %}
@@ -100,23 +189,23 @@
                         </td>
 
                         <!-- 2. Date AD & BS -->
-                        <td>
-                            <strong class="text-dark">{{ est.bill_date_ad }}</strong>
+                        <td class="text-nowrap">
+                            <div class="fw-semibold text-dark fs-xs">{{ est.bill_date_ad|date:"M d, Y" }}</div>
                             {% if est.bill_date_bs %}
-                                <div class="text-muted fs-2xs font-monospace">{{ est.bill_date_bs }} BS</div>
+                                <div class="text-muted fs-3xs font-monospace">{{ est.bill_date_bs }} BS</div>
                             {% endif %}
                         </td>
 
-                        <!-- 3. Customer Info (Safely Handled for Walk-in & Registered Customers) -->
-                        <td>
-                            <strong class="text-dark">{{ est.recipient_display_name }}</strong>
+                        <!-- 3. Customer Info -->
+                        <td class="recipient-cell">
+                            <strong class="text-dark fs-xs text-truncate d-block" title="{{ est.recipient_display_name }}">{{ est.recipient_display_name }}</strong>
                             {% if est.customer_phone_manual %}
-                                <div class="text-muted fs-2xs font-monospace">
-                                    <i class="fas fa-phone fs-3xs text-success me-1"></i>{{ est.customer_phone_manual }}
+                                <div class="text-muted fs-3xs font-monospace">
+                                    <i class="fas fa-phone fs-3xs text-success me-0.5"></i>{{ est.customer_phone_manual }}
                                 </div>
                             {% elif est.customer and est.customer.phone_number %}
-                                <div class="text-muted fs-2xs font-monospace">
-                                    <i class="fas fa-phone fs-3xs text-success me-1"></i>{{ est.customer.phone_number }}
+                                <div class="text-muted fs-3xs font-monospace">
+                                    <i class="fas fa-phone fs-3xs text-success me-0.5"></i>{{ est.customer.phone_number }}
                                 </div>
                             {% endif %}
                             {% if est.customer_pan %}
@@ -128,100 +217,111 @@
 
                         <!-- 4. Cashier -->
                         <td>
-                            <span class="badge bg-light text-dark border">{{ est.cashier.username }}</span>
+                            <span class="badge bg-light text-dark border fs-3xs px-1.5 py-0.5 text-truncate d-inline-block" style="max-width: 65px;" title="{{ est.cashier.username }}">
+                                {{ est.cashier.username }}
+                            </span>
                         </td>
 
-                        <!-- 5. Grand Total -->
-                        <td class="fw-bold {% if est.status == 'CANCELLED' %}text-muted text-decoration-line-through{% else %}text-primary{% endif %} font-monospace">
+                        <!-- 5. Grand Total (No-Wrap) -->
+                        <td class="text-end currency-cell fw-bold {% if est.status == 'CANCELLED' %}text-muted text-decoration-line-through{% else %}text-primary{% endif %}">
                             Rs. {{ est.grand_total|floatformat:2|intcomma }}
                         </td>
 
-                        <!-- 6. Paid Amount -->
-                        <td class="text-success fw-semibold font-monospace">
+                        <!-- 6. Paid Amount (No-Wrap) -->
+                        <td class="text-end currency-cell text-success fw-semibold">
                             Rs. {{ est.paid_amount|floatformat:2|intcomma }}
                         </td>
 
-                        <!-- 7. Due Amount -->
-                        <td>
+                        <!-- 7. Due Amount (Compact Badge) -->
+                        <td class="text-end currency-cell">
                             {% if est.due_amount > 0 %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace">
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace fs-3xs px-1 py-0.5">
                                     Rs. {{ est.due_amount|floatformat:2|intcomma }}
                                 </span>
                             {% else %}
-                                <span class="text-muted fs-xs"><i class="fas fa-check text-success me-1"></i> Clear</span>
+                                <span class="text-muted fs-3xs"><i class="fas fa-check text-success me-0.5"></i>Clear</span>
                             {% endif %}
                         </td>
 
                         <!-- 8. Status Badge -->
                         <td>
                             {% if est.status == 'COMPLETED' %}
-                                <span class="badge bg-success bg-opacity-10 text-success fw-bold px-2 py-1 fs-2xs">
-                                    <i class="fas fa-check-circle me-1"></i> Completed
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold badge-status-compact">
+                                    <i class="fas fa-check-circle me-0.5"></i>Completed
                                 </span>
                             {% elif est.status == 'CANCELLED' %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold px-2 py-1 fs-2xs">
-                                    <i class="fas fa-ban me-1"></i> Cancelled (Void)
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold badge-status-compact">
+                                    <i class="fas fa-ban me-0.5"></i>Void
                                 </span>
                             {% elif est.status == 'PARTIALLY_RETURNED' %}
-                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold px-2 py-1 fs-2xs">
-                                    <i class="fas fa-rotate-left me-1"></i> Partial Return
+                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold badge-status-compact">
+                                    <i class="fas fa-rotate-left me-0.5"></i>Partial
                                 </span>
                             {% elif est.status == 'RETURNED' %}
-                                <span class="badge bg-purple bg-opacity-10 text-purple fw-bold px-2 py-1 fs-2xs">
-                                    <i class="fas fa-rotate-left me-1"></i> Fully Returned
+                                <span class="badge bg-purple bg-opacity-10 text-purple fw-bold badge-status-compact">
+                                    <i class="fas fa-rotate-left me-0.5"></i>Returned
                                 </span>
                             {% else %}
-                                <span class="badge bg-secondary px-2 py-1 fs-2xs">{{ est.get_status_display }}</span>
+                                <span class="badge bg-secondary badge-status-compact">{{ est.get_status_display }}</span>
                             {% endif %}
                         </td>
 
-                        <!-- 9. Actions Button Group -->
-                        <td class="text-end pe-4">
-                            <div class="d-inline-flex align-items-center gap-1">
-                                <!-- A. View Bill Details -->
-                                <a href="{% url 'sales:estimate_detail' est.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-2.5 py-1" title="View Full Bill Details">
-                                    <i class="fas fa-eye me-1"></i> View
-                                </a>
+                        <!-- 9. Actions Dropdown Button -->
+                        <td class="col-actions">
+                            <div class="dropdown d-inline-block">
+                                <button class="btn btn-outline-primary btn-actions-dropdown dropdown-toggle" 
+                                        type="button" 
+                                        data-bs-toggle="dropdown" 
+                                        aria-expanded="false" 
+                                        title="Actions Menu">
+                                    Actions
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end shadow-lg actions-dropdown-menu">
+                                    <!-- A. View Details -->
+                                    <li>
+                                        <a class="dropdown-item text-primary" href="{% url 'sales:estimate_detail' est.pk %}">
+                                            <i class="fas fa-eye text-primary"></i> View Details
+                                        </a>
+                                    </li>
 
-                                <!-- B. Print Dropdown Menu -->
-                                <div class="dropdown d-inline-block">
-                                    <button class="btn btn-outline-dark btn-sm rounded-pill px-2.5 py-1 dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Print Options">
-                                        <i class="fas fa-print me-1"></i> Print
-                                    </button>
-                                    <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0 fs-xs p-1">
-                                        <li>
-                                            <a class="dropdown-item py-1.5 rounded-2" href="{% url 'sales:estimate_thermal_slip' est.pk %}" target="_blank">
-                                                <i class="fas fa-receipt me-2 text-dark"></i> 80mm Thermal Receipt
-                                            </a>
-                                        </li>
-                                        <li>
-                                            <a class="dropdown-item py-1.5 rounded-2" href="{% url 'sales:estimate_detail' est.pk %}?format=a4" target="_blank">
-                                                <i class="fas fa-file-invoice me-2 text-primary"></i> Formal A4 Invoice Sheet
-                                            </a>
-                                        </li>
-                                    </ul>
-                                </div>
+                                    <!-- B. Print Options -->
+                                    <li>
+                                        <a class="dropdown-item text-dark" href="{% url 'sales:estimate_thermal_slip' est.pk %}" target="_blank">
+                                            <i class="fas fa-receipt text-secondary"></i> 80mm Thermal Slip
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item text-dark" href="{% url 'sales:estimate_detail' est.pk %}?format=a4" target="_blank">
+                                            <i class="fas fa-file-invoice text-info"></i> Formal A4 Invoice
+                                        </a>
+                                    </li>
 
-                                <!-- C. Safe Counter Edit Button (Hidden if Cancelled or Returned) -->
-                                {% if est.can_be_edited %}
-                                    <a href="{% url 'sales:estimate_edit' est.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-2.5 py-1" title="Edit Date, Customer, or Notes">
-                                        <i class="fas fa-pen-to-square me-1"></i> Edit
-                                    </a>
-                                {% endif %}
+                                    <!-- C. Safe Counter Edit -->
+                                    {% if est.can_be_edited %}
+                                    <li><hr class="dropdown-divider my-1"></li>
+                                    <li>
+                                        <a class="dropdown-item text-dark" href="{% url 'sales:estimate_edit' est.pk %}">
+                                            <i class="fas fa-pen-to-square text-secondary"></i> Edit Details
+                                        </a>
+                                    </li>
+                                    {% endif %}
 
-                                <!-- D. Supervisor Void / Cancel Button -->
-                                {% if est.can_be_voided and is_supervisor %}
-                                    <button type="button" 
-                                            class="btn btn-outline-danger btn-sm rounded-pill px-2.5 py-1 btn-open-void-modal"
-                                            data-bs-toggle="modal" 
-                                            data-bs-target="#listVoidConfirmModal"
-                                            data-estimate-id="{{ est.pk }}"
-                                            data-estimate-number="{{ est.estimate_number }}"
-                                            data-grand-total="{{ est.grand_total|floatformat:2|intcomma }}"
-                                            title="Void / Cancel this Bill and reverse stock">
-                                        <i class="fas fa-ban me-1"></i> Void
-                                    </button>
-                                {% endif %}
+                                    <!-- D. Void / Cancel -->
+                                    {% if est.can_be_voided and is_supervisor %}
+                                    <li><hr class="dropdown-divider my-1"></li>
+                                    <li>
+                                        <button type="button" 
+                                                class="dropdown-item text-danger btn-open-void-modal"
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#listVoidConfirmModal"
+                                                data-estimate-id="{{ est.pk }}"
+                                                data-estimate-number="{{ est.estimate_number }}"
+                                                data-grand-total="{{ est.grand_total|floatformat:2|intcomma }}">
+                                            <i class="fas fa-ban text-danger"></i> Void Bill
+                                        </button>
+                                    </li>
+                                    {% endif %}
+                                </ul>
                             </div>
                         </td>
                     </tr>
@@ -238,7 +338,7 @@
             </table>
         </div>
 
-        <div class="p-3 border-top bg-light">
+        <div class="p-2.5 border-top bg-light">
             {% include "includes/_pagination.html" %}
         </div>
     </div>
@@ -254,7 +354,7 @@
                 {% csrf_token %}
                 <input type="hidden" name="next" value="list">
                 
-                <div class="modal-header bg-danger text-white py-3 px-4 border-0">
+                <div class="modal-header bg-danger text-white py-2.5 px-3 border-0">
                     <div class="d-flex align-items-center gap-2">
                         <i class="fas fa-triangle-exclamation fs-5"></i>
                         <div>
@@ -265,9 +365,9 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
 
-                <div class="modal-body p-4">
+                <div class="modal-body p-3">
                     <!-- Impact Notice Alert -->
-                    <div class="alert alert-danger bg-danger bg-opacity-10 border-danger border-opacity-25 rounded-3 p-3 fs-xs mb-3 text-dark">
+                    <div class="alert alert-danger bg-danger bg-opacity-10 border-danger border-opacity-25 rounded-3 p-2.5 fs-xs mb-3 text-dark">
                         <strong class="d-block text-danger mb-1"><i class="fas fa-shield-halved me-1"></i> Irreversible Action Safeguard:</strong>
                         <ul class="mb-0 ps-3 text-muted">
                             <li>All merchandise items will be <strong>restocked to sellable inventory</strong>.</li>
@@ -279,7 +379,7 @@
                     </div>
 
                     <!-- Operational Category Dropdown -->
-                    <div class="mb-3">
+                    <div class="mb-2.5">
                         <label class="form-label fs-xs fw-bold text-dark mb-1">
                             Operational Justification / Category <span class="text-danger">*</span>
                         </label>
@@ -311,7 +411,7 @@
                     <div id="modalValidationAlert" class="alert alert-danger p-2 fs-2xs d-none mb-0 mt-2"></div>
                 </div>
 
-                <div class="modal-footer bg-light border-0 py-2 px-4 d-flex justify-content-between">
+                <div class="modal-footer bg-light border-0 py-2 px-3 d-flex justify-content-between">
                     <button type="button" class="btn btn-outline-secondary btn-sm px-3 rounded-pill" data-bs-dismiss="modal">
                         Keep Bill
                     </button>
@@ -334,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const validationAlert = document.getElementById('modalValidationAlert');
     const confirmSubmitBtn = document.getElementById('modalConfirmSubmitBtn');
 
-    // Dynamically wire the modal when any "Void" button on the table is clicked
+    // Dynamically wire the modal when any "Void" button inside the actions dropdown is clicked
     document.querySelectorAll('.btn-open-void-modal').forEach(btn => {
         btn.addEventListener('click', () => {
             const estId = btn.dataset.estimateId;

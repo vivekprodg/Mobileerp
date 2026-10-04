@@ -3,30 +3,42 @@ Inventory Management & Business Logic Service.
 
 Key Capabilities:
 1. Atomic Stock Adjustments & Movement Logs:
-   - Row-level database locking (`select_for_update`) on BranchStock.
+   - Row-level database locking (select_for_update) on BranchStock.
    - Comprehensive audit logging via StockMovementLog.
    - Automatic Double-Entry General Ledger postings for physical audit variances:
      * ADJUSTMENT_SUB: Dr. 6160 Inventory Shrinkage / Cr. 1310 Merchandise Inventory Asset.
      * ADJUSTMENT_ADD: Dr. 1310 Merchandise Inventory Asset / Cr. 4030 Inventory Audit Surplus Gain.
-2. User-Entered Batch Prioritization & FIFO Tracking (`record_inward_stock_batch`):
-   - Prioritizes custom vendor batch numbers entered in the GRN line item table (up to 100 chars).
-   - Generates clean sequential fallback batch strings (`BATCH-{YYMMDD}-{PRODUCT_ID}-{UUID}`)
-     only if the batch number field was left blank by the user.
-   - Tracks FIFO batches for non-serialized accessories and backlog phones received without IMEIs.
-3. Inward IMEI Registration & Dual-SIM Compliance (`register_inward_imei_unit`):
-   - Registers physical device instances, associates them with the user's custom batch number,
-     and tags NTA MDMS compliance status.
-4. Component-Level Customer Warranty Schedules (`initialize_device_component_warranties`):
-   - Generates exact calendar expiration dates for Main Body (12M/365D), Battery (6M/180D),
-     and Screen (3M/90D) while stamping statutory damage exclusion terms.
+2. Inward FIFO Batch & Depletion Engine:
+   - Prioritizes user-entered vendor batch numbers from GRN line items.
+   - Depletes oldest purchase batches with row-level locks on sales or transfers.
+3. Inward IMEI Registration & Dual-SIM Compliance:
+   - Registers physical device instances, tags MDMS status, and tracks dual-SIM pending scans.
+4. Component-Level Customer Warranty Schedules:
+   - Sets exact calendar expiration dates for Main Body (12M), Battery (6M), and Screen (3M).
+5. Enterprise Dashboard Multi-Warehouse Aggregations:
+   - High-level multi-warehouse stock rollups (SKU counts, total units, asset valuation per warehouse).
+6. Stock Movement Velocity & Timeline Series:
+   - Aggregates Stock In, Stock Out, Transfers, and Adjustments across dynamic time horizons (7D, 30D, 3M)
+     with timeline coordinate series for direct SVG chart rendering.
+7. Real-Time Inventory Alerts Engine:
+   - Dynamic threshold computation for Low Stock, Out of Stock, Reorder Required,
+     Audit Discrepancies, and Expiring FIFO Batches.
+8. Direct Inter-Warehouse Stock Transfer Engine:
+   - Executes atomic multi-location transfers with instant stock balance updates,
+     dual StockMovementLog auditing, and physical serialized handset re-allocation.
 """
 
 import uuid
 import logging
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date, timedelta
-from typing import Optional, List, Tuple
+from datetime import date, datetime, timedelta
+from typing import Optional, List, Tuple, Dict, Any
+
 from django.db import transaction
+from django.db.models import (
+    F, Q, Sum, Count, DecimalField, ExpressionWrapper, Value
+)
+from django.db.models.functions import Coalesce, TruncDate
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
@@ -40,8 +52,9 @@ logger = logging.getLogger(__name__)
 
 class InventoryService:
     """
-    Authoritative service handling atomic stock adjustments, user-defined FIFO batch
-    registrations, IMEI handset lifecycles, and synchronized Double-Entry General Ledger postings.
+    Authoritative service handling atomic stock adjustments, multi-warehouse rollups,
+    period-based movement velocity calculations, inventory alerts, FIFO batches,
+    IMEI handset lifecycles, and synchronized Double-Entry General Ledger postings.
     """
 
     # =========================================================================
@@ -81,9 +94,10 @@ class InventoryService:
         new_qty = previous_qty + quantity_delta
 
         if new_qty < Decimal('0.000') and not allow_negative:
+            base_unit_label = getattr(product.base_unit, 'code', 'Units') if product.base_unit else 'Units'
             raise ValidationError(
                 f"Insufficient stock for '{product.name}' at {branch.name}. "
-                f"Available: {previous_qty} {product.base_unit.code}, Requested reduction: {abs(quantity_delta)}"
+                f"Available: {previous_qty} {base_unit_label}, Requested reduction: {abs(quantity_delta)}"
             )
 
         branch_stock.quantity = new_qty
@@ -245,13 +259,11 @@ class InventoryService:
         if quantity <= Decimal('0.000'):
             raise ValidationError(f"Batch quantity for '{product.name}' must be greater than zero.")
 
-        # 1. Prioritize user-entered physical batch code
         clean_batch_no = str(batch_number or '').strip()
         if not clean_batch_no:
             date_str = (purchase_date or timezone.now().date()).strftime('%y%m%d')
             clean_batch_no = f"BATCH-{date_str}-{product.id}-{uuid.uuid4().hex[:4].upper()}"
         else:
-            # Clean and truncate to schema limit (max 100 characters)
             clean_batch_no = clean_batch_no[:100]
 
         target_purchase_date = purchase_date or timezone.now().date()
@@ -274,7 +286,6 @@ class InventoryService:
 
         return batch
 
-    # Convenient method alias
     record_inward_batch = record_inward_stock_batch
 
     # =========================================================================
@@ -418,9 +429,7 @@ class InventoryService:
         - Battery (6M): Exactly 180 days from sale date.
         - Screen (3M): Exactly 90 days from sale date.
 
-        Stamps the statutory exclusion note:
-        "Covers manufacturing defects only. Void if physical drop cracks or liquid damage found."
-        into the customer's permanent warranty certificate.
+        Stamps statutory exclusion note into customer permanent warranty record.
         """
         product = item_instance.product
         created_records = []
@@ -436,7 +445,6 @@ class InventoryService:
                 comp_type = (rule.component_type or '').upper()
                 months = rule.warranty_months if rule.warranty_months is not None else 0
 
-                # Compute exact calendar durations
                 if months == 0:
                     duration_days = 0
                 elif comp_type == 'SCREEN' and months == 3:
@@ -472,7 +480,6 @@ class InventoryService:
                 )
                 created_records.append(cw)
         else:
-            # Fallback when no component rules exist on the product
             if product.requires_imei_tracking:
                 default_rules = [
                     ('DEVICE', 'Main Handset Body & Motherboard', custom_warranty_months or product.warranty_months or 12, 365),
@@ -510,3 +517,431 @@ class InventoryService:
                 created_records.append(cw)
 
         return created_records
+
+    # =========================================================================
+    # 6. WAREHOUSE SUMMARY AGGREGATION METHOD
+    # =========================================================================
+    @classmethod
+    def get_warehouse_summary(cls) -> List[Dict[str, Any]]:
+        """
+        Aggregates product catalog counts, physical unit quantities, and total
+        monetary asset valuations across all registered warehouse branches.
+        Returns a structured summary list matching the Warehouse Overview dashboard table.
+        """
+        branches = Branch.objects.all().order_by('-is_main_branch', 'name')
+        summary = []
+
+        cost_val_expr = ExpressionWrapper(
+            F('quantity') * F('product__purchase_price'),
+            output_field=DecimalField(max_digits=18, decimal_places=2)
+        )
+
+        for branch in branches:
+            branch_stocks = BranchStock.objects.filter(branch=branch)
+
+            agg = branch_stocks.aggregate(
+                distinct_products=Count('product_id', distinct=True),
+                total_units=Coalesce(
+                    Sum('quantity'),
+                    Value(Decimal('0.000'), output_field=DecimalField(max_digits=18, decimal_places=3))
+                ),
+                total_val=Coalesce(
+                    Sum(cost_val_expr),
+                    Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))
+                )
+            )
+
+            summary.append({
+                'id': branch.id,
+                'name': branch.name,
+                'code': branch.code,
+                'is_main_branch': branch.is_main_branch,
+                'products_count': agg['distinct_products'] or 0,
+                'stock_quantity': int(agg['total_units'] or 0),
+                'inventory_value': agg['total_val'] or Decimal('0.00'),
+                'status': 'Active' if branch.is_active else 'Inactive',
+                'is_active': branch.is_active
+            })
+
+        return summary
+
+    # =========================================================================
+    # 7. STOCK MOVEMENT VELOCITY & TIMELINE SERIES
+    # =========================================================================
+    @classmethod
+    def get_stock_movement_metrics(
+        cls,
+        period: str = '7d',
+        branch: Optional[Branch] = None
+    ) -> Dict[str, Any]:
+        """
+        Computes stock movement velocities over specified time horizons ('today', '7d', '30d', '3m').
+        Aggregates four movement buckets:
+          - Stock In: Purchases, Transfers In, Positive Adjustments, Trade-In Acquisitions, RMA Replacements
+          - Stock Out: Counter Sales, Transfers Out, Damage/Loss Adjustments, Trade-In Sales
+          - Transfers: All Inter-Branch Movements
+          - Adjustments: Physical Count Discrepancies (+ and -)
+        Also compiles parallel timeline coordinate arrays (labels, stock_in, stock_out)
+        for direct rendering by the frontend SVG chart engine.
+        """
+        today = timezone.now().date()
+
+        if period == 'today':
+            start_date = today
+            days_count = 1
+        elif period == '30d':
+            start_date = today - timedelta(days=29)
+            days_count = 30
+        elif period == '3m':
+            start_date = today - timedelta(days=89)
+            days_count = 90
+        else:  # Default '7d'
+            period = '7d'
+            start_date = today - timedelta(days=6)
+            days_count = 7
+
+        base_qs = StockMovementLog.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=today
+        )
+        if branch:
+            base_qs = base_qs.filter(branch=branch)
+
+        IN_TYPES = [
+            'PURCHASE', 'TRANSFER_IN', 'ADJUSTMENT_ADD',
+            'TRADE_IN_ACQUISITION', 'RMA_VENDOR_REPLACEMENT_IN', 'SALE_RETURN'
+        ]
+        OUT_TYPES = [
+            'SALE', 'TRANSFER_OUT', 'ADJUSTMENT_SUB',
+            'TRADE_IN_SALE', 'SERVICE_REPLACED_PART_DEDUCT', 'RMA_VENDOR_DISPATCH'
+        ]
+        TRANSFER_TYPES = ['TRANSFER_IN', 'TRANSFER_OUT']
+        ADJUSTMENT_TYPES = ['ADJUSTMENT_ADD', 'ADJUSTMENT_SUB']
+
+        # Aggregate total metric sums
+        in_sum = base_qs.filter(movement_type__in=IN_TYPES).aggregate(
+            total=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+        )['total']
+
+        out_sum = base_qs.filter(movement_type__in=OUT_TYPES).aggregate(
+            total=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+        )['total']
+
+        tr_sum = base_qs.filter(movement_type__in=TRANSFER_TYPES).aggregate(
+            total=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+        )['total']
+
+        adj_sum = base_qs.filter(movement_type__in=ADJUSTMENT_TYPES).aggregate(
+            total=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+        )['total']
+
+        # Format KPI strings
+        in_val = int(abs(in_sum))
+        out_val = int(abs(out_sum))
+        tr_val = int(abs(tr_sum))
+        adj_net = int(adj_sum)
+
+        in_str = f"+{in_val:,}"
+        out_str = f"-{out_val:,}"
+        tr_str = f"{tr_val:,}"
+        adj_str = f"{adj_net:+,}" if adj_net != 0 else "0"
+
+        # Generate timeline buckets for SVG chart
+        timeline_labels = []
+        timeline_in = []
+        timeline_out = []
+
+        if period in ['today', '7d']:
+            # Day-by-day intervals
+            curr = start_date
+            while curr <= today:
+                day_label = curr.strftime('%a') if period == '7d' else curr.strftime('%H:00')
+                timeline_labels.append(day_label)
+
+                day_logs = base_qs.filter(created_at__date=curr)
+                day_in = day_logs.filter(movement_type__in=IN_TYPES).aggregate(
+                    t=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+                )['t']
+                day_out = day_logs.filter(movement_type__in=OUT_TYPES).aggregate(
+                    t=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+                )['t']
+
+                timeline_in.append(int(abs(day_in)))
+                timeline_out.append(int(abs(day_out)))
+                curr += timedelta(days=1)
+
+        elif period == '30d':
+            # 4-Week intervals
+            curr = start_date
+            week_idx = 1
+            while curr <= today:
+                week_end = min(curr + timedelta(days=6), today)
+                timeline_labels.append(f"W{week_idx}")
+
+                week_logs = base_qs.filter(created_at__date__gte=curr, created_at__date__lte=week_end)
+                w_in = week_logs.filter(movement_type__in=IN_TYPES).aggregate(
+                    t=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+                )['t']
+                w_out = week_logs.filter(movement_type__in=OUT_TYPES).aggregate(
+                    t=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+                )['t']
+
+                timeline_in.append(int(abs(w_in)))
+                timeline_out.append(int(abs(w_out)))
+                curr = week_end + timedelta(days=1)
+                week_idx += 1
+
+        else:  # '3m'
+            # 3 Monthly intervals
+            for m_offset in range(2, -1, -1):
+                m_target_date = today - timedelta(days=m_offset * 30)
+                m_start = m_target_date - timedelta(days=14)
+                m_end = min(m_target_date + timedelta(days=15), today)
+
+                month_name = m_target_date.strftime('%b')
+                timeline_labels.append(month_name)
+
+                m_logs = base_qs.filter(created_at__date__gte=m_start, created_at__date__lte=m_end)
+                m_in = m_logs.filter(movement_type__in=IN_TYPES).aggregate(
+                    t=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+                )['t']
+                m_out = m_logs.filter(movement_type__in=OUT_TYPES).aggregate(
+                    t=Coalesce(Sum('quantity_delta'), Value(Decimal('0.000'), output_field=DecimalField(max_digits=14, decimal_places=3)))
+                )['t']
+
+                timeline_in.append(int(abs(m_in)))
+                timeline_out.append(int(abs(m_out)))
+
+        return {
+            'period': period,
+            'inVal': in_str,
+            'outVal': out_str,
+            'trVal': tr_str,
+            'adjVal': adj_str,
+            'raw_in': in_val,
+            'raw_out': out_val,
+            'raw_transfers': tr_val,
+            'raw_adjustments': adj_net,
+            'days': timeline_labels,
+            'stockIn': timeline_in,
+            'stockOut': timeline_out
+        }
+
+    # =========================================================================
+    # 8. INVENTORY ALERTS CALCULATION METHOD
+    # =========================================================================
+    @classmethod
+    def get_inventory_alerts(cls, branch: Optional[Branch] = None) -> Dict[str, int]:
+        """
+        Dynamically computes the five core operational inventory alert counts:
+        1. Low Stock: Stock quantity > 0 but <= low_stock_threshold.
+        2. Out of Stock: Stock quantity <= 0.
+        3. Reorder Required: Available stock (quantity - reserved) <= low_stock_threshold.
+        4. Stock Discrepancy: Adjustment records logged within the last 30 days.
+        5. Expiring Soon: FIFO batches expiring within the next 60 days.
+        """
+        today = timezone.now().date()
+        thirty_days_ago = today - timedelta(days=30)
+        sixty_days_future = today + timedelta(days=60)
+
+        stock_qs = BranchStock.objects.all()
+        if branch:
+            stock_qs = stock_qs.filter(branch=branch)
+
+        # 1. Low Stock
+        low_stock_count = stock_qs.filter(
+            quantity__gt=Decimal('0.000'),
+            quantity__lte=F('low_stock_threshold')
+        ).count()
+
+        # 2. Out of Stock
+        out_of_stock_count = stock_qs.filter(
+            quantity__lte=Decimal('0.000')
+        ).count()
+
+        # 3. Reorder Required (considers reserved customer orders)
+        available_expr = ExpressionWrapper(
+            F('quantity') - F('reserved_quantity'),
+            output_field=DecimalField(max_digits=12, decimal_places=3)
+        )
+        reorder_count = stock_qs.annotate(calc_available=available_expr).filter(
+            calc_available__lte=F('low_stock_threshold')
+        ).count()
+
+        # 4. Stock Discrepancy (audit corrections)
+        discrepancy_qs = StockMovementLog.objects.filter(
+            created_at__date__gte=thirty_days_ago,
+            movement_type__in=['ADJUSTMENT_ADD', 'ADJUSTMENT_SUB']
+        )
+        if branch:
+            discrepancy_qs = discrepancy_qs.filter(branch=branch)
+        discrepancy_count = discrepancy_qs.count()
+
+        # 5. Expiring Soon (FIFO Batches)
+        batch_qs = ProductBatch.objects.filter(
+            is_depleted=False,
+            expiry_date__isnull=False,
+            expiry_date__gte=today,
+            expiry_date__lte=sixty_days_future
+        )
+        if branch:
+            batch_qs = batch_qs.filter(branch=branch)
+        expiring_count = batch_qs.count()
+
+        return {
+            'low_stock': low_stock_count,
+            'out_of_stock': out_of_stock_count,
+            'reorder_required': reorder_count,
+            'stock_discrepancy': discrepancy_count,
+            'expiring_soon': expiring_count
+        }
+
+    # =========================================================================
+    # 9. DIRECT INTER-WAREHOUSE STOCK TRANSFER ENGINE
+    # =========================================================================
+    @classmethod
+    @transaction.atomic
+    def execute_direct_warehouse_transfer(
+        cls,
+        product: Product,
+        source_branch: Branch,
+        destination_branch: Branch,
+        quantity: Decimal,
+        scanned_imei_or_serial: str = "",
+        transfer_date: Optional[date] = None,
+        remarks: str = "",
+        user=None
+    ) -> Dict[str, Any]:
+        """
+        Executes an instant atomic inter-warehouse stock transfer:
+        1. Validates source and destination branches are distinct.
+        2. Validates positive quantity and sufficient available balance at source with select_for_update.
+        3. Deducts quantity from source BranchStock (TRANSFER_OUT).
+        4. Increments quantity at destination BranchStock (TRANSFER_IN).
+        5. Logs dual audit trails in StockMovementLog.
+        6. Reassigns physical ItemInstance handset records if moving serialized items.
+        """
+        if source_branch.pk == destination_branch.pk:
+            raise ValidationError("Source and destination warehouses must be different.")
+
+        qty_to_transfer = Decimal(str(quantity))
+        if qty_to_transfer <= Decimal('0.000'):
+            raise ValidationError("Transfer quantity must be strictly greater than zero.")
+
+        # Lock source stock record
+        source_stock, _ = BranchStock.objects.select_for_update().get_or_create(
+            branch=source_branch,
+            product=product,
+            defaults={
+                'quantity': Decimal('0.000'),
+                'reserved_quantity': Decimal('0.000'),
+                'quarantined_defective_quantity': Decimal('0.000'),
+                'low_stock_threshold': product.reorder_level or Decimal('5.00')
+            }
+        )
+
+        if source_stock.available_quantity < qty_to_transfer:
+            base_code = getattr(product.base_unit, 'code', 'Units') if product.base_unit else 'Units'
+            raise ValidationError(
+                f"Insufficient stock for '{product.name}' at {source_branch.name}. "
+                f"Available: {source_stock.available_quantity} {base_code}, Requested: {qty_to_transfer}"
+            )
+
+        clean_date = transfer_date or timezone.now().date()
+        date_str = clean_date.strftime('%y%m%d')
+        transfer_doc = f"TRF-{date_str}-{product.id}-{uuid.uuid4().hex[:4].upper()}"
+
+        clean_imei = str(scanned_imei_or_serial or '').strip()
+        matched_instance = None
+
+        # Handle serialized handset movement
+        if product.requires_imei_tracking:
+            if clean_imei:
+                matched_instance = ItemInstance.objects.select_for_update().filter(
+                    Q(imei_1=clean_imei) | Q(imei_2=clean_imei) | Q(serial_number=clean_imei),
+                    product=product,
+                    branch=source_branch,
+                    status='IN_STOCK'
+                ).first()
+
+                if not matched_instance:
+                    raise ValidationError(
+                        f"Device with IMEI/Serial '{clean_imei}' was not found in available stock at {source_branch.name}."
+                    )
+            else:
+                # If non-explicit IMEI was provided for serialized item, find available unit
+                matched_instance = ItemInstance.objects.select_for_update().filter(
+                    product=product,
+                    branch=source_branch,
+                    status='IN_STOCK'
+                ).first()
+
+        # Deduct from source branch
+        source_prev = source_stock.quantity
+        source_stock.quantity -= qty_to_transfer
+        source_stock.save(update_fields=['quantity', 'updated_at'])
+
+        StockMovementLog.objects.create(
+            product=product,
+            branch=source_branch,
+            movement_type='TRANSFER_OUT',
+            quantity_delta=-qty_to_transfer,
+            previous_quantity=source_prev,
+            new_quantity=source_stock.quantity,
+            reference_document=transfer_doc,
+            imei_or_serial_number=clean_imei,
+            remarks=f"Direct Transfer to {destination_branch.name}. {remarks}".strip(),
+            user=user
+        )
+
+        # Increment at destination branch
+        dest_stock, _ = BranchStock.objects.select_for_update().get_or_create(
+            branch=destination_branch,
+            product=product,
+            defaults={
+                'quantity': Decimal('0.000'),
+                'reserved_quantity': Decimal('0.000'),
+                'quarantined_defective_quantity': Decimal('0.000'),
+                'low_stock_threshold': product.reorder_level or Decimal('5.00')
+            }
+        )
+
+        dest_prev = dest_stock.quantity
+        dest_stock.quantity += qty_to_transfer
+        dest_stock.save(update_fields=['quantity', 'updated_at'])
+
+        StockMovementLog.objects.create(
+            product=product,
+            branch=destination_branch,
+            movement_type='TRANSFER_IN',
+            quantity_delta=qty_to_transfer,
+            previous_quantity=dest_prev,
+            new_quantity=dest_stock.quantity,
+            reference_document=transfer_doc,
+            imei_or_serial_number=clean_imei,
+            remarks=f"Direct Transfer from {source_branch.name}. {remarks}".strip(),
+            user=user
+        )
+
+        # Update handset branch location
+        if matched_instance:
+            matched_instance.branch = destination_branch
+            matched_instance.save(update_fields=['branch', 'updated_at'])
+
+        logger.info(
+            f"[Direct Stock Transfer] {qty_to_transfer} units of '{product.name}' transferred "
+            f"from {source_branch.name} to {destination_branch.name} (Ref: {transfer_doc})."
+        )
+
+        return {
+            'success': True,
+            'transfer_reference': transfer_doc,
+            'product_name': product.name,
+            'sku': product.sku,
+            'transferred_quantity': qty_to_transfer,
+            'source_branch': source_branch.name,
+            'source_new_stock': source_stock.quantity,
+            'destination_branch': destination_branch.name,
+            'destination_new_stock': dest_stock.quantity,
+            'imei': clean_imei
+        }

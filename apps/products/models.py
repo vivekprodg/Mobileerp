@@ -8,7 +8,6 @@ from django.utils.translation import gettext_lazy as _
 from apps.core.models import TimeStampedModel
 from apps.inventory.models import Product, ProductCategory, Brand, UnitOfMeasurement
 
-
 class ProductPriceTier(TimeStampedModel):
     """
     Tiered pricing configuration for Standard Retail, Wholesale, Dealer, and VIP Customers.
@@ -22,21 +21,34 @@ class ProductPriceTier(TimeStampedModel):
     ]
 
     product = models.ForeignKey(
-        Product, on_delete=models.CASCADE, related_name='price_tiers',
+        Product,
+        on_delete=models.CASCADE,
+        related_name='price_tiers',
         verbose_name=_("Catalog Product")
     )
     tier_type = models.CharField(
-        max_length=20, choices=TIER_CHOICES, db_index=True,
+        max_length=20,
+        choices=TIER_CHOICES,
+        db_index=True,
         verbose_name=_("Customer Tier Type")
     )
     min_quantity = models.DecimalField(
-        max_digits=10, decimal_places=3, default=Decimal('1.000'),
+        max_digits=10,
+        decimal_places=3,
+        default=Decimal('1.000'),
         verbose_name=_("Minimum Quantity Qualifying Threshold"),
         help_text=_("Minimum base units required to qualify for this rate")
     )
     price_per_unit = models.DecimalField(
-        max_digits=12, decimal_places=2,
+        max_digits=12,
+        decimal_places=2,
         verbose_name=_("Price per Base Unit (NPR)")
+    )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        verbose_name=_("Is Active"),
+        help_text=_("Designates whether this price tier rule is active and available for billing.")
     )
 
     class Meta:
@@ -45,10 +57,13 @@ class ProductPriceTier(TimeStampedModel):
         ordering = ['product', 'min_quantity']
         verbose_name = _('Product Price Tier')
         verbose_name_plural = _('Product Price Tiers')
+        indexes = [
+            models.Index(fields=['product', 'tier_type', 'is_active'], name='idx_tier_prod_type_active'),
+        ]
 
     def __str__(self):
-        return f"{self.product.name} - {self.get_tier_type_display()}: Rs. {self.price_per_unit} (>= {self.min_quantity})"
-
+        status_tag = "" if self.is_active else " [INACTIVE]"
+        return f"{self.product.name} - {self.get_tier_type_display()}: Rs. {self.price_per_unit} (>= {self.min_quantity}){status_tag}"
 
 class BarcodeLabelTemplate(TimeStampedModel):
     """
@@ -63,12 +78,14 @@ class BarcodeLabelTemplate(TimeStampedModel):
     show_mrp = models.BooleanField(default=True, verbose_name=_("Print Selling Price / MRP"))
     show_product_code = models.BooleanField(default=True, verbose_name=_("Print Product SKU Code"))
     show_variant_info = models.BooleanField(
-        default=True, verbose_name=_("Print Variant Info"),
+        default=True,
+        verbose_name=_("Print Variant Info"),
         help_text=_("Print RAM/Storage & Color variant on sticker")
     )
     show_model_number = models.BooleanField(default=True, verbose_name=_("Print Model Number"))
     show_warranty_badge = models.BooleanField(
-        default=True, verbose_name=_("Print Warranty Badge"),
+        default=True,
+        verbose_name=_("Print Warranty Badge"),
         help_text=_("Print e.g. 1 Year Warranty on label")
     )
     show_estimate_tag = models.BooleanField(
@@ -77,7 +94,10 @@ class BarcodeLabelTemplate(TimeStampedModel):
         help_text=_("Prints 'EST' or 'Proforma' badge on barcode sticker")
     )
     custom_note = models.CharField(
-        max_length=50, blank=True, null=True, default="Incl. All Taxes",
+        max_length=50,
+        blank=True,
+        null=True,
+        default="Incl. All Taxes",
         verbose_name=_("Custom Sticker Footer Note")
     )
 
@@ -89,11 +109,9 @@ class BarcodeLabelTemplate(TimeStampedModel):
     def __str__(self):
         return f"{self.name} ({self.width_mm}x{self.height_mm}mm)"
 
-
 # =============================================================================
 # HISTORICAL MIGRATION PLACEHOLDER PROXY (ZERO-MIGRATION DB EXTENSION)
 # =============================================================================
-
 class HistoricalProductManager(models.Manager):
     """
     Filters catalog to exclusively show generic historical migration placeholder items.
@@ -104,7 +122,6 @@ class HistoricalProductManager(models.Manager):
             models.Q(name__icontains='(Historical)') |
             models.Q(name__in=['Mobile', 'Various Items'])
         )
-
 
 class HistoricalProduct(Product):
     """

@@ -8,42 +8,110 @@
     
     <title>{% block title %}{{ COMPANY_NAME|default:"Smart Mobile & Optics Hub" }} | Enterprise ERP{% endblock %}</title>
 
-    <!-- PWA Manifest & Icons -->
+    <!-- PWA Manifest & Web App Icons -->
     <link rel="manifest" href="{% static 'manifest.json' %}">
     <meta name="theme-color" content="#060b18">
     <link rel="icon" type="image/png" href="{% if HAS_COMPANY_LOGO and COMPANY_LOGO_URL %}{{ COMPANY_LOGO_URL }}{% else %}{% static 'images/icons/icon-192x192.png' %}{% endif %}">
 
-    <!-- Fonts: Preconnected with swap display to prevent render-blocking -->
+    <!-- Fonts: Preconnected with swap display to eliminate render-blocking -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Core Vendor CSS (Localized to eliminate third-party DNS lookup latency) -->
+    <!-- Core Vendor CSS (Bootstrap 5.3.3 with reliable CDN fallback) -->
     <link rel="stylesheet" href="{% static 'css/bootstrap.min.css' %}" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css';">
+    
+    <!-- Font Awesome 6.5.1 (Universal icon font covering all dashboard, inventory & POS icons) -->
     <link rel="stylesheet" href="{% static 'vendor/fontawesome/css/all.min.css' %}" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css';">
     
-    <!-- Nepali Datepicker (Bikram Sambat Visual Calendar) CSS: Localized -->
+    <!-- Nepali Datepicker (Bikram Sambat Visual Calendar) CSS -->
     <link rel="stylesheet" href="{% static 'vendor/nepali-datepicker/nepali.datepicker.v4.0.7.min.css' %}" onerror="this.onerror=null;this.href='https://nepalidatepicker.sajanmaharjan.com.np/nepali.datepicker/css/nepali.datepicker.v4.0.7.min.css';">
 
-    <!-- Core ERP Custom CSS -->
+    <!-- Core ERP Custom Design System -->
     <link rel="stylesheet" href="{% static 'css/custom.css' %}">
 
-    <!-- Explicit Layout Offset Rules: 36px (Top-Bar) + 58px (Main-Bar) = 94px -->
+    <!-- =====================================================================
+         MASTER LAYOUT ARCHITECTURE, VIEWPORT RULES & Z-INDEX HIERARCHY
+         ===================================================================== -->
     <style>
         :root {
+            /* Layout Geometry: 36px (Top Header) + 58px (Main Header) = 94px */
+            --erp-top-header-height: 36px;
+            --erp-main-header-height: 58px;
             --erp-header-total-height: 94px;
+            --erp-sidebar-width: 275px;
+            --erp-sidebar-collapsed-width: 72px;
+
+            /* Strict Stacking Context Hierarchy */
+            --erp-z-header-top: 1032;
+            --erp-z-header-main: 1030;
+            --erp-z-sidebar: 1020;
+            --bs-backdrop-zindex: 1060;
+            --bs-modal-zindex: 1065;
+            --erp-z-submodal: 1075;
+            --erp-z-toast: 1095;
+            --erp-z-datepicker: 99999;
         }
 
+        /* Full Viewport App Layout */
         .app-layout {
+            display: flex;
+            flex: 1 1 auto;
+            width: 100%;
             min-height: calc(100vh - var(--erp-header-total-height));
+            position: relative;
+            background-color: var(--erp-canvas-bg, #f8fafc);
         }
 
+        /* Sidebar Viewport Docking with Smooth Transitions */
         .app-sidebar-wrapper {
             top: var(--erp-header-total-height);
             height: calc(100vh - var(--erp-header-total-height));
+            z-index: var(--erp-z-sidebar);
+            flex-shrink: 0;
+            width: var(--erp-sidebar-width);
+            min-width: var(--erp-sidebar-width);
+            max-width: var(--erp-sidebar-width);
+            transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                        min-width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                        max-width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+            background: #ffffff;
+            border-right: 1px solid #e2e8f0;
+            overflow: hidden;
         }
 
-        /* Active highlight for Collapsed / Icon-Only Sidebar Mode */
+        /* =====================================================================
+           COLLAPSED SIDEBAR RULES (MINI-BAR 72px WITH FULL-SCREEN CONTENT)
+           ===================================================================== */
+        .app-layout.sidebar-collapsed .app-sidebar-wrapper {
+            width: var(--erp-sidebar-collapsed-width) !important;
+            min-width: var(--erp-sidebar-collapsed-width) !important;
+            max-width: var(--erp-sidebar-collapsed-width) !important;
+        }
+
+        /* Hide all written labels, sub-menus and badges when collapsed */
+        .app-layout.sidebar-collapsed .sidebar-label-wrap,
+        .app-layout.sidebar-collapsed .sidebar-section-heading,
+        .app-layout.sidebar-collapsed .sidebar-disclaimer-wrap,
+        .app-layout.sidebar-collapsed .badge-pill-tag,
+        .app-layout.sidebar-collapsed .accordion-arrow,
+        .app-layout.sidebar-collapsed .sidebar-subgroup-content {
+            display: none !important;
+        }
+
+        /* Center icons perfectly in the slim 72px bar */
+        .app-layout.sidebar-collapsed .sidebar-nav-item {
+            justify-content: center !important;
+            padding: 10px 0 !important;
+            border-radius: 9px !important;
+        }
+
+        .app-layout.sidebar-collapsed .sidebar-nav-item i {
+            margin: 0 !important;
+            font-size: 1.15rem !important;
+        }
+
+        /* Active Item Indicator in Collapsed Mode */
         .app-layout.sidebar-collapsed .sidebar-nav-item.active {
             background-color: var(--erp-primary-light, #eff6ff) !important;
             border-left: 3px solid var(--erp-primary, #2563eb) !important;
@@ -55,15 +123,52 @@
             transform: scale(1.15) !important;
         }
 
-        /* ==========================================================================
-           NEPALI DATEPICKER DESIGN SYSTEM & ELEVATION ALIGNMENT
-           ========================================================================== */
+        /* =====================================================================
+           FULL-WIDTH EXPANDED VIEWPORT FOR ENTERPRISE TABLES & SCREENS
+           ===================================================================== */
+        .app-content-wrapper {
+            flex: 1 1 0%;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--erp-canvas-bg, #f8fafc);
+            position: relative;
+            width: 100%;
+            transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .app-main-body {
+            flex: 1 0 auto;
+            width: 100%;
+            min-width: 0;
+            padding-bottom: 24px;
+        }
+
+        /* Layered Modal, Toast & Datepicker Elevations */
+        .modal-backdrop { z-index: var(--bs-backdrop-zindex) !important; }
+        .modal { z-index: var(--bs-modal-zindex) !important; }
+        .sub-helper-modal, .modal[data-modal-level="sub"] { z-index: var(--erp-z-submodal) !important; }
+
+        #appMessageContainer,
+        .erp-toast-container {
+            position: fixed;
+            top: calc(var(--erp-header-total-height) + 12px);
+            right: 20px;
+            z-index: var(--erp-z-toast) !important;
+            max-width: 440px;
+            width: calc(100% - 40px);
+            pointer-events: none;
+        }
+
+        #appMessageContainer .alert { pointer-events: auto; }
+
+        /* Bikram Sambat Visual Calendar Popover */
         #ndp-nepali-box, .ndp-nepali-box {
             font-family: var(--erp-font-sans, 'Plus Jakarta Sans', system-ui, sans-serif) !important;
             border-radius: 14px !important;
             border: 1px solid #cbd5e1 !important;
-            box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16) !important;
-            z-index: 99999 !important;
+            box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18) !important;
+            z-index: var(--erp-z-datepicker) !important;
             overflow: hidden;
             padding: 8px !important;
             background: #ffffff !important;
@@ -89,10 +194,6 @@
             cursor: pointer;
         }
 
-        .ndp-header select:focus {
-            border-color: #38bdf8 !important;
-        }
-
         .ndp-days th {
             color: #64748b !important;
             font-size: 10.5px !important;
@@ -111,7 +212,7 @@
         }
 
         .ndp-days td a:hover {
-            background-color: #eff6ff !important;
+            background-color: #eff8ff !important;
             color: var(--erp-primary, #2563eb) !important;
         }
 
@@ -123,7 +224,6 @@
             border-radius: 6px !important;
         }
 
-        /* Highlight visual focus on inputs bound to Nepali Calendar */
         .nepali-datepicker-active,
         [data-ndp-initialized="true"]:focus {
             border-color: #2563eb !important;
@@ -134,17 +234,17 @@
 </head>
 <body class="d-flex flex-column min-vh-100">
 
-    <!-- Stacked Two-Tier Header Architecture (Top-Bar + Main-Bar) -->
+    <!-- 1. Two-Tier Header Architecture -->
     {% include "includes/_header.html" %}
 
     <div class="app-layout" id="appLayout">
         
-        <!-- Desktop Fixed Collapsible Sidebar -->
+        <!-- 2. Desktop Fixed Collapsible Sidebar (>= 992px) -->
         <aside class="app-sidebar-wrapper d-none d-lg-flex" id="desktopSidebar">
             {% include "includes/_sidebar.html" %}
         </aside>
 
-        <!-- Mobile Offcanvas Drawer (< 992px) -->
+        <!-- 3. Mobile Offcanvas Navigation Drawer (< 992px) -->
         <div class="offcanvas offcanvas-start p-0 d-lg-none" tabindex="-1" id="sidebarOffcanvas" style="width: 290px;">
             <div class="offcanvas-header bg-dark text-white border-bottom border-secondary px-3 py-3">
                 <div class="d-flex align-items-center gap-2">
@@ -167,22 +267,28 @@
             </div>
         </div>
 
-        <!-- Main Content Viewport with Dual-Tier Sticky Footer -->
+        <!-- 4. Main Content Viewport with Dual-Tier Sticky Footer -->
         <main class="app-content-wrapper" id="mainContent">
             <div class="app-main-body">
+                <!-- System Feedback Alert Banners -->
                 {% include "includes/_messages.html" %}
+                
+                <!-- Page-Specific Body Content -->
                 {% block content %}{% endblock %}
             </div>
             
-            <!-- Two-Tier Footers: Tier 1 (Main Action) + Tier 2 (Sub-Footer) -->
+            <!-- Two-Tier Footers -->
             {% include "includes/_footer.html" %}
         </main>
     </div>
 
-    <!-- Universal Command Palette Modal (Ctrl + K) -->
+    <!-- 5. Universal Command Palette Modal (Ctrl + K) -->
     {% include "includes/_global_search_modal.html" %}
 
-    <!-- Core Vendor JS Bundle (Bootstrap 5.3.3): Localized with fallback -->
+    <!-- =====================================================================
+         CORE JAVASCRIPT BUNDLES & ASYNCHRONOUS INITIALIZERS
+         ===================================================================== -->
+    <!-- Bootstrap 5.3.3 Bundle with Popper -->
     <script src="{% static 'js/bootstrap.bundle.min.js' %}"></script>
     <script>
         if (typeof bootstrap === 'undefined') {
@@ -190,10 +296,10 @@
         }
     </script>
     
-    <!-- PWA Service Worker Registration -->
+    <!-- Progressive Web App Service Worker Registration -->
     <script src="{% static 'js/pwa_register.js' %}"></script>
 
-    <!-- Nepali Datepicker (Bikram Sambat Visual Calendar) JS: Localized with fallback -->
+    <!-- Bikram Sambat Nepali Datepicker Engine -->
     <script src="{% static 'vendor/nepali-datepicker/nepali.datepicker.v4.0.7.min.js' %}"></script>
     <script>
         if (typeof HTMLElement.prototype.nepaliDatePicker === 'undefined') {
@@ -201,13 +307,15 @@
         }
     </script>
 
-    <!-- Asynchronous Contextual & Global Search Controllers -->
+    <!-- Contextual Search & Global Command Palette Controllers -->
     <script src="{% static 'js/contextual_search.js' %}"></script>
     <script src="{% static 'js/global_search.js' %}"></script>
 
-    <!-- Master Layout, Nepali Calendar & Global Shortcuts Controller -->
+    <!-- Master Layout, Auto-Collapse Engine & Lifecycle Handlers -->
     <script>
-        // Desktop Sidebar Collapse Functionality
+        // -------------------------------------------------------------
+        // 1. Sidebar Toggle & LocalStorage State Synchronizer
+        // -------------------------------------------------------------
         function toggleSidebarCollapse() {
             const layout = document.getElementById('appLayout');
             if (!layout) return;
@@ -216,7 +324,7 @@
             localStorage.setItem('erp_sidebar_collapsed', isCollapsed ? 'true' : 'false');
         }
 
-        // Subgroup Accordion Toggle for Reports
+        // Subgroup Accordion Toggle for Navigation Groups
         function toggleSubgroup(groupId, toggleElement) {
             const content = document.getElementById(groupId);
             if (!content) return;
@@ -233,10 +341,9 @@
             }
         }
 
-        /**
-         * Scoped Nepali Datepicker Initializer
-         * Binds Bikram Sambat (BS) visual calendar popup to targeted input fields.
-         */
+        // -------------------------------------------------------------
+        // 2. Scoped Nepali Datepicker Initializer (Bikram Sambat)
+        // -------------------------------------------------------------
         function initNepaliDatepickers(root = document) {
             if (typeof HTMLElement.prototype.nepaliDatePicker === 'undefined') {
                 return;
@@ -284,9 +391,9 @@
             });
         }
 
-        /**
-         * Open Command Palette Modal
-         */
+        // -------------------------------------------------------------
+        // 3. Command Palette Trigger
+        // -------------------------------------------------------------
         function openGlobalSearchModal() {
             const searchModalEl = document.getElementById('globalSearchModal');
             if (!searchModalEl) return;
@@ -298,29 +405,49 @@
             modalInstance.show();
         }
 
+        // -------------------------------------------------------------
+        // 4. Lifecycle Listeners, Auto-Collapse on Click & Shortcuts
+        // -------------------------------------------------------------
         document.addEventListener('DOMContentLoaded', () => {
             const layout = document.getElementById('appLayout');
             const toggleBtn = document.getElementById('sidebarToggleBtn');
             const desktopSidebar = document.getElementById('desktopSidebar');
             const scrollContainer = desktopSidebar ? desktopSidebar.querySelector('.sidebar-scroll-viewport') : null;
 
-            // 1. Restore Sidebar State from LocalStorage (Auto-collapses if set)
+            // Restore sidebar state from LocalStorage
             if (layout && localStorage.getItem('erp_sidebar_collapsed') === 'true') {
                 layout.classList.add('sidebar-collapsed');
             }
 
+            // 3-Line Hamburger Button Toggle
             if (toggleBtn) {
-                toggleBtn.addEventListener('click', toggleSidebarCollapse);
+                toggleBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    toggleSidebarCollapse();
+                });
             }
 
-            // 2. Prevent Sidebar Rolling Up: Retain Position & Scroll Active Item Into View
+            // AUTO-COLLAPSE ON LINK CLICK:
+            // Whenever user clicks any menu item in the left sidebar, save state as collapsed
+            if (desktopSidebar) {
+                const navLinks = desktopSidebar.querySelectorAll('a.sidebar-nav-item, a.sidebar-subgroup-link');
+                navLinks.forEach(link => {
+                    link.addEventListener('click', () => {
+                        localStorage.setItem('erp_sidebar_collapsed', 'true');
+                        if (layout) {
+                            layout.classList.add('sidebar-collapsed');
+                        }
+                    });
+                });
+            }
+
+            // Retain sidebar scroll position across navigation
             if (scrollContainer) {
                 const savedScrollPos = sessionStorage.getItem('erp_sidebar_scroll_top');
                 if (savedScrollPos !== null) {
                     scrollContainer.scrollTop = parseInt(savedScrollPos, 10);
                 }
 
-                // If an active item exists, ensure it stays smoothly in view
                 const activeItem = scrollContainer.querySelector('.sidebar-nav-item.active, .sidebar-subgroup-link.active');
                 if (activeItem) {
                     setTimeout(() => {
@@ -328,46 +455,31 @@
                     }, 50);
                 }
 
-                // Keep track of scroll movements
                 scrollContainer.addEventListener('scroll', () => {
                     sessionStorage.setItem('erp_sidebar_scroll_top', scrollContainer.scrollTop);
                 });
             }
-
-            // 3. Auto-Collapse on Menu Item Click & Save Scroll Position
-            const navLinks = document.querySelectorAll('.sidebar-nav-item:not(.sidebar-subgroup-toggle), .sidebar-subgroup-link');
-            navLinks.forEach(link => {
-                link.addEventListener('click', () => {
-                    // Auto-collapse sidebar on desktop upon selection
-                    if (window.innerWidth >= 992) {
-                        localStorage.setItem('erp_sidebar_collapsed', 'true');
-                    }
-                    if (scrollContainer) {
-                        sessionStorage.setItem('erp_sidebar_scroll_top', scrollContainer.scrollTop);
-                    }
-                });
-            });
 
             // Global Keyboard Shortcuts
             document.addEventListener('keydown', (e) => {
                 const targetTag = e.target.tagName.toLowerCase();
                 const isFormInput = targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || e.target.isContentEditable;
 
-                // 1. Sidebar Toggle Shortcut: Ctrl + B / Cmd + B
+                // Sidebar Toggle: Ctrl + B / Cmd + B
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
                     e.preventDefault();
                     toggleSidebarCollapse();
                     return;
                 }
 
-                // 2. Command Palette Shortcut: Ctrl + K / Cmd + K
+                // Command Palette: Ctrl + K / Cmd + K
                 if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
                     e.preventDefault();
                     openGlobalSearchModal();
                     return;
                 }
 
-                // 3. Quick-search Slash Shortcut: '/' when not inside an active form field
+                // Quick-search slash: '/' when not typing in form field
                 if (e.key === '/' && !isFormInput) {
                     e.preventDefault();
                     openGlobalSearchModal();
@@ -375,7 +487,7 @@
                 }
             });
 
-            // Auto-focus Search Field on Modal Display
+            // Focus search input when command palette opens
             const searchModalEl = document.getElementById('globalSearchModal');
             if (searchModalEl) {
                 searchModalEl.addEventListener('shown.bs.modal', () => {
@@ -391,10 +503,10 @@
             const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
             tooltipTriggerList.map(el => new bootstrap.Tooltip(el));
 
-            // Initial component mounts
+            // Mount datepickers
             initNepaliDatepickers(document);
 
-            // Re-bind on Bootstrap Modal open
+            // Re-mount dynamic components when Bootstrap Modals open
             document.addEventListener('shown.bs.modal', (e) => {
                 if (e.target) {
                     initNepaliDatepickers(e.target);
@@ -405,7 +517,7 @@
             });
         });
 
-        // Globally exposed references
+        // Global Window Expositions
         window.initNepaliDatepickers = initNepaliDatepickers;
         window.openGlobalSearchModal = openGlobalSearchModal;
     </script>

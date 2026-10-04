@@ -1,50 +1,257 @@
 {% extends "core/base.html" %}
-{% load humanize %}
+{% load humanize static %}
 
-{% block title %}Suppliers &amp; Brand Distributors Directory | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+{% block title %}Supplier &amp; Distributor Directory | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ==========================================================================
+   SUPPLIER DIRECTORY - RIGID 100% SINGLE-SCREEN FIT ARCHITECTURE
+   Eliminates all horizontal overflow and guarantees the "Ledger" and "Edit"
+   action buttons are 100% visible on one single screen frame without clipping.
+   ========================================================================== */
+.supplier-table-container {
+    background: #ffffff;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+.table-supplier {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed !important;
+    font-size: 0.8125rem;
+    margin-bottom: 0;
+}
+
+.table-supplier thead th {
+    font-size: 0.6875rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--erp-slate-500, #64748b);
+    background-color: #f8fafc;
+    border-bottom: 1px solid var(--erp-slate-200, #e2e8f0);
+    padding: 8px 6px !important;
+    vertical-align: middle;
+    white-space: normal !important;
+    line-height: 1.25;
+    word-break: normal;
+}
+
+.table-supplier tbody td {
+    padding: 7px 6px !important;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--erp-slate-100, #f1f5f9);
+    color: var(--erp-slate-800, #1e293b);
+}
+
+.table-supplier tbody tr {
+    transition: background-color 0.12s ease;
+}
+
+.table-supplier tbody tr:hover {
+    background-color: #f8fafc;
+}
+
+/* Re-budgeted Column Width Distribution (Exact 100% Total Screen Fit) */
+.col-w-supplier-name   { width: 22%; }
+.col-w-classification { width: 12%; }
+.col-w-registration   { width: 12%; }
+.col-w-phone          { width: 11%; }
+.col-w-authorization  { width: 11%; }
+.col-w-payable        { width: 12%; }
+.col-w-status         { width: 6%; }
+.col-w-actions        { width: 14%; min-width: 120px; text-align: right; }
+
+/* Text Truncation & Compact Badges */
+.text-truncate-supplier {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+.font-mono {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace) !important;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Compact Action Buttons with Zero-Wrap Anchoring */
+.btn-ledger-action {
+    font-size: 0.70rem !important;
+    font-weight: 700 !important;
+    padding: 3px 8px !important;
+    border-radius: 999px !important;
+    white-space: nowrap !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    line-height: 1.2 !important;
+}
+
+.btn-edit-action {
+    width: 24px !important;
+    height: 24px !important;
+    padding: 0 !important;
+    border-radius: 6px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 0.70rem !important;
+    flex-shrink: 0 !important;
+}
+
+/* ==========================================================================
+   LIVE AUTOCOMPLETE TYPEAHEAD DROPDOWN STYLES
+   ========================================================================== */
+.async-search-container {
+    position: relative;
+    width: 100%;
+}
+
+.supplier-live-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 1080;
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-300, #cbd5e1);
+    border-radius: 12px;
+    box-shadow: 0 14px 30px -5px rgba(15, 23, 42, 0.18), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+    max-height: 320px;
+    overflow-y: auto;
+    margin-top: 2px;
+    display: none;
+}
+
+.supplier-live-dropdown.show {
+    display: block;
+}
+
+.live-suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--erp-slate-100, #f1f5f9);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-decoration: none;
+    color: inherit;
+    transition: background-color 0.12s ease;
+}
+
+.live-suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.live-suggestion-item:hover,
+.live-suggestion-item.active {
+    background-color: #eff6ff;
+}
+
+.live-suggestion-item.active {
+    border-left: 3px solid #2563eb;
+    padding-left: 9px;
+}
+
+.suggestion-title {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: var(--erp-slate-900, #0f172a);
+}
+
+.suggestion-meta {
+    font-size: 0.7rem;
+    color: var(--erp-slate-500, #64748b);
+    margin-top: 1px;
+}
+
+.match-highlight {
+    color: #2563eb;
+    font-weight: 800;
+    text-decoration: underline;
+}
+
+.suggestion-chip {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4">
+<div class="container-fluid px-2 px-md-3 py-3" style="max-width: 100%;">
     <!-- Header -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-3">
         <div>
-            <h4 class="fw-bold text-dark mb-0">
-                <i class="fas fa-building-user text-primary me-2"></i> Supplier &amp; Distributor Directory
-            </h4>
-            <p class="text-muted fs-xs mb-0">
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0 fs-5">
+                    <i class="fas fa-building-user text-primary me-2"></i>Supplier &amp; Distributor Directory
+                </h4>
+                <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-2.5 py-0.5 rounded-pill fs-2xs font-mono fw-bold" id="totalSuppliersBadge">
+                    Total: {{ page_obj.paginator.count|default:suppliers|length }}
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-0.5">
                 Manage authorized brand importers, regional wholesalers, trade terms, and outstanding payables
             </p>
         </div>
         <div class="d-flex gap-2">
-            <a href="{% url 'purchases:supplier_create' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm">
+            <a href="{% url 'purchases:supplier_create' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-sm">
                 <i class="fas fa-plus-circle me-1"></i> Register New Supplier
             </a>
         </div>
     </div>
 
-    <!-- Search & Multi-Field Filter Bar -->
-    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-center">
+    <!-- Search & Multi-Field Filter Bar with Interactive Typeahead Dropdown -->
+    <div class="card border-0 shadow-sm rounded-4 p-2.5 bg-white mb-3">
+        <form method="get" class="row g-2 align-items-center" id="supplierFilterForm">
+            <!-- Global Real-Time Search Box with Instant Live-Dropdown Engine -->
             <div class="col-12 col-md-4">
-                <div class="input-group input-group-sm">
-                    <span class="input-group-text bg-light border-0"><i class="fas fa-search text-muted"></i></span>
-                    <input type="text" name="q" value="{{ request.GET.q|default:'' }}" class="form-control bg-light border-0" placeholder="Search by Supplier Code, Name, Phone, Reg No, or PAN...">
+                <div class="async-search-container">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-light border-0 text-muted ps-2.5">
+                            <i class="fas fa-search"></i>
+                        </span>
+                        <input type="text" 
+                               name="q" 
+                               id="globalSupplierSearchInput" 
+                               value="{{ request.GET.q|default:'' }}" 
+                               class="form-control bg-light border-0 fw-semibold" 
+                               placeholder="Search Code, Name, Phone, Reg No, or PAN..." 
+                               autocomplete="off">
+                        <button type="button" class="btn btn-light border-0 text-muted px-2" id="clearSupplierSearchBtn" style="display: none;" title="Clear search">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+
+                    <!-- Floating Live Dropdown Menu (Opens on Click & Filters Live) -->
+                    <div id="supplierSearchDropdown" class="supplier-live-dropdown"></div>
                 </div>
             </div>
 
+            <!-- Supplier Types Filter (English Labels) -->
             <div class="col-6 col-md-3">
-                <select name="type" class="form-select form-select-sm bg-light border-0">
+                <select name="type" id="supplierTypeFilterSelect" class="form-select form-select-sm bg-light border-0 fw-semibold text-secondary">
                     <option value="">All Supplier Types</option>
                     <option value="NATIONAL_DISTRIBUTOR" {% if request.GET.type == 'NATIONAL_DISTRIBUTOR' %}selected{% endif %}>National Importer / Distributor</option>
                     <option value="REGIONAL_WHOLESALER" {% if request.GET.type == 'REGIONAL_WHOLESALER' %}selected{% endif %}>Regional Wholesaler</option>
                     <option value="MANUFACTURER" {% if request.GET.type == 'MANUFACTURER' %}selected{% endif %}>Manufacturer</option>
-                    <option value="LOCAL_TRADER" {% if request.GET.type == 'LOCAL_TRADER' %}selected{% endif %}>Local Trader</option>
+                    <option value="LOCAL_TRADER" {% if request.GET.type == 'LOCAL_TRADER' %}selected{% endif %}>Local Dealer / Trader</option>
                     <option value="SERVICE_PARTS_VENDOR" {% if request.GET.type == 'SERVICE_PARTS_VENDOR' %}selected{% endif %}>Parts &amp; Service Supplier</option>
                 </select>
             </div>
 
+            <!-- Status Filter -->
             <div class="col-6 col-md-2">
-                <select name="status" class="form-select form-select-sm bg-light border-0">
+                <select name="status" id="supplierStatusFilterSelect" class="form-select form-select-sm bg-light border-0 fw-semibold text-secondary">
                     <option value="">All Statuses</option>
                     <option value="ACTIVE" {% if request.GET.status == 'ACTIVE' %}selected{% endif %}>Active Only</option>
                     <option value="BLOCKED" {% if request.GET.status == 'BLOCKED' %}selected{% endif %}>Blocked Only</option>
@@ -52,13 +259,15 @@
                 </select>
             </div>
 
+            <!-- Balance Filter -->
             <div class="col-6 col-md-2">
-                <select name="has_due" class="form-select form-select-sm bg-light border-0">
+                <select name="has_due" id="supplierDueFilterSelect" class="form-select form-select-sm bg-light border-0 fw-semibold text-secondary">
                     <option value="">All Balances</option>
-                    <option value="true" {% if request.GET.has_due == 'true' %}selected{% endif %}>With Payable Due (> 0)</option>
+                    <option value="true" {% if request.GET.has_due == 'true' %}selected{% endif %}>With Payable Due (&gt; 0)</option>
                 </select>
             </div>
 
+            <!-- Filter & Reset Buttons -->
             <div class="col-6 col-md-1 d-flex gap-1">
                 <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
                 {% if request.GET.q or request.GET.type or request.GET.status or request.GET.has_due %}
@@ -68,104 +277,434 @@
         </form>
     </div>
 
-    <!-- Enhanced Supplier Directory Table -->
+    <!-- Enhanced Supplier Directory Table with 100% Viewport Fit -->
     <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 fs-sm">
-                <thead class="bg-light text-muted text-uppercase fs-xs">
+        <div class="supplier-table-container">
+            <table class="table table-hover align-middle mb-0 table-supplier" id="supplierDirectoryTable">
+                <thead>
                     <tr>
-                        <th class="ps-4">Code &amp; Company Name</th>
-                        <th>Classification</th>
-                        <th>Registration No</th>
-                        <th>Primary Phone</th>
-                        <th>Distributor Authorization</th>
-                        <th>Outstanding Payable</th>
-                        <th>Status</th>
-                        <th class="text-end pe-4">Actions</th>
+                        <th class="ps-3 col-w-supplier-name">Supplier</th>
+                        <th class="col-w-classification">Classification</th>
+                        <th class="col-w-registration">Reg / PAN</th>
+                        <th class="col-w-phone">Phone</th>
+                        <th class="col-w-authorization">Authorization</th>
+                        <th class="text-end col-w-payable">Payable</th>
+                        <th class="text-center col-w-status">Status</th>
+                        <th class="text-end pe-3 col-w-actions">Actions</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="supplierTableBody">
                     {% for s in suppliers %}
-                    <tr>
-                        <td class="ps-4">
-                            <span class="badge bg-primary bg-opacity-10 text-primary font-monospace fs-2xs px-2 py-0 mb-1 d-inline-block">{{ s.code }}</span>
-                            <a href="{% url 'purchases:supplier_detail' s.pk %}" class="fw-bold text-dark text-decoration-none d-block">
+                    <tr class="supplier-data-row"
+                        data-code="{{ s.code|default:'' }}"
+                        data-name="{{ s.company_name|default:'' }}"
+                        data-contact="{{ s.contact_person|default:'' }}"
+                        data-phone="{{ s.phone_number|default:'' }}"
+                        data-reg="{{ s.registration_number|default:'' }}"
+                        data-pan="{{ s.pan_number|default:'' }}"
+                        data-type="{{ s.get_supplier_type_display|default:'' }}"
+                        data-status="{{ s.status|default:'' }}"
+                        data-balance="{{ s.current_balance|default:0 }}">
+                        
+                        <!-- 1. Supplier: Code, Name, Contact -->
+                        <td class="ps-3 col-w-supplier-name">
+                            <span class="badge bg-primary bg-opacity-10 text-primary font-mono fs-2xs px-1.5 py-0 mb-0.5 d-inline-block">{{ s.code }}</span>
+                            <a href="{% url 'purchases:supplier_detail' s.pk %}" class="fw-bold text-dark text-decoration-none text-truncate-supplier" title="{{ s.company_name }}">
                                 {{ s.company_name }}
                             </a>
-                            <small class="text-muted"><i class="fas fa-user-tie me-1"></i>{{ s.contact_person }}</small>
+                            <small class="text-muted text-truncate-supplier"><i class="fas fa-user-tie me-1"></i>{{ s.contact_person }}</small>
                         </td>
 
-                        <td>
-                            <span class="badge bg-light text-dark border fs-2xs">{{ s.get_supplier_type_display }}</span>
+                        <!-- 2. Classification -->
+                        <td class="col-w-classification">
+                            <span class="badge bg-light text-dark border fs-2xs text-truncate-supplier" title="{{ s.get_supplier_type_display }}">
+                                {{ s.get_supplier_type_display }}
+                            </span>
                         </td>
 
-                        <td>
-                            <span class="font-monospace fw-semibold text-secondary">{{ s.registration_number }}</span>
-                            {% if s.pan_number %}<small class="text-muted d-block font-monospace">PAN: {{ s.pan_number }}</small>{% endif %}
+                        <!-- 3. Reg / PAN -->
+                        <td class="col-w-registration">
+                            <span class="font-mono fw-semibold text-secondary text-truncate-supplier">{{ s.registration_number }}</span>
+                            {% if s.pan_number %}<small class="text-muted d-block font-mono fs-3xs">PAN: {{ s.pan_number }}</small>{% endif %}
                         </td>
 
-                        <td>
-                            <span class="font-monospace fw-semibold">{{ s.phone_number }}</span>
-                            {% if s.city %}<small class="text-muted d-block">{{ s.city }}</small>{% endif %}
+                        <!-- 4. Phone & City -->
+                        <td class="col-w-phone">
+                            <span class="font-mono fw-semibold text-truncate-supplier">{{ s.phone_number }}</span>
+                            {% if s.city %}<small class="text-muted d-block text-truncate-supplier">{{ s.city }}</small>{% endif %}
                         </td>
 
-                        <td>
+                        <!-- 5. Authorization Tier -->
+                        <td class="col-w-authorization">
                             {% if s.is_authorized_distributor %}
-                                <span class="badge bg-info bg-opacity-10 text-info fw-bold fs-2xs px-2 py-1">
-                                    <i class="fas fa-shield-halved me-1"></i> {{ s.get_distributor_tier_display|default:"Authorized" }}
+                                <span class="badge bg-info bg-opacity-10 text-info fw-bold fs-2xs px-1.5 py-0.5 text-truncate-supplier" title="{{ s.get_distributor_tier_display|default:'Authorized' }}">
+                                    <i class="fas fa-shield-halved me-1"></i>{{ s.get_distributor_tier_display|default:"Authorized" }}
                                 </span>
                             {% else %}
-                                <span class="badge bg-light text-muted border fs-2xs">Standard Vendor</span>
+                                <span class="badge bg-light text-muted border fs-2xs">Standard</span>
                             {% endif %}
                         </td>
 
-                        <td>
+                        <!-- 6. Outstanding Payable (Right-Aligned) -->
+                        <td class="text-end col-w-payable font-mono">
                             {% if s.current_balance > 0 %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-xs px-2 py-1 font-monospace">
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-xs px-1.5 py-0.5">
                                     Rs. {{ s.current_balance|floatformat:2|intcomma }}
                                 </span>
                             {% elif s.current_balance < 0 %}
-                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs px-2 py-1 font-monospace">
-                                    Advance: Rs. {{ s.current_balance|stringformat:".2f"|slice:"1:" }}
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-xs px-1.5 py-0.5">
+                                    Adv: Rs. {{ s.current_balance|stringformat:".2f"|slice:"1:" }}
                                 </span>
                             {% else %}
-                                <span class="badge bg-light text-muted border fs-xs">Rs. 0.00 (Clear)</span>
+                                <span class="badge bg-light text-muted border fs-xs">Rs. 0.00</span>
                             {% endif %}
                         </td>
 
-                        <td>
+                        <!-- 7. Status Badge -->
+                        <td class="text-center col-w-status">
                             {% if s.status == 'ACTIVE' %}
-                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-2 py-1">Active</span>
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold fs-2xs px-1.5 py-0.5">Active</span>
                             {% elif s.status == 'BLOCKED' %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-2 py-1">Blocked</span>
+                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold fs-2xs px-1.5 py-0.5">Blocked</span>
                             {% else %}
-                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs px-2 py-1">Inactive</span>
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs px-1.5 py-0.5">Inactive</span>
                             {% endif %}
                         </td>
 
-                        <td class="text-end pe-4">
-                            <div class="d-inline-flex gap-2">
-                                <a href="{% url 'purchases:supplier_detail' s.pk %}" class="btn btn-outline-primary btn-sm rounded-pill px-3">
-                                    Ledger &amp; Payout
+                        <!-- 8. Actions (Compact Group - Never Clipped) -->
+                        <td class="col-w-actions pe-3 text-end">
+                            <div class="d-inline-flex align-items-center justify-content-end gap-1">
+                                <a href="{% url 'purchases:supplier_detail' s.pk %}" class="btn btn-outline-primary btn-ledger-action" title="View Ledger and Record Payout">
+                                    <i class="fas fa-book-open"></i> Ledger
                                 </a>
-                                <a href="{% url 'purchases:supplier_edit' s.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3" title="Edit Supplier">
-                                    <i class="fas fa-edit"></i>
+                                <a href="{% url 'purchases:supplier_edit' s.pk %}" class="btn btn-outline-secondary btn-edit-action" title="Edit Supplier Details">
+                                    <i class="fas fa-pen"></i>
                                 </a>
                             </div>
                         </td>
                     </tr>
                     {% empty %}
-                    <tr>
+                    <tr id="emptySupplierRow">
                         <td colspan="8" class="text-center py-5 text-muted">
                             <i class="fas fa-building-user fs-1 text-secondary opacity-25 d-block mb-2"></i>
                             No suppliers or distributors matched your query.
                         </td>
                     </tr>
                     {% endfor %}
+
+                    <!-- Dynamic No-Search Results Row -->
+                    <tr id="noSupplierMatchesRow" style="display: none;">
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="fas fa-folder-open fs-2 opacity-25 d-block mb-2"></i>
+                            <div class="fw-bold fs-sm text-dark mb-1">No Matching Suppliers Found</div>
+                            <div class="fs-xs">No records matched your search query.</div>
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </div>
+
+        <div class="p-2.5 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
     </div>
-    {% include "includes/_pagination.html" %}
 </div>
+
+<!-- =========================================================================
+     INTERACTIVE JAVASCRIPT: INSTANT LIVE DROPDOWN, MULTI-TERM FILTER & TABLE SYNC
+     ========================================================================= -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('globalSupplierSearchInput');
+    const clearBtn = document.getElementById('clearSupplierSearchBtn');
+    const dropdown = document.getElementById('supplierSearchDropdown');
+    const tableBody = document.getElementById('supplierTableBody');
+    const noResultsRow = document.getElementById('noSupplierMatchesRow');
+    const totalBadge = document.getElementById('totalSuppliersBadge');
+    const typeSelect = document.getElementById('supplierTypeFilterSelect');
+    const statusSelect = document.getElementById('supplierStatusFilterSelect');
+    const dueSelect = document.getElementById('supplierDueFilterSelect');
+
+    let debounceTimer = null;
+    let activeHighlightIndex = -1;
+    let cachedApiSuppliers = [];
+
+    // Helper: Escape HTML
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return String(text).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    // Helper: Escape Regex
+    function escapeRegex(text) {
+        return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+    }
+
+    // Build client-side index of currently rendered rows
+    function buildClientRowIndex() {
+        const rows = tableBody.querySelectorAll('.supplier-data-row');
+        const list = [];
+        rows.forEach(r => {
+            list.push({
+                element: r,
+                code: (r.dataset.code || '').toLowerCase(),
+                name: (r.dataset.name || '').toLowerCase(),
+                contact: (r.dataset.contact || '').toLowerCase(),
+                phone: (r.dataset.phone || '').toLowerCase(),
+                reg: (r.dataset.reg || '').toLowerCase(),
+                pan: (r.dataset.pan || '').toLowerCase(),
+                type: (r.dataset.type || '').toLowerCase(),
+                status: (r.dataset.status || '').toLowerCase(),
+                balance: parseFloat(r.dataset.balance || 0),
+                fullText: r.textContent.toLowerCase()
+            });
+        });
+        return list;
+    }
+
+    const indexedRows = buildClientRowIndex();
+
+    // -------------------------------------------------------------
+    // 1. In-Table Live Row Filter (Supports multi-tokens like 'viv 9802')
+    // -------------------------------------------------------------
+    function filterTableRows(rawQuery) {
+        const query = (rawQuery || '').toLowerCase().trim();
+        const tokens = query.split(/\s+/).filter(Boolean);
+
+        const selectedType = typeSelect ? typeSelect.options[typeSelect.selectedIndex].text.toLowerCase().trim() : '';
+        const isTypeFiltered = typeSelect && typeSelect.value !== '';
+        const selectedStatus = statusSelect ? statusSelect.value.toLowerCase().trim() : '';
+        const isStatusFiltered = statusSelect && statusSelect.value !== '';
+        const isDueFiltered = dueSelect && dueSelect.value === 'true';
+
+        let visibleCount = 0;
+
+        indexedRows.forEach(item => {
+            let matchesTokens = true;
+            if (tokens.length > 0) {
+                matchesTokens = tokens.every(token => 
+                    item.name.includes(token) ||
+                    item.code.includes(token) ||
+                    item.phone.includes(token) ||
+                    item.contact.includes(token) ||
+                    item.reg.includes(token) ||
+                    item.pan.includes(token) ||
+                    item.fullText.includes(token)
+                );
+            }
+
+            const matchesType = !isTypeFiltered || item.type.includes(selectedType);
+            const matchesStatus = !isStatusFiltered || item.status === selectedStatus;
+            const matchesDue = !isDueFiltered || item.balance > 0;
+
+            if (matchesTokens && matchesType && matchesStatus && matchesDue) {
+                item.element.style.display = '';
+                visibleCount++;
+            } else {
+                item.element.style.display = 'none';
+            }
+        });
+
+        if (noResultsRow) {
+            noResultsRow.style.display = (visibleCount === 0 && indexedRows.length > 0) ? '' : 'none';
+        }
+
+        if (totalBadge) {
+            totalBadge.innerText = `Total: ${visibleCount}`;
+        }
+    }
+
+    // -------------------------------------------------------------
+    // 2. Fetch and Render Live Dropdown Suggestions
+    // -------------------------------------------------------------
+    async function fetchAndRenderDropdown(query = '') {
+        const clean = query.trim();
+        const tokens = clean.toLowerCase().split(/\s+/).filter(Boolean);
+
+        dropdown.innerHTML = `
+            <div class="p-3 text-center text-muted fs-xs">
+                <i class="fas fa-circle-notch fa-spin me-1 text-primary"></i> Loading suppliers...
+            </div>
+        `;
+        dropdown.classList.add('show');
+
+        try {
+            if (cachedApiSuppliers.length === 0) {
+                const res = await fetch('/purchases/suppliers/api/search/?limit=150');
+                if (res.ok) {
+                    const data = await res.json();
+                    cachedApiSuppliers = data.results || [];
+                }
+            }
+
+            let filtered = cachedApiSuppliers;
+
+            if (tokens.length > 0) {
+                filtered = cachedApiSuppliers.filter(s => {
+                    const targetStr = `${s.company_name} ${s.code} ${s.contact_person} ${s.phone_number} ${s.pan_number || ''} ${s.registration_number || ''}`.toLowerCase();
+                    return tokens.every(t => targetStr.includes(t));
+                });
+            }
+
+            if (filtered.length === 0) {
+                dropdown.innerHTML = `
+                    <div class="p-3 text-center text-muted fs-xs">
+                        <i class="fas fa-user-slash opacity-50 d-block mb-1"></i>
+                        No suppliers found matching "<strong>${escapeHtml(clean)}</strong>"
+                    </div>
+                `;
+                return;
+            }
+
+            function highlight(text) {
+                if (!tokens.length) return escapeHtml(text);
+                let escaped = escapeHtml(text);
+                tokens.forEach(t => {
+                    const regex = new RegExp(`(${escapeRegex(t)})`, 'gi');
+                    escaped = escaped.replace(regex, '<span class="match-highlight">$1</span>');
+                });
+                return escaped;
+            }
+
+            let html = '';
+            filtered.slice(0, 15).forEach((s, idx) => {
+                const bal = parseFloat(s.current_balance || 0);
+                let badgeClass = 'bg-light text-muted border';
+                let badgeText = s.balance_badge_text || 'Rs. 0.00';
+
+                if (bal > 0) {
+                    badgeClass = 'bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25';
+                } else if (bal < 0) {
+                    badgeClass = 'bg-success bg-opacity-10 text-success border border-success border-opacity-25';
+                }
+
+                html += `
+                    <div class="live-suggestion-item" data-index="${idx}" data-fill="${escapeHtml(s.company_name)}">
+                        <div class="pe-2 text-truncate">
+                            <div class="suggestion-title text-truncate">
+                                ${highlight(s.company_name)}
+                                <span class="badge bg-light text-dark border font-mono fs-3xs ms-1">${escapeHtml(s.code)}</span>
+                            </div>
+                            <div class="suggestion-meta text-truncate">
+                                <i class="fas fa-user-tie me-1"></i>${highlight(s.contact_person)} 
+                                &bull; <i class="fas fa-phone fs-3xs text-success me-0.5"></i>${highlight(s.phone_number)}
+                                ${s.pan_number ? ' &bull; PAN: ' + highlight(s.pan_number) : ''}
+                            </div>
+                        </div>
+                        <div class="text-end flex-shrink-0">
+                            <span class="suggestion-chip ${badgeClass}">${badgeText}</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            dropdown.innerHTML = html;
+            activeHighlightIndex = -1;
+
+            dropdown.querySelectorAll('.live-suggestion-item').forEach(el => {
+                el.addEventListener('click', () => {
+                    const fillVal = el.dataset.fill;
+                    selectSupplierFromDropdown(fillVal);
+                });
+            });
+
+        } catch (err) {
+            dropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Error loading suppliers.</div>';
+        }
+    }
+
+    function selectSupplierFromDropdown(companyName) {
+        searchInput.value = companyName;
+        clearBtn.style.display = 'block';
+        dropdown.classList.remove('show');
+        dropdown.innerHTML = '';
+        activeHighlightIndex = -1;
+        filterTableRows(companyName);
+        searchInput.focus();
+    }
+
+    // -------------------------------------------------------------
+    // 3. Search Input Event Listeners
+    // -------------------------------------------------------------
+    searchInput.addEventListener('focus', () => {
+        fetchAndRenderDropdown(searchInput.value);
+    });
+
+    searchInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!dropdown.classList.contains('show')) {
+            fetchAndRenderDropdown(searchInput.value);
+        }
+    });
+
+    searchInput.addEventListener('input', () => {
+        const val = searchInput.value;
+        clearBtn.style.display = val.trim() ? 'block' : 'none';
+
+        filterTableRows(val);
+
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            fetchAndRenderDropdown(val);
+        }, 120);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+        if (!dropdown.classList.contains('show')) return;
+        const items = dropdown.querySelectorAll('.live-suggestion-item');
+        if (!items.length) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeHighlightIndex = (activeHighlightIndex + 1) % items.length;
+            updateHighlight(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeHighlightIndex = (activeHighlightIndex - 1 + items.length) % items.length;
+            updateHighlight(items);
+        } else if (e.key === 'Enter') {
+            if (activeHighlightIndex >= 0 && items[activeHighlightIndex]) {
+                e.preventDefault();
+                selectSupplierFromDropdown(items[activeHighlightIndex].dataset.fill);
+            }
+        } else if (e.key === 'Escape') {
+            dropdown.classList.remove('show');
+            activeHighlightIndex = -1;
+        }
+    });
+
+    function updateHighlight(items) {
+        items.forEach((item, idx) => {
+            if (idx === activeHighlightIndex) {
+                item.classList.add('active');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('active');
+            }
+        });
+    }
+
+    clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        clearBtn.style.display = 'none';
+        dropdown.classList.remove('show');
+        dropdown.innerHTML = '';
+        activeHighlightIndex = -1;
+        filterTableRows('');
+        searchInput.focus();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.remove('show');
+            activeHighlightIndex = -1;
+        }
+    });
+
+    if (typeSelect) typeSelect.addEventListener('change', () => filterTableRows(searchInput.value));
+    if (statusSelect) statusSelect.addEventListener('change', () => filterTableRows(searchInput.value));
+    if (dueSelect) dueSelect.addEventListener('change', () => filterTableRows(searchInput.value));
+});
+</script>
 {% endblock %}

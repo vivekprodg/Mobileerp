@@ -500,7 +500,7 @@ kbd, .kbd-pill {
 }
 
 .sidebar-section-heading {
-    font-size: 0.6875rem;
+    font-size: 0.64rem;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -520,7 +520,7 @@ kbd, .kbd-pill {
     padding: 8px 12px;
     color: #334155;
     font-weight: 600;
-    font-size: 0.84rem;
+    font-size: 0.76rem;
     border-radius: 9px;
     text-decoration: none !important;
     transition: all 0.15s ease;
@@ -585,7 +585,7 @@ kbd, .kbd-pill {
 }
 
 .sidebar-subgroup-link {
-    font-size: 0.79rem;
+    font-size: 0.72rem;
     padding: 5px 10px;
     color: #475569;
     font-weight: 500;

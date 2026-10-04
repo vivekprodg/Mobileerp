@@ -5,7 +5,10 @@ Key Capabilities:
 1. Supplier Directory & Sub-Ledger: Full accounts payable lifecycle with credit limits and settlement histories.
 2. Supplier Confirmation Statement Linkage: Exposes active Nepali Fiscal Year in context to directly
    launch the official multi-year Party Confirmation Ledger & audit sign-off letters.
-3. Supplier & GRN Search APIs: High-performance endpoints for autocomplete/typeahead in PO, GRN, and return forms.
+3. Supplier & GRN Search APIs:
+   - High-performance multi-token query parsing (e.g. 'viv 9802' matches across name, code, phone, contact, PAN).
+   - Generous listing limit (up to 150 items) for zero-query on-click instant dropdown browsing.
+   - Rich JSON payload including clean English classification and formatted debt badges.
 4. Supplier Payouts:
    - Atomically updates supplier debt balance strictly through sub-ledger records with row-level locking.
    - Automatically posts double-entry General Ledger payment vouchers without swallowing errors.
@@ -29,6 +32,7 @@ Key Capabilities:
 import csv
 import json
 import uuid
+import re
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -172,26 +176,34 @@ class PurchaseModuleAccessMixin(LoginRequiredMixin, UserPassesTestMixin):
 # ==============================================================================
 class SupplierSearchAPIView(PurchaseModuleAccessMixin, View):
     """
-    API endpoint for async Supplier search/autocomplete in Purchase Orders,
+    High-performance API endpoint for async Supplier search/autocomplete in Purchase Orders,
     GRNs, Debit Notes, and Payment Modals.
+    
+    Enhanced Capabilities:
+    - Multi-token splitting: Supports queries like 'viv 9802' searching across Name, Code, Phone, Contact, and PAN.
+    - Generous zero-query limit: Returns up to 150 active suppliers sorted alphabetically when q is empty.
+    - Clean English classification without Nepali brackets.
     """
 
     def get(self, request, *args, **kwargs):
         query = request.GET.get('q', '').strip()
-        limit = min(int(request.GET.get('limit', 25)), 100)
+        limit = min(int(request.GET.get('limit', 150)), 200)
 
         qs = Supplier.objects.filter(status='ACTIVE')
 
         if query:
-            qs = qs.filter(
-                Q(code__icontains=query) |
-                Q(company_name__icontains=query) |
-                Q(contact_person__icontains=query) |
-                Q(phone_number__icontains=query) |
-                Q(pan_number__icontains=query)
-            )
+            tokens = [t.strip() for t in query.split() if t.strip()]
+            for token in tokens:
+                qs = qs.filter(
+                    Q(code__icontains=token) |
+                    Q(company_name__icontains=token) |
+                    Q(contact_person__icontains=token) |
+                    Q(phone_number__icontains=token) |
+                    Q(registration_number__icontains=token) |
+                    Q(pan_number__icontains=token)
+                )
         else:
-            qs = qs.order_by('-last_purchase_date', '-current_balance', 'company_name')
+            qs = qs.order_by('company_name')
 
         results = []
         for s in qs[:limit]:
@@ -206,18 +218,23 @@ class SupplierSearchAPIView(PurchaseModuleAccessMixin, View):
                 badge = 'SETTLED'
                 badge_text = "Settled (Rs. 0.00)"
 
+            # Ensure clean English classification text
+            clean_classification = re.sub(r'\s*\([^)]*\)', '', s.get_supplier_type_display()).strip()
+
             results.append({
                 'id': s.id,
                 'code': s.code,
                 'company_name': s.company_name,
                 'contact_person': s.contact_person,
                 'phone_number': s.phone_number,
+                'city': s.city or '',
+                'registration_number': s.registration_number or '',
                 'pan_number': s.pan_number or '',
                 'current_balance': float(bal),
                 'current_balance_formatted': f"Rs. {bal:,.2f}",
                 'balance_badge': badge,
                 'balance_badge_text': badge_text,
-                'supplier_type': s.get_supplier_type_display(),
+                'supplier_type': clean_classification,
                 'text': f"{s.company_name} ({s.contact_person} - {s.phone_number})"
             })
 
@@ -298,14 +315,16 @@ class SupplierListView(PurchaseModuleAccessMixin, ListView):
         has_due = self.request.GET.get('has_due', '').strip()
 
         if query:
-            qs = qs.filter(
-                Q(code__icontains=query) |
-                Q(company_name__icontains=query) |
-                Q(contact_person__icontains=query) |
-                Q(phone_number__icontains=query) |
-                Q(registration_number__icontains=query) |
-                Q(pan_number__icontains=query)
-            )
+            tokens = [t.strip() for t in query.split() if t.strip()]
+            for token in tokens:
+                qs = qs.filter(
+                    Q(code__icontains=token) |
+                    Q(company_name__icontains=token) |
+                    Q(contact_person__icontains=token) |
+                    Q(phone_number__icontains=token) |
+                    Q(registration_number__icontains=token) |
+                    Q(pan_number__icontains=token)
+                )
         if s_type:
             qs = qs.filter(supplier_type=s_type)
         if status_filter:
@@ -1244,13 +1263,15 @@ class PurchaseReturnListView(PurchaseModuleAccessMixin, ListView):
         end_date = self.request.GET.get('end_date', '').strip()
 
         if query:
-            qs = qs.filter(
-                Q(return_number__icontains=query) |
-                Q(original_bill_reference__icontains=query) |
-                Q(supplier__company_name__icontains=query) |
-                Q(remarks__icontains=query) |
-                Q(items__returned_imei_list__icontains=query)
-            ).distinct()
+            tokens = [t.strip() for t in query.split() if t.strip()]
+            for token in tokens:
+                qs = qs.filter(
+                    Q(return_number__icontains=token) |
+                    Q(original_bill_reference__icontains=token) |
+                    Q(supplier__company_name__icontains=token) |
+                    Q(remarks__icontains=token) |
+                    Q(items__returned_imei_list__icontains=token)
+                )
 
         if supplier_id:
             qs = qs.filter(supplier_id=supplier_id)
@@ -1267,7 +1288,7 @@ class PurchaseReturnListView(PurchaseModuleAccessMixin, ListView):
         if end_date:
             qs = qs.filter(return_date__lte=end_date)
 
-        return qs.order_by('-return_date', '-created_at')
+        return qs.distinct().order_by('-return_date', '-created_at')
 
     def render_to_response(self, context, **response_kwargs):
         if self.request.GET.get('export') == 'csv':

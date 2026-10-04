@@ -1,28 +1,18 @@
 {% extends "core/base.html" %}
-{% load humanize %}
+{% load humanize static core_tags %}
 
-{% block title %}Inventory &amp; Warehouse Catalog | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+{% block title %}Inventory &amp; Warehouse Management | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
 {% block extra_head %}
 <style>
 /* ==========================================================================
-   ENTERPRISE INVENTORY DASHBOARD DESIGN SYSTEM & SPECIFICATION ARCHITECTURE
+   ENTERPRISE INVENTORY DASHBOARD DESIGN SYSTEM
    ========================================================================== */
 :root {
-    --inv-bg: #f5f7fa;
-    --inv-surface: #ffffff;
-    --inv-surface-soft: #f8fafc;
-    --inv-surface-muted: #f1f5f9;
-    --inv-text: #101828;
-    --inv-text-secondary: #475467;
-    --inv-text-muted: #98a2b3;
-    --inv-placeholder: #98a2b3;
-    --inv-border: #e4e7ec;
-    --inv-border-strong: #d0d5dd;
     --inv-primary: #175cd3;
     --inv-primary-dark: #1849a9;
     --inv-primary-soft: #eff8ff;
-    --inv-primary-border: #bfdbfe;
+    --inv-primary-border: #b2ccff;
     --inv-success: #079455;
     --inv-success-soft: #ecfdf3;
     --inv-success-border: #a6f4c5;
@@ -32,709 +22,216 @@
     --inv-danger: #d92d20;
     --inv-danger-soft: #fef3f2;
     --inv-danger-border: #fee4e2;
-    --inv-purple: #6941c6;
-    --inv-purple-soft: #f4f3ff;
-    --inv-purple-border: #e9d7fe;
-    --inv-radius-sm: 8px;
-    --inv-radius-md: 12px;
-    --inv-radius-lg: 16px;
-    --inv-radius-pill: 9999px;
-    --inv-shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.04);
-    --inv-shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.05);
-    --inv-shadow-md: 0 8px 24px rgba(16, 24, 40, 0.06);
-    --inv-shadow-lg: 0 20px 60px rgba(16, 24, 40, 0.12);
-    --inv-transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+    --inv-slate-50: #f8fafc;
+    --inv-slate-100: #f1f5f9;
+    --inv-slate-200: #e2e8f0;
+    --inv-slate-300: #cbd5e1;
+    --inv-slate-600: #475569;
+    --inv-slate-700: #334155;
+    --inv-slate-900: #0f172a;
 }
 
-.inv-content {
-    max-width: 1680px;
+.inv-dashboard-wrapper {
+    max-width: 1720px;
     margin: 0 auto;
-    padding: 24px 20px;
 }
 
-/* Page Header & Title Bar */
-.inv-page-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 20px;
-    margin-bottom: 24px;
-}
-
-.inv-eyebrow {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--inv-primary);
-    font-size: 11px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    margin-bottom: 6px;
-}
-
-.inv-eyebrow-line {
-    width: 24px;
-    height: 2px;
-    background: var(--inv-primary);
-    border-radius: 999px;
-}
-
-.inv-page-title {
-    margin: 0;
-    font-size: clamp(26px, 2.5vw, 34px);
-    letter-spacing: -.035em;
-    line-height: 1.15;
-    font-weight: 800;
-    color: var(--inv-text);
-}
-
-.inv-page-description {
-    max-width: 720px;
-    margin: 8px 0 0;
-    color: var(--inv-text-secondary);
-    font-size: 13.5px;
-    line-height: 1.6;
-}
-
-.inv-header-actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: nowrap;
-    align-items: center;
-}
-
-/* Global Button System */
-.inv-btn {
-    min-height: 40px !important;
-    border-radius: 10px !important;
-    border: 1px solid var(--inv-border) !important;
-    background: white !important;
-    color: #344054 !important;
-    padding: 0 16px !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    gap: 8px !important;
-    font-size: 12.5px !important;
-    font-weight: 700 !important;
-    white-space: nowrap !important;
-    box-shadow: var(--inv-shadow-sm) !important;
-    text-decoration: none !important;
-    transition: all var(--inv-transition) !important;
-    cursor: pointer;
-}
-
-.inv-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--inv-shadow-md) !important;
-}
-
-.inv-btn-primary {
-    background: var(--inv-primary) !important;
-    border-color: var(--inv-primary) !important;
-    color: #ffffff !important;
-}
-
-.inv-btn-primary:hover {
-    background: var(--inv-primary-dark) !important;
-    border-color: var(--inv-primary-dark) !important;
-    color: #ffffff !important;
-}
-
-.inv-btn-excel {
-    background: #ecfdf5 !important;
-    border-color: var(--inv-success-border) !important;
-    color: #065f46 !important;
-}
-
-.inv-btn-excel:hover {
-    background: #d1fae5 !important;
-    border-color: #6ee7b7 !important;
-    color: #047857 !important;
-}
-
-/* Metric Cards System */
-.inv-kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin-bottom: 24px;
-}
-
-.inv-kpi {
-    background: var(--inv-surface);
-    border: 1px solid var(--inv-border);
-    border-radius: var(--inv-radius-lg);
+/* 1. Metric Overview Cards */
+.inv-overview-card {
+    background: #ffffff;
+    border: 1px solid var(--inv-slate-200);
+    border-radius: 14px;
     padding: 18px 20px;
-    min-height: 135px;
-    box-shadow: var(--inv-shadow-sm);
-    transition: all var(--inv-transition);
-}
-
-.inv-kpi:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--inv-shadow-md);
-    border-color: var(--inv-border-strong);
-}
-
-.inv-kpi-top {
+    height: 100%;
     display: flex;
-    align-items: center;
+    flex-direction: column;
     justify-content: space-between;
-    gap: 12px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-.inv-kpi-label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: .065em;
-    color: var(--inv-text-secondary);
-    font-weight: 800;
+.inv-overview-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px -4px rgba(15, 23, 42, 0.08);
+    border-color: #cbd5e1;
 }
 
-.inv-kpi-icon {
+.inv-card-icon-pill {
     width: 38px;
     height: 38px;
     border-radius: 10px;
-    display: grid;
-    place-items: center;
-    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
 }
 
-.inv-kpi-value {
-    margin-top: 14px;
-    font-size: 27px;
-    line-height: 1;
-    letter-spacing: -.04em;
+.inv-card-digits {
+    font-size: 1.65rem;
     font-weight: 800;
-    color: var(--inv-text);
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
     font-variant-numeric: tabular-nums;
 }
 
-.inv-kpi-meta {
-    margin-top: 8px;
-    font-size: 11.5px;
-    color: var(--inv-text-muted);
-}
-
-/* Two-Column Responsive Workspace Grid */
-.inv-workspace {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 20px;
-    align-items: start;
-}
-
-.inv-panel {
+/* 2. Middle Grid Panels */
+.inv-panel-card {
     background: #ffffff;
-    border: 1px solid var(--inv-border);
-    border-radius: var(--inv-radius-lg);
-    box-shadow: var(--inv-shadow-sm);
+    border: 1px solid var(--inv-slate-200);
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 .inv-panel-header {
     padding: 16px 20px;
-    border-bottom: 1px solid var(--inv-border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-}
-
-.inv-panel-title {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 800;
-    letter-spacing: -.015em;
-    color: var(--inv-text);
-}
-
-.inv-panel-subtitle {
-    color: var(--inv-text-muted);
-    font-size: 11.5px;
-    margin-top: 3px;
-}
-
-/* Search & Filter Toolbar */
-.inv-toolbar {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--inv-border);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-    background: #ffffff;
-}
-
-.inv-search {
-    flex: 1 1 280px;
-    position: relative;
-}
-
-.inv-search input {
-    width: 100%;
-    min-height: 40px;
-    border: 1px solid var(--inv-border);
-    border-radius: 10px;
-    outline: none;
-    padding: 0 14px 0 38px;
-    color: var(--inv-text);
-    background: #ffffff;
-    font-size: 12.5px;
-    transition: all 0.15s ease;
-}
-
-.inv-search input::placeholder,
-.inv-form-input::placeholder {
-    color: var(--inv-placeholder) !important;
-    opacity: 1;
-}
-
-.inv-search input:focus,
-.inv-select:focus,
-.inv-form-input:focus {
-    border-color: #84adff;
-    box-shadow: 0 0 0 3px rgba(23, 92, 211, 0.08);
-}
-
-.inv-search-icon {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #98a2b3;
-    pointer-events: none;
-    z-index: 2;
-}
-
-/* Real-Time Catalog Hints Dropdown */
-.inv-search-hints-dropdown {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    right: 0;
-    background: #ffffff;
-    border: 1px solid var(--inv-border);
-    border-radius: 12px;
-    box-shadow: var(--inv-shadow-lg);
-    max-height: 380px;
-    overflow-y: auto;
-    z-index: 1060;
-}
-
-.inv-search-hint-item {
-    padding: 10px 14px;
-    border-bottom: 1px solid #f1f5f9;
+    border-bottom: 1px solid var(--inv-slate-100);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    text-decoration: none;
-    color: var(--inv-text);
-    transition: background 0.15s ease;
+}
+
+/* Alert Pills */
+.inv-alert-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 9999px;
+    font-size: 0.72rem;
+    font-weight: 700;
     cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+    user-select: none;
+    text-decoration: none !important;
 }
 
-.inv-search-hint-item:last-child {
-    border-bottom: none;
+.inv-alert-pill:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
 }
 
-.inv-search-hint-item:hover,
-.inv-search-hint-item.active {
-    background-color: var(--inv-primary-soft);
+.inv-alert-pill.active {
+    outline: 2px solid var(--inv-primary);
+    outline-offset: 1px;
 }
 
-.inv-select {
-    min-height: 40px;
-    min-width: 140px;
-    border: 1px solid var(--inv-border);
+.pill-low-stock     { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.pill-out-stock     { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.pill-reorder       { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.pill-discrepancy   { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+.pill-expiring      { background: #fff7ed; color: #c2410c; border-color: #ffedd5; }
+
+/* Movement Stats Row */
+.movement-stat-box {
+    background: var(--inv-slate-50);
+    border: 1px solid var(--inv-slate-200);
     border-radius: 10px;
-    background: #ffffff;
-    color: #475467;
-    padding: 0 12px;
-    outline: none;
-    font-size: 12.5px;
-    font-weight: 650;
-    cursor: pointer;
+    padding: 10px 14px;
+    flex: 1;
 }
 
-.inv-filter-btn {
-    min-height: 40px;
-    width: 40px;
-    border: 1px solid var(--inv-border);
-    border-radius: 10px;
+.movement-stat-val {
+    font-size: 1.15rem;
+    font-weight: 800;
+    font-family: var(--erp-font-mono, monospace);
+    line-height: 1.2;
+}
+
+/* Period Switcher */
+.period-toggle-btn {
+    border: 1px solid var(--inv-slate-200);
     background: #ffffff;
-    color: #475467;
-    display: grid;
-    place-items: center;
+    padding: 4px 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--inv-slate-600);
+    border-radius: 8px;
     cursor: pointer;
-    text-decoration: none;
     transition: all 0.15s ease;
 }
 
-.inv-filter-btn:hover {
-    border-color: var(--inv-primary);
-    color: var(--inv-primary);
-    background: var(--inv-primary-soft);
+.period-toggle-btn.active {
+    background: var(--inv-slate-900);
+    color: #ffffff;
+    border-color: var(--inv-slate-900);
 }
 
-/* Master Catalog Table Architecture */
-.inv-table-wrap {
-    overflow-x: auto;
-}
-
-.inv-table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 1100px;
-}
-
-.inv-table thead th {
-    text-align: left;
-    padding: 12px 16px;
-    color: #667085;
-    background: #fcfcfd;
-    border-bottom: 1px solid var(--inv-border);
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: .065em;
+/* 3. Catalog Table & Controls */
+.inv-table th {
+    font-size: 0.6875rem;
     font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    background-color: #f8fafc;
+    border-bottom: 1px solid var(--inv-slate-200);
+    padding: 12px 14px;
     white-space: nowrap;
 }
 
-.inv-table tbody td {
-    padding: 13px 16px;
-    border-bottom: 1px solid #f0f2f5;
+.inv-table th.sortable-th {
+    cursor: pointer;
+    user-select: none;
+}
+
+.inv-table th.sortable-th:hover {
+    color: var(--inv-primary);
+}
+
+.inv-table td {
+    padding: 12px 14px;
+    font-size: 0.8125rem;
     vertical-align: middle;
-    font-size: 12.5px;
-    color: var(--inv-text);
+    border-bottom: 1px solid #f1f5f9;
 }
 
 .inv-table tbody tr:hover {
-    background: #fafcff;
+    background-color: #fbfcfe;
 }
 
-.inv-product-cell {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.inv-product-image {
-    width: 42px;
-    height: 42px;
-    border-radius: 10px;
-    background: linear-gradient(145deg, #f8fafc, #e2e8f0);
-    display: grid;
-    place-items: center;
-    color: #667085;
-    font-size: 16px;
-    flex: 0 0 auto;
-    overflow: hidden;
-    border: 1px solid var(--inv-border);
-}
-
-.inv-product-thumbnail-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-.inv-product-name {
-    font-weight: 750;
-    color: #101828;
-    text-decoration: none;
-}
-
-.inv-product-name:hover {
-    color: var(--inv-primary);
-}
-
-.inv-product-sku {
-    margin-top: 2px;
-    font-size: 10.5px;
-    color: #98a2b3;
-    font-family: 'JetBrains Mono', monospace;
-}
-
-.inv-badge {
+.table-status-pill {
+    padding: 3px 9px;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
     display: inline-flex;
     align-items: center;
-    padding: 3px 8px;
-    border-radius: 999px;
-    font-size: 10px;
-    font-weight: 800;
-    white-space: nowrap;
+    gap: 4px;
 }
 
-.inv-badge-primary { color: #175cd3; background: #eff8ff; border: 1px solid var(--inv-primary-border); }
-.inv-badge-success { color: #067647; background: #ecfdf3; border: 1px solid var(--inv-success-border); }
-.inv-badge-warning { color: #b54708; background: #fffaeb; border: 1px solid var(--inv-warning-border); }
-.inv-badge-danger  { color: #b42318; background: #fef3f2; border: 1px solid var(--inv-danger-border); }
-.inv-badge-purple  { color: #6941c6; background: #f4f3ff; border: 1px solid var(--inv-purple-border); }
+.status-in-stock   { background: #ecfdf3; color: #079455; border: 1px solid #a6f4c5; }
+.status-low-stock  { background: #fffaeb; color: #b54708; border: 1px solid #fedf89; }
+.status-out-stock  { background: #fef3f2; color: #d92d20; border: 1px solid #fee4e2; }
+.status-overstock  { background: #eff8ff; color: #175cd3; border: 1px solid #b2ccff; }
+.status-inactive   { background: #f1f5f9; color: #475467; border: 1px solid #e2e8f0; }
 
-.inv-price {
-    font-weight: 750;
-    font-family: 'JetBrains Mono', monospace;
-    font-variant-numeric: tabular-nums;
-}
-
-.inv-stock-value {
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
-}
-
-.inv-muted {
-    color: var(--inv-text-muted);
-}
-
-.inv-icon-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    border: 1px solid var(--inv-border);
-    background: white;
-    color: #667085;
-    display: grid;
-    place-items: center;
-    text-decoration: none;
-    transition: all 0.15s ease;
-}
-
-.inv-icon-btn:hover {
-    color: var(--inv-primary);
-    border-color: #9bbcff;
-    background: var(--inv-primary-soft);
-}
-
-/* Right-Hand Activity & Replenishment Feeds */
-.inv-right-column {
-    display: grid;
-    gap: 18px;
-}
-
-.inv-alert-panel {
-    padding: 18px;
-}
-
-.inv-alert-heading {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-}
-
-.inv-alert-count {
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: var(--inv-warning-soft);
-    color: var(--inv-warning);
-    border: 1px solid var(--inv-warning-border);
-    display: grid;
-    place-items: center;
-    font-weight: 800;
-    font-size: 11px;
-}
-
-.inv-alert-item {
-    padding: 12px 0;
-    border-bottom: 1px solid #f2f4f7;
-}
-
-.inv-alert-item:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-}
-
-.inv-alert-product {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.inv-alert-name {
-    font-size: 12px;
-    font-weight: 750;
-    color: var(--inv-text);
-}
-
-.inv-alert-stock {
-    font-size: 10.5px;
-    color: var(--inv-danger);
-    font-weight: 750;
-    margin-top: 2px;
-}
-
-.inv-progress {
-    height: 6px;
-    margin-top: 8px;
-    background: #f2f4f7;
-    border-radius: 999px;
-    overflow: hidden;
-}
-
-.inv-progress-bar {
-    height: 100%;
-    border-radius: inherit;
-    background: var(--inv-danger);
-}
-
-.inv-activity-panel {
-    padding: 18px;
-}
-
-.inv-activity {
-    display: grid;
-    gap: 14px;
-    margin-top: 14px;
-}
-
-.inv-activity-item {
-    display: flex;
-    gap: 10px;
-}
-
-.inv-activity-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    background: var(--inv-primary-soft);
-    color: var(--inv-primary);
-    border: 1px solid var(--inv-primary-border);
-    display: grid;
-    place-items: center;
-    flex: 0 0 auto;
-    font-size: 13px;
-    font-weight: 800;
-}
-
-.inv-activity-title {
-    font-size: 11.5px;
-    font-weight: 750;
-    color: var(--inv-text);
-}
-
-.inv-activity-meta {
-    margin-top: 2px;
-    color: var(--inv-text-muted);
-    font-size: 10px;
-    line-height: 1.4;
-}
-
-/* Modals Architecture & Backdrop Blur */
-.inv-modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(16, 24, 40, 0.6);
-    backdrop-filter: blur(6px);
-    z-index: 1050;
-    display: none;
-    place-items: center;
-    padding: 20px;
-}
-
-.inv-modal-overlay.show {
-    display: grid;
-}
-
-.inv-modal {
-    width: min(840px, 100%);
-    max-height: 90vh;
-    overflow-y: auto;
-    background: #ffffff;
-    border-radius: 18px;
-    box-shadow: var(--inv-shadow-lg);
-}
-
-.inv-modal-header {
-    padding: 18px 22px;
-    border-bottom: 1px solid var(--inv-border);
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: center;
-}
-
-.inv-modal-title {
-    font-size: 16px;
-    font-weight: 800;
-    letter-spacing: -.02em;
-    color: var(--inv-text);
-}
-
-.inv-modal-description {
-    color: var(--inv-text-secondary);
-    font-size: 11.5px;
-    margin-top: 3px;
-}
-
-.inv-modal-close {
-    width: 32px;
-    height: 32px;
-    border: 1px solid var(--inv-border);
-    background: white;
-    border-radius: 8px;
-    color: #667085;
+.interactive-warehouse-row {
     cursor: pointer;
-    display: grid;
-    place-items: center;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease;
 }
 
-.inv-modal-close:hover {
-    background: #f8fafc;
-    color: var(--inv-text);
+.interactive-warehouse-row:hover {
+    background-color: #eff8ff !important;
 }
 
-.inv-form {
-    padding: 20px 22px;
+/* Modals System */
+.inv-modal-header {
+    background: #0f172a;
+    color: #ffffff;
+    padding: 16px 22px;
+    border: none;
 }
 
-.inv-form-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-}
-
-.inv-form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-
-.inv-form-group.full {
-    grid-column: 1 / -1;
-}
-
-.inv-form-label {
-    font-size: 11.5px;
-    font-weight: 750;
-    color: #344054;
-}
-
-.inv-form-input {
-    min-height: 38px;
-    border: 1px solid var(--inv-border);
-    border-radius: 9px;
-    padding: 0 11px;
-    outline: none;
-    font-size: 12.5px;
-    color: var(--inv-text);
-    width: 100%;
-}
-
-.inv-modal-footer {
-    margin-top: 20px;
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-}
-
-/* Quick Add Button */
+/* Quick Add '+' Button next to form selectors */
 .inv-quick-add-btn {
     display: inline-flex;
     align-items: center;
@@ -745,1571 +242,1694 @@
     background: var(--inv-primary-soft);
     color: var(--inv-primary);
     border: 1px solid var(--inv-primary-border);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 800;
     cursor: pointer;
     line-height: 1;
     transition: all 0.15s ease;
+    padding: 0;
 }
 
 .inv-quick-add-btn:hover {
     background: var(--inv-primary);
-    color: white;
+    color: #ffffff;
     border-color: var(--inv-primary);
     transform: scale(1.05);
 }
 
-@media (max-width: 1200px) {
-    .inv-workspace { grid-template-columns: 1fr; }
-    .inv-right-column { grid-template-columns: 1fr 1fr; }
+/* Sub-Modal Z-Index Elevation (opens over Add Product modal cleanly) */
+.sub-helper-modal {
+    z-index: 1075 !important;
 }
-
-@media (max-width: 900px) {
-    .inv-kpi-grid { grid-template-columns: repeat(2, 1fr); }
-    .inv-page-header { flex-direction: column; }
-    .inv-header-actions { justify-content: flex-start; width: 100%; flex-wrap: wrap; }
-}
-
-@media (max-width: 600px) {
-    .inv-kpi-grid, .inv-right-column { grid-template-columns: 1fr; }
-    .inv-toolbar { flex-direction: column; align-items: stretch; }
-    .inv-search { flex-basis: 100%; }
-    .inv-form-grid { grid-template-columns: 1fr; }
-    .inv-form-group.full { grid-column: auto; }
+.sub-helper-modal .modal-backdrop {
+    z-index: 1070 !important;
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="inv-content">
+<div class="inv-dashboard-wrapper py-3 px-2 px-md-4">
 
-    <!-- PAGE HEADER -->
-    <div class="inv-page-header">
+    <!-- =====================================================================
+         1. PAGE HEADER & 4 COMPACT ACTION BUTTONS
+         ===================================================================== -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 bg-white p-3 rounded-4 border shadow-xs">
         <div>
-            <div class="inv-eyebrow">
-                <span class="inv-eyebrow-line"></span>
-                Inventory &amp; Smartphones Management
+            <div class="d-flex align-items-center gap-2">
+                <h4 class="fw-bold text-dark mb-0">Inventory &amp; Warehouse</h4>
+                <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-2.5 py-1 fs-2xs fw-bold">
+                    <i class="fas fa-boxes-stacked me-1"></i> Multi-Warehouse
+                </span>
             </div>
-            <h1 class="inv-page-title">
-                Inventory &amp; Warehouse
-            </h1>
-            <p class="inv-page-description">
-                Manage smartphone memory variants (RAM/ROM), specifications, branch inventory stock counters,
-                fluctuating batch landed costs, warranty terms (Phone, Battery &amp; Screen), and warehouse rack locations.
+            <p class="text-muted fs-xs mb-0 mt-0.5">
+                Multi-warehouse stock levels, SKU tracking, velocity analytics, valuations, and physical audits
             </p>
         </div>
 
-        <div class="inv-header-actions">
-            <!-- Intelligent Excel Importer Link -->
-            <a href="{% url 'inventory:excel_import' %}" class="inv-btn inv-btn-excel" title="Upload existing Excel/CSV spreadsheet">
-                <i class="fas fa-file-excel text-success"></i> Import Excel (.xlsx)
-            </a>
-
-            <a href="{% url 'products:barcode_print' %}" class="inv-btn">
-                <i class="fas fa-barcode text-primary"></i> Generate Barcodes
-            </a>
-
-            <a href="{% url 'reports:export_csv' 'valuation' %}" class="inv-btn">
-                <i class="fas fa-file-invoice-dollar text-secondary"></i> Stock Valuation
-            </a>
-
-            <button type="button" class="inv-btn inv-btn-primary" id="openAddModalBtn">
-                <i class="fas fa-plus-circle"></i> Add Product / Phone
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Modal 1: + Add Product -->
+            <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 py-1.5 fw-bold shadow-xs" data-bs-toggle="modal" data-bs-target="#addProductModal" id="btnOpenAddProduct">
+                <i class="fas fa-plus-circle me-1"></i> Add Product
             </button>
+
+            <!-- Modal 2: Stock Adjustment -->
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 py-1.5 fw-bold" data-bs-toggle="modal" data-bs-target="#stockAdjustmentModal">
+                <i class="fas fa-sliders me-1 text-primary"></i> Stock Adjustment
+            </button>
+
+            <!-- Modal 3: Stock Transfer -->
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 py-1.5 fw-bold" data-bs-toggle="modal" data-bs-target="#stockTransferModal">
+                <i class="fas fa-dolly me-1 text-warning"></i> Stock Transfer
+            </button>
+
+            <!-- Action 4: Filtered CSV Export -->
+            <a href="{% url 'inventory:inventory_export_csv' %}" id="btnHeaderExportCsv" class="btn btn-outline-success btn-sm rounded-pill px-3 py-1.5 fw-bold">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
         </div>
     </div>
 
-    <!-- KPI CARDS -->
-    <div class="inv-kpi-grid">
-        <div class="inv-kpi">
-            <div class="inv-kpi-top">
-                <div class="inv-kpi-label">Active SKUs</div>
-                <div class="inv-kpi-icon" style="background:#eff8ff; color:#175cd3;">
-                    <i class="fas fa-boxes-stacked"></i>
-                </div>
-            </div>
-            <div class="inv-kpi-value">{{ kpi_active_skus|intcomma }}</div>
-            <div class="inv-kpi-meta">Catalog models registered</div>
-        </div>
-
-        <!-- OUTLET CONTEXT CARD WITH INSTANT SWITCHER -->
-        <div class="inv-kpi position-relative">
-            <div class="inv-kpi-top">
-                <div class="inv-kpi-label">Active Outlet Context</div>
-                <div class="dropdown">
-                    <button class="inv-kpi-icon border-0 p-0" style="background:#ecfdf3; color:#079455; cursor:pointer;" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Switch Active Outlet">
-                        <i class="fas fa-store"></i>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0 p-2 rounded-3" style="min-width: 240px; z-index: 1060;">
-                        <li class="px-3 py-1 text-muted fs-2xs text-uppercase fw-bold border-bottom mb-1">Switch Branch View</li>
-                        {% for br in AVAILABLE_BRANCHES %}
-                        <li>
-                            <form action="{% url 'branches:switch_branch' %}" method="post" class="m-0">
-                                {% csrf_token %}
-                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                                <input type="hidden" name="branch" value="{{ br.id }}">
-                                <button type="submit" class="dropdown-item rounded-2 py-2 fs-xs d-flex align-items-center justify-content-between {% if ACTIVE_BRANCH.id == br.id %}bg-success bg-opacity-10 text-success fw-bold{% endif %}">
-                                    <span>{{ br.name }}</span>
-                                    <span class="badge bg-light text-dark border">{{ br.code }}</span>
-                                </button>
-                            </form>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-            <div class="inv-kpi-value fs-4 text-truncate" title="{{ ACTIVE_BRANCH.name }}">{{ ACTIVE_BRANCH.name|default:"Main Counter" }}</div>
-            <div class="inv-kpi-meta d-flex align-items-center justify-content-between">
-                <span>Code: <strong>{{ ACTIVE_BRANCH.code|default:"HQ" }}</strong></span>
-                <span class="badge bg-success bg-opacity-10 text-success fs-2xs fw-bold"><i class="fas fa-circle fs-2xs me-1"></i> Live Active</span>
-            </div>
-        </div>
-
-        <div class="inv-kpi">
-            <div class="inv-kpi-top">
-                <div class="inv-kpi-label">Low Stock Items</div>
-                <div class="inv-kpi-icon" style="background:#fffaeb; color:#dc6803;">
-                    <i class="fas fa-triangle-exclamation"></i>
-                </div>
-            </div>
-            <div class="inv-kpi-value">{{ kpi_low_stock_count }}</div>
-            <div class="inv-kpi-meta"><strong style="color:#dc6803;">Below alert threshold</strong></div>
-        </div>
-
-        <div class="inv-kpi">
-            <div class="inv-kpi-top">
-                <div class="inv-kpi-label">Inventory Asset Value</div>
-                <div class="inv-kpi-icon" style="background:#f4f3ff; color:#6941c6;">
-                    <i class="fas fa-coins"></i>
-                </div>
-            </div>
-            <div class="inv-kpi-value">Rs. {{ kpi_inventory_value|floatformat:0|intcomma }}</div>
-            <div class="inv-kpi-meta">Current stock at landed cost</div>
-        </div>
-    </div>
-
-    <!-- WORKSPACE -->
-    <div class="inv-workspace">
-
-        <!-- MAIN INVENTORY PANEL -->
-        <div class="inv-panel">
-            <div class="inv-panel-header">
-                <div>
-                    <h2 class="inv-panel-title">Product &amp; Smartphone Catalog</h2>
-                    <div class="inv-panel-subtitle">Track memory variants, pricing, component warranty terms, stock levels and storage racks</div>
-                </div>
-
-                <a href="{% url 'reports:export_csv' 'valuation' %}" class="inv-btn" style="height:34px; padding:0 12px; font-size:11.5px;">
-                    <i class="fas fa-download me-1"></i> Export CSV
-                </a>
-            </div>
-
-            <!-- TOOLBAR WITH REAL-TIME CATALOG FILTER HINTS -->
-            <form method="get" class="inv-toolbar" id="filterForm">
-                <div class="inv-search position-relative" id="catalogSearchContainer">
-                    <i class="fas fa-search inv-search-icon"></i>
-                    <input type="text" name="q" id="catalogSearchInput" value="{{ request.GET.q|default:'' }}" 
-                           placeholder="Search phone name, RAM/ROM, SKU, barcode..." autocomplete="off">
-                    
-                    <!-- Live Instant Search Hints Dropdown -->
-                    <div class="inv-search-hints-dropdown d-none" id="catalogSearchHints"></div>
-                </div>
-
-                <select class="inv-select" name="category" id="catalogCategoryFilter" onchange="document.getElementById('filterForm').submit()">
-                    <option value="all">All Categories</option>
-                    {% for cat in categories %}
-                        <option value="{{ cat.id }}" {% if request.GET.category == cat.id|stringformat:"s" %}selected{% endif %}>
-                            {{ cat.name }}
-                        </option>
-                    {% endfor %}
-                </select>
-
-                <select class="inv-select" name="brand" id="catalogBrandFilter" onchange="document.getElementById('filterForm').submit()">
-                    <option value="all">All Brands</option>
-                    {% for b in brands %}
-                        <option value="{{ b.id }}" {% if request.GET.brand == b.id|stringformat:"s" %}selected{% endif %}>
-                            {{ b.name }}
-                        </option>
-                    {% endfor %}
-                </select>
-
-                <select class="inv-select" name="stock_status" onchange="document.getElementById('filterForm').submit()">
-                    <option value="all" {% if request.GET.stock_status == 'all' or not request.GET.stock_status %}selected{% endif %}>All Stock</option>
-                    <option value="healthy" {% if request.GET.stock_status == 'healthy' %}selected{% endif %}>In Stock</option>
-                    <option value="low" {% if request.GET.stock_status == 'low' %}selected{% endif %}>Low Stock</option>
-                    <option value="critical" {% if request.GET.stock_status == 'critical' %}selected{% endif %}>Zero / Out</option>
-                </select>
-
-                <a href="{% url 'inventory:product_list' %}" class="inv-filter-btn" title="Clear filters">
-                    <i class="fas fa-rotate-left"></i>
-                </a>
-            </form>
-
-            <!-- TABLE WITH 10 COLUMNS -->
-            <div class="inv-table-wrap">
-                <table class="inv-table">
-                    <thead>
-                        <tr>
-                            <th>Phone / Product</th>
-                            <th>Variant (RAM/ROM)</th>
-                            <th>Category</th>
-                            <th>Rack Location</th>
-                            <th>Stock Available</th>
-                            <th>Latest Cost</th>
-                            <th>Current MRP</th>
-                            <th>Warranty Coverage</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for product in products %}
-                        <tr>
-                            <td>
-                                <div class="inv-product-cell">
-                                    <div class="inv-product-image">
-                                        {% if product.image %}
-                                            <img src="{{ product.image.url }}" 
-                                                 alt="{{ product.name }}" 
-                                                 class="inv-product-thumbnail-img"
-                                                 onclick="window.open('{{ product.image.url }}', '_blank')"
-                                                 title="Click to view photo">
-                                        {% elif product.requires_imei_tracking %}
-                                            <i class="fas fa-mobile-screen text-primary"></i>
-                                        {% elif product.is_spare_part %}
-                                            <i class="fas fa-wrench text-danger"></i>
-                                        {% else %}
-                                            <i class="fas fa-box text-secondary"></i>
-                                        {% endif %}
-                                    </div>
-                                    <div>
-                                        <a href="{% url 'inventory:product_detail' product.pk %}" class="inv-product-name">
-                                            {{ product.name }}
-                                        </a>
-                                        <div class="inv-product-sku">
-                                            SKU: {{ product.sku }}{% if product.barcode %} &middot; {{ product.barcode }}{% endif %}
-                                        </div>
-                                    </div>
-                                </div>
-                            </td>
-
-                            <td>
-                                {% if product.ram and product.internal_storage %}
-                                    <span class="inv-badge inv-badge-purple">
-                                        {{ product.ram }} / {{ product.internal_storage }}
-                                    </span>
-                                    {% if product.color_variant %}
-                                        <div class="text-muted" style="font-size: 10px; margin-top: 2px;">{{ product.color_variant }}</div>
-                                    {% endif %}
-                                {% elif product.variant_name %}
-                                    <span class="inv-badge" style="background:#f2f4f7; color:#344054; border:1px solid var(--inv-border);">{{ product.variant_name }}</span>
-                                {% else %}
-                                    <span class="inv-muted">-</span>
-                                {% endif %}
-                            </td>
-
-                            <td>
-                                <div>{{ product.category.name }}</div>
-                                {% if product.brand %}<small class="inv-muted">{{ product.brand.name }}</small>{% endif %}
-                            </td>
-
-                            <td>
-                                {% if product.rack_number %}
-                                    <span class="inv-badge" style="background:#f8fafc; border:1px solid var(--inv-border); color:#475467;">
-                                        {{ product.rack_number }}{% if product.shelf_identifier %} ({{ product.shelf_identifier }}){% endif %}
-                                    </span>
-                                {% else %}
-                                    <span class="inv-muted">-</span>
-                                {% endif %}
-                            </td>
-
-                            <td>
-                                {% for bs in product.branch_stocks.all %}
-                                    {% if bs.branch == ACTIVE_BRANCH %}
-                                        <span class="inv-stock-value">{{ bs.quantity|floatformat:0 }}</span>
-                                        <span class="inv-muted"> {{ product.base_unit.code }}</span>
-                                    {% endif %}
-                                {% empty %}
-                                    <span class="inv-stock-value">0</span>
-                                    <span class="inv-muted"> {{ product.base_unit.code }}</span>
-                                {% endfor %}
-                            </td>
-
-                            <td class="inv-price">
-                                NPR {{ product.purchase_price|floatformat:2|intcomma }}
-                            </td>
-
-                            <td class="inv-price" style="color: var(--inv-primary);">
-                                NPR {{ product.selling_price|floatformat:2|intcomma }}
-                            </td>
-
-                            <!-- WARRANTY COVERAGE BREAKDOWN COLUMN -->
-                            <td>
-                                {% if product.requires_imei_tracking or product.component_warranty_rules.exists %}
-                                    <div class="d-flex flex-column gap-1">
-                                        <div class="d-flex flex-wrap gap-1">
-                                            {% for rule in product.component_warranty_rules.all %}
-                                                {% if rule.component_type == 'DEVICE' %}
-                                                    <span class="inv-badge inv-badge-primary" title="{{ rule.coverage_conditions|default:'Main Handset Body & Motherboard' }}">
-                                                        Phone: {{ rule.warranty_months }}M
-                                                    </span>
-                                                {% elif rule.component_type == 'BATTERY' %}
-                                                    <span class="inv-badge inv-badge-warning" title="{{ rule.coverage_conditions|default:'Internal Battery' }}">
-                                                        Batt: {{ rule.warranty_months }}M
-                                                    </span>
-                                                {% elif rule.component_type == 'SCREEN' %}
-                                                    <span class="inv-badge inv-badge-success" title="{{ rule.coverage_conditions|default:'Screen / Touch Panel' }}">
-                                                        Screen: {{ rule.warranty_months }}M
-                                                    </span>
-                                                {% endif %}
-                                            {% empty %}
-                                                <span class="inv-badge inv-badge-primary">
-                                                    Phone: {{ product.warranty_months|default:12 }}M
-                                                </span>
-                                                <span class="inv-badge inv-badge-warning">
-                                                    Batt: 6M
-                                                </span>
-                                                <span class="inv-badge inv-badge-success">
-                                                    Screen: 3M
-                                                </span>
-                                            {% endfor %}
-                                        </div>
-                                        <span class="text-danger fw-bold" style="font-size: 9.5px;" title="Physical drops, broken screen and liquid damage strictly void warranty">
-                                            <i class="fas fa-ban me-0.5"></i> Drops/Liquid Void
-                                        </span>
-                                    </div>
-                                {% elif product.warranty_months > 0 %}
-                                    <span class="inv-badge" style="background:#f1f5f9; color:#475569; border:1px solid var(--inv-border);">
-                                        {{ product.warranty_months }} Months
-                                    </span>
-                                {% else %}
-                                    <span class="inv-muted" style="font-size: 11px;">No Warranty</span>
-                                {% endif %}
-                            </td>
-
-                            <td>
-                                {% for bs in product.branch_stocks.all %}
-                                    {% if bs.branch == ACTIVE_BRANCH %}
-                                        {% if bs.quantity <= 0 %}
-                                            <span class="inv-badge inv-badge-danger">Critical</span>
-                                        {% elif bs.is_low_stock %}
-                                            <span class="inv-badge inv-badge-warning">Low Stock</span>
-                                        {% else %}
-                                            <span class="inv-badge inv-badge-success">In Stock</span>
-                                        {% endif %}
-                                    {% endif %}
-                                {% empty %}
-                                    <span class="inv-badge inv-badge-danger">Zero Stock</span>
-                                {% endfor %}
-                            </td>
-
-                            <td>
-                                <div class="d-flex align-items-center gap-1">
-                                    <a href="{% url 'inventory:product_detail' product.pk %}" class="inv-icon-btn" title="View Details, Warranties &amp; Historical Costs">
-                                        <i class="fas fa-ellipsis-vertical"></i>
-                                    </a>
-                                </div>
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="10" class="text-center py-5 text-muted">
-                                <div class="py-4">
-                                    <i class="fas fa-boxes-stacked fs-1 text-secondary opacity-25 d-block mb-3"></i>
-                                    <div style="font-weight: 750; color: #101828; font-size: 14px;">No products or smartphones matched your query</div>
-                                    <div style="font-size: 12px; color: #667085; margin-top: 4px;">Click the button below to register a new phone or import from Excel.</div>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- PAGINATION -->
-            <div class="p-3 border-top bg-light">
-                {% include "includes/_pagination.html" %}
-            </div>
-        </div>
-
-        <!-- RIGHT COLUMN -->
-        <div class="inv-right-column">
-
-            <!-- LOW STOCK WATCH -->
-            <div class="inv-panel inv-alert-panel">
-                <div class="inv-alert-heading">
+    <!-- =====================================================================
+         2. 6 METRIC OVERVIEW CARDS
+         ===================================================================== -->
+    <div class="row g-3 mb-4">
+        <!-- Card 1: Total SKUs -->
+        <div class="col-12 col-sm-6 col-xl-2">
+            <div class="inv-overview-card border-start border-primary border-4">
+                <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <h2 class="inv-panel-title">Replenishment Watch</h2>
-                        <div class="inv-panel-subtitle">Items requiring purchase reorder</div>
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Total Products</span>
+                        <div class="inv-card-digits text-dark mt-1">{{ kpi_total_skus|default:0|intcomma }}</div>
                     </div>
-                    <div class="inv-alert-count">
-                        {{ kpi_low_stock_count }}
-                    </div>
-                </div>
-
-                {% for item in replenishment_items %}
-                <div class="inv-alert-item">
-                    <div class="inv-alert-product">
-                        <div>
-                            <div class="inv-alert-name">{{ item.product.name|truncatechars:24 }}</div>
-                            <div class="inv-alert-stock">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }} remaining</div>
-                        </div>
-                        <strong style="font-size:10.5px; color: var(--inv-danger);">
-                            Alert: {{ item.low_stock_threshold|floatformat:0 }}
-                        </strong>
-                    </div>
-                    <div class="inv-progress">
-                        <div class="inv-progress-bar" style="width: {% widthratio item.quantity item.low_stock_threshold 100 %}%;"></div>
+                    <div class="inv-card-icon-pill" style="background: #eff6ff; color: #175cd3;">
+                        <i class="fas fa-boxes-stacked"></i>
                     </div>
                 </div>
-                {% empty %}
-                <div class="text-center py-4 text-muted" style="font-size: 11.5px;">
-                    <i class="fas fa-circle-check text-success me-1"></i> All inventory stocks healthy
-                </div>
-                {% endfor %}
-            </div>
-
-            <!-- ACTIVITY FEED -->
-            <div class="inv-panel inv-activity-panel">
-                <h2 class="inv-panel-title">Recent Activity</h2>
-                <div class="inv-panel-subtitle">Latest inventory &amp; IMEI logs</div>
-
-                <div class="inv-activity">
-                    {% for act in recent_activities %}
-                    <div class="inv-activity-item">
-                        <div class="inv-activity-icon">
-                            {% if act.movement_type == 'PURCHASE' %}
-                                <i class="fas fa-plus"></i>
-                            {% elif act.movement_type == 'SALE' %}
-                                <i class="fas fa-arrow-down"></i>
-                            {% else %}
-                                <i class="fas fa-rotate"></i>
-                            {% endif %}
-                        </div>
-                        <div>
-                            <div class="inv-activity-title">
-                                {{ act.quantity_delta }} {{ act.product.base_unit.code }} ({{ act.get_movement_type_display }})
-                            </div>
-                            <div class="inv-activity-meta">
-                                {{ act.product.name|truncatechars:22 }} &middot; {{ act.reference_document|default:"Manual" }}
-                                <br>
-                                {{ act.created_at|timesince }} ago
-                            </div>
-                        </div>
-                    </div>
-                    {% empty %}
-                    <div class="text-center py-4 text-muted" style="font-size: 11.5px;">
-                        No recent stock movements recorded.
-                    </div>
-                    {% endfor %}
+                <div class="text-muted fs-3xs mt-2 pt-2 border-top">
+                    Active Catalog SKUs
                 </div>
             </div>
+        </div>
 
+        <!-- Card 2: Total Units in Stock -->
+        <div class="col-12 col-sm-6 col-xl-2">
+            <div class="inv-overview-card border-start border-info border-4">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Total Stock Units</span>
+                        <div class="inv-card-digits text-dark mt-1">{{ kpi_total_units|default:0|intcomma }}</div>
+                    </div>
+                    <div class="inv-card-icon-pill" style="background: #f0fdf4; color: #16a34a;">
+                        <i class="fas fa-cubes"></i>
+                    </div>
+                </div>
+                <div class="text-muted fs-3xs mt-2 pt-2 border-top">
+                    Physical Units On Hand
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 3: Low Stock Items -->
+        <div class="col-12 col-sm-6 col-xl-2">
+            <div class="inv-overview-card border-start border-warning border-4" style="background: #fffdf5;">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-warning-emphasis fs-3xs text-uppercase fw-bold d-block">Low Stock Items</span>
+                        <div class="inv-card-digits text-warning-emphasis mt-1">{{ kpi_low_stock_count|default:0 }}</div>
+                    </div>
+                    <div class="inv-card-icon-pill" style="background: #fef3c7; color: #d97706;">
+                        <i class="fas fa-triangle-exclamation"></i>
+                    </div>
+                </div>
+                <div class="text-warning-emphasis fs-3xs mt-2 pt-2 border-top">
+                    At/Below Reorder Threshold
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 4: Out of Stock -->
+        <div class="col-12 col-sm-6 col-xl-2">
+            <div class="inv-overview-card border-start border-danger border-4" style="background: #fffafa;">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-danger fs-3xs text-uppercase fw-bold d-block">Out of Stock</span>
+                        <div class="inv-card-digits text-danger mt-1">{{ kpi_out_of_stock_count|default:0 }}</div>
+                    </div>
+                    <div class="inv-card-icon-pill" style="background: #fee2e2; color: #dc2626;">
+                        <i class="fas fa-ban"></i>
+                    </div>
+                </div>
+                <div class="text-danger fs-3xs mt-2 pt-2 border-top">
+                    Zero Available Units
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 5: Inventory Valuation -->
+        <div class="col-12 col-sm-6 col-xl-2">
+            <div class="inv-overview-card border-start border-success border-4">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Inventory Value</span>
+                        <div class="inv-card-digits text-success mt-1" style="font-size: 1.35rem;">
+                            Rs. {{ kpi_inventory_value|default:"0"|floatformat:0|intcomma }}
+                        </div>
+                    </div>
+                    <div class="inv-card-icon-pill" style="background: #ecfdf5; color: #059669;">
+                        <i class="fas fa-coins"></i>
+                    </div>
+                </div>
+                <div class="text-muted fs-3xs mt-2 pt-2 border-top">
+                    Landed Cost Valuation
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 6: Total Warehouses -->
+        <div class="col-12 col-sm-6 col-xl-2">
+            <div class="inv-overview-card border-start border-secondary border-4">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Warehouses</span>
+                        <div class="inv-card-digits text-dark mt-1">{{ kpi_total_warehouses|default:1 }}</div>
+                    </div>
+                    <div class="inv-card-icon-pill" style="background: #f1f5f9; color: #475569;">
+                        <i class="fas fa-warehouse"></i>
+                    </div>
+                </div>
+                <div class="text-muted fs-3xs mt-2 pt-2 border-top">
+                    Active Storage Locations
+                </div>
+            </div>
         </div>
     </div>
-</div>
 
-<!-- =========================================================
-     1. QUICK ADD PRODUCT MODAL (COMPLETE WITH BARCODE, MODEL NUMBER & WHOLESALE PRICE)
-     ========================================================= -->
-<div class="inv-modal-overlay" id="addProductModal">
-    <div class="inv-modal">
-        <div class="inv-modal-header">
-            <div>
-                <div class="inv-modal-title">Quick Add Product / Smartphone</div>
-                <div class="inv-modal-description">Establish technical specifications, memory variants, component warranties, and initial stock.</div>
+    <!-- =====================================================================
+         3. MIDDLE SECTION: WAREHOUSE OVERVIEW & STOCK VELOCITY / ALERTS
+         ===================================================================== -->
+    <div class="row g-4 mb-4">
+        <!-- Left Panel: Warehouse Overview Table (Clickable to Filter) -->
+        <div class="col-12 col-xl-6">
+            <div class="inv-panel-card">
+                <div class="inv-panel-header">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-warehouse text-primary me-2"></i> Warehouse Overview
+                        </h6>
+                        <small class="text-muted fs-3xs">Click any location row below to filter the product catalog table</small>
+                    </div>
+                    <a href="{% url 'branches:branch_list' %}" class="fs-xs fw-bold text-primary text-decoration-none">
+                        Manage &rarr;
+                    </a>
+                </div>
+
+                <div class="table-responsive flex-grow-1">
+                    <table class="table inv-table mb-0">
+                        <thead>
+                            <tr>
+                                <th>Warehouse Location</th>
+                                <th class="text-center">Products</th>
+                                <th class="text-center">Stock Units</th>
+                                <th class="text-end">Valuation (NPR)</th>
+                                <th class="text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for wh in warehouses_summary %}
+                            <tr class="interactive-warehouse-row" data-warehouse-id="{{ wh.id }}" data-warehouse-name="{{ wh.name }}">
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="inv-card-icon-pill" style="width: 28px; height: 28px; font-size: 0.75rem; background: {% if wh.is_main_branch %}#eff6ff; color: #175cd3;{% else %}#f8fafc; color: #64748b;{% endif %}">
+                                            <i class="fas fa-store"></i>
+                                        </div>
+                                        <div>
+                                            <strong class="text-dark d-block fs-xs">{{ wh.name }}</strong>
+                                            <span class="text-muted font-mono fs-3xs">Code: {{ wh.code }}</span>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="text-center font-mono fw-bold fs-xs">{{ wh.products_count|intcomma }}</td>
+                                <td class="text-center font-mono fw-bold fs-xs text-primary">{{ wh.stock_quantity|intcomma }}</td>
+                                <td class="text-end font-mono fw-bold fs-xs text-success">Rs. {{ wh.inventory_value|floatformat:2|intcomma }}</td>
+                                <td class="text-center">
+                                    <span class="badge bg-success bg-opacity-10 text-success fs-3xs fw-bold px-2 py-1">
+                                        Active
+                                    </span>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted fs-xs">No active warehouses registered.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <button type="button" class="inv-modal-close" id="closeAddModalBtn" aria-label="Close">
-                <i class="fas fa-times"></i>
-            </button>
         </div>
 
-        <form class="inv-form" action="{% url 'products:quick_create' %}" method="post" id="quickAddForm">
-            {% csrf_token %}
-            
-            <input type="hidden" name="tax_pricing_type" value="{% if IS_VAT_MODE %}INCLUSIVE{% else %}EXEMPT{% endif %}">
-            <input type="hidden" name="is_vat_applicable" value="{% if IS_VAT_MODE %}true{% else %}false{% endif %}">
-            <input type="hidden" name="vat_rate" value="{{ DEFAULT_TAX_RATE|default:'0.00' }}">
-
-            <div class="inv-form-grid">
-                <!-- 1. PRODUCT NAME (FULL WIDTH) -->
-                <div class="inv-form-group full">
-                    <label class="inv-form-label">Product Name *</label>
-                    <input class="inv-form-input" name="name" required placeholder="e.g. Samsung Galaxy A55 5G">
-                </div>
-
-                <!-- 2. MODEL NAME & MODEL NUMBER -->
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Model Name</label>
-                    <input class="inv-form-input" name="model_name" placeholder="e.g. Galaxy A55">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Model Number (मोडेल नम्बर)</label>
-                    <input class="inv-form-input" name="model_number" placeholder="e.g. SM-A556E/DS">
-                </div>
-
-                <!-- 3. SKU CODE & PHYSICAL BOX BARCODE -->
-                <div class="inv-form-group">
-                    <label class="inv-form-label">SKU Code (Auto if blank)</label>
-                    <input class="inv-form-input" name="sku" placeholder="e.g. SAM-A55-256">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Barcode (Scan physical box or leave blank)</label>
-                    <input class="inv-form-input font-monospace" name="barcode" placeholder="Scan physical barcode or leave blank">
-                </div>
-
-                <!-- 4. CATEGORY ASYNC CONTEXTUAL SEARCH -->
-                <div class="inv-form-group">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <label class="inv-form-label mb-0">Category *</label>
-                        <button type="button" class="inv-quick-add-btn" id="openQuickCategoryBtn" title="Quick Add New Category">
-                            <i class="fas fa-plus"></i>
+        <!-- Right Panel: Stock Movement & Alert Velocity Panel -->
+        <div class="col-12 col-xl-6">
+            <div class="inv-panel-card p-3">
+                <!-- 1. The 5 Clickable Inventory Alert Pills -->
+                <div class="mb-3">
+                    <span class="text-muted fs-3xs text-uppercase fw-bold d-block mb-1.5">Actionable Inventory Alerts</span>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="button" class="inv-alert-pill pill-low-stock filter-alert-pill" data-status="low">
+                            <i class="fas fa-triangle-exclamation"></i> Low Stock ({{ inventory_alerts.low_stock|default:0 }})
+                        </button>
+                        <button type="button" class="inv-alert-pill pill-out-stock filter-alert-pill" data-status="critical">
+                            <i class="fas fa-ban"></i> Out of Stock ({{ inventory_alerts.out_of_stock|default:0 }})
+                        </button>
+                        <button type="button" class="inv-alert-pill pill-reorder filter-alert-pill" data-status="reorder">
+                            <i class="fas fa-clock-rotate-left"></i> Reorder Required ({{ inventory_alerts.reorder_required|default:0 }})
+                        </button>
+                        <button type="button" class="inv-alert-pill pill-discrepancy filter-alert-pill" data-status="discrepancy">
+                            <i class="fas fa-scale-unbalanced"></i> Discrepancies ({{ inventory_alerts.stock_discrepancy|default:0 }})
+                        </button>
+                        <button type="button" class="inv-alert-pill pill-expiring filter-alert-pill" data-status="expiring">
+                            <i class="fas fa-hourglass-half"></i> Expiring Soon ({{ inventory_alerts.expiring_soon|default:0 }})
                         </button>
                     </div>
-                    <div class="contextual-search-wrapper" 
-                         id="modalCategoryWrapper" 
-                         data-search-url="/inventory/api/categories/search/" 
-                         data-search-type="category" 
-                         data-placeholder="Search or pick category...">
-                        <input type="hidden" name="category" id="modal_product_category" required>
-                        <input type="text" 
-                               class="inv-form-input async-search-input" 
-                               id="modal_category_display"
-                               placeholder="Search or pick category..." 
-                               autocomplete="off">
+                </div>
+
+                <!-- 2. Movement Period Switcher Toolbar -->
+                <div class="d-flex justify-content-between align-items-center border-top pt-3 mb-2">
+                    <div>
+                        <h6 class="fw-bold text-dark fs-xs mb-0">Stock Movement Velocity</h6>
+                        <small class="text-muted fs-3xs">Inward vs. Outward physical flow</small>
+                    </div>
+
+                    <div class="d-flex gap-1" id="movementPeriodGroup">
+                        <button type="button" class="period-toggle-btn active" data-period="7d">7 Days</button>
+                        <button type="button" class="period-toggle-btn" data-period="30d">30 Days</button>
+                        <button type="button" class="period-toggle-btn" data-period="3m">3 Months</button>
                     </div>
                 </div>
 
-                <!-- 5. SUBCATEGORY ASYNC CONTEXTUAL SEARCH (CHAINED) -->
-                <div class="inv-form-group">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <label class="inv-form-label mb-0">Sub-Category</label>
-                        <button type="button" class="inv-quick-add-btn" id="openQuickSubCategoryBtn" title="Quick Add SubCategory">
-                            <i class="fas fa-plus"></i>
-                        </button>
+                <!-- 3. Velocity Summary Metric Box Row -->
+                <div class="d-flex gap-2 mb-3">
+                    <div class="movement-stat-box">
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Stock In</span>
+                        <div class="movement-stat-val text-success" id="statStockIn">{{ movement_metrics.inVal|default:"+0" }}</div>
                     </div>
-                    <div class="contextual-search-wrapper" 
-                         id="modalSubCategoryWrapper" 
-                         data-search-url="/inventory/api/subcategories/search/" 
-                         data-search-type="subcategory" 
-                         data-placeholder="Pick category first or search...">
-                        <input type="hidden" name="subcategory" id="modal_product_subcategory">
-                        <input type="text" 
-                               class="inv-form-input async-search-input" 
-                               id="modal_subcategory_display"
-                               placeholder="Pick category first or search..." 
-                               autocomplete="off">
+                    <div class="movement-stat-box">
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Stock Out</span>
+                        <div class="movement-stat-val text-danger" id="statStockOut">{{ movement_metrics.outVal|default:"-0" }}</div>
+                    </div>
+                    <div class="movement-stat-box">
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Transfers</span>
+                        <div class="movement-stat-val text-primary" id="statTransfers">{{ movement_metrics.trVal|default:"0" }}</div>
+                    </div>
+                    <div class="movement-stat-box">
+                        <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Adjustments</span>
+                        <div class="movement-stat-val text-dark" id="statAdjustments">{{ movement_metrics.adjVal|default:"0" }}</div>
                     </div>
                 </div>
 
-                <!-- 6. BRAND & NETWORK TYPE -->
-                <div class="inv-form-group">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <label class="inv-form-label mb-0">Brand</label>
-                        <button type="button" class="inv-quick-add-btn" id="openQuickBrandBtn" title="Quick Add New Brand">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                    </div>
-                    <div class="contextual-search-wrapper" 
-                         id="modalBrandWrapper" 
-                         data-search-url="/inventory/api/brands/search/" 
-                         data-search-type="brand" 
-                         data-placeholder="Search brand (Apple, Samsung...)">
-                        <input type="hidden" name="brand" id="modal_product_brand">
-                        <input type="text" 
-                               class="inv-form-input async-search-input" 
-                               id="modal_brand_display"
-                               placeholder="Search brand (Apple, Samsung...)" 
-                               autocomplete="off">
-                    </div>
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Network Type</label>
-                    <select class="inv-form-input" name="network_type">
-                        <option value="5G">5G / LTE</option>
-                        <option value="4G">4G / VoLTE</option>
-                        <option value="WIFI_ONLY">Wi-Fi Only</option>
-                    </select>
-                </div>
-
-                <!-- 7. RAM & STORAGE -->
-                <div class="inv-form-group">
-                    <label class="inv-form-label">RAM (e.g. 8GB)</label>
-                    <input class="inv-form-input" name="ram" placeholder="e.g. 8GB">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Storage (e.g. 256GB)</label>
-                    <input class="inv-form-input" name="internal_storage" placeholder="e.g. 256GB">
-                </div>
-
-                <!-- 8. COLOR & BASE ATOMIC UNIT -->
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Color / Finish</label>
-                    <input class="inv-form-input" name="color_variant" placeholder="e.g. Awesome Navy">
-                </div>
-
-                <div class="inv-form-group">
-                    <div class="d-flex justify-content-between align-items-center mb-1">
-                        <label class="inv-form-label mb-0">Base Atomic Unit *</label>
-                        <button type="button" class="inv-quick-add-btn" id="openQuickUnitBtn" title="Quick Add Unit of Measurement">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                    </div>
-                    <div class="contextual-search-wrapper" 
-                         id="modalUnitWrapper" 
-                         data-search-url="/inventory/api/units/search/" 
-                         data-search-type="unit" 
-                         data-placeholder="Select unit (Pcs, Box, Set...)">
-                        <input type="hidden" name="base_unit" id="modal_product_unit" required>
-                        <input type="text" 
-                               class="inv-form-input async-search-input" 
-                               id="modal_unit_display"
-                               placeholder="Select unit (Pcs, Box, Set...)" 
-                               autocomplete="off">
-                    </div>
-                </div>
-
-                <!-- 9. PRICING: COST PRICE, SELLING PRICE & WHOLESALE PRICE -->
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Cost Price (NPR)</label>
-                    <input class="inv-form-input font-monospace" type="number" step="0.01" min="0" name="purchase_price" placeholder="0.00" value="0.00">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Selling Price / Counter MRP *</label>
-                    <input class="inv-form-input font-monospace" type="number" step="0.01" min="0" name="selling_price" required placeholder="0.00">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Wholesale Price (थोक मूल्य NPR)</label>
-                    <input class="inv-form-input font-monospace" type="number" step="0.01" min="0" name="wholesale_price" placeholder="0.00">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Opening Stock Quantity</label>
-                    <input class="inv-form-input font-monospace" type="number" step="1" min="0" name="initial_stock" value="0">
-                </div>
-
-                <!-- 10. RACK LOCATION -->
-                <div class="inv-form-group full">
-                    <label class="inv-form-label">Rack / Shelf Location</label>
-                    <input class="inv-form-input" name="rack_number" placeholder="e.g. Rack-M01, Shelf-B">
-                </div>
-
-                <!-- 11. CHECKBOXES: SERIALIZED PHONE & DISCOUNT PERMISSION -->
-                <div class="inv-form-group">
-                    <label class="d-flex align-items-center gap-2 inv-form-label mt-1 pointer">
-                        <input type="checkbox" name="requires_imei_tracking" id="quickAddRequiresImei" value="true" checked>
-                        <span class="fw-bold text-dark">Track 15-Digit IMEIs (Smartphones)</span>
-                    </label>
-                    <small class="text-muted fs-2xs">Check for smartphones to enable Phone, Battery &amp; Screen warranties.</small>
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="d-flex align-items-center gap-2 inv-form-label mt-1 pointer">
-                        <input type="checkbox" name="is_discountable" id="quickAddIsDiscountable" value="true" checked>
-                        <span class="fw-bold text-dark">Allow Cashier Discount (छुट अनुमति)</span>
-                    </label>
-                    <small class="text-muted fs-2xs">Uncheck to lock price and prohibit cashiers from discounting this item.</small>
-                </div>
-
-                <!-- 12. MULTI-COMPONENT WARRANTY BREAKDOWN SECTION -->
-                <div class="inv-form-group full">
-                    <div class="p-3 rounded-3 border" style="background: #f8fafc; border-color: #e2e8f0 !important;" id="warrantyConfigCard">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="fw-bold text-dark fs-xs">
-                                <i class="fas fa-shield-halved text-primary me-1"></i> Multi-Component Warranty Policy (मर्मत तथा वारेन्टी अवधि)
-                            </span>
-                            <span class="badge bg-primary bg-opacity-10 text-primary fs-2xs fw-bold" id="warrantyPolicyBadge">
-                                Smartphone Preset Active
-                            </span>
-                        </div>
-
-                        <div class="row g-2">
-                            <!-- 1. Handset / Motherboard Warranty -->
-                            <div class="col-12 col-md-4">
-                                <label class="inv-form-label fs-2xs">
-                                    Handset / Motherboard (ह्यान्डसेट)
-                                </label>
-                                <div class="input-group input-group-sm">
-                                    <input class="inv-form-input font-monospace text-center fw-bold" 
-                                           type="number" step="1" min="0" 
-                                           name="warranty_months" 
-                                           id="quickAddWarrantyInput" 
-                                           value="12" 
-                                           placeholder="12">
-                                    <span class="input-group-text bg-white fs-2xs text-muted border-start-0">Months</span>
-                                </div>
-                                <small class="text-muted fs-3xs">Official Device Body Warranty</small>
-                            </div>
-
-                            <!-- 2. Battery Warranty -->
-                            <div class="col-12 col-md-4">
-                                <label class="inv-form-label fs-2xs">
-                                    Internal Battery (ब्याट्री वारेन्टी)
-                                </label>
-                                <div class="input-group input-group-sm">
-                                    <input class="inv-form-input font-monospace text-center fw-bold" 
-                                           type="number" step="1" min="0" 
-                                           name="battery_warranty_months" 
-                                           id="quickAddBatteryWarrantyInput" 
-                                           value="6" 
-                                           placeholder="6">
-                                    <span class="input-group-text bg-white fs-2xs text-muted border-start-0">Months</span>
-                                </div>
-                                <small class="text-muted fs-3xs">Swelling / Backup Failure</small>
-                            </div>
-
-                            <!-- 3. Screen / Display Warranty -->
-                            <div class="col-12 col-md-4">
-                                <label class="inv-form-label fs-2xs">
-                                    Screen / Display (डिस्प्ले वारेन्टी)
-                                </label>
-                                <div class="input-group input-group-sm">
-                                    <input class="inv-form-input font-monospace text-center fw-bold" 
-                                           type="number" step="1" min="0" 
-                                           name="screen_warranty_months" 
-                                           id="quickAddScreenWarrantyInput" 
-                                           value="3" 
-                                           placeholder="3">
-                                    <span class="input-group-text bg-white fs-2xs text-muted border-start-0">Months</span>
-                                </div>
-                                <small class="text-muted fs-3xs">Touch / Panel Factory Defect</small>
-                            </div>
-
-                            <!-- 4. Legal Conditions / Exclusions -->
-                            <div class="col-12 mt-2">
-                                <label class="inv-form-label fs-2xs">
-                                    Terms &amp; Exclusions (वारेन्टी सर्त तथा बहिष्करण)
-                                </label>
-                                <input type="text" 
-                                       class="inv-form-input fs-2xs" 
-                                       name="warranty_conditions" 
-                                       id="quickAddWarrantyConditions" 
-                                       value="Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found." 
-                                       placeholder="e.g. Covers manufacturing defects only. Physical/liquid damage void.">
-                                <small class="text-danger fs-3xs fw-bold mt-1 d-block">
-                                    <i class="fas fa-exclamation-triangle me-1"></i> Physical drop cracks, display breakage, or liquid ingress strictly void all warranty.
-                                </small>
-                            </div>
-                        </div>
-                    </div>
+                <!-- 4. Pure SVG Vector Movement Chart Container -->
+                <div class="position-relative w-100" style="height: 140px; background: #fafbfc; border-radius: 12px; border: 1px solid var(--inv-slate-200); padding: 8px;">
+                    <svg id="movementSvgChart" viewBox="0 0 540 130" class="w-100 h-100" preserveAspectRatio="none"></svg>
                 </div>
             </div>
-
-            <div class="inv-modal-footer">
-                <button type="button" class="inv-btn" id="cancelAddModalBtn">Cancel</button>
-                <button type="submit" class="inv-btn inv-btn-primary" id="submitQuickProductBtn">Create Product</button>
-            </div>
-        </form>
+        </div>
     </div>
-</div>
 
-<!-- =========================================================
-     2. QUICK ADD CATEGORY POPUP MODAL
-     ========================================================= -->
-<div class="inv-modal-overlay" id="quickCategoryModal" style="z-index: 1080;">
-    <div class="inv-modal" style="width: min(440px, 100%);">
-        <div class="inv-modal-header" style="background:#f8fafc;">
-            <div>
-                <div class="inv-modal-title" style="font-size:14px;"><i class="fas fa-tag text-primary me-2"></i> Quick Add Category</div>
-                <div class="inv-modal-description">Instantly register a category without leaving this screen.</div>
-            </div>
-            <button type="button" class="inv-modal-close" id="closeQuickCategoryBtn">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-
-        <form class="inv-form" id="quickCategoryForm">
-            {% csrf_token %}
-            <div class="d-flex flex-column gap-3">
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Category Name *</label>
-                    <input class="inv-form-input" id="quickCatNameInput" required placeholder="e.g. Smart Watches, Optical Frames">
+    <!-- =====================================================================
+         4. MAIN PRODUCT INVENTORY TABLE & ADVANCED FILTER TOOLBAR
+         ===================================================================== -->
+    <div class="inv-panel-card" id="catalogCatalogSection">
+        <!-- Filter Toolbar -->
+        <div class="p-3 border-bottom bg-light bg-opacity-50">
+            <div class="row g-2 align-items-center">
+                <!-- Live Search Box -->
+                <div class="col-12 col-md-3">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-white border-end-0 text-muted"><i class="fas fa-search"></i></span>
+                        <input type="text" id="liveCatalogSearch" class="form-control border-start-0 ps-0" placeholder="Search by name, SKU, or barcode..." autocomplete="off">
+                    </div>
                 </div>
 
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Category Code (Optional)</label>
-                    <input class="inv-form-input" id="quickCatCodeInput" placeholder="e.g. WAT, OPT">
-                </div>
-            </div>
-
-            <div class="inv-modal-footer">
-                <button type="button" class="inv-btn" id="cancelQuickCategoryBtn">Cancel</button>
-                <button type="submit" class="inv-btn inv-btn-primary" id="saveQuickCategoryBtn">Save Category</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- =========================================================
-     3. QUICK ADD SUBCATEGORY POPUP MODAL
-     ========================================================= -->
-<div class="inv-modal-overlay" id="quickSubCategoryModal" style="z-index: 1080;">
-    <div class="inv-modal" style="width: min(460px, 100%);">
-        <div class="inv-modal-header" style="background:#f8fafc;">
-            <div>
-                <div class="inv-modal-title" style="font-size:14px;"><i class="fas fa-folder-tree text-primary me-2"></i> Quick Add Sub-Category</div>
-                <div class="inv-modal-description">Register a sub-category under a parent product category.</div>
-            </div>
-            <button type="button" class="inv-modal-close" id="closeQuickSubCategoryBtn">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-
-        <form class="inv-form" id="quickSubCategoryForm">
-            {% csrf_token %}
-            <div class="d-flex flex-column gap-3">
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Parent Category *</label>
-                    <select class="inv-form-input" id="quickSubCatParentSelect" required>
-                        <option value="" disabled selected>-- Select Parent Category --</option>
+                <!-- Category Filter -->
+                <div class="col-6 col-md-2">
+                    <select id="filterCategorySelect" class="form-select form-select-sm">
+                        <option value="">All Categories</option>
                         {% for cat in categories %}
                             <option value="{{ cat.id }}">{{ cat.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
 
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Sub-Category Name *</label>
-                    <input class="inv-form-input" id="quickSubCatNameInput" required placeholder="e.g. Flagship 5G, Tempered Glass, RayBan Frames">
+                <!-- Warehouse Filter -->
+                <div class="col-6 col-md-2">
+                    <select id="filterWarehouseSelect" class="form-select form-select-sm">
+                        <option value="">All Warehouses</option>
+                        {% for br in branches %}
+                            <option value="{{ br.id }}">{{ br.name }} ({{ br.code }})</option>
+                        {% endfor %}
+                    </select>
                 </div>
 
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Sub-Category Code (Optional)</label>
-                    <input class="inv-form-input" id="quickSubCatCodeInput" placeholder="e.g. SUB-FLAG, SUB-TG">
+                <!-- Stock Status Filter -->
+                <div class="col-6 col-md-2">
+                    <select id="filterStatusSelect" class="form-select form-select-sm">
+                        <option value="">All Stock Statuses</option>
+                        <option value="healthy">In Stock (Healthy)</option>
+                        <option value="low">Low Stock (Alert)</option>
+                        <option value="critical">Out of Stock (Zero)</option>
+                        <option value="overstock">Overstock</option>
+                    </select>
+                </div>
+
+                <!-- Brand Filter -->
+                <div class="col-6 col-md-2">
+                    <select id="filterBrandSelect" class="form-select form-select-sm">
+                        <option value="">All Brands</option>
+                        {% for b in brands %}
+                            <option value="{{ b.id }}">{{ b.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Utility Reset & Export Buttons -->
+                <div class="col-12 col-md-1 d-flex gap-1 justify-content-end">
+                    <button type="button" id="btnClearCatalogFilters" class="btn btn-outline-secondary btn-sm w-100 rounded-3" title="Clear All Filters">
+                        <i class="fas fa-rotate-left"></i>
+                    </button>
+                    <a href="{% url 'inventory:inventory_export_csv' %}" id="btnFilterExportCsv" class="btn btn-outline-success btn-sm w-100 rounded-3" title="Download Filtered CSV">
+                        <i class="fas fa-file-csv"></i>
+                    </a>
                 </div>
             </div>
-
-            <div class="inv-modal-footer">
-                <button type="button" class="inv-btn" id="cancelQuickSubCategoryBtn">Cancel</button>
-                <button type="submit" class="inv-btn inv-btn-primary" id="saveQuickSubCategoryBtn">Save Sub-Category</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- =========================================================
-     4. QUICK ADD BRAND POPUP MODAL
-     ========================================================= -->
-<div class="inv-modal-overlay" id="quickBrandModal" style="z-index: 1080;">
-    <div class="inv-modal" style="width: min(440px, 100%);">
-        <div class="inv-modal-header" style="background:#f8fafc;">
-            <div>
-                <div class="inv-modal-title" style="font-size:14px;"><i class="fas fa-copyright text-primary me-2"></i> Quick Add Brand</div>
-                <div class="inv-modal-description">Instantly register a brand name without leaving this screen.</div>
-            </div>
-            <button type="button" class="inv-modal-close" id="closeQuickBrandBtn">
-                <i class="fas fa-times"></i>
-            </button>
         </div>
 
-        <form class="inv-form" id="quickBrandForm">
-            {% csrf_token %}
-            <div class="d-flex flex-column gap-3">
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Brand Name *</label>
-                    <input class="inv-form-input" id="quickBrandNameInput" required placeholder="e.g. Nothing, OnePlus, Realme">
-                </div>
-
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Origin Country (Optional)</label>
-                    <input class="inv-form-input" id="quickBrandCountryInput" placeholder="e.g. South Korea, China, India, Nepal">
-                </div>
-            </div>
-
-            <div class="inv-modal-footer">
-                <button type="button" class="inv-btn" id="cancelQuickBrandBtn">Cancel</button>
-                <button type="submit" class="inv-btn inv-btn-primary" id="saveQuickBrandBtn">Save Brand</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- =========================================================
-     5. QUICK ADD UNIT OF MEASUREMENT (UOM) POPUP MODAL
-     ========================================================= -->
-<div class="inv-modal-overlay" id="quickUnitModal" style="z-index: 1080;">
-    <div class="inv-modal" style="width: min(460px, 100%);">
-        <div class="inv-modal-header" style="background:#f8fafc;">
-            <div>
-                <div class="inv-modal-title" style="font-size:14px;"><i class="fas fa-scale-balanced text-primary me-2"></i> Quick Add Unit of Measurement</div>
-                <div class="inv-modal-description">Register atomic base measurement units (Piece, Set, Meter, Box).</div>
-            </div>
-            <button type="button" class="inv-modal-close" id="closeQuickUnitBtn">
-                <i class="fas fa-times"></i>
-            </button>
+        <!-- Table Viewport -->
+        <div class="table-responsive flex-grow-1">
+            <table class="table inv-table align-middle mb-0" id="mainCatalogTable">
+                <thead>
+                    <tr>
+                        <th class="sortable-th ps-3" data-sort="name">Product Name <i class="fas fa-sort text-muted ms-1 fs-3xs"></i></th>
+                        <th class="sortable-th" data-sort="sku">SKU Code <i class="fas fa-sort text-muted ms-1 fs-3xs"></i></th>
+                        <th>Category</th>
+                        <th>Warehouse</th>
+                        <th class="text-center sortable-th" data-sort="quantity">On Hand <i class="fas fa-sort text-muted ms-1 fs-3xs"></i></th>
+                        <th class="text-center">Reserved</th>
+                        <th class="text-center">Available</th>
+                        <th class="text-center">Reorder Lvl</th>
+                        <th class="text-end sortable-th" data-sort="purchase_price">Unit Cost <i class="fas fa-sort text-muted ms-1 fs-3xs"></i></th>
+                        <th class="text-end sortable-th" data-sort="stock_value">Stock Value <i class="fas fa-sort text-muted ms-1 fs-3xs"></i></th>
+                        <th class="text-center">Status</th>
+                        <th class="text-end pe-3">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="catalogTableTbody">
+                    {% for p in products %}
+                    <tr>
+                        <td class="ps-3">
+                            <div class="d-flex align-items-center gap-2">
+                                {% if p.image %}
+                                    <img src="{{ p.image.url }}" alt="{{ p.name }}" class="rounded border" style="width: 32px; height: 32px; object-fit: cover;">
+                                {% else %}
+                                    <div class="rounded bg-light border p-1 d-flex align-items-center justify-content-center text-muted" style="width: 32px; height: 32px; font-size: 13px;">
+                                        {% if p.requires_imei_tracking %}<i class="fas fa-mobile-screen"></i>{% else %}<i class="fas fa-box"></i>{% endif %}
+                                    </div>
+                                {% endif %}
+                                <div>
+                                    <a href="{% url 'inventory:product_detail' p.pk %}" class="fw-bold text-dark text-decoration-none">
+                                        {{ p.name }}
+                                    </a>
+                                    {% if p.requires_imei_tracking %}
+                                        <span class="badge bg-primary bg-opacity-10 text-primary fs-3xs font-mono ms-1">IMEI</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                        <td class="font-mono text-muted fs-xs">{{ p.sku }}</td>
+                        <td>{{ p.category.name|default:"General" }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ ACTIVE_BRANCH.name|default:"Main Counter" }}</span></td>
+                        
+                        <td class="text-center font-mono fw-bold fs-xs">
+                            {% for bs in p.branch_stocks.all %}
+                                {% if bs.branch == ACTIVE_BRANCH %}{{ bs.quantity|floatformat:0 }}{% endif %}
+                            {% empty %}0{% endfor %}
+                        </td>
+                        <td class="text-center font-mono text-muted fs-xs">
+                            {% for bs in p.branch_stocks.all %}
+                                {% if bs.branch == ACTIVE_BRANCH %}{{ bs.reserved_quantity|floatformat:0 }}{% endif %}
+                            {% empty %}0{% endfor %}
+                        </td>
+                        <td class="text-center font-mono fw-bold text-primary fs-xs">
+                            {% for bs in p.branch_stocks.all %}
+                                {% if bs.branch == ACTIVE_BRANCH %}{{ bs.available_quantity|floatformat:0 }}{% endif %}
+                            {% empty %}0{% endfor %}
+                        </td>
+                        <td class="text-center font-mono text-muted fs-xs">{{ p.reorder_level|floatformat:0 }}</td>
+                        <td class="text-end font-mono fs-xs">Rs. {{ p.purchase_price|floatformat:2|intcomma }}</td>
+                        <td class="text-end font-mono fw-bold text-dark fs-xs">
+                            {% for bs in p.branch_stocks.all %}
+                                {% if bs.branch == ACTIVE_BRANCH %}
+                                    Rs. {{ bs.quantity|mul:p.purchase_price|floatformat:2|intcomma }}
+                                {% endif %}
+                            {% empty %}Rs. 0.00{% endfor %}
+                        </td>
+                        <td class="text-center">
+                            {% for bs in p.branch_stocks.all %}
+                                {% if bs.branch == ACTIVE_BRANCH %}
+                                    {% if bs.quantity <= 0 %}
+                                        <span class="table-status-pill status-out-stock">Out of Stock</span>
+                                    {% elif bs.is_low_stock %}
+                                        <span class="table-status-pill status-low-stock">Low Stock</span>
+                                    {% else %}
+                                        <span class="table-status-pill status-in-stock">In Stock</span>
+                                    {% endif %}
+                                {% endif %}
+                            {% empty %}
+                                <span class="table-status-pill status-out-stock">Out of Stock</span>
+                            {% endfor %}
+                        </td>
+                        <td class="text-end pe-3">
+                            <div class="d-inline-flex gap-1">
+                                <a href="{% url 'inventory:product_detail' p.pk %}" class="btn btn-outline-secondary btn-sm rounded-circle p-1" title="View Detail">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="{% url 'inventory:product_edit' p.pk %}" class="btn btn-outline-primary btn-sm rounded-circle p-1" title="Edit">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="12" class="text-center py-5 text-muted">
+                            <i class="fas fa-boxes-stacked fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No products found matching your active filter criteria.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
 
-        <form class="inv-form" id="quickUnitForm">
-            {% csrf_token %}
-            <div class="d-flex flex-column gap-3">
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Unit Name *</label>
-                    <input class="inv-form-input" id="quickUnitNameInput" required placeholder="e.g. Meter, Roll, Set, Packet">
-                </div>
+        <!-- Pagination Footer -->
+        <div class="p-3 border-top bg-light bg-opacity-25 d-flex flex-column flex-md-row justify-content-between align-items-center gap-2">
+            <span class="text-muted fs-xs" id="catalogPaginationSummary">
+                Showing <strong class="text-dark">{{ page_obj.start_index|default:1 }}</strong> to <strong class="text-dark">{{ page_obj.end_index|default:products|length }}</strong> of <strong class="text-dark">{{ page_obj.paginator.count|default:products|length }}</strong> products
+            </span>
 
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Short Code (Uppercase) *</label>
-                    <input class="inv-form-input" id="quickUnitCodeInput" required placeholder="e.g. MTR, ROL, SET, PKT">
-                </div>
+            <nav aria-label="Catalog pagination">
+                <ul class="pagination pagination-sm m-0 gap-1" id="catalogPaginationUl">
+                    {% if page_obj.has_previous %}
+                    <li class="page-item">
+                        <button type="button" class="page-link rounded-pill px-3" data-page="{{ page_obj.previous_page_number }}">Previous</button>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link rounded-pill px-3">Previous</span></li>
+                    {% endif %}
 
-                <div class="inv-form-group">
-                    <label class="inv-form-label">Nepali Name (Optional)</label>
-                    <input class="inv-form-input" id="quickUnitNameNpInput" placeholder="e.g. मिटर, रोल, सेट, बक्स">
-                </div>
+                    <li class="page-item active"><span class="page-link rounded-pill px-3" id="currPageNumDisplay">{{ page_obj.number|default:1 }}</span></li>
 
-                <div class="inv-form-group">
-                    <label class="d-flex align-items-center gap-2 inv-form-label mt-1">
-                        <input type="checkbox" id="quickUnitDecimalCheck">
-                        <span>Allow Decimal Fractions (e.g. 1.50)</span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="inv-modal-footer">
-                <button type="button" class="inv-btn" id="cancelQuickUnitBtn">Cancel</button>
-                <button type="submit" class="inv-btn inv-btn-primary" id="saveQuickUnitBtn">Save Unit</button>
-            </div>
-        </form>
+                    {% if page_obj.has_next %}
+                    <li class="page-item">
+                        <button type="button" class="page-link rounded-pill px-3" data-page="{{ page_obj.next_page_number }}">Next</button>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link rounded-pill px-3">Next</span></li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
     </div>
 </div>
 
-<!-- =========================================================
-     6. EXPLANATORY WARNING MODAL FOR IMEI ZERO-STOCK RULES
-     ========================================================= -->
-<div class="inv-modal-overlay" id="productWarningModal" style="z-index: 1090;">
-    <div class="inv-modal" style="width: min(520px, 100%);">
-        <div class="inv-modal-header bg-warning bg-opacity-10 border-warning border-opacity-25">
-            <div class="d-flex align-items-center gap-2">
-                <span class="badge bg-warning text-dark p-2 rounded-circle"><i class="fas fa-triangle-exclamation"></i></span>
+<!-- =========================================================================
+     MODAL 1: ADD PRODUCT / HANDSET MODAL (WITH MINI '+' HELPER BUTTONS)
+     ========================================================================= -->
+<div class="modal fade" id="addProductModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header inv-modal-header">
                 <div>
-                    <div class="inv-modal-title text-dark">Important Inventory Compliance Notice</div>
-                    <div class="inv-modal-description">Product catalog record created with zero initial stock rule</div>
+                    <h6 class="modal-title fw-bold text-white mb-0"><i class="fas fa-plus-circle me-1"></i> Register New Product / Handset</h6>
+                    <small class="text-white-50 fs-3xs">Counter catalog registration with instant sub-entity additions</small>
                 </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <button type="button" class="inv-modal-close" id="closeProductWarningBtn">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
+            
+            <form id="quickAddProductForm" action="{% url 'products:quick_create' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body p-4 bg-white">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-8">
+                            <label class="form-label fw-bold fs-xs text-dark">Product Name <span class="text-danger">*</span></label>
+                            <input type="text" name="name" class="form-control" placeholder="e.g. Galaxy A55 5G / 20W Type-C Charger" required>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-bold fs-xs text-dark">SKU Code</label>
+                            <input type="text" name="sku" class="form-control font-mono" placeholder="Auto-generated if blank">
+                        </div>
 
-        <div class="p-4">
-            <div class="alert alert-warning bg-opacity-10 border border-warning border-opacity-25 rounded-3 p-3 mb-3 fs-xs text-dark lh-base" id="productWarningText">
-                <!-- Dynamic Warning Notice Injected Here -->
-            </div>
-            <p class="fs-xs text-muted mb-0">
-                To add available sellable units with valid 15-digit IMEIs, please receive them via <strong>Goods Received Note (GRN)</strong> or use the <strong>Excel Importer</strong>.
-            </p>
-        </div>
+                        <!-- Category Selector with '+' Button -->
+                        <div class="col-12 col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label fw-bold fs-xs text-dark mb-0">Category <span class="text-danger">*</span></label>
+                                <button type="button" class="inv-quick-add-btn" id="openQuickCategoryBtn" title="Quick Add Category">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                            </div>
+                            <select name="category" id="productFormCategorySelect" class="form-select" required>
+                                {% for cat in categories %}
+                                    <option value="{{ cat.id }}">{{ cat.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
 
-        <div class="inv-modal-footer p-3 bg-light border-top">
-            <button type="button" class="inv-btn inv-btn-primary px-4" id="acknowledgeWarningBtn">
-                <i class="fas fa-check me-1"></i> Acknowledge &amp; View Catalog
-            </button>
+                        <!-- Sub-Category Selector with '+' Button -->
+                        <div class="col-12 col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label fw-bold fs-xs text-dark mb-0">Sub-Category</label>
+                                <button type="button" class="inv-quick-add-btn" id="openQuickSubCategoryBtn" title="Quick Add Sub-Category">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                            </div>
+                            <select name="subcategory" id="productFormSubCategorySelect" class="form-select">
+                                <option value="">-- Optional Sub-Category --</option>
+                            </select>
+                        </div>
+
+                        <!-- Brand Selector with '+' Button -->
+                        <div class="col-12 col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label fw-bold fs-xs text-dark mb-0">Brand</label>
+                                <button type="button" class="inv-quick-add-btn" id="openQuickBrandBtn" title="Quick Add Brand">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                            </div>
+                            <select name="brand" id="productFormBrandSelect" class="form-select">
+                                <option value="">-- No Brand / Generic --</option>
+                                {% for b in brands %}
+                                    <option value="{{ b.id }}">{{ b.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Base Unit Selector with '+' Button -->
+                        <div class="col-12 col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <label class="form-label fw-bold fs-xs text-dark mb-0">Base Unit <span class="text-danger">*</span></label>
+                                <button type="button" class="inv-quick-add-btn" id="openQuickUnitBtn" title="Quick Add Base Unit">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                            </div>
+                            <select name="base_unit" id="productFormUnitSelect" class="form-select" required>
+                                {% for u in units %}
+                                    <option value="{{ u.id }}" {% if u.code == 'PCS' %}selected{% endif %}>{{ u.name }} ({{ u.code }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="col-6 col-md-4">
+                            <label class="form-label fw-bold fs-xs text-dark">Purchase Cost (NPR)</label>
+                            <input type="number" step="0.01" min="0" name="purchase_price" class="form-control font-mono" value="0.00">
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label fw-bold fs-xs text-dark">Selling Price (MRP) <span class="text-danger">*</span></label>
+                            <input type="number" step="0.01" min="0" name="selling_price" class="form-control font-mono" placeholder="0.00" required>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label fw-bold fs-xs text-dark">Wholesale Price (NPR)</label>
+                            <input type="number" step="0.01" min="0" name="wholesale_price" class="form-control font-mono" placeholder="0.00">
+                        </div>
+
+                        <div class="col-6 col-md-4">
+                            <label class="form-label fw-bold fs-xs text-dark">Initial Stock</label>
+                            <input type="number" step="1" min="0" name="initial_stock" class="form-control font-mono" value="0">
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label fw-bold fs-xs text-dark">Barcode (Optional)</label>
+                            <input type="text" name="barcode" class="form-control font-mono" placeholder="Scan box barcode">
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label fw-bold fs-xs text-dark">Rack Location</label>
+                            <input type="text" name="rack_number" class="form-control" placeholder="e.g. Rack-A1">
+                        </div>
+
+                        <!-- Serialized Smartphone Checkbox -->
+                        <div class="col-12">
+                            <div class="p-3 bg-light rounded-3 border d-flex justify-content-between align-items-center">
+                                <div class="form-check form-switch m-0">
+                                    <input class="form-check-input" type="checkbox" name="requires_imei_tracking" value="true" id="modalRequiresImei">
+                                    <label class="form-check-label fw-bold text-dark fs-xs ms-1" for="modalRequiresImei">
+                                        Track 15-Digit IMEI (Serialized Smartphone)
+                                    </label>
+                                </div>
+                                <span class="text-muted fs-3xs">Enables Phone, Battery &amp; Screen warranties</span>
+                            </div>
+                        </div>
+
+                        <!-- Multi-Component Warranty Breakdown Section -->
+                        <div class="col-12">
+                            <div class="p-3 rounded-3 border bg-light">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="fw-bold text-dark fs-xs">
+                                        <i class="fas fa-shield-halved text-success me-1"></i> Multi-Component Warranty Policy
+                                    </span>
+                                    <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs fw-bold" id="modalWarrantyBadge">
+                                        Accessory (0 Months)
+                                    </span>
+                                </div>
+
+                                <div class="row g-2">
+                                    <div class="col-4">
+                                        <label class="form-label fs-3xs fw-bold text-muted mb-1">Handset / Body</label>
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" step="1" min="0" name="warranty_months" id="modalWarrantyBody" class="form-control font-mono text-center" value="0">
+                                            <span class="input-group-text bg-white fs-3xs">M</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <label class="form-label fs-3xs fw-bold text-muted mb-1">Battery</label>
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" step="1" min="0" name="battery_warranty_months" id="modalWarrantyBattery" class="form-control font-mono text-center" value="0">
+                                            <span class="input-group-text bg-white fs-3xs">M</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <label class="form-label fs-3xs fw-bold text-muted mb-1">Screen / Display</label>
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" step="1" min="0" name="screen_warranty_months" id="modalWarrantyScreen" class="form-control font-mono text-center" value="0">
+                                            <span class="input-group-text bg-white fs-3xs">M</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-12 mt-1">
+                                        <input type="text" name="warranty_conditions" id="modalWarrantyConditions" class="form-control form-control-sm fs-3xs" value="No warranty for consumable accessory.">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold" id="btnSubmitQuickProduct">
+                        <i class="fas fa-check me-1"></i> Register Product
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
+
+<!-- =========================================================================
+     MODAL 2: STOCK ADJUSTMENT MODAL (ADD, DEDUCT, REPLACE)
+     ========================================================================= -->
+<div class="modal fade" id="stockAdjustmentModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header inv-modal-header">
+                <div>
+                    <h6 class="modal-title fw-bold text-white mb-0"><i class="fas fa-sliders me-1"></i> Manual Stock Adjustment</h6>
+                    <small class="text-white-50 fs-3xs">Physical count correction, damaged write-off, or balance replacement</small>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            
+            <form id="stockAdjustmentForm" action="{% url 'inventory:dashboard_stock_adjust' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body p-4 bg-white">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold fs-xs text-dark">Target Product <span class="text-danger">*</span></label>
+                        <select name="product_id" id="adjProductSelect" class="form-select" required>
+                            <option value="">-- Choose Product --</option>
+                            {% for p in products %}
+                                {% if not p.requires_imei_tracking %}
+                                    <option value="{{ p.id }}">{{ p.name }} ({{ p.sku }})</option>
+                                {% endif %}
+                            {% endfor %}
+                        </select>
+                        <small class="text-muted fs-3xs mt-1 d-block">Serialized phones must be inwarded via GRN with valid IMEIs.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold fs-xs text-dark">Warehouse / Outlet <span class="text-danger">*</span></label>
+                        <select name="warehouse_id" id="adjWarehouseSelect" class="form-select" required>
+                            {% for br in branches %}
+                                <option value="{{ br.id }}" {% if br == ACTIVE_BRANCH %}selected{% endif %}>{{ br.name }} ({{ br.code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-bold fs-xs text-dark">Adjustment Type <span class="text-danger">*</span></label>
+                            <select name="adjustment_type" id="adjTypeSelect" class="form-select" required>
+                                <option value="ADJUSTMENT_ADD" selected>Add Stock (+)</option>
+                                <option value="ADJUSTMENT_SUB">Deduct Stock (-)</option>
+                                <option value="SET">Replace / Set Total (=)</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold fs-xs text-dark">Quantity <span class="text-danger">*</span></label>
+                            <input type="number" step="1" min="0" name="quantity" class="form-control font-mono" placeholder="Units" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label fw-bold fs-xs text-dark">Reason / Remarks <span class="text-danger">*</span></label>
+                        <textarea name="remarks" class="form-control fs-xs" rows="2" placeholder="e.g. Physical inventory count audit, damaged package write-off" required></textarea>
+                    </div>
+                </div>
+
+                <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold" id="btnSubmitStockAdj">
+                        Commit Adjustment
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 3: DIRECT STOCK TRANSFER MODAL
+     ========================================================================= -->
+<div class="modal fade" id="stockTransferModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header inv-modal-header">
+                <div>
+                    <h6 class="modal-title fw-bold text-white mb-0"><i class="fas fa-dolly me-1"></i> Direct Warehouse Stock Transfer</h6>
+                    <small class="text-white-50 fs-3xs">Instant balance relocation between warehouses</small>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            
+            <form id="stockTransferForm" action="{% url 'inventory:dashboard_stock_transfer' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body p-4 bg-white">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold fs-xs text-dark">Product to Transfer <span class="text-danger">*</span></label>
+                        <select name="product_id" id="trfProductSelect" class="form-select" required>
+                            <option value="">-- Choose Product --</option>
+                            {% for p in products %}
+                                <option value="{{ p.id }}">{{ p.name }} ({{ p.sku }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-bold fs-xs text-dark">Origin Warehouse <span class="text-danger">*</span></label>
+                            <select name="source_warehouse_id" class="form-select" required>
+                                {% for br in branches %}
+                                    <option value="{{ br.id }}" {% if br == ACTIVE_BRANCH %}selected{% endif %}>{{ br.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold fs-xs text-dark">Target Warehouse <span class="text-danger">*</span></label>
+                            <select name="destination_warehouse_id" class="form-select" required>
+                                <option value="">-- Select Target --</option>
+                                {% for br in branches %}
+                                    {% if br != ACTIVE_BRANCH %}
+                                        <option value="{{ br.id }}">{{ br.name }}</option>
+                                    {% endif %}
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-bold fs-xs text-dark">Quantity <span class="text-danger">*</span></label>
+                            <input type="number" step="1" min="1" name="quantity" class="form-control font-mono" value="1" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold fs-xs text-dark">IMEI / S/N (If Handset)</label>
+                            <input type="text" name="scanned_imei_or_serial" class="form-control font-mono" placeholder="Scan IMEI">
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label fw-bold fs-xs text-dark">Transfer Remarks</label>
+                        <input type="text" name="remarks" class="form-control fs-xs" placeholder="e.g. Stock rebalancing, branch counter pre-order">
+                    </div>
+                </div>
+
+                <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning text-dark btn-sm rounded-pill px-4 fw-bold" id="btnSubmitStockTrf">
+                        Execute Transfer
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 4 (HELPER 1): QUICK ADD CATEGORY POPUP
+     ========================================================================= -->
+<div class="modal fade sub-helper-modal" id="quickCategoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-primary text-white border-0 py-2.5 px-3">
+                <h6 class="modal-title fw-bold fs-xs mb-0"><i class="fas fa-tags me-1"></i> Quick Add Category</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="quickCategoryForm">
+                {% csrf_token %}
+                <div class="modal-body p-3 bg-white">
+                    <div class="mb-2">
+                        <label class="form-label fw-bold fs-xs text-dark">Category Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="quickCatNameInput" placeholder="e.g. Smart Watches" required>
+                    </div>
+                    <div>
+                        <label class="form-label fw-bold fs-xs text-dark">Short Code</label>
+                        <input type="text" class="form-control form-control-sm font-mono text-uppercase" id="quickCatCodeInput" placeholder="e.g. WAT">
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold" id="saveQuickCategoryBtn">Save Category</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 5 (HELPER 2): QUICK ADD SUBCATEGORY POPUP
+     ========================================================================= -->
+<div class="modal fade sub-helper-modal" id="quickSubCategoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-info text-white border-0 py-2.5 px-3">
+                <h6 class="modal-title fw-bold fs-xs mb-0"><i class="fas fa-folder-tree me-1"></i> Quick Add Sub-Category</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="quickSubCategoryForm">
+                {% csrf_token %}
+                <div class="modal-body p-3 bg-white">
+                    <div class="mb-2">
+                        <label class="form-label fw-bold fs-xs text-dark">Parent Category <span class="text-danger">*</span></label>
+                        <select class="form-select form-select-sm" id="quickSubCatParentSelect" required>
+                            {% for cat in categories %}
+                                <option value="{{ cat.id }}">{{ cat.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold fs-xs text-dark">Subcategory Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="quickSubCatNameInput" placeholder="e.g. Flagship 5G" required>
+                    </div>
+                    <div>
+                        <label class="form-label fw-bold fs-xs text-dark">Short Code</label>
+                        <input type="text" class="form-control form-control-sm font-mono text-uppercase" id="quickSubCatCodeInput" placeholder="e.g. SUB-FLAG">
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-info text-white btn-sm rounded-pill px-3 fw-bold" id="saveQuickSubCategoryBtn">Save Subcategory</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 6 (HELPER 3): QUICK ADD BRAND POPUP
+     ========================================================================= -->
+<div class="modal fade sub-helper-modal" id="quickBrandModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-primary text-white border-0 py-2.5 px-3">
+                <h6 class="modal-title fw-bold fs-xs mb-0"><i class="fas fa-copyright me-1"></i> Quick Add Brand</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="quickBrandForm">
+                {% csrf_token %}
+                <div class="modal-body p-3 bg-white">
+                    <div class="mb-2">
+                        <label class="form-label fw-bold fs-xs text-dark">Brand Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="quickBrandNameInput" placeholder="e.g. Nothing, OnePlus" required>
+                    </div>
+                    <div>
+                        <label class="form-label fw-bold fs-xs text-dark">Origin Country</label>
+                        <input type="text" class="form-control form-control-sm" id="quickBrandCountryInput" placeholder="e.g. Nepal, USA, China">
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold" id="saveQuickBrandBtn">Save Brand</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 7 (HELPER 4): QUICK ADD BASE UNIT POPUP
+     ========================================================================= -->
+<div class="modal fade sub-helper-modal" id="quickUnitModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-secondary text-white border-0 py-2.5 px-3">
+                <h6 class="modal-title fw-bold fs-xs mb-0"><i class="fas fa-scale-balanced me-1"></i> Quick Add Unit</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="quickUnitForm">
+                {% csrf_token %}
+                <div class="modal-body p-3 bg-white">
+                    <div class="mb-2">
+                        <label class="form-label fw-bold fs-xs text-dark">Unit Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="quickUnitNameInput" placeholder="e.g. Roll, Set, Box" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-bold fs-xs text-dark">Short Code <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm font-mono text-uppercase" id="quickUnitCodeInput" placeholder="e.g. ROL, BOX" required>
+                    </div>
+                    <div class="form-check form-switch mt-2">
+                        <input class="form-check-input" type="checkbox" id="quickUnitDecimalCheck">
+                        <label class="form-check-label fs-2xs fw-bold" for="quickUnitDecimalCheck">Allow Decimal Quantities</label>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0 py-2 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-secondary btn-sm rounded-pill px-3 fw-bold" id="saveQuickUnitBtn">Save Unit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     MODAL 8 (HELPER 5): IMEI ZERO-STOCK RULE COMPLIANCE WARNING MODAL
+     ========================================================================= -->
+<div class="modal fade" id="productWarningModal" tabindex="-1" aria-hidden="true" style="z-index: 1090;">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-warning text-dark border-0 py-2.5 px-3">
+                <h6 class="modal-title fw-bold fs-xs mb-0"><i class="fas fa-triangle-exclamation me-1"></i> Inventory Compliance Rule</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-3 text-center bg-white">
+                <div class="p-3 bg-warning bg-opacity-10 text-dark rounded-3 border border-warning border-opacity-25 fs-xs text-start mb-3" id="productWarningText">
+                    <!-- Warning Notice Injected Here -->
+                </div>
+                <button type="button" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold" data-bs-dismiss="modal">
+                    I Understand
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- =========================================================================
+     CLIENT-SIDE JAVASCRIPT CONTROLLER
+     ========================================================================= -->
+<script id="initialMovementData" type="application/json">
+    {
+        "days": {{ movement_metrics.days|default:"[]"|safe }},
+        "stockIn": {{ movement_metrics.stockIn|default:"[]"|safe }},
+        "stockOut": {{ movement_metrics.stockOut|default:"[]"|safe }}
+    }
+</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const productModal = document.getElementById('addProductModal');
-    const openProductBtn = document.getElementById('openAddModalBtn');
-    const closeProductBtn = document.getElementById('closeAddModalBtn');
-    const cancelProductBtn = document.getElementById('cancelAddModalBtn');
-    const quickProductForm = document.getElementById('quickAddForm');
-    const submitQuickProductBtn = document.getElementById('submitQuickProductBtn');
+    // -------------------------------------------------------------
+    // 1. STATE STORE FOR LIVE TABLE FILTERING & SORTING
+    // -------------------------------------------------------------
+    const catalogState = {
+        q: '',
+        category: '',
+        warehouse: '',
+        stock_status: '',
+        brand: '',
+        sort_by: 'name',
+        page: 1,
+        limit: 25
+    };
 
-    const modalCategoryWrapper = document.getElementById('modalCategoryWrapper');
-    const modalSubCategoryWrapper = document.getElementById('modalSubCategoryWrapper');
-    const modalBrandWrapper = document.getElementById('modalBrandWrapper');
-    const modalUnitWrapper = document.getElementById('modalUnitWrapper');
+    const tbody = document.getElementById('catalogTableTbody');
+    const searchInp = document.getElementById('liveCatalogSearch');
+    const catSelect = document.getElementById('filterCategorySelect');
+    const whSelect = document.getElementById('filterWarehouseSelect');
+    const statSelect = document.getElementById('filterStatusSelect');
+    const brandSelect = document.getElementById('filterBrandSelect');
+    const clearBtn = document.getElementById('btnClearCatalogFilters');
+    const paginationSummary = document.getElementById('catalogPaginationSummary');
+    const paginationUl = document.getElementById('catalogPaginationUl');
+    const currPageNumDisplay = document.getElementById('currPageNumDisplay');
 
-    const categoryModal = document.getElementById('quickCategoryModal');
-    const openCatBtn = document.getElementById('openQuickCategoryBtn');
-    const closeCatBtn = document.getElementById('closeQuickCategoryBtn');
-    const cancelCatBtn = document.getElementById('cancelQuickCategoryBtn');
-    const quickCategoryForm = document.getElementById('quickCategoryForm');
-    const catNameInput = document.getElementById('quickCatNameInput');
-    const catCodeInput = document.getElementById('quickCatCodeInput');
-    const catalogCategoryFilter = document.getElementById('catalogCategoryFilter');
+    let searchTimer = null;
 
-    const subCategoryModal = document.getElementById('quickSubCategoryModal');
-    const openSubCatBtn = document.getElementById('openQuickSubCategoryBtn');
-    const closeSubCatBtn = document.getElementById('closeQuickSubCategoryBtn');
-    const cancelSubCatBtn = document.getElementById('cancelQuickSubCategoryBtn');
-    const quickSubCategoryForm = document.getElementById('quickSubCategoryForm');
-    const subCatParentSelect = document.getElementById('quickSubCatParentSelect');
-    const subCatNameInput = document.getElementById('quickSubCatNameInput');
-    const subCatCodeInput = document.getElementById('quickSubCatCodeInput');
+    function buildQueryString() {
+        const p = new URLSearchParams();
+        p.set('ajax', 'true');
+        if (catalogState.q) p.set('q', catalogState.q);
+        if (catalogState.category) p.set('category', catalogState.category);
+        if (catalogState.warehouse) p.set('warehouse', catalogState.warehouse);
+        if (catalogState.stock_status) p.set('stock_status', catalogState.stock_status);
+        if (catalogState.brand) p.set('brand', catalogState.brand);
+        if (catalogState.sort_by) p.set('sort_by', catalogState.sort_by);
+        p.set('page', catalogState.page);
+        p.set('limit', catalogState.limit);
+        return p.toString();
+    }
 
-    const brandModal = document.getElementById('quickBrandModal');
-    const openBrandBtn = document.getElementById('openQuickBrandBtn');
-    const closeBrandBtn = document.getElementById('closeQuickBrandBtn');
-    const cancelBrandBtn = document.getElementById('cancelQuickBrandBtn');
-    const quickBrandForm = document.getElementById('quickBrandForm');
-    const brandNameInput = document.getElementById('quickBrandNameInput');
-    const brandCountryInput = document.getElementById('quickBrandCountryInput');
-    const catalogBrandFilter = document.getElementById('catalogBrandFilter');
+    async function fetchTableData() {
+        if (!tbody) return;
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="12" class="text-center py-5 text-muted">
+                    <span class="spinner-border spinner-border-sm me-2 text-primary"></span> Filtering catalog...
+                </td>
+            </tr>
+        `;
 
-    const unitModal = document.getElementById('quickUnitModal');
-    const openUnitBtn = document.getElementById('openQuickUnitBtn');
-    const closeUnitBtn = document.getElementById('closeQuickUnitBtn');
-    const cancelUnitBtn = document.getElementById('cancelQuickUnitBtn');
-    const quickUnitForm = document.getElementById('quickUnitForm');
-    const unitNameInput = document.getElementById('quickUnitNameInput');
-    const unitCodeInput = document.getElementById('quickUnitCodeInput');
-    const unitNameNpInput = document.getElementById('quickUnitNameNpInput');
-    const unitDecimalCheck = document.getElementById('quickUnitDecimalCheck');
+        try {
+            const url = `{% url 'inventory:product_list' %}?${buildQueryString()}`;
+            const res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!res.ok) throw new Error('Query error');
 
-    const warningModal = document.getElementById('productWarningModal');
-    const warningTextEl = document.getElementById('productWarningText');
-    const closeWarningBtn = document.getElementById('closeProductWarningBtn');
-    const acknowledgeWarningBtn = document.getElementById('acknowledgeWarningBtn');
+            const data = await res.json();
+            renderTableRows(data.results);
+            updatePaginationUI(data);
 
-    // =========================================================================
-    // MULTI-COMPONENT WARRANTY INTERACTIVE SYNCHRONIZATION (SINGLE SOURCE)
-    // =========================================================================
-    const warrantyInput = document.getElementById('quickAddWarrantyInput');
-    const batteryWarrantyInput = document.getElementById('quickAddBatteryWarrantyInput');
-    const screenWarrantyInput = document.getElementById('quickAddScreenWarrantyInput');
-    const warrantyConditions = document.getElementById('quickAddWarrantyConditions');
-    const warrantyPolicyBadge = document.getElementById('warrantyPolicyBadge');
-    const imeiCheck = document.getElementById('quickAddRequiresImei');
+            const csvParams = new URLSearchParams(buildQueryString());
+            csvParams.delete('ajax');
+            csvParams.set('export', 'csv');
+            const csvUrl = `{% url 'inventory:product_list' %}?${csvParams.toString()}`;
+            const headCsvBtn = document.getElementById('btnHeaderExportCsv');
+            const filterCsvBtn = document.getElementById('btnFilterExportCsv');
+            if (headCsvBtn) headCsvBtn.href = csvUrl;
+            if (filterCsvBtn) filterCsvBtn.href = csvUrl;
 
-    function syncWarrantyPreset() {
-        if (!imeiCheck) return;
-        const isPhone = imeiCheck.checked;
+        } catch (err) {
+            console.error(err);
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="12" class="text-center py-4 text-danger">
+                        <i class="fas fa-triangle-exclamation me-1"></i> Failed to query catalog records.
+                    </td>
+                </tr>
+            `;
+        }
+    }
 
-        if (isPhone) {
-            if (!warrantyInput.value || warrantyInput.value === '0') {
-                warrantyInput.value = '12';
+    function renderTableRows(rows) {
+        if (!rows || rows.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="12" class="text-center py-5 text-muted">
+                        <i class="fas fa-boxes-stacked fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                        No products found matching your active filter criteria.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = rows.map(r => `
+            <tr>
+                <td class="ps-3">
+                    <div class="d-flex align-items-center gap-2">
+                        ${r.image_url ? `
+                            <img src="${r.image_url}" alt="${r.name}" class="rounded border" style="width: 32px; height: 32px; object-fit: cover;">
+                        ` : `
+                            <div class="rounded bg-light border p-1 d-flex align-items-center justify-content-center text-muted" style="width: 32px; height: 32px; font-size: 13px;">
+                                <i class="${r.requires_imei ? 'fas fa-mobile-screen' : 'fas fa-box'}"></i>
+                            </div>
+                        `}
+                        <div>
+                            <a href="${r.detail_url}" class="fw-bold text-dark text-decoration-none">${r.name}</a>
+                            ${r.requires_imei ? '<span class="badge bg-primary bg-opacity-10 text-primary fs-3xs font-mono ms-1">IMEI</span>' : ''}
+                        </div>
+                    </div>
+                </td>
+                <td class="font-mono text-muted fs-xs">${r.sku}</td>
+                <td>${r.category_name}</td>
+                <td><span class="badge bg-light text-dark border">${whSelect && whSelect.selectedIndex > 0 ? whSelect.options[whSelect.selectedIndex].text.split('(')[0] : 'Main Counter'}</span></td>
+                <td class="text-center font-mono fw-bold fs-xs">${r.on_hand_quantity}</td>
+                <td class="text-center font-mono text-muted fs-xs">${r.reserved_quantity}</td>
+                <td class="text-center font-mono fw-bold text-primary fs-xs">${r.available_quantity}</td>
+                <td class="text-center font-mono text-muted fs-xs">5</td>
+                <td class="text-end font-mono fs-xs">${r.purchase_price_formatted}</td>
+                <td class="text-end font-mono fw-bold text-dark fs-xs">${r.stock_value_formatted}</td>
+                <td class="text-center">
+                    <span class="table-status-pill status-${r.status_label.toLowerCase().replace(/ /g, '-')}">
+                        ${r.status_label}
+                    </span>
+                </td>
+                <td class="text-end pe-3">
+                    <div class="d-inline-flex gap-1">
+                        <a href="${r.detail_url}" class="btn btn-outline-secondary btn-sm rounded-circle p-1" title="View Detail">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                        <a href="${r.edit_url}" class="btn btn-outline-primary btn-sm rounded-circle p-1" title="Edit">
+                            <i class="fas fa-edit"></i>
+                        </a>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function updatePaginationUI(data) {
+        if (currPageNumDisplay) currPageNumDisplay.innerText = data.page;
+        if (paginationSummary) {
+            const start = ((data.page - 1) * catalogState.limit) + 1;
+            const end = Math.min(data.page * catalogState.limit, data.total_count);
+            paginationSummary.innerHTML = `Showing <strong class="text-dark">${data.total_count > 0 ? start : 0}</strong> to <strong class="text-dark">${end}</strong> of <strong class="text-dark">${data.total_count}</strong> products`;
+        }
+
+        if (paginationUl) {
+            paginationUl.innerHTML = `
+                <li class="page-item ${!data.has_previous ? 'disabled' : ''}">
+                    <button type="button" class="page-link rounded-pill px-3" data-page="${data.page - 1}" ${!data.has_previous ? 'disabled' : ''}>Previous</button>
+                </li>
+                <li class="page-item active"><span class="page-link rounded-pill px-3">${data.page}</span></li>
+                <li class="page-item ${!data.has_next ? 'disabled' : ''}">
+                    <button type="button" class="page-link rounded-pill px-3" data-page="${data.page + 1}" ${!data.has_next ? 'disabled' : ''}>Next</button>
+                </li>
+            `;
+        }
+    }
+
+    // Filter Listeners
+    if (searchInp) {
+        searchInp.addEventListener('input', (e) => {
+            catalogState.q = e.target.value.trim();
+            catalogState.page = 1;
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(fetchTableData, 220);
+        });
+    }
+
+    if (catSelect) {
+        catSelect.addEventListener('change', (e) => {
+            catalogState.category = e.target.value;
+            catalogState.page = 1;
+            fetchTableData();
+        });
+    }
+
+    if (whSelect) {
+        whSelect.addEventListener('change', (e) => {
+            catalogState.warehouse = e.target.value;
+            catalogState.page = 1;
+            fetchTableData();
+        });
+    }
+
+    if (statSelect) {
+        statSelect.addEventListener('change', (e) => {
+            catalogState.stock_status = e.target.value;
+            catalogState.page = 1;
+            fetchTableData();
+        });
+    }
+
+    if (brandSelect) {
+        brandSelect.addEventListener('change', (e) => {
+            catalogState.brand = e.target.value;
+            catalogState.page = 1;
+            fetchTableData();
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            catalogState.q = '';
+            catalogState.category = '';
+            catalogState.warehouse = '';
+            catalogState.stock_status = '';
+            catalogState.brand = '';
+            catalogState.sort_by = 'name';
+            catalogState.page = 1;
+
+            if (searchInp) searchInp.value = '';
+            if (catSelect) catSelect.value = '';
+            if (whSelect) whSelect.value = '';
+            if (statSelect) statSelect.value = '';
+            if (brandSelect) brandSelect.value = '';
+
+            document.querySelectorAll('.filter-alert-pill').forEach(p => p.classList.remove('active'));
+            fetchTableData();
+        });
+    }
+
+    document.querySelectorAll('.sortable-th').forEach(th => {
+        th.addEventListener('click', () => {
+            const field = th.dataset.sort;
+            if (catalogState.sort_by === field) {
+                catalogState.sort_by = `-${field}`;
+            } else {
+                catalogState.sort_by = field;
             }
-            if (!batteryWarrantyInput.value || batteryWarrantyInput.value === '0') {
-                batteryWarrantyInput.value = '6';
+            catalogState.page = 1;
+            fetchTableData();
+        });
+    });
+
+    if (paginationUl) {
+        paginationUl.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-page]');
+            if (btn && !btn.disabled) {
+                catalogState.page = parseInt(btn.dataset.page, 10);
+                fetchTableData();
+                document.getElementById('catalogCatalogSection').scrollIntoView({ behavior: 'smooth' });
             }
-            if (!screenWarrantyInput.value || screenWarrantyInput.value === '0') {
-                screenWarrantyInput.value = '3';
+        });
+    }
+
+    document.querySelectorAll('.interactive-warehouse-row').forEach(row => {
+        row.addEventListener('click', () => {
+            const whId = row.dataset.warehouseId;
+            if (whSelect) {
+                whSelect.value = whId;
+                catalogState.warehouse = whId;
+                catalogState.page = 1;
+                fetchTableData();
+                document.getElementById('catalogCatalogSection').scrollIntoView({ behavior: 'smooth' });
             }
-            if (warrantyPolicyBadge) {
-                warrantyPolicyBadge.textContent = 'Smartphone Preset Active';
-                warrantyPolicyBadge.className = 'badge bg-primary bg-opacity-10 text-primary fs-2xs fw-bold';
+        });
+    });
+
+    document.querySelectorAll('.filter-alert-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const statusKey = pill.dataset.status;
+            document.querySelectorAll('.filter-alert-pill').forEach(p => p.classList.remove('active'));
+            pill.classList.add('active');
+
+            if (statSelect) {
+                statSelect.value = statusKey === 'low' ? 'low' : (statusKey === 'critical' ? 'critical' : '');
             }
-            if (warrantyConditions && (!warrantyConditions.value || warrantyConditions.value.includes('No warranty') || warrantyConditions.value.includes('consumable'))) {
-                warrantyConditions.value = 'Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found.';
+            catalogState.stock_status = statusKey;
+            catalogState.page = 1;
+            fetchTableData();
+            document.getElementById('catalogCatalogSection').scrollIntoView({ behavior: 'smooth' });
+        });
+    });
+
+    // -------------------------------------------------------------
+    // 2. SVG MOVEMENT VELOCITY CHART RENDERER
+    // -------------------------------------------------------------
+    const svgChart = document.getElementById('movementSvgChart');
+    const initialDataEl = document.getElementById('initialMovementData');
+
+    function renderSvgChart(days, stockIn, stockOut) {
+        if (!svgChart) return;
+        const width = 540;
+        const height = 130;
+        const padX = 35;
+        const padY = 20;
+
+        const maxVal = Math.max(...stockIn, ...stockOut, 10);
+        const count = days.length || 7;
+        const stepX = (width - padX * 2) / (count - 1 || 1);
+
+        const getY = (val) => height - padY - ((val / maxVal) * (height - padY * 2));
+
+        let inPoints = [];
+        let outPoints = [];
+        let labelsHtml = '';
+
+        for (let i = 0; i < count; i++) {
+            const x = padX + (i * stepX);
+            const yIn = getY(stockIn[i] || 0);
+            const yOut = getY(stockOut[i] || 0);
+
+            inPoints.push(`${x},${yIn}`);
+            outPoints.push(`${x},${yOut}`);
+
+            labelsHtml += `<text x="${x}" y="${height - 4}" font-size="9" fill="#94a3b8" text-anchor="middle" font-family="monospace">${days[i] || ''}</text>`;
+        }
+
+        svgChart.innerHTML = `
+            <line x1="${padX}" y1="${getY(0)}" x2="${width - padX}" y2="${getY(0)}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3,3" />
+            <line x1="${padX}" y1="${getY(maxVal / 2)}" x2="${width - padX}" y2="${getY(maxVal / 2)}" stroke="#f1f5f9" stroke-width="1" stroke-dasharray="3,3" />
+            <polyline fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" points="${inPoints.join(' ')}" />
+            <polyline fill="none" stroke="#ef4444" stroke-width="2" stroke-dasharray="4,4" stroke-linecap="round" stroke-linejoin="round" points="${outPoints.join(' ')}" />
+            ${labelsHtml}
+        `;
+    }
+
+    if (initialDataEl) {
+        try {
+            const parsed = JSON.parse(initialDataEl.textContent);
+            renderSvgChart(parsed.days || [], parsed.stockIn || [], parsed.stockOut || []);
+        } catch (e) {
+            renderSvgChart(['M','T','W','T','F','S','S'], [0,0,0,0,0,0,0], [0,0,0,0,0,0,0]);
+        }
+    }
+
+    document.querySelectorAll('#movementPeriodGroup .period-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const period = btn.dataset.period;
+            document.querySelectorAll('#movementPeriodGroup .period-toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            try {
+                const res = await fetch(`{% url 'inventory:stock_movement_metrics_api' %}?period=${period}&warehouse=${catalogState.warehouse}`);
+                if (!res.ok) return;
+                const json = await res.json();
+                if (json.status === 'success' && json.data) {
+                    const d = json.data;
+                    document.getElementById('statStockIn').innerText = d.inVal;
+                    document.getElementById('statStockOut').innerText = d.outVal;
+                    document.getElementById('statTransfers').innerText = d.trVal;
+                    document.getElementById('statAdjustments').innerText = d.adjVal;
+                    renderSvgChart(d.days, d.stockIn, d.stockOut);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        });
+    });
+
+    // -------------------------------------------------------------
+    // 3. MULTI-COMPONENT WARRANTY AUTO-SYNCHRONIZATION
+    // -------------------------------------------------------------
+    const imeiCheckbox = document.getElementById('modalRequiresImei');
+    const warrantyBodyInp = document.getElementById('modalWarrantyBody');
+    const warrantyBatteryInp = document.getElementById('modalWarrantyBattery');
+    const warrantyScreenInp = document.getElementById('modalWarrantyScreen');
+    const warrantyConditionsInp = document.getElementById('modalWarrantyConditions');
+    const warrantyBadge = document.getElementById('modalWarrantyBadge');
+
+    function syncWarrantyConfig() {
+        if (!imeiCheckbox) return;
+        if (imeiCheckbox.checked) {
+            if (warrantyBodyInp) warrantyBodyInp.value = '12';
+            if (warrantyBatteryInp) warrantyBatteryInp.value = '6';
+            if (warrantyScreenInp) warrantyScreenInp.value = '3';
+            if (warrantyConditionsInp) warrantyConditionsInp.value = 'Covers genuine manufacturing defects only. Void if physical drop cracks, glass breakage, or liquid/water ingress found.';
+            if (warrantyBadge) {
+                warrantyBadge.innerText = 'Smartphone Preset (12M/6M/3M)';
+                warrantyBadge.className = 'badge bg-success bg-opacity-10 text-success fs-3xs fw-bold';
             }
         } else {
-            if (warrantyInput) warrantyInput.value = '0';
-            if (batteryWarrantyInput) batteryWarrantyInput.value = '0';
-            if (screenWarrantyInput) screenWarrantyInput.value = '0';
-            if (warrantyPolicyBadge) {
-                warrantyPolicyBadge.textContent = 'Non-Warranted Accessory (0M)';
-                warrantyPolicyBadge.className = 'badge bg-secondary bg-opacity-10 text-secondary fs-2xs fw-bold';
-            }
-            if (warrantyConditions) {
-                warrantyConditions.value = 'No warranty for consumable accessory.';
+            if (warrantyBodyInp) warrantyBodyInp.value = '0';
+            if (warrantyBatteryInp) warrantyBatteryInp.value = '0';
+            if (warrantyScreenInp) warrantyScreenInp.value = '0';
+            if (warrantyConditionsInp) warrantyConditionsInp.value = 'No warranty for consumable accessory.';
+            if (warrantyBadge) {
+                warrantyBadge.innerText = 'Accessory (0 Months)';
+                warrantyBadge.className = 'badge bg-secondary bg-opacity-10 text-secondary fs-3xs fw-bold';
             }
         }
     }
 
-    if (imeiCheck) {
-        imeiCheck.addEventListener('change', syncWarrantyPreset);
+    if (imeiCheckbox) {
+        imeiCheckbox.addEventListener('change', syncWarrantyConfig);
     }
 
-    function openModal(el) { if (el) el.classList.add('show'); }
-    function closeModal(el) { if (el) el.classList.remove('show'); }
+    // -------------------------------------------------------------
+    // 4. THE 5 QUICK HELPER MODAL POPUP LISTENERS & AJAX SUBMISSIONS
+    // -------------------------------------------------------------
+    const getCsrf = () => document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
 
-    if (openProductBtn) {
-        openProductBtn.addEventListener('click', () => {
-            openModal(productModal);
-            syncWarrantyPreset();
-        });
-    }
-    if (closeProductBtn) closeProductBtn.addEventListener('click', () => closeModal(productModal));
-    if (cancelProductBtn) cancelProductBtn.addEventListener('click', () => closeModal(productModal));
+    // Open Helper Modals over Add Product Modal
+    document.getElementById('openQuickCategoryBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('quickCategoryModal')).show();
+    });
 
-    // =========================================================================
-    // 1. Dynamic Dropdown Chaining: Category -> Subcategory
-    // =========================================================================
-    if (modalCategoryWrapper && modalSubCategoryWrapper) {
-        modalCategoryWrapper.addEventListener('item-selected', (e) => {
-            const cat = e.detail;
-            if (cat && cat.id) {
-                const newSubcatUrl = `/inventory/api/subcategories/search/?category_id=${cat.id}`;
-                modalSubCategoryWrapper.dataset.searchUrl = newSubcatUrl;
-                modalSubCategoryWrapper.dataset.autocompleteUrl = newSubcatUrl;
-                
-                const subcatHidden = modalSubCategoryWrapper.querySelector('input[type="hidden"]');
-                const subcatInput = modalSubCategoryWrapper.querySelector('.async-search-input');
-                const subcatChip = modalSubCategoryWrapper.querySelector('.async-selected-chip');
-                if (subcatHidden) subcatHidden.value = '';
-                if (subcatInput) {
-                    subcatInput.value = '';
-                    subcatInput.classList.remove('d-none');
-                }
-                if (subcatChip) subcatChip.classList.add('d-none');
+    document.getElementById('openQuickSubCategoryBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('quickSubCategoryModal')).show();
+    });
 
-                if (subCatParentSelect) subCatParentSelect.value = cat.id;
-            }
-        });
+    document.getElementById('openQuickBrandBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('quickBrandModal')).show();
+    });
 
-        modalCategoryWrapper.addEventListener('item-cleared', () => {
-            const defaultSubcatUrl = '/inventory/api/subcategories/search/';
-            modalSubCategoryWrapper.dataset.searchUrl = defaultSubcatUrl;
-            modalSubCategoryWrapper.dataset.autocompleteUrl = defaultSubcatUrl;
+    document.getElementById('openQuickUnitBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('quickUnitModal')).show();
+    });
 
-            const subcatHidden = modalSubCategoryWrapper.querySelector('input[type="hidden"]');
-            const subcatInput = modalSubCategoryWrapper.querySelector('.async-search-input');
-            const subcatChip = modalSubCategoryWrapper.querySelector('.async-selected-chip');
-            if (subcatHidden) subcatHidden.value = '';
-            if (subcatInput) {
-                subcatInput.value = '';
-                subcatInput.classList.remove('d-none');
-            }
-            if (subcatChip) subcatChip.classList.add('d-none');
-        });
-    }
+    // Helper 1: Category Form Submit
+    document.getElementById('quickCategoryForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('quickCatNameInput')?.value.trim();
+        const code = document.getElementById('quickCatCodeInput')?.value.trim();
+        const btn = document.getElementById('saveQuickCategoryBtn');
+        if (!name) return;
 
-    if (openCatBtn) {
-        openCatBtn.addEventListener('click', () => {
-            if (catNameInput) catNameInput.value = '';
-            if (catCodeInput) catCodeInput.value = '';
-            openModal(categoryModal);
-            setTimeout(() => catNameInput && catNameInput.focus(), 100);
-        });
-    }
-    if (closeCatBtn) closeCatBtn.addEventListener('click', () => closeModal(categoryModal));
-    if (cancelCatBtn) cancelCatBtn.addEventListener('click', () => closeModal(categoryModal));
+        btn.disabled = true;
+        btn.innerText = 'Saving...';
 
-    if (openSubCatBtn) {
-        openSubCatBtn.addEventListener('click', () => {
-            if (subCatNameInput) subCatNameInput.value = '';
-            if (subCatCodeInput) subCatCodeInput.value = '';
-            const selectedCatId = document.getElementById('modal_product_category')?.value;
-            if (selectedCatId && subCatParentSelect) {
-                subCatParentSelect.value = selectedCatId;
-            }
-            openModal(subCategoryModal);
-            setTimeout(() => subCatNameInput && subCatNameInput.focus(), 100);
-        });
-    }
-    if (closeSubCatBtn) closeSubCatBtn.addEventListener('click', () => closeModal(subCategoryModal));
-    if (cancelSubCatBtn) cancelSubCatBtn.addEventListener('click', () => closeModal(subCategoryModal));
-
-    if (openBrandBtn) {
-        openBrandBtn.addEventListener('click', () => {
-            if (brandNameInput) brandNameInput.value = '';
-            if (brandCountryInput) brandCountryInput.value = '';
-            openModal(brandModal);
-            setTimeout(() => brandNameInput && brandNameInput.focus(), 100);
-        });
-    }
-    if (closeBrandBtn) closeBrandBtn.addEventListener('click', () => closeModal(brandModal));
-    if (cancelBrandBtn) cancelBrandBtn.addEventListener('click', () => closeModal(brandModal));
-
-    if (openUnitBtn) {
-        openUnitBtn.addEventListener('click', () => {
-            if (unitNameInput) unitNameInput.value = '';
-            if (unitCodeInput) unitCodeInput.value = '';
-            if (unitNameNpInput) unitNameNpInput.value = '';
-            if (unitDecimalCheck) unitDecimalCheck.checked = false;
-            openModal(unitModal);
-            setTimeout(() => unitNameInput && unitNameInput.focus(), 100);
-        });
-    }
-    if (closeUnitBtn) closeUnitBtn.addEventListener('click', () => closeModal(unitModal));
-    if (cancelUnitBtn) cancelUnitBtn.addEventListener('click', () => closeModal(unitModal));
-
-    if (closeWarningBtn) closeWarningBtn.addEventListener('click', () => window.location.reload());
-    if (acknowledgeWarningBtn) acknowledgeWarningBtn.addEventListener('click', () => window.location.reload());
-
-    [productModal, categoryModal, subCategoryModal, brandModal, unitModal].forEach(modalEl => {
-        if (modalEl) {
-            modalEl.addEventListener('click', (e) => {
-                if (e.target === modalEl) closeModal(modalEl);
+        try {
+            const res = await fetch("{% url 'inventory:category_quick_create_api' %}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                body: JSON.stringify({ name, code })
             });
+            const data = await res.json();
+            if (data.status === 'success' && data.category) {
+                const select = document.getElementById('productFormCategorySelect');
+                if (select) {
+                    select.add(new Option(data.category.name, data.category.id, true, true));
+                }
+                const subParentSelect = document.getElementById('quickSubCatParentSelect');
+                if (subParentSelect) {
+                    subParentSelect.add(new Option(data.category.name, data.category.id, true, true));
+                }
+                bootstrap.Modal.getInstance(document.getElementById('quickCategoryModal'))?.hide();
+                document.getElementById('quickCategoryForm').reset();
+            } else {
+                alert(data.message || 'Error saving category');
+            }
+        } catch (err) {
+            alert('Failed to connect to server');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Save Category';
         }
     });
 
-    const getCsrf = () => document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+    // Helper 2: Subcategory Form Submit
+    document.getElementById('quickSubCategoryForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const parentId = document.getElementById('quickSubCatParentSelect')?.value;
+        const name = document.getElementById('quickSubCatNameInput')?.value.trim();
+        const code = document.getElementById('quickSubCatCodeInput')?.value.trim();
+        const btn = document.getElementById('saveQuickSubCategoryBtn');
+        if (!parentId || !name) return;
 
-    function triggerComponentSelection(wrapperEl, item) {
-        if (!wrapperEl || !item) return;
+        btn.disabled = true;
+        btn.innerText = 'Saving...';
 
-        const hiddenInput = wrapperEl.querySelector('input[type="hidden"]');
-        const textInput = wrapperEl.querySelector('.async-search-input');
-        const chip = wrapperEl.querySelector('.async-selected-chip');
-
-        const id = item.id !== undefined ? item.id : item.pk;
-        const title = item.name || item.title || item.label || 'Item';
-        const subtitle = item.code || item.symbol || '';
-        const displayLabel = subtitle ? `${title} (${subtitle})` : title;
-
-        if (hiddenInput) {
-            hiddenInput.value = id;
-            hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-
-        if (chip) {
-            const chipLabel = chip.querySelector('.chip-label');
-            if (chipLabel) chipLabel.textContent = displayLabel;
-            chip.classList.remove('d-none');
-        }
-
-        if (textInput) {
-            textInput.value = displayLabel;
-            textInput.classList.add('d-none');
-        }
-
-        const payload = {
-            bubbles: true,
-            cancelable: true,
-            detail: Object.assign({}, item, { id: id, title: title, extra_data: item })
-        };
-        wrapperEl.dispatchEvent(new CustomEvent('item-selected', payload));
-    }
-
-    if (quickCategoryForm) {
-        quickCategoryForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const name = catNameInput.value.trim();
-            const code = catCodeInput.value.trim();
-            if (!name) return;
-
-            const saveBtn = document.getElementById('saveQuickCategoryBtn');
-            saveBtn.disabled = true;
-            saveBtn.innerText = 'Saving...';
-
-            try {
-                const resp = await fetch("{% url 'inventory:category_quick_create_api' %}", {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
-                    body: JSON.stringify({ name: name, code: code })
-                });
-                const data = await resp.json();
-
-                if (data.status === 'success' && data.category) {
-                    if (modalCategoryWrapper) triggerComponentSelection(modalCategoryWrapper, data.category);
-                    if (catalogCategoryFilter) {
-                        catalogCategoryFilter.add(new Option(data.category.name, data.category.id));
-                    }
-                    closeModal(categoryModal);
-                } else {
-                    alert('Error: ' + (data.message || 'Could not create category.'));
-                }
-            } catch (err) {
-                alert('Failed to connect to server.');
-            } finally {
-                saveBtn.disabled = false;
-                saveBtn.innerText = 'Save Category';
-            }
-        });
-    }
-
-    if (quickSubCategoryForm) {
-        quickSubCategoryForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const parentCatId = subCatParentSelect ? subCatParentSelect.value : '';
-            const name = subCatNameInput ? subCatNameInput.value.trim() : '';
-            const code = subCatCodeInput ? subCatCodeInput.value.trim() : '';
-
-            if (!parentCatId || !name) return;
-
-            const saveBtn = document.getElementById('saveQuickSubCategoryBtn');
-            saveBtn.disabled = true;
-            saveBtn.innerText = 'Saving...';
-
-            try {
-                const resp = await fetch("{% url 'inventory:subcategory_quick_create_api' %}", {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
-                    body: JSON.stringify({ category_id: parentCatId, name: name, code: code })
-                });
-                const data = await resp.json();
-
-                if (data.status === 'success' && data.subcategory) {
-                    if (modalSubCategoryWrapper) triggerComponentSelection(modalSubCategoryWrapper, data.subcategory);
-                    closeModal(subCategoryModal);
-                } else {
-                    alert('Error: ' + (data.message || 'Could not create sub-category.'));
-                }
-            } catch (err) {
-                alert('Failed to connect to server.');
-            } finally {
-                saveBtn.disabled = false;
-                saveBtn.innerText = 'Save Sub-Category';
-            }
-        });
-    }
-
-    if (quickBrandForm) {
-        quickBrandForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const name = brandNameInput ? brandNameInput.value.trim() : '';
-            const country = brandCountryInput ? brandCountryInput.value.trim() : '';
-            if (!name) return;
-
-            const saveBtn = document.getElementById('saveQuickBrandBtn');
-            saveBtn.disabled = true;
-            saveBtn.innerText = 'Saving...';
-
-            try {
-                const resp = await fetch("{% url 'inventory:brand_quick_create_api' %}", {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
-                    body: JSON.stringify({ name: name, origin_country: country })
-                });
-                const data = await resp.json();
-
-                if (data.status === 'success' && data.brand) {
-                    if (modalBrandWrapper) triggerComponentSelection(modalBrandWrapper, data.brand);
-                    if (catalogBrandFilter) {
-                        catalogBrandFilter.add(new Option(data.brand.name, data.brand.id));
-                    }
-                    closeModal(brandModal);
-                } else {
-                    alert('Error: ' + (data.message || 'Could not create brand.'));
-                }
-            } catch (err) {
-                alert('Failed to connect to server.');
-            } finally {
-                saveBtn.disabled = false;
-                saveBtn.innerText = 'Save Brand';
-            }
-        });
-    }
-
-    if (quickUnitForm) {
-        quickUnitForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const name = unitNameInput ? unitNameInput.value.trim() : '';
-            const code = unitCodeInput ? unitCodeInput.value.trim().toUpperCase() : '';
-            const nameNp = unitNameNpInput ? unitNameNpInput.value.trim() : '';
-            const allowDecimal = unitDecimalCheck ? unitDecimalCheck.checked : false;
-
-            if (!name || !code) return;
-
-            const saveBtn = document.getElementById('saveQuickUnitBtn');
-            saveBtn.disabled = true;
-            saveBtn.innerText = 'Saving...';
-
-            try {
-                const resp = await fetch("{% url 'inventory:unit_quick_create_api' %}", {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
-                    body: JSON.stringify({ name: name, code: code, name_np: nameNp, allow_decimal: allowDecimal })
-                });
-                const data = await resp.json();
-
-                if (data.status === 'success' && data.unit) {
-                    if (modalUnitWrapper) triggerComponentSelection(modalUnitWrapper, data.unit);
-                    closeModal(unitModal);
-                } else {
-                    alert('Error: ' + (data.message || 'Could not register unit.'));
-                }
-            } catch (err) {
-                alert('Failed to connect to server.');
-            } finally {
-                saveBtn.disabled = false;
-                saveBtn.innerText = 'Save Unit';
-            }
-        });
-    }
-
-    // Quick Product Form Submission with Single Authoritative Warranty Input
-    if (quickProductForm) {
-        quickProductForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            // Ensure single warranty input has valid value before submission
-            if (warrantyInput) {
-                const val = warrantyInput.value.trim();
-                if (val === '') {
-                    warrantyInput.value = (imeiCheck && imeiCheck.checked) ? '12' : '0';
-                }
-            }
-
-            // Ensure cost price has a safe fallback of 0.00 if left empty by the user
-            const purchasePriceInput = quickProductForm.querySelector('[name="purchase_price"]');
-            if (purchasePriceInput && (!purchasePriceInput.value || purchasePriceInput.value.trim() === '')) {
-                purchasePriceInput.value = '0.00';
-            }
-
-            // Ensure wholesale price defaults safely if left blank
-            const wholesalePriceInput = quickProductForm.querySelector('[name="wholesale_price"]');
-            if (wholesalePriceInput && (!wholesalePriceInput.value || wholesalePriceInput.value.trim() === '')) {
-                const sellingPriceInput = quickProductForm.querySelector('[name="selling_price"]');
-                wholesalePriceInput.value = sellingPriceInput && sellingPriceInput.value ? sellingPriceInput.value : '0.00';
-            }
-
-            const formData = new FormData(quickProductForm);
-
-            if (submitQuickProductBtn) {
-                submitQuickProductBtn.disabled = true;
-                submitQuickProductBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
-            }
-
-            try {
-                const resp = await fetch(quickProductForm.action, {
-                    method: 'POST',
-                    body: formData,
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-
-                const data = await resp.json();
-
-                if (data.status === 'success') {
-                    if (data.warning) {
-                        closeModal(productModal);
-                        if (warningTextEl) {
-                            warningTextEl.innerHTML = `<i class="fas fa-info-circle text-warning me-1"></i> ${data.warning}`;
-                        }
-                        openModal(warningModal);
-                    } else {
-                        window.location.reload();
-                    }
-                } else {
-                    const errorMsg = data.errors ? JSON.stringify(data.errors) : (data.message || 'Validation error.');
-                    alert('Could not save product: ' + errorMsg);
-                    if (submitQuickProductBtn) {
-                        submitQuickProductBtn.disabled = false;
-                        submitQuickProductBtn.innerText = 'Create Product';
-                    }
-                }
-            } catch (err) {
-                quickProductForm.submit();
-            }
-        });
-    }
-
-    // =========================================================================
-    // 3. Real-Time Catalog Filter Hints (Search Dropdown)
-    // =========================================================================
-    const searchInput = document.getElementById('catalogSearchInput');
-    const hintsDropdown = document.getElementById('catalogSearchHints');
-    let searchDebounceTimer = null;
-    let currentHintIndex = -1;
-
-    function escapeHtml(str) {
-        if (!str) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-    }
-
-    if (searchInput && hintsDropdown) {
-        function hideHints() {
-            hintsDropdown.classList.add('d-none');
-            hintsDropdown.innerHTML = '';
-            currentHintIndex = -1;
-        }
-
-        searchInput.addEventListener('input', () => {
-            const query = searchInput.value.trim();
-            clearTimeout(searchDebounceTimer);
-
-            if (query.length < 2) {
-                hideHints();
-                return;
-            }
-
-            searchDebounceTimer = setTimeout(async () => {
-                try {
-                    const res = await fetch(`/products/api/search/?mode=simple&q=${encodeURIComponent(query)}`);
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    const items = Array.isArray(data) ? data : (data.results || data.items || []);
-
-                    if (items.length === 0) {
-                        hintsDropdown.innerHTML = `
-                            <div class="p-3 text-center text-muted fs-xs">
-                                <i class="fas fa-circle-info me-1"></i> No matching products found for "<strong>${escapeHtml(query)}</strong>"
-                                <div class="mt-1 fs-2xs">Press Enter to submit standard table filter.</div>
-                            </div>
-                        `;
-                        hintsDropdown.classList.remove('d-none');
-                        return;
-                    }
-
-                    hintsDropdown.innerHTML = items.slice(0, 7).map((p, idx) => {
-                        const name = p.name || p.title || 'Product';
-                        const sku = p.sku || p.model || '';
-                        const price = p.selling_price || p.price ? `Rs. ${parseFloat(p.selling_price || p.price).toFixed(2)}` : '';
-                        const stock = p.stock ?? p.current_stock ?? null;
-                        const url = p.url || `/inventory/${p.id}/`;
-
-                        return `
-                            <a href="${url}" class="inv-search-hint-item" data-index="${idx}">
-                                <div class="d-flex align-items-center gap-2">
-                                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-2">
-                                        <i class="fas fa-mobile-screen"></i>
-                                    </span>
-                                    <div>
-                                        <strong class="d-block text-dark fs-xs">${escapeHtml(name)}</strong>
-                                        <small class="text-muted fs-2xs font-mono">SKU: ${escapeHtml(sku)} ${stock !== null ? `&bull; Stock: ${stock}` : ''}</small>
-                                    </div>
-                                </div>
-                                <div class="text-end">
-                                    <span class="inv-price text-primary fs-xs d-block">${price}</span>
-                                    <span class="badge bg-light text-secondary border fs-2xs">View Detail &rarr;</span>
-                                </div>
-                            </a>
-                        `;
-                    }).join('');
-
-                    hintsDropdown.classList.remove('d-none');
-                } catch (err) {
-                    console.warn('[CatalogHints] Failed to fetch:', err);
-                    hideHints();
-                }
-            }, 220);
-        });
-
-        searchInput.addEventListener('keydown', (e) => {
-            const items = hintsDropdown.querySelectorAll('.inv-search-hint-item');
-            if (hintsDropdown.classList.contains('d-none') || items.length === 0) {
-                return;
-            }
-
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                currentHintIndex = (currentHintIndex + 1) % items.length;
-                updateHintActive(items);
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                currentHintIndex = (currentHintIndex - 1 + items.length) % items.length;
-                updateHintActive(items);
-            } else if (e.key === 'Enter') {
-                if (currentHintIndex >= 0 && currentHintIndex < items.length) {
-                    e.preventDefault();
-                    items[currentHintIndex].click();
-                }
-            } else if (e.key === 'Escape') {
-                hideHints();
-            }
-        });
-
-        function updateHintActive(items) {
-            items.forEach((it, idx) => {
-                it.classList.toggle('active', idx === currentHintIndex);
-                if (idx === currentHintIndex) {
-                    it.scrollIntoView({ block: 'nearest' });
-                }
+        try {
+            const res = await fetch("{% url 'inventory:subcategory_quick_create_api' %}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                body: JSON.stringify({ category_id: parentId, name, code })
             });
-        }
-
-        document.addEventListener('click', (e) => {
-            if (!searchInput.contains(e.target) && !hintsDropdown.contains(e.target)) {
-                hideHints();
+            const data = await res.json();
+            if (data.status === 'success' && data.subcategory) {
+                const select = document.getElementById('productFormSubCategorySelect');
+                if (select) {
+                    select.add(new Option(data.subcategory.name, data.subcategory.id, true, true));
+                }
+                bootstrap.Modal.getInstance(document.getElementById('quickSubCategoryModal'))?.hide();
+                document.getElementById('quickSubCategoryForm').reset();
+            } else {
+                alert(data.message || 'Error saving subcategory');
             }
-        });
-    }
+        } catch (err) {
+            alert('Failed to connect to server');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Save Subcategory';
+        }
+    });
+
+    // Helper 3: Brand Form Submit
+    document.getElementById('quickBrandForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('quickBrandNameInput')?.value.trim();
+        const origin_country = document.getElementById('quickBrandCountryInput')?.value.trim();
+        const btn = document.getElementById('saveQuickBrandBtn');
+        if (!name) return;
+
+        btn.disabled = true;
+        btn.innerText = 'Saving...';
+
+        try {
+            const res = await fetch("{% url 'inventory:brand_quick_create_api' %}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                body: JSON.stringify({ name, origin_country })
+            });
+            const data = await res.json();
+            if (data.status === 'success' && data.brand) {
+                const select = document.getElementById('productFormBrandSelect');
+                if (select) {
+                    select.add(new Option(data.brand.name, data.brand.id, true, true));
+                }
+                bootstrap.Modal.getInstance(document.getElementById('quickBrandModal'))?.hide();
+                document.getElementById('quickBrandForm').reset();
+            } else {
+                alert(data.message || 'Error saving brand');
+            }
+        } catch (err) {
+            alert('Failed to connect to server');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Save Brand';
+        }
+    });
+
+    // Helper 4: Unit Form Submit
+    document.getElementById('quickUnitForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('quickUnitNameInput')?.value.trim();
+        const code = document.getElementById('quickUnitCodeInput')?.value.trim().toUpperCase();
+        const allow_decimal = document.getElementById('quickUnitDecimalCheck')?.checked || false;
+        const btn = document.getElementById('saveQuickUnitBtn');
+        if (!name || !code) return;
+
+        btn.disabled = true;
+        btn.innerText = 'Saving...';
+
+        try {
+            const res = await fetch("{% url 'inventory:unit_quick_create_api' %}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+                body: JSON.stringify({ name, code, allow_decimal })
+            });
+            const data = await res.json();
+            if (data.status === 'success' && data.unit) {
+                const select = document.getElementById('productFormUnitSelect');
+                if (select) {
+                    select.add(new Option(`${data.unit.name} (${data.unit.code})`, data.unit.id, true, true));
+                }
+                bootstrap.Modal.getInstance(document.getElementById('quickUnitModal'))?.hide();
+                document.getElementById('quickUnitForm').reset();
+            } else {
+                alert(data.message || 'Error saving unit');
+            }
+        } catch (err) {
+            alert('Failed to connect to server');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Save Unit';
+        }
+    });
+
+    // -------------------------------------------------------------
+    // 5. PRIMARY MODALS (ADD PRODUCT, ADJUSTMENT, TRANSFER)
+    // -------------------------------------------------------------
+    // Add Product Submit (With Helper 5: Warning Modal Trigger)
+    document.getElementById('quickAddProductForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const btn = document.getElementById('btnSubmitQuickProduct');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Registering...';
+
+        try {
+            const res = await fetch(form.action, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCsrf() },
+                body: new FormData(form)
+            });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                bootstrap.Modal.getInstance(document.getElementById('addProductModal'))?.hide();
+                form.reset();
+
+                // If serialized device had 0 stock warning, trigger Helper Modal 5
+                if (data.warning) {
+                    const warningText = document.getElementById('productWarningText');
+                    if (warningText) warningText.innerHTML = `<i class="fas fa-info-circle me-1"></i> ${data.warning}`;
+                    bootstrap.Modal.getOrCreateInstance(document.getElementById('productWarningModal')).show();
+                } else {
+                    alert(`Product '${data.name}' registered successfully!`);
+                }
+                fetchTableData();
+            } else {
+                alert('Error saving product: ' + (data.message || JSON.stringify(data.errors)));
+            }
+        } catch (err) {
+            alert('Server error registering product.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check me-1"></i> Register Product';
+        }
+    });
+
+    // Stock Adjustment Form Submit
+    document.getElementById('stockAdjustmentForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const btn = document.getElementById('btnSubmitStockAdj');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Adjusting...';
+
+        try {
+            const res = await fetch(form.action, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCsrf() },
+                body: new FormData(form)
+            });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                bootstrap.Modal.getInstance(document.getElementById('stockAdjustmentModal'))?.hide();
+                form.reset();
+                alert(data.message);
+                fetchTableData();
+            } else {
+                alert('Adjustment error: ' + data.message);
+            }
+        } catch (err) {
+            alert('Server error committing adjustment.');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Commit Adjustment';
+        }
+    });
+
+    // Stock Transfer Form Submit
+    document.getElementById('stockTransferForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const btn = document.getElementById('btnSubmitStockTrf');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Transferring...';
+
+        try {
+            const res = await fetch(form.action, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCsrf() },
+                body: new FormData(form)
+            });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                bootstrap.Modal.getInstance(document.getElementById('stockTransferModal'))?.hide();
+                form.reset();
+                alert(data.message);
+                fetchTableData();
+            } else {
+                alert('Transfer error: ' + data.message);
+            }
+        } catch (err) {
+            alert('Server error executing transfer.');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Execute Transfer';
+        }
+    });
 });
 </script>
 {% endblock %}

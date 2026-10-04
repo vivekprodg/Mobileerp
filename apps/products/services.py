@@ -1,6 +1,5 @@
 """
 Product Catalog, Pricing Evaluation & Thermal Barcode Calibration Engine.
-File Path: apps/products/services.py
 
 Features:
 1. Calibrated Sticker Dimensions:
@@ -10,10 +9,12 @@ Features:
    - Includes Model Name, Memory specs (e.g. 8GB/256GB), Color, MRP, Warranty period, and MDMS compliance badge.
 3. Multi-Tiered Wholesale & Retail Pricing Matrix:
    - Resolves optimal volume prices based on customer account tier (Retail, Wholesale, Dealer, VIP).
+   - Defensive pricing resolution guaranteeing zero server crashes during catalog lookups.
 """
 
 import io
 import uuid
+import logging
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Dict, Any, List
 
@@ -26,6 +27,7 @@ from apps.branches.models import Branch
 from apps.core.models import SystemConfiguration
 from apps.core.utils.barcode_generator import BarcodeGenerator
 
+logger = logging.getLogger(__name__)
 
 class ProductCatalogService:
     """
@@ -53,28 +55,41 @@ class ProductCatalogService:
     ) -> Decimal:
         """
         Determines the optimal unit price based on customer tier (Retail, Wholesale, VIP, Dealer) and volume.
+        Defensively handles tier resolution to guarantee that pricing queries never crash 
+        product autocomplete or invoice generation endpoints.
         """
-        tier_mapping = {
-            'WHOLESALE': 'WHOLESALE',
-            'VIP': 'SPECIAL',
-            'DEALER': 'DEALER'
-        }
-        target_tier = tier_mapping.get(customer_type, 'RETAIL')
+        try:
+            tier_mapping = {
+                'WHOLESALE': 'WHOLESALE',
+                'VIP': 'SPECIAL',
+                'DEALER': 'DEALER'
+            }
+            normalized_cust_type = str(customer_type or 'RETAIL').upper().strip()
+            target_tier = tier_mapping.get(normalized_cust_type, 'RETAIL')
 
-        matched_tier = ProductPriceTier.objects.filter(
-            product=product,
-            tier_type=target_tier,
-            min_quantity__lte=quantity,
-            is_active=True
-        ).order_by('-min_quantity').first()
+            # Build query filter defensively checking field presence
+            tier_kwargs = {
+                'product': product,
+                'tier_type': target_tier,
+                'min_quantity__lte': quantity,
+            }
+            if hasattr(ProductPriceTier, 'is_active'):
+                tier_kwargs['is_active'] = True
 
-        if matched_tier:
-            return matched_tier.price_per_unit
+            matched_tier = ProductPriceTier.objects.filter(**tier_kwargs).order_by('-min_quantity').first()
 
-        if customer_type == 'WHOLESALE' and product.wholesale_price:
-            return product.wholesale_price
+            if matched_tier and matched_tier.price_per_unit is not None:
+                return matched_tier.price_per_unit
 
-        return product.selling_price
+            if normalized_cust_type == 'WHOLESALE' and product.wholesale_price and product.wholesale_price > Decimal('0.00'):
+                return product.wholesale_price
+
+        except Exception as err:
+            logger.warning(
+                f"[ProductCatalogService.get_applicable_price] Tier resolution fallback for Product {product.id}: {err}"
+            )
+
+        return product.selling_price if product.selling_price is not None else Decimal('0.00')
 
     @classmethod
     def compile_sticker_data(
@@ -127,8 +142,8 @@ class ProductCatalogService:
             'color': product.color_variant or '',
             'sku': product.sku,
             'barcode': code_to_render,
-            'price': f"{product.selling_price:.2f}",
-            'price_formatted': f"Rs. {product.selling_price:,.2f}",
+            'price': f"{product.selling_price:.2f}" if product.selling_price else "0.00",
+            'price_formatted': f"Rs. {product.selling_price:,.2f}" if product.selling_price else "Rs. 0.00",
             'warranty': warranty_str,
             'rack_location': f"Rack: {product.rack_number}" if product.rack_number else "",
             'tax_note': tax_note,

@@ -8,6 +8,7 @@ Registers:
    ('Mobile (Historical)' and 'Various Items (Historical)') with 1-click generation action.
 """
 
+from decimal import Decimal
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
@@ -16,12 +17,11 @@ from apps.products.models import ProductPriceTier, BarcodeLabelTemplate, Histori
 # =============================================================================
 # 1. PRODUCT PRICE TIER ADMIN
 # =============================================================================
-
 @admin.register(ProductPriceTier)
 class ProductPriceTierAdmin(admin.ModelAdmin):
     list_display = [
         'product', 'tier_type_badge', 'min_quantity',
-        'price_per_unit', 'is_active', 'created_at'
+        'price_per_unit', 'is_active_badge', 'created_at'
     ]
     list_filter = ['tier_type', 'is_active', 'product__brand', 'product__category']
     search_fields = [
@@ -31,7 +31,7 @@ class ProductPriceTierAdmin(admin.ModelAdmin):
     list_select_related = ['product']
 
     fieldsets = (
-        ("Tier Configuration", {
+        (_("Tier Configuration"), {
             'fields': ('product', 'tier_type', 'min_quantity', 'price_per_unit', 'is_active')
         }),
     )
@@ -50,6 +50,17 @@ class ProductPriceTierAdmin(admin.ModelAdmin):
         )
     tier_type_badge.short_description = _("Tier Type")
 
+    def is_active_badge(self, obj):
+        if obj.is_active:
+            return format_html(
+                '<span style="color: #065f46; background-color: #ecfdf5; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 10px;">ACTIVE</span>'
+            )
+        return format_html(
+            '<span style="color: #991b1b; background-color: #fef2f2; border: 1px solid #fecaca; padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 10px;">INACTIVE</span>'
+        )
+    is_active_badge.short_description = _("Active Status")
+    is_active_badge.admin_order_field = 'is_active'
+
 # =============================================================================
 # 2. BARCODE LABEL TEMPLATE ADMIN
 # =============================================================================
@@ -67,14 +78,14 @@ class BarcodeLabelTemplateAdmin(admin.ModelAdmin):
     search_fields = ['name', 'custom_note']
 
     fieldsets = (
-        ("Template Dimensions", {
+        (_("Template Dimensions"), {
             'fields': (
                 'name',
                 ('width_mm', 'height_mm'),
                 'is_active'
             )
         }),
-        ("Print Content Options for Smartphones & Items", {
+        (_("Print Content Options for Smartphones & Items"), {
             'fields': (
                 ('show_shop_name', 'show_mrp'),
                 ('show_product_code', 'show_model_number'),
@@ -106,7 +117,7 @@ class HistoricalProductAdmin(admin.ModelAdmin):
     actions = ['seed_placeholders_action']
 
     fieldsets = (
-        ("Historical Tax Product Placeholder Identity", {
+        (_("Historical Tax Product Placeholder Identity"), {
             'description': _(
                 "These items are used strictly for importing historical 2080 B.S. Mobilesoft tax sales. "
                 "They are non-serialized (IMEI disabled), non-discountable, and 13% VAT tax-inclusive."
@@ -117,14 +128,14 @@ class HistoricalProductAdmin(admin.ModelAdmin):
                 ('model_name', 'description')
             )
         }),
-        ("Tax Compliance & Pricing", {
+        (_("Tax Compliance & Pricing"), {
             'fields': (
                 ('selling_price', 'purchase_price'),
                 ('tax_pricing_type', 'is_vat_applicable', 'vat_rate'),
                 'is_discountable'
             )
         }),
-        ("Serialized Tracking Controls (Must Remain OFF)", {
+        (_("Serialized Tracking Controls (Must Remain OFF)"), {
             'fields': (
                 ('requires_imei_tracking', 'requires_serial_tracking', 'inventory_tracking_type'),
             )
@@ -146,7 +157,7 @@ class HistoricalProductAdmin(admin.ModelAdmin):
     imei_status_badge.short_description = _("IMEI Policy")
 
     def tax_compliance_badge(self, obj):
-        if obj.is_vat_applicable and obj.vat_rate > 0:
+        if obj.is_vat_applicable and obj.vat_rate > Decimal('0.00'):
             return format_html(
                 '<span style="color: #1e40af; background-color: #eff6ff; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 10px;">'
                 '13% VAT (ANNEX-5 ALIGNED)'

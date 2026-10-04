@@ -7,19 +7,25 @@ Capabilities:
      highest-stock, or recently updated products.
 2. Progressive Character Matching (v -> vi -> viv):
    - Fast partial substring searches across product names, brand names (e.g. Vivo, Apple, Samsung),
-     model names, model numbers, variants, SKUs, and barcodes.
+     model names, model numbers, variants, SKUs, and barcodes using case-insensitive containment (__icontains).
+   - Annotates prefix priority so items with brands or names starting with the typed query appear first.
+   - Preserves .distinct() to prevent duplicate rows from joined IMEI instances.
 3. Prioritized IMEI & Serial Hardware Lookups:
    - Instant prioritized resolution for exact or partial 15-digit IMEI scans (`imei_1`, `imei_2`, `serial_number`).
 4. Dual Mode Operation:
    - mode='pos': Rich POS structure containing in-stock physical handset boxes, dual-SIM flags,
      tax pricing classifications, avatar icons, and multi-component warranty parameters.
-   - mode='simple': Lightweight records optimized for dropdown selectors, table row cells, POs, and transfers.
+   - mode='simple': Lightweight, highly enriched records providing full procurement metadata
+     (product ID, name, SKU, barcode, unit cost, counter MRP, UOM, VAT %, and IMEI tracking flags)
+     for GRN purchase inward, purchase orders, transfers, and table row dropdowns.
 """
 
 import re
+import logging
 from decimal import Decimal
 from datetime import date, timedelta
-from django.db.models import Q
+
+from django.db.models import Q, Case, When, Value, IntegerField
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -33,6 +39,8 @@ from apps.products.api.serializers import (
 )
 from apps.products.services import ProductCatalogService
 from apps.integrations.mdms.nta_checker import NTAMDMSClient
+
+logger = logging.getLogger(__name__)
 
 def get_product_avatar_meta(product):
     """
@@ -109,9 +117,9 @@ class ProductSearchAPIView(APIView):
     Universal High-Speed Product Search & Auto-Complete API.
     Supports two operating modes:
       - mode='pos': Rich POS structure (in-stock IMEIs, dual-SIM flags, warranty rules, tax pricing).
-      - mode='simple' (default): Clean, lightweight records for dropdowns, table row cells,
-        purchase orders, transfers, repair tickets, and barcode batches.
-    When 'q' is empty, returns the 20 most recently updated or highest-stock active products immediately.
+      - mode='simple' (default): Clean, fully enriched records for GRN purchase inward,
+        dropdown selectors, table row cells, POs, transfers, and barcode generation.
+    When 'q' is empty, returns the top 20 recently updated active products immediately.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -128,7 +136,7 @@ class ProductSearchAPIView(APIView):
             limit = 20 if not query else 30
 
         # =========================================================================
-        # 1. EMPTY QUERY: IMMEDIATE DISPLAY OF TOP/RECENT PRODUCTS
+        # 1. EMPTY QUERY: IMMEDIATE ZERO-QUERY POPULATION OF TOP/RECENT PRODUCTS
         # =========================================================================
         if not query:
             products_qs = _get_base_product_queryset().select_related(
@@ -190,7 +198,7 @@ class ProductSearchAPIView(APIView):
             return Response({'status': 'success', 'results': [self._build_simple_package_payload(pkg_match, branch)], 'count': 1})
 
         # =========================================================================
-        # 4. GENERAL PROGRESSIVE LOOKUP (v -> vi -> viv across names, models, brands)
+        # 4. GENERAL PROGRESSIVE LOOKUP (v -> vi -> viv across brands, names, models)
         # =========================================================================
         base_filter = (
             Q(name__icontains=query) |
@@ -215,6 +223,19 @@ class ProductSearchAPIView(APIView):
             except (ValueError, TypeError):
                 pass
 
+        # Relevance weighting: items starting with query (e.g. Brand 'Vivo' or Name 'Vivo...') rank highest
+        products_qs = products_qs.annotate(
+            match_priority=Case(
+                When(brand__name__istartswith=query, then=Value(1)),
+                When(name__istartswith=query, then=Value(2)),
+                When(model_name__istartswith=query, then=Value(3)),
+                When(sku__istartswith=query, then=Value(4)),
+                When(barcode__istartswith=query, then=Value(5)),
+                default=Value(10),
+                output_field=IntegerField()
+            )
+        ).order_by('match_priority', 'name')
+
         products = products_qs.select_related(
             'base_unit', 'category', 'brand'
         ).prefetch_related('component_warranty_rules', 'branch_stocks')[:limit]
@@ -227,7 +248,7 @@ class ProductSearchAPIView(APIView):
         return Response({'status': 'success', 'results': simple_results, 'count': len(simple_results)})
 
     # -------------------------------------------------------------------------
-    # PAYLOAD BUILDERS: SIMPLE MODE (STANDARD DROPDOWNS & TABLE ROWS)
+    # PAYLOAD BUILDERS: SIMPLE MODE (ENRICHED FOR GRN INWARD & TABLE ROWS)
     # -------------------------------------------------------------------------
     def _build_simple_product_payload(self, p, branch, customer_type):
         stock_qty = Decimal('0.000')
@@ -236,7 +257,18 @@ class ProductSearchAPIView(APIView):
             if bs:
                 stock_qty = bs.available_quantity
 
-        price = ProductCatalogService.get_applicable_price(p, Decimal('1.000'), customer_type)
+        # Defensive price resolution guaranteeing zero 500 error crashes
+        try:
+            resolved_selling_price = ProductCatalogService.get_applicable_price(p, Decimal('1.000'), customer_type)
+        except Exception as err:
+            logger.warning(f"[ProductSearchAPIView] Price tier resolution fallback for {p.id}: {err}")
+            resolved_selling_price = p.selling_price if p.selling_price is not None else Decimal('0.00')
+
+        cost_price = p.purchase_price if p.purchase_price is not None else Decimal('0.00')
+        selling_price = resolved_selling_price if resolved_selling_price is not None else Decimal('0.00')
+        wholesale_price = p.wholesale_price if (p.wholesale_price is not None and p.wholesale_price > Decimal('0.00')) else selling_price
+        vat_rate = p.vat_rate if p.vat_rate is not None else Decimal('13.00')
+
         variant_desc = p.variant_name or f"{p.ram or ''}/{p.internal_storage or ''} {p.color_variant or ''}".strip()
         variant_tag = f" ({variant_desc})" if variant_desc else ""
         badge = "IMEI" if p.requires_imei_tracking else ("SPARE" if p.is_spare_part else "STD")
@@ -251,31 +283,47 @@ class ProductSearchAPIView(APIView):
             warranty_summary = f"Phone: {dev}M | Batt: {bat}M | Screen: {scr}M"
         elif p.requires_imei_tracking:
             warranty_summary = f"Phone: {p.warranty_months or 12}M | Batt: 6M | Screen: 3M"
-        elif p.warranty_months > 0:
+        elif p.warranty_months and p.warranty_months > 0:
             warranty_summary = f"{p.warranty_months}M General Warranty"
         else:
             warranty_summary = "No Warranty"
+
+        unit_code = p.base_unit.code if p.base_unit else 'Pcs'
+        unit_name = p.base_unit.name if p.base_unit else 'Piece'
+        unit_id = p.base_unit_id if p.base_unit else None
 
         extra_data = {
             'id': p.id,
             'product_id': p.id,
             'name': p.name,
-            'price': str(price),
-            'selling_price': str(price),
-            'cost_price': str(p.purchase_price),
-            'purchase_price': str(p.purchase_price),
-            'wholesale_price': str(p.wholesale_price or p.selling_price),
-            'available_stock': str(stock_qty),
-            'requires_imei': p.requires_imei_tracking,
-            'requires_imei_tracking': p.requires_imei_tracking,
-            'unit_code': p.base_unit.code if p.base_unit else 'Pcs',
-            'unit_name': p.base_unit.name if p.base_unit else 'Piece',
+            'brand': p.brand.name if p.brand else '',
+            'brand_name': p.brand.name if p.brand else '',
+            'category': p.category.name if p.category else 'General',
+            'category_name': p.category.name if p.category else 'General',
+            'category_id': p.category_id,
             'sku': p.sku,
             'barcode': p.barcode or '',
-            'is_vat_applicable': p.is_vat_applicable,
-            'vat_rate': str(p.vat_rate),
-            'tax_pricing_type': p.tax_pricing_type,
-            'warranty_months': p.warranty_months,
+            'price': float(selling_price),
+            'selling_price': float(selling_price),
+            'mrp': float(selling_price),
+            'cost_price': float(cost_price),
+            'purchase_price': float(cost_price),
+            'wholesale_price': float(wholesale_price),
+            'available_stock': float(stock_qty),
+            'current_stock': float(stock_qty),
+            'base_unit_id': unit_id,
+            'base_unit_code': unit_code,
+            'unit_code': unit_code,
+            'unit_name': unit_name,
+            'is_vat_applicable': bool(p.is_vat_applicable),
+            'vat_rate': float(vat_rate),
+            'tax_pricing_type': p.tax_pricing_type or 'EXEMPT',
+            'requires_imei': bool(p.requires_imei_tracking),
+            'requires_imei_tracking': bool(p.requires_imei_tracking),
+            'requires_serial': bool(p.requires_serial_tracking),
+            'requires_serial_tracking': bool(p.requires_serial_tracking),
+            'is_spare_part': bool(p.is_spare_part),
+            'warranty_months': p.warranty_months or 0,
             'warranty_summary': warranty_summary
         }
 
@@ -285,28 +333,37 @@ class ProductSearchAPIView(APIView):
             'name': p.name,
             'text': f"{p.name}{variant_tag} [{p.sku}]",
             'title': f"{p.name}{variant_tag}",
-            'subtitle': f"SKU: {p.sku} | Barcode: {p.barcode or 'N/A'} | Stock: {stock_qty} | Warranty: {warranty_summary}",
+            'subtitle': f"Brand: {p.brand.name if p.brand else 'Generic'} | SKU: {p.sku} | Cost: Rs. {cost_price:,.2f} | Stock: {stock_qty}",
             'badge': badge,
             'sku': p.sku,
             'barcode': p.barcode or '',
+            'brand': p.brand.name if p.brand else '',
+            'brand_name': p.brand.name if p.brand else '',
+            'category': p.category.name if p.category else 'General',
+            'category_name': p.category.name if p.category else 'General',
+            'category_id': p.category_id,
             'model_name': p.model_name or '',
             'model_number': p.model_number or '',
-            'price': str(price),
-            'selling_price': str(price),
-            'wholesale_price': str(p.wholesale_price or p.selling_price),
-            'purchase_price': str(p.purchase_price),
-            'cost_price': str(p.purchase_price),
+            'price': str(selling_price),
+            'selling_price': str(selling_price),
+            'mrp': str(selling_price),
+            'wholesale_price': str(wholesale_price),
+            'purchase_price': str(cost_price),
+            'cost_price': str(cost_price),
             'available_stock': str(stock_qty),
-            'requires_imei': p.requires_imei_tracking,
-            'requires_imei_tracking': p.requires_imei_tracking,
-            'requires_serial': p.requires_serial_tracking,
-            'is_spare_part': p.is_spare_part,
-            'unit_code': p.base_unit.code if p.base_unit else 'Pcs',
-            'unit_name': p.base_unit.name if p.base_unit else 'Piece',
-            'is_vat_applicable': p.is_vat_applicable,
-            'vat_rate': str(p.vat_rate),
-            'tax_pricing_type': p.tax_pricing_type,
-            'warranty_months': p.warranty_months,
+            'base_unit_id': unit_id,
+            'base_unit_code': unit_code,
+            'unit_code': unit_code,
+            'unit_name': unit_name,
+            'is_vat_applicable': bool(p.is_vat_applicable),
+            'vat_rate': str(vat_rate),
+            'tax_pricing_type': p.tax_pricing_type or 'EXEMPT',
+            'requires_imei': bool(p.requires_imei_tracking),
+            'requires_imei_tracking': bool(p.requires_imei_tracking),
+            'requires_serial': bool(p.requires_serial_tracking),
+            'requires_serial_tracking': bool(p.requires_serial_tracking),
+            'is_spare_part': bool(p.is_spare_part),
+            'warranty_months': p.warranty_months or 0,
             'warranty_summary': warranty_summary,
             'extra_data': extra_data
         }
@@ -314,7 +371,17 @@ class ProductSearchAPIView(APIView):
     def _build_simple_imei_payload(self, imei_match, customer_type):
         prod = imei_match.product
         stock_qty = Decimal('1.000') if imei_match.status == 'IN_STOCK' else Decimal('0.000')
-        price = ProductCatalogService.get_applicable_price(prod, Decimal('1.000'), customer_type)
+
+        try:
+            resolved_selling_price = ProductCatalogService.get_applicable_price(prod, Decimal('1.000'), customer_type)
+        except Exception:
+            resolved_selling_price = prod.selling_price if prod.selling_price is not None else Decimal('0.00')
+
+        cost_price = imei_match.landed_cost or prod.purchase_price or Decimal('0.00')
+        selling_price = resolved_selling_price if resolved_selling_price is not None else Decimal('0.00')
+        unit_code = prod.base_unit.code if prod.base_unit else 'Pcs'
+        unit_name = prod.base_unit.name if prod.base_unit else 'Piece'
+        vat_rate = prod.vat_rate if prod.vat_rate is not None else Decimal('13.00')
 
         rules = prod.component_warranty_rules.all()
         if rules.exists():
@@ -330,20 +397,32 @@ class ProductSearchAPIView(APIView):
             'id': prod.id,
             'product_id': prod.id,
             'name': prod.name,
+            'brand': prod.brand.name if prod.brand else '',
+            'brand_name': prod.brand.name if prod.brand else '',
+            'category': prod.category.name if prod.category else 'General',
+            'category_name': prod.category.name if prod.category else 'General',
+            'category_id': prod.category_id,
             'item_instance_id': imei_match.id,
             'imei_1': imei_match.imei_1 or '',
             'imei_2': imei_match.imei_2 or '',
             'serial_number': imei_match.serial_number or '',
-            'price': str(price),
-            'selling_price': str(price),
-            'purchase_price': str(imei_match.landed_cost or prod.purchase_price),
-            'cost_price': str(imei_match.landed_cost or prod.purchase_price),
-            'available_stock': str(stock_qty),
+            'price': float(selling_price),
+            'selling_price': float(selling_price),
+            'mrp': float(selling_price),
+            'purchase_price': float(cost_price),
+            'cost_price': float(cost_price),
+            'available_stock': float(stock_qty),
+            'current_stock': float(stock_qty),
             'requires_imei': True,
             'requires_imei_tracking': True,
-            'unit_code': prod.base_unit.code if prod.base_unit else 'Pcs',
+            'base_unit_code': unit_code,
+            'unit_code': unit_code,
+            'unit_name': unit_name,
             'sku': prod.sku,
             'barcode': prod.barcode or '',
+            'is_vat_applicable': bool(prod.is_vat_applicable),
+            'vat_rate': float(vat_rate),
+            'tax_pricing_type': prod.tax_pricing_type or 'EXEMPT',
             'mdms_status': imei_match.mdms_status,
             'status': imei_match.status,
             'warranty_summary': warranty_summary
@@ -355,7 +434,7 @@ class ProductSearchAPIView(APIView):
             'name': prod.name,
             'text': f"{prod.name} [IMEI: {imei_match.imei_1}]",
             'title': f"{prod.name} ({imei_match.get_condition_display()})",
-            'subtitle': f"IMEI: {imei_match.imei_1} | S/N: {imei_match.serial_number or 'N/A'} | Status: {imei_match.get_status_display()} | Warranty: {warranty_summary}",
+            'subtitle': f"IMEI: {imei_match.imei_1} | Cost: Rs. {cost_price:,.2f} | Status: {imei_match.get_status_display()}",
             'badge': 'IMEI',
             'item_instance_id': imei_match.id,
             'imei_1': imei_match.imei_1 or '',
@@ -363,18 +442,29 @@ class ProductSearchAPIView(APIView):
             'serial_number': imei_match.serial_number or '',
             'sku': prod.sku,
             'barcode': prod.barcode or '',
+            'brand': prod.brand.name if prod.brand else '',
+            'brand_name': prod.brand.name if prod.brand else '',
+            'category': prod.category.name if prod.category else 'General',
+            'category_name': prod.category.name if prod.category else 'General',
+            'category_id': prod.category_id,
             'model_name': prod.model_name or '',
             'model_number': prod.model_number or '',
-            'price': str(price),
-            'selling_price': str(price),
-            'purchase_price': str(imei_match.landed_cost or prod.purchase_price),
-            'cost_price': str(imei_match.landed_cost or prod.purchase_price),
+            'price': str(selling_price),
+            'selling_price': str(selling_price),
+            'mrp': str(selling_price),
+            'purchase_price': str(cost_price),
+            'cost_price': str(cost_price),
             'available_stock': str(stock_qty),
             'requires_imei': True,
             'requires_imei_tracking': True,
-            'requires_serial': prod.requires_serial_tracking,
-            'is_spare_part': prod.is_spare_part,
-            'unit_code': prod.base_unit.code if prod.base_unit else 'Pcs',
+            'requires_serial': bool(prod.requires_serial_tracking),
+            'is_spare_part': bool(prod.is_spare_part),
+            'base_unit_code': unit_code,
+            'unit_code': unit_code,
+            'unit_name': unit_name,
+            'is_vat_applicable': bool(prod.is_vat_applicable),
+            'vat_rate': str(vat_rate),
+            'tax_pricing_type': prod.tax_pricing_type or 'EXEMPT',
             'mdms_status': imei_match.mdms_status,
             'status': imei_match.status,
             'warranty_summary': warranty_summary,
@@ -389,22 +479,37 @@ class ProductSearchAPIView(APIView):
             if bs:
                 stock_qty = bs.available_quantity
 
-        pkg_price = pkg_match.selling_price_per_unit or (prod.selling_price * pkg_match.conversion_factor)
-        warranty_summary = f"{prod.warranty_months}M General Warranty" if prod.warranty_months > 0 else "No Warranty"
+        pkg_factor = pkg_match.conversion_factor if pkg_match.conversion_factor > Decimal('0.000') else Decimal('1.000')
+        pkg_price = pkg_match.selling_price_per_unit or (prod.selling_price * pkg_factor)
+        pkg_cost = prod.purchase_price * pkg_factor
+        vat_rate = prod.vat_rate if prod.vat_rate is not None else Decimal('13.00')
+        warranty_summary = f"{prod.warranty_months}M General Warranty" if prod.warranty_months and prod.warranty_months > 0 else "No Warranty"
 
         extra_data = {
             'id': prod.id,
             'product_id': prod.id,
             'name': f"{prod.name} ({pkg_match.unit_name})",
             'package_conversion_id': pkg_match.id,
-            'price': str(pkg_price),
-            'selling_price': str(pkg_price),
-            'purchase_price': str(prod.purchase_price * pkg_match.conversion_factor),
-            'cost_price': str(prod.purchase_price * pkg_match.conversion_factor),
-            'available_stock': str(stock_qty / pkg_match.conversion_factor if pkg_match.conversion_factor else stock_qty),
+            'brand': prod.brand.name if prod.brand else '',
+            'brand_name': prod.brand.name if prod.brand else '',
+            'category': prod.category.name if prod.category else 'General',
+            'category_name': prod.category.name if prod.category else 'General',
+            'category_id': prod.category_id,
+            'price': float(pkg_price),
+            'selling_price': float(pkg_price),
+            'mrp': float(pkg_price),
+            'purchase_price': float(pkg_cost),
+            'cost_price': float(pkg_cost),
+            'available_stock': float(stock_qty / pkg_factor),
+            'current_stock': float(stock_qty / pkg_factor),
             'requires_imei': False,
             'requires_imei_tracking': False,
+            'base_unit_code': pkg_match.unit_name,
             'unit_code': pkg_match.unit_name,
+            'unit_name': pkg_match.unit_name,
+            'is_vat_applicable': bool(prod.is_vat_applicable),
+            'vat_rate': float(vat_rate),
+            'tax_pricing_type': prod.tax_pricing_type or 'EXEMPT',
             'warranty_summary': warranty_summary
         }
 
@@ -414,23 +519,33 @@ class ProductSearchAPIView(APIView):
             'name': f"{prod.name} ({pkg_match.unit_name})",
             'text': f"{prod.name} ({pkg_match.unit_name}) [{pkg_match.barcode}]",
             'title': f"{prod.name} ({pkg_match.unit_name})",
-            'subtitle': f"Package: {pkg_match.unit_name} (x{pkg_match.conversion_factor}) | Barcode: {pkg_match.barcode} | Warranty: {warranty_summary}",
+            'subtitle': f"Package: {pkg_match.unit_name} (x{pkg_match.conversion_factor}) | Cost: Rs. {pkg_cost:,.2f}",
             'badge': 'PKG',
             'package_conversion_id': pkg_match.id,
             'sku': prod.sku,
             'barcode': pkg_match.barcode,
+            'brand': prod.brand.name if prod.brand else '',
+            'brand_name': prod.brand.name if prod.brand else '',
+            'category': prod.category.name if prod.category else 'General',
+            'category_name': prod.category.name if prod.category else 'General',
+            'category_id': prod.category_id,
             'model_name': prod.model_name or '',
             'model_number': prod.model_number or '',
             'price': str(pkg_price),
             'selling_price': str(pkg_price),
-            'purchase_price': str(prod.purchase_price * pkg_match.conversion_factor),
-            'cost_price': str(prod.purchase_price * pkg_match.conversion_factor),
-            'available_stock': str(stock_qty / pkg_match.conversion_factor if pkg_match.conversion_factor else stock_qty),
+            'mrp': str(pkg_price),
+            'purchase_price': str(pkg_cost),
+            'cost_price': str(pkg_cost),
+            'available_stock': str(stock_qty / pkg_factor),
             'requires_imei': False,
             'requires_imei_tracking': False,
             'requires_serial': False,
-            'is_spare_part': prod.is_spare_part,
+            'is_spare_part': bool(prod.is_spare_part),
+            'base_unit_code': pkg_match.unit_name,
             'unit_code': pkg_match.unit_name,
+            'is_vat_applicable': bool(prod.is_vat_applicable),
+            'vat_rate': str(vat_rate),
+            'tax_pricing_type': prod.tax_pricing_type or 'EXEMPT',
             'warranty_summary': warranty_summary,
             'extra_data': extra_data
         }
@@ -440,7 +555,11 @@ class ProductSearchAPIView(APIView):
     # -------------------------------------------------------------------------
     def _build_pos_imei_payload(self, imei_match, customer_type):
         prod = imei_match.product
-        price = ProductCatalogService.get_applicable_price(prod, Decimal('1.000'), customer_type)
+        try:
+            price = ProductCatalogService.get_applicable_price(prod, Decimal('1.000'), customer_type)
+        except Exception:
+            price = prod.selling_price or Decimal('0.00')
+
         variant_desc = prod.variant_name or f"{prod.ram or ''}/{prod.internal_storage or ''} {prod.color_variant or ''}".strip()
         avatar_meta = get_product_avatar_meta(prod)
 
@@ -573,7 +692,7 @@ class ProductSearchAPIView(APIView):
 
         pkg_price = pkg_match.selling_price_per_unit or (prod.selling_price * pkg_match.conversion_factor)
         avatar_meta = get_product_avatar_meta(prod)
-        warranty_summary = f"{prod.warranty_months}M General Warranty" if prod.warranty_months > 0 else "No Warranty"
+        warranty_summary = f"{prod.warranty_months}M General Warranty" if prod.warranty_months and prod.warranty_months > 0 else "No Warranty"
 
         return {
             'match_type': 'PACKAGE_UNIT',
@@ -614,7 +733,11 @@ class ProductSearchAPIView(APIView):
             if bs:
                 stock_qty = bs.available_quantity
 
-        price = ProductCatalogService.get_applicable_price(p, Decimal('1.000'), customer_type)
+        try:
+            price = ProductCatalogService.get_applicable_price(p, Decimal('1.000'), customer_type)
+        except Exception:
+            price = p.selling_price or Decimal('0.00')
+
         variant_desc = p.variant_name or f"{p.ram or ''}/{p.internal_storage or ''} {p.color_variant or ''}".strip()
         avatar_meta = get_product_avatar_meta(p)
 
@@ -654,7 +777,6 @@ class ProductSearchAPIView(APIView):
                 {'component_type': 'SCREEN', 'component_name': 'Screen / Display Panel', 'warranty_months': 3},
             ]
 
-        # Build clean warranty summary string and tags
         if is_phone:
             comp_map = {r['component_type']: r['warranty_months'] for r in comp_rules}
             dev = comp_map.get('DEVICE', p.warranty_months or 12)
@@ -666,7 +788,7 @@ class ProductSearchAPIView(APIView):
                 'battery': f"{bat}M",
                 'screen': f"{scr}M"
             }
-        elif p.warranty_months > 0:
+        elif p.warranty_months and p.warranty_months > 0:
             warranty_summary = f"{p.warranty_months}M General Warranty"
             warranty_tags = {'general': f"{p.warranty_months}M"}
         else:

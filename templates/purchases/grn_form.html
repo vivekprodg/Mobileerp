@@ -33,6 +33,7 @@
   --radius-lg: 8px;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-dropdown: 0 12px 28px -4px rgba(15, 23, 42, 0.18), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
   --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 }
@@ -260,12 +261,15 @@ textarea.form-control-grn {
   color: #ffffff;
 }
 
-/* TABLE SECTION */
+/* TABLE CONTAINER: ADEQUATE CLEARANCE TO PREVENT OVERFLOW CLIPPING */
 .table-container {
   overflow-x: auto;
   border: 1px solid var(--slate-200);
   border-radius: var(--radius-sm);
   background: var(--surface);
+  min-height: 360px;
+  padding-bottom: 140px;
+  position: relative;
 }
 
 table.items-table {
@@ -565,7 +569,7 @@ table.items-table select {
 }
 .btn-action-success-grn:hover { background-color: var(--success-hover); color:#fff; }
 
-/* AUTOCOMPLETE & FLOATING DROPDOWN */
+/* AUTOCOMPLETE & ENHANCED FLOATING DROPDOWN */
 .search-wrapper-relative {
   position: relative;
   width: 100%;
@@ -573,17 +577,18 @@ table.items-table select {
 
 .floating-results-dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 2px);
   left: 0;
-  right: 0;
-  z-index: 1090;
+  min-width: 320px;
+  width: max-content;
+  max-width: 480px;
+  z-index: 1200;
   background: #ffffff;
   border: 1px solid var(--slate-300);
-  border-radius: var(--radius-sm);
-  max-height: 250px;
+  border-radius: var(--radius-md);
+  max-height: 270px;
   overflow-y: auto;
-  box-shadow: var(--shadow-md);
-  margin-top: 2px;
+  box-shadow: var(--shadow-dropdown);
   display: none;
 }
 
@@ -597,8 +602,28 @@ table.items-table select {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  transition: background-color 0.12s ease, border-left-color 0.12s ease;
+  background-color: #ffffff;
+  text-decoration: none !important;
+  color: inherit;
 }
-.dropdown-item-grn:hover { background-color: var(--primary-light); }
+
+.dropdown-item-grn:last-child {
+  border-bottom: none;
+}
+
+.dropdown-item-grn:hover,
+.dropdown-item-grn.active {
+  background-color: var(--primary-light) !important;
+  border-left: 3px solid var(--primary);
+  padding-left: 9px;
+}
+
+.match-highlight {
+  color: var(--primary);
+  font-weight: 800;
+  text-decoration: underline;
+}
 
 /* TOAST NOTIFICATION */
 #toast-notification {
@@ -653,6 +678,7 @@ table.items-table select {
   }
   .card-grn { box-shadow: none !important; border: 1px solid #ccc !important; }
   table.items-table { min-width: 100% !important; }
+  .table-container { min-height: auto !important; padding-bottom: 0 !important; }
 }
 </style>
 {% endblock %}
@@ -858,7 +884,7 @@ table.items-table select {
       </div>
     </section>
 
-    <!-- SECTION 3: RECEIVED ITEMS -->
+    <!-- SECTION 3: RECEIVED ITEMS & LANDED CALCULATION -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>3. Received Items &amp; Landed Calculation</span>
@@ -1309,6 +1335,25 @@ table.items-table select {
     return "Rs. " + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function highlightMatch(fullText, query) {
+    if (!query || !fullText) return escapeHtml(fullText);
+    const escaped = escapeHtml(fullText);
+    const cleanQuery = query.trim().replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+    if (!cleanQuery) return escaped;
+    const regex = new RegExp(`(${cleanQuery})`, 'gi');
+    return escaped.replace(regex, '<span class="match-highlight">$1</span>');
+  }
+
   let toastTimeout;
   function showToast(message, isSuccess = true) {
     clearTimeout(toastTimeout);
@@ -1334,41 +1379,50 @@ table.items-table select {
 
   // ATTACH ROW EVENT LISTENERS
   function attachRowEvents(row) {
-    const inputs = row.querySelectorAll('input, select');
+    const inputs = row.querySelectorAll('input:not(.item-name), select:not(.item-uom)');
     inputs.forEach(input => {
       input.addEventListener('input', calculateAll);
       input.addEventListener('change', calculateAll);
     });
 
+    const uomSelect = row.querySelector('.item-uom');
+    if (uomSelect) {
+      uomSelect.addEventListener('change', calculateAll);
+    }
+
     // Delete row
     const btnRemove = row.querySelector('.btn-remove-row-grn');
-    btnRemove.addEventListener('click', () => {
-      const activeRows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
-      if (activeRows.length <= 1) {
-        showToast("At least one line item is required.", false);
-        return;
-      }
-      const deleteCheck = row.querySelector('input[name$="-DELETE"]');
-      if (deleteCheck) {
-        deleteCheck.checked = true;
-        row.style.display = 'none';
-      } else {
-        row.remove();
-      }
-      renumberRows();
-      calculateAll();
-    });
+    if (btnRemove) {
+      btnRemove.addEventListener('click', () => {
+        const activeRows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
+        if (activeRows.length <= 1) {
+          showToast("At least one line item is required.", false);
+          return;
+        }
+        const deleteCheck = row.querySelector('input[name$="-DELETE"]');
+        if (deleteCheck) {
+          deleteCheck.checked = true;
+          row.style.display = 'none';
+        } else {
+          row.remove();
+        }
+        renumberRows();
+        calculateAll();
+      });
+    }
 
-    // Autocomplete Product
+    // Autocomplete Product with Keyboard & Selection Navigation
     initProductAutocomplete(row);
   }
 
   function renumberRows() {
     const activeRows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
     activeRows.forEach((row, idx) => {
-      row.querySelector('.row-sn').textContent = idx + 1;
+      const snEl = row.querySelector('.row-sn');
+      if (snEl) snEl.textContent = idx + 1;
     });
-    document.getElementById('itemsCountBadge').textContent = `Total Item Lines: ${activeRows.length}`;
+    const badge = document.getElementById('itemsCountBadge');
+    if (badge) badge.textContent = `Total Item Lines: ${activeRows.length}`;
   }
 
   // ADD NEW ITEM ROW
@@ -1390,12 +1444,14 @@ table.items-table select {
 
   btnAddRow.addEventListener('click', () => {
     const r = addNewItem();
-    r.querySelector('.item-name').focus();
+    const inp = r.querySelector('.item-name');
+    if (inp) inp.focus();
   });
 
   btnAddRowBottom.addEventListener('click', () => {
     const r = addNewItem();
-    r.querySelector('.item-name').focus();
+    const inp = r.querySelector('.item-name');
+    if (inp) inp.focus();
   });
 
   // COMPREHENSIVE RECONCILIATION & MATH ENGINE
@@ -1408,28 +1464,29 @@ table.items-table select {
     let totalItemUnits = 0;
 
     // 1. Gather Overheads
-    const freight = parseNum(document.getElementById('freightCharge').value);
-    const customs = parseNum(document.getElementById('customsDuty').value);
-    const handling = parseNum(document.getElementById('handlingCharge').value);
-    const insurance = parseNum(document.getElementById('insuranceCharge').value);
-    const otherOvh = parseNum(document.getElementById('otherOverheads').value);
+    const freight = parseNum(document.getElementById('freightCharge')?.value);
+    const customs = parseNum(document.getElementById('customsDuty')?.value);
+    const handling = parseNum(document.getElementById('handlingCharge')?.value);
+    const insurance = parseNum(document.getElementById('insuranceCharge')?.value);
+    const otherOvh = parseNum(document.getElementById('otherOverheads')?.value);
     const totalOverheads = freight + customs + handling + insurance + otherOvh;
 
-    document.getElementById('totalOverheadsDisplay').value = formatCurrency(totalOverheads);
+    const ovhDisplay = document.getElementById('totalOverheadsDisplay');
+    if (ovhDisplay) ovhDisplay.value = formatCurrency(totalOverheads);
 
-    const wholeBillDiscount = parseNum(wholeBillDiscountInput.value);
-    const spotPaid = parseNum(spotPaidDeliveryInput.value);
-    cashPaidInput.value = spotPaid.toFixed(2); // sync settlement paid
+    const wholeBillDiscount = parseNum(wholeBillDiscountInput?.value);
+    const spotPaid = parseNum(spotPaidDeliveryInput?.value);
+    if (cashPaidInput) cashPaidInput.value = spotPaid.toFixed(2);
 
     const rowCalculations = [];
 
     // First Pass: Gross, Discounts & Taxable Base
     rows.forEach(row => {
-      const qty = parseNum(row.querySelector('.item-qty').value);
-      const rate = parseNum(row.querySelector('.item-rate').value);
-      const discType = row.querySelector('.item-disc-type').value;
-      const discVal = parseNum(row.querySelector('.item-disc-val').value);
-      const taxPercent = parseNum(row.querySelector('.item-tax-percent').value);
+      const qty = parseNum(row.querySelector('.item-qty')?.value);
+      const rate = parseNum(row.querySelector('.item-rate')?.value);
+      const discType = row.querySelector('.item-disc-type')?.value || 'NONE';
+      const discVal = parseNum(row.querySelector('.item-disc-val')?.value);
+      const taxPercent = parseNum(row.querySelector('.item-tax-percent')?.value);
 
       totalItemUnits += qty;
       let rawGross = qty * rate;
@@ -1503,127 +1560,305 @@ table.items-table select {
       netTaxableSum += effectiveTaxable;
       totalVatAmount += vatAmt;
 
-      // Update DOM values
-      item.row.querySelector('.item-taxable-amount').value = effectiveTaxable.toFixed(2);
-      item.row.querySelector('.item-vat-amount').value = vatAmt.toFixed(2);
-      item.row.querySelector('.item-net-amount').value = netLineAmount.toFixed(2);
-      item.row.querySelector('.item-alloc-overhead').value = rowAllocOverhead.toFixed(2);
-      item.row.querySelector('.item-landed-unit-cost').value = landedUnitCost.toFixed(2);
+      // Update DOM values safely
+      const elTaxable = item.row.querySelector('.item-taxable-amount');
+      const elVat = item.row.querySelector('.item-vat-amount');
+      const elNet = item.row.querySelector('.item-net-amount');
+      const elAlloc = item.row.querySelector('.item-alloc-overhead');
+      const elLanded = item.row.querySelector('.item-landed-unit-cost');
+
+      if (elTaxable) elTaxable.value = effectiveTaxable.toFixed(2);
+      if (elVat) elVat.value = vatAmt.toFixed(2);
+      if (elNet) elNet.value = netLineAmount.toFixed(2);
+      if (elAlloc) elAlloc.value = rowAllocOverhead.toFixed(2);
+      if (elLanded) elLanded.value = landedUnitCost.toFixed(2);
     });
 
     // FINAL VALUATIONS
     const grandTotalPurchase = netTaxableSum + totalNonTaxable + totalVatAmount;
     const totalLandedCost = netTaxableSum + totalNonTaxable + totalOverheads;
     const supplierPayable = Math.max(0, grandTotalPurchase - spotPaid);
-    const cashPaid = parseNum(cashPaidInput.value);
+    const cashPaid = parseNum(cashPaidInput?.value);
     const remainingCredit = Math.max(0, (netTaxableSum + totalNonTaxable + totalVatAmount) - cashPaid);
 
     // Section 4: Purchase Summary Panel
-    document.getElementById('sumMerchandiseSubtotal').textContent = formatCurrency(totalPreVatMerchandise);
-    document.getElementById('sumItemDiscount').textContent = "- " + formatCurrency(totalItemDiscount);
-    document.getElementById('sumWholeBillDiscount').textContent = "- " + formatCurrency(wholeBillDiscount);
-    document.getElementById('sumNonTaxable').textContent = formatCurrency(totalNonTaxable);
-    document.getElementById('sumTaxableAmount').textContent = formatCurrency(netTaxableSum);
-    document.getElementById('sumVatAmount').textContent = formatCurrency(totalVatAmount);
-    document.getElementById('sumOverheadsTotal').textContent = formatCurrency(totalOverheads);
-    document.getElementById('sumSpotPaid').textContent = "- " + formatCurrency(spotPaid);
-    document.getElementById('sumGrandTotal').textContent = formatCurrency(grandTotalPurchase);
-    document.getElementById('sumTotalLandedCost').textContent = formatCurrency(totalLandedCost);
+    const sSubtotal = document.getElementById('sumMerchandiseSubtotal');
+    const sItemDisc = document.getElementById('sumItemDiscount');
+    const sBillDisc = document.getElementById('sumWholeBillDiscount');
+    const sNonTax = document.getElementById('sumNonTaxable');
+    const sTaxable = document.getElementById('sumTaxableAmount');
+    const sVat = document.getElementById('sumVatAmount');
+    const sOvh = document.getElementById('sumOverheadsTotal');
+    const sSpot = document.getElementById('sumSpotPaid');
+    const sGrand = document.getElementById('sumGrandTotal');
+    const sLanded = document.getElementById('sumTotalLandedCost');
+
+    if (sSubtotal) sSubtotal.textContent = formatCurrency(totalPreVatMerchandise);
+    if (sItemDisc) sItemDisc.textContent = "- " + formatCurrency(totalItemDiscount);
+    if (sBillDisc) sBillDisc.textContent = "- " + formatCurrency(wholeBillDiscount);
+    if (sNonTax) sNonTax.textContent = formatCurrency(totalNonTaxable);
+    if (sTaxable) sTaxable.textContent = formatCurrency(netTaxableSum);
+    if (sVat) sVat.textContent = formatCurrency(totalVatAmount);
+    if (sOvh) sOvh.textContent = formatCurrency(totalOverheads);
+    if (sSpot) sSpot.textContent = "- " + formatCurrency(spotPaid);
+    if (sGrand) sGrand.textContent = formatCurrency(grandTotalPurchase);
+    if (sLanded) sLanded.textContent = formatCurrency(totalLandedCost);
 
     // Section 5: Landed Cost Reconciliation Step Cards
-    document.getElementById('reconStep1').textContent = formatCurrency(totalPreVatMerchandise - totalItemDiscount - wholeBillDiscount);
-    document.getElementById('reconStep2').textContent = formatCurrency(totalVatAmount);
-    document.getElementById('reconStep3').textContent = formatCurrency(totalOverheads);
-    document.getElementById('reconStep4').textContent = formatCurrency(totalLandedCost);
-    document.getElementById('reconStep5').textContent = formatCurrency(supplierPayable);
+    const r1 = document.getElementById('reconStep1');
+    const r2 = document.getElementById('reconStep2');
+    const r3 = document.getElementById('reconStep3');
+    const r4 = document.getElementById('reconStep4');
+    const r5 = document.getElementById('reconStep5');
+
+    if (r1) r1.textContent = formatCurrency(totalPreVatMerchandise - totalItemDiscount - wholeBillDiscount);
+    if (r2) r2.textContent = formatCurrency(totalVatAmount);
+    if (r3) r3.textContent = formatCurrency(totalOverheads);
+    if (r4) r4.textContent = formatCurrency(totalLandedCost);
+    if (r5) r5.textContent = formatCurrency(supplierPayable);
 
     // Section 6: Payment & Settlement
-    document.getElementById('supplierPayableTotal').value = grandTotalPurchase.toFixed(2);
-    document.getElementById('creditAmountOutput').value = remainingCredit.toFixed(2);
+    const sPayTotal = document.getElementById('supplierPayableTotal');
+    const cOut = document.getElementById('creditAmountOutput');
+    const bBadge = document.getElementById('itemsCountBadge');
 
-    document.getElementById('itemsCountBadge').textContent = `Total Item Lines: ${rows.length} | Total Received Units: ${totalItemUnits.toFixed(2)}`;
+    if (sPayTotal) sPayTotal.value = grandTotalPurchase.toFixed(2);
+    if (cOut) cOut.value = remainingCredit.toFixed(2);
+    if (bBadge) bBadge.textContent = `Total Item Lines: ${rows.length} | Total Received Units: ${totalItemUnits.toFixed(2)}`;
   }
 
-  // PRODUCT AUTOCOMPLETE
+  // =========================================================================
+  // ENHANCED PRODUCT AUTOCOMPLETE WITH KEYBOARD SUPPORT & SELECTION AUTOFILL
+  // =========================================================================
   function initProductAutocomplete(row) {
     const input = row.querySelector('.item-name');
     const hiddenId = row.querySelector('.item-product-id');
     const dropdown = row.querySelector('.product-dropdown');
     let timer = null;
+    let currentResults = [];
+    let activeHighlightIndex = -1;
 
-    input.addEventListener('input', () => {
-      clearTimeout(timer);
-      const q = input.value.trim();
-      if (q.length < 1) {
-        dropdown.classList.remove('show');
-        dropdown.innerHTML = '';
-        return;
-      }
+    if (!input || !dropdown) return;
 
-      timer = setTimeout(async () => {
-        try {
-          const res = await fetch(`/products/api/search/?mode=simple&q=${encodeURIComponent(q)}`);
-          if (!res.ok) return;
-          const data = await res.json();
-          const items = Array.isArray(data) ? data : (data.results || []);
+    function closeDropdown() {
+      dropdown.classList.remove('show');
+      dropdown.innerHTML = '';
+      activeHighlightIndex = -1;
+      currentResults = [];
+    }
 
-          if (items.length === 0) {
-            dropdown.innerHTML = '<div class="p-2 text-muted fs-xs">No matching products found.</div>';
-            dropdown.classList.add('show');
-            return;
-          }
+    function updateActiveHighlight(items) {
+      items.forEach((itemEl, idx) => {
+        if (idx === activeHighlightIndex) {
+          itemEl.classList.add('active');
+          itemEl.scrollIntoView({ block: 'nearest' });
+        } else {
+          itemEl.classList.remove('active');
+        }
+      });
+    }
 
-          let html = '';
-          items.slice(0, 8).forEach(p => {
-            const cost = p.purchase_price || p.cost_price || (p.extra_data && p.extra_data.cost_price) || 0;
-            const price = p.selling_price || p.price || 0;
-            html += `
-              <div class="dropdown-item-grn" data-id="${p.id}" data-name="${p.name}" data-cost="${cost}" data-price="${price}">
-                <div>
-                  <strong>${p.name}</strong>
-                  <div style="font-size:10.5px; color:#64748b;">SKU: ${p.sku || '-'}</div>
+    async function fetchProducts(query = '', isInitial = false) {
+      try {
+        dropdown.innerHTML = '<div class="p-2 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1 text-primary"></i> Searching catalog...</div>';
+        dropdown.classList.add('show');
+
+        const cleanQ = (query || '').trim();
+        const url = cleanQ
+          ? `/products/api/search/?mode=simple&q=${encodeURIComponent(cleanQ)}&limit=15`
+          : `/products/api/search/?mode=simple&limit=15`;
+
+        const res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        if (!res.ok) {
+          dropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Search unavailable. Please retry.</div>';
+          return;
+        }
+
+        const data = await res.json();
+        currentResults = data.results || (Array.isArray(data) ? data : []);
+        activeHighlightIndex = -1;
+
+        if (!currentResults.length) {
+          dropdown.innerHTML = cleanQ 
+            ? `<div class="p-2.5 text-center text-muted fs-xs">No products found matching "<strong>${escapeHtml(cleanQ)}</strong>".</div>`
+            : '<div class="p-2.5 text-center text-muted fs-xs">No active catalog items found.</div>';
+          dropdown.classList.add('show');
+          return;
+        }
+
+        let html = '';
+        currentResults.slice(0, 15).forEach((p, idx) => {
+          const cost = parseFloat(p.purchase_price || p.cost_price || (p.extra_data && p.extra_data.cost_price) || 0);
+          const price = parseFloat(p.selling_price || p.price || 0);
+          const brand = p.brand_name || (p.extra_data && p.extra_data.brand_name) || '';
+          const isPhone = Boolean(p.requires_imei || p.requires_imei_tracking || (p.extra_data && (p.extra_data.requires_imei || p.extra_data.requires_imei_tracking)));
+
+          html += `
+            <div class="dropdown-item-grn" data-index="${idx}">
+              <div style="min-width:0; overflow:hidden; padding-right:8px;">
+                <div style="font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                  ${highlightMatch(p.name, cleanQ)}
+                  ${isPhone ? '<span class="badge bg-primary bg-opacity-10 text-primary ms-1 font-mono fs-3xs">IMEI</span>' : ''}
                 </div>
-                <div class="text-right font-mono" style="font-size:11px;">
-                  Rs. ${parseFloat(cost).toFixed(2)}
+                <div style="font-size:10.5px; color:#64748b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                  ${brand ? highlightMatch(brand, cleanQ) + ' &bull; ' : ''}SKU: ${escapeHtml(p.sku || '-')} &bull; Unit: ${escapeHtml(p.unit_code || 'Pcs')}
                 </div>
               </div>
-            `;
-          });
-          dropdown.innerHTML = html;
-          dropdown.classList.add('show');
+              <div class="text-right font-mono" style="font-size:11px; flex-shrink:0;">
+                <div style="color:var(--primary); font-weight:700;">Cost: Rs. ${cost.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
+                <div style="color:#64748b; font-size:10px;">MRP: Rs. ${price.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
+              </div>
+            </div>
+          `;
+        });
 
-          dropdown.querySelectorAll('.dropdown-item-grn').forEach(itemEl => {
-            itemEl.addEventListener('click', () => {
-              hiddenId.value = itemEl.dataset.id;
-              input.value = itemEl.dataset.name;
-              
-              const rateInput = row.querySelector('.item-rate');
-              const mrpInput = row.querySelector('.item-mrp');
-              if (rateInput && (!rateInput.value || parseNum(rateInput.value) === 0)) {
-                rateInput.value = parseFloat(itemEl.dataset.cost).toFixed(2);
-              }
-              if (mrpInput && (!mrpInput.value || parseNum(mrpInput.value) === 0)) {
-                mrpInput.value = parseFloat(itemEl.dataset.price).toFixed(2);
-              }
+        dropdown.innerHTML = html;
+        dropdown.classList.add('show');
 
-              dropdown.classList.remove('show');
-              calculateAll();
-            });
+        dropdown.querySelectorAll('.dropdown-item-grn').forEach(el => {
+          el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = parseInt(el.dataset.index, 10);
+            if (currentResults[idx]) {
+              applyProductSelection(currentResults[idx]);
+            }
           });
-        } catch (err) {
-          console.warn('Product search failed:', err);
+        });
+
+      } catch (err) {
+        console.warn('[GRN Product Search Error]:', err);
+        dropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Search error. Please verify network.</div>';
+      }
+    }
+
+    function applyProductSelection(p) {
+      const cost = parseFloat(p.purchase_price || p.cost_price || (p.extra_data && p.extra_data.cost_price) || 0);
+      const price = parseFloat(p.selling_price || p.price || 0);
+
+      // 1. Identification
+      hiddenId.value = p.id || p.product_id;
+      input.value = p.name;
+
+      // 2. Pre-VAT Rate
+      const rateInput = row.querySelector('.item-rate');
+      if (rateInput && cost > 0) {
+        rateInput.value = cost.toFixed(2);
+      }
+
+      // 3. Retail MRP
+      const mrpInput = row.querySelector('.item-mrp');
+      if (mrpInput && price > 0) {
+        mrpInput.value = price.toFixed(2);
+      }
+
+      // 4. UOM (Unit of Measurement)
+      const unitCode = p.unit_code || (p.extra_data && p.extra_data.unit_code) || 'Pcs';
+      const uomSelect = row.querySelector('.item-uom');
+      if (uomSelect && unitCode) {
+        let matched = false;
+        for (let opt of uomSelect.options) {
+          if (opt.value.toLowerCase() === unitCode.toLowerCase() || opt.text.toLowerCase() === unitCode.toLowerCase()) {
+            opt.selected = true;
+            matched = true;
+            break;
+          }
         }
-      }, 180);
+        if (!matched) {
+          const newOpt = new Option(unitCode, unitCode, true, true);
+          uomSelect.add(newOpt);
+        }
+      }
+
+      // 5. Tax % / VAT Rate
+      const taxInput = row.querySelector('.item-tax-percent');
+      if (taxInput) {
+        if (p.is_vat_applicable === false || p.tax_pricing_type === 'EXEMPT') {
+          taxInput.value = '0.00';
+        } else if (p.vat_rate !== undefined && p.vat_rate !== null) {
+          taxInput.value = parseFloat(p.vat_rate).toFixed(2);
+        }
+      }
+
+      // 6. Serial / IMEI Notification Cue
+      const isPhone = Boolean(p.requires_imei || p.requires_imei_tracking || (p.extra_data && (p.extra_data.requires_imei || p.extra_data.requires_imei_tracking)));
+      const serialInput = row.querySelector('.item-serial');
+      if (serialInput) {
+        if (isPhone) {
+          serialInput.placeholder = 'Scan 15-digit IMEI(s) *';
+          serialInput.style.borderColor = 'var(--primary)';
+          serialInput.style.backgroundColor = 'var(--primary-light)';
+          serialInput.title = 'Serialized handset: scan or enter valid 15-digit IMEI.';
+        } else {
+          serialInput.placeholder = 'Optional Serial / Batch';
+          serialInput.style.borderColor = '';
+          serialInput.style.backgroundColor = '';
+          serialInput.title = '';
+        }
+      }
+
+      closeDropdown();
+      calculateAll();
+
+      // Shift focus to Qty field
+      const qtyInput = row.querySelector('.item-qty');
+      if (qtyInput) qtyInput.focus();
+    }
+
+    // Zero-query click & focus trigger
+    input.addEventListener('focus', () => {
+      const q = input.value.trim();
+      fetchProducts(q, true);
     });
 
-    document.addEventListener('click', (e) => {
-      if (!dropdown.contains(e.target) && e.target !== input) {
-        dropdown.classList.remove('show');
+    input.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!dropdown.classList.contains('show')) {
+        const q = input.value.trim();
+        fetchProducts(q, true);
+      }
+    });
+
+    // Progressive real-time typing with debouncing (v -> vi -> viv)
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      hiddenId.value = ''; // Reset product ID while typing
+      const q = input.value;
+
+      timer = setTimeout(() => {
+        fetchProducts(q, false);
+      }, 160);
+    });
+
+    // Keyboard navigation (ArrowDown, ArrowUp, Enter, Escape)
+    input.addEventListener('keydown', (e) => {
+      if (!dropdown.classList.contains('show')) return;
+      const items = dropdown.querySelectorAll('.dropdown-item-grn');
+      if (!items.length) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeHighlightIndex = (activeHighlightIndex + 1) % items.length;
+        updateActiveHighlight(items);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeHighlightIndex = (activeHighlightIndex - 1 + items.length) % items.length;
+        updateActiveHighlight(items);
+      } else if (e.key === 'Enter') {
+        if (activeHighlightIndex >= 0 && currentResults[activeHighlightIndex]) {
+          e.preventDefault();
+          e.stopPropagation();
+          applyProductSelection(currentResults[activeHighlightIndex]);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeDropdown();
       }
     });
   }
 
+  // =========================================================================
   // SUPPLIER AUTOCOMPLETE
+  // =========================================================================
   function initSupplierAutocomplete() {
     const sInput = document.getElementById('supplierName');
     const sHidden = document.getElementById('id_supplier');
@@ -1632,131 +1867,155 @@ table.items-table select {
     const sMobile = document.getElementById('supplierMobile');
     let timer = null;
 
-    sInput.addEventListener('input', () => {
-      clearTimeout(timer);
-      const q = sInput.value.trim();
-      if (q.length < 1) {
-        sDropdown.classList.remove('show');
-        sDropdown.innerHTML = '';
-        return;
-      }
+    if (!sInput || !sDropdown) return;
 
-      timer = setTimeout(async () => {
-        try {
-          const res = await fetch(`/purchases/suppliers/api/search/?q=${encodeURIComponent(q)}`);
-          if (!res.ok) return;
-          const data = await res.json();
-          const suppliers = data.results || [];
+    function closeSupplierDropdown() {
+      sDropdown.classList.remove('show');
+      sDropdown.innerHTML = '';
+    }
 
-          if (suppliers.length === 0) {
-            sDropdown.innerHTML = '<div class="p-2 text-muted fs-xs">No suppliers found.</div>';
-            sDropdown.classList.add('show');
-            return;
-          }
+    async function fetchSuppliers(query = '') {
+      try {
+        const q = (query || '').trim();
+        const url = q ? `/purchases/suppliers/api/search/?q=${encodeURIComponent(q)}` : `/purchases/suppliers/api/search/`;
+        const res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        if (!res.ok) return;
+        const data = await res.json();
+        const suppliers = data.results || [];
 
-          let html = '';
-          suppliers.slice(0, 8).forEach(s => {
-            html += `
-              <div class="dropdown-item-grn" data-id="${s.id}" data-name="${s.company_name}" data-pan="${s.pan_number || ''}" data-phone="${s.phone_number || ''}">
-                <div>
-                  <strong>${s.company_name}</strong>
-                  <div style="font-size:10.5px; color:#64748b;">${s.contact_person} &bull; ${s.phone_number}</div>
-                </div>
-                <div class="font-mono" style="font-size:11px; color:#dc2626;">
-                  ${s.balance_badge_text || ''}
-                </div>
-              </div>
-            `;
-          });
-          sDropdown.innerHTML = html;
+        if (suppliers.length === 0) {
+          sDropdown.innerHTML = '<div class="p-2 text-muted fs-xs">No suppliers found.</div>';
           sDropdown.classList.add('show');
-
-          sDropdown.querySelectorAll('.dropdown-item-grn').forEach(el => {
-            el.addEventListener('click', () => {
-              sHidden.value = el.dataset.id;
-              sInput.value = el.dataset.name;
-              if (sPan) sPan.value = el.dataset.pan;
-              if (sMobile) sMobile.value = el.dataset.phone;
-              sDropdown.classList.remove('show');
-            });
-          });
-        } catch (e) {
-          console.warn('Supplier search failed:', e);
+          return;
         }
-      }, 180);
+
+        let html = '';
+        suppliers.slice(0, 10).forEach(s => {
+          html += `
+            <div class="dropdown-item-grn" data-id="${s.id}" data-name="${s.company_name}" data-pan="${s.pan_number || ''}" data-phone="${s.phone_number || ''}">
+              <div>
+                <strong>${highlightMatch(s.company_name, q)}</strong>
+                <div style="font-size:10.5px; color:#64748b;">${escapeHtml(s.contact_person)} &bull; ${escapeHtml(s.phone_number)}</div>
+              </div>
+              <div class="font-mono text-right" style="font-size:11px; color:#dc2626;">
+                ${s.balance_badge_text || ''}
+              </div>
+            </div>
+          `;
+        });
+        sDropdown.innerHTML = html;
+        sDropdown.classList.add('show');
+
+        sDropdown.querySelectorAll('.dropdown-item-grn').forEach(el => {
+          el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            sHidden.value = el.dataset.id;
+            sInput.value = el.dataset.name;
+            if (sPan) sPan.value = el.dataset.pan;
+            if (sMobile) sMobile.value = el.dataset.phone;
+            closeSupplierDropdown();
+          });
+        });
+      } catch (e) {
+        console.warn('[Supplier Autocomplete Error]:', e);
+      }
+    }
+
+    sInput.addEventListener('focus', () => fetchSuppliers(sInput.value));
+    sInput.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!sDropdown.classList.contains('show')) fetchSuppliers(sInput.value);
     });
 
-    document.addEventListener('click', (e) => {
-      if (!sDropdown.contains(e.target) && e.target !== sInput) {
-        sDropdown.classList.remove('show');
-      }
+    sInput.addEventListener('input', () => {
+      clearTimeout(timer);
+      sHidden.value = '';
+      const q = sInput.value;
+      timer = setTimeout(() => fetchSuppliers(q), 160);
     });
   }
 
+  // GLOBAL DOCUMENT CLICK LISTENER TO CLOSE ALL FLOATING DROPDOWNS
+  document.addEventListener('click', (e) => {
+    document.querySelectorAll('.floating-results-dropdown').forEach(dd => {
+      const wrapper = dd.closest('.search-wrapper-relative');
+      if (wrapper && !wrapper.contains(e.target)) {
+        dd.classList.remove('show');
+      }
+    });
+  });
+
   // GLOBAL LISTENERS FOR OVERHEADS & SUMMARY INPUTS
   overheadInputs.forEach(inp => inp.addEventListener('input', calculateAll));
-  wholeBillDiscountInput.addEventListener('input', calculateAll);
-  spotPaidDeliveryInput.addEventListener('input', calculateAll);
-  cashPaidInput.addEventListener('input', () => {
-    spotPaidDeliveryInput.value = cashPaidInput.value;
-    calculateAll();
-  });
-  defaultVatRateInput.addEventListener('input', () => {
-    document.querySelectorAll('.item-tax-percent').forEach(el => el.value = defaultVatRateInput.value);
-    document.getElementById('summaryVatPct').textContent = defaultVatRateInput.value;
-    calculateAll();
-  });
+  if (wholeBillDiscountInput) wholeBillDiscountInput.addEventListener('input', calculateAll);
+  if (spotPaidDeliveryInput) spotPaidDeliveryInput.addEventListener('input', calculateAll);
+  if (cashPaidInput) {
+    cashPaidInput.addEventListener('input', () => {
+      if (spotPaidDeliveryInput) spotPaidDeliveryInput.value = cashPaidInput.value;
+      calculateAll();
+    });
+  }
+  if (defaultVatRateInput) {
+    defaultVatRateInput.addEventListener('input', () => {
+      document.querySelectorAll('.item-tax-percent').forEach(el => el.value = defaultVatRateInput.value);
+      const vatPctEl = document.getElementById('summaryVatPct');
+      if (vatPctEl) vatPctEl.textContent = defaultVatRateInput.value;
+      calculateAll();
+    });
+  }
 
   // DATE SYNCHRONIZERS
   const billDate = document.getElementById('billDate');
   const billDateSec = document.getElementById('invoiceDateSecondary');
-  billDate.addEventListener('change', () => billDateSec.value = billDate.value);
-  billDateSec.addEventListener('change', () => billDate.value = billDateSec.value);
+  if (billDate && billDateSec) {
+    billDate.addEventListener('change', () => billDateSec.value = billDate.value);
+    billDateSec.addEventListener('change', () => billDate.value = billDateSec.value);
+  }
 
   // ACTION BUTTONS BEHAVIOR
-  document.getElementById('btnPrint').addEventListener('click', () => window.print());
+  document.getElementById('btnPrint')?.addEventListener('click', () => window.print());
 
-  document.getElementById('btnSaveDraft').addEventListener('click', () => {
+  document.getElementById('btnSaveDraft')?.addEventListener('click', () => {
     actionHidden.value = 'save_draft';
     showToast("Saving GRN Draft into local store...");
     masterForm.submit();
   });
 
-  document.getElementById('btnVerifyGrn').addEventListener('click', () => {
-    const invNo = document.getElementById('supplierInvoiceNo').value.trim();
+  document.getElementById('btnVerifyGrn')?.addEventListener('click', () => {
+    const invNo = document.getElementById('supplierInvoiceNo')?.value.trim();
     if (!invNo) {
       showToast("Supplier Invoice Ref is mandatory for verification.", false);
-      document.getElementById('supplierInvoiceNo').focus();
+      document.getElementById('supplierInvoiceNo')?.focus();
       return;
     }
     showToast("GRN verified successfully. Ready for warehouse ledger inward.");
   });
 
-  document.getElementById('btnUpdateStock').addEventListener('click', (e) => {
+  document.getElementById('btnUpdateStock')?.addEventListener('click', (e) => {
     actionHidden.value = 'verify_stock';
-    const supplierId = document.getElementById('id_supplier').value;
-    const invNo = document.getElementById('supplierInvoiceNo').value.trim();
+    const supplierId = document.getElementById('id_supplier')?.value;
+    const invNo = document.getElementById('supplierInvoiceNo')?.value.trim();
     const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
 
-    if (!supplierId && !document.getElementById('supplierName').value.trim()) {
+    if (!supplierId && !document.getElementById('supplierName')?.value.trim()) {
       e.preventDefault();
       showToast("Validation Error: Please select or enter a valid Supplier.", false);
-      document.getElementById('supplierName').focus();
+      document.getElementById('supplierName')?.focus();
       return;
     }
 
     if (!invNo) {
       e.preventDefault();
       showToast("Validation Error: Supplier Invoice / Bill Ref No is required.", false);
-      document.getElementById('supplierInvoiceNo').focus();
+      document.getElementById('supplierInvoiceNo')?.focus();
       return;
     }
 
     let hasInvalidItem = false;
     rows.forEach(r => {
-      const pId = r.querySelector('.item-product-id').value;
-      const pName = r.querySelector('.item-name').value.trim();
-      const qty = parseNum(r.querySelector('.item-qty').value);
+      const pId = r.querySelector('.item-product-id')?.value;
+      const pName = r.querySelector('.item-name')?.value.trim();
+      const qty = parseNum(r.querySelector('.item-qty')?.value);
       if ((!pId && !pName) || qty <= 0) hasInvalidItem = true;
     });
 

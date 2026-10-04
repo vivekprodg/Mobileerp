@@ -144,11 +144,11 @@ class Supplier(TimeStampedModel):
     """
 
     SUPPLIER_TYPE_CHOICES = [
-        ('NATIONAL_DISTRIBUTOR', 'National Importer / Distributor (राष्ट्रिय आयातकर्ता)'),
-        ('REGIONAL_WHOLESALER', 'Regional Wholesaler / Stockist (क्षेत्रीय थोक विक्रेता)'),
-        ('MANUFACTURER', 'Authorized Brand Manufacturer (उत्पादक)'),
-        ('LOCAL_TRADER', 'Local Dealer / Trader (स्थानीय बिक्रेता)'),
-        ('SERVICE_PARTS_VENDOR', 'Spare Parts & Service Supplier (पार्ट्स आपूर्तिकर्ता)'),
+        ('NATIONAL_DISTRIBUTOR', 'National Importer / Distributor'),
+        ('REGIONAL_WHOLESALER', 'Regional Wholesaler'),
+        ('MANUFACTURER', 'Manufacturer'),
+        ('LOCAL_TRADER', 'Local Dealer / Trader'),
+        ('SERVICE_PARTS_VENDOR', 'Parts & Service Supplier'),
     ]
 
     PROVINCE_CHOICES = [
