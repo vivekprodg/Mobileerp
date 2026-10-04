@@ -34,7 +34,6 @@ from apps.core.models import AuditLog
 from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
 
-
 class CancelledSalesService:
     """
     Business logic engine for forensic auditing of cancelled and voided sales invoices.

@@ -1,6 +1,5 @@
 """
 Brand-Wise Sales Turnover & Volume Intelligence Service.
-File Path: apps/reports/services/brand_sales_service.py
 
 Capabilities:
 1. Aggregates counter turnover, units sold, and profit contributions grouped by Brand

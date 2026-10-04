@@ -261,7 +261,7 @@ textarea.form-control-grn {
   color: #ffffff;
 }
 
-/* TABLE CONTAINER: ADEQUATE CLEARANCE TO PREVENT OVERFLOW CLIPPING */
+/* TABLE CONTAINER */
 .table-container {
   overflow-x: auto;
   border: 1px solid var(--slate-200);
@@ -1454,14 +1454,16 @@ table.items-table select {
     if (inp) inp.focus();
   });
 
-  // COMPREHENSIVE RECONCILIATION & MATH ENGINE
+  // =========================================================================
+  // MATHEMATICALLY STRICT RECONCILIATION & DUAL-POT CALCULATION ENGINE
+  // =========================================================================
   function calculateAll() {
     const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
     let totalPreVatMerchandise = 0;
     let totalItemDiscount = 0;
-    let totalTaxableBeforeWholeBillDisc = 0;
-    let totalNonTaxable = 0;
     let totalItemUnits = 0;
+    let grossTaxableLines = 0;
+    let grossNonTaxableLines = 0;
 
     // 1. Gather Overheads
     const freight = parseNum(document.getElementById('freightCharge')?.value);
@@ -1480,7 +1482,7 @@ table.items-table select {
 
     const rowCalculations = [];
 
-    // First Pass: Gross, Discounts & Taxable Base
+    // First Pass: Gross, Discounts & Initial Pot Separation
     rows.forEach(row => {
       const qty = parseNum(row.querySelector('.item-qty')?.value);
       const rate = parseNum(row.querySelector('.item-rate')?.value);
@@ -1499,66 +1501,74 @@ table.items-table select {
       }
       if (lineDisc > rawGross) lineDisc = rawGross;
 
-      let taxableBase = Math.max(0, rawGross - lineDisc);
+      let netLineBase = Math.max(0, rawGross - lineDisc);
       let effectiveGross = rawGross;
 
       // Extract pre-VAT base if VAT Included
       if (vatMode === 'INCLUSIVE' && taxPercent > 0) {
         const divisor = 1 + (taxPercent / 100);
-        taxableBase = taxableBase / divisor;
-        effectiveGross = taxableBase + lineDisc;
+        netLineBase = netLineBase / divisor;
+        effectiveGross = netLineBase + lineDisc;
       }
 
       totalPreVatMerchandise += effectiveGross;
       totalItemDiscount += lineDisc;
 
-      if (taxPercent === 0) {
-        totalNonTaxable += taxableBase;
+      if (taxPercent > 0) {
+        grossTaxableLines += netLineBase;
       } else {
-        totalTaxableBeforeWholeBillDisc += taxableBase;
+        grossNonTaxableLines += netLineBase;
       }
 
       rowCalculations.push({
-        row, qty, rate, gross: effectiveGross, lineDisc, taxableBase, taxPercent
+        row, qty, rate, gross: effectiveGross, lineDisc, netLineBase, taxPercent
       });
     });
 
-    // Second Pass: Whole Bill Discount & Overhead Proration
+    const netMerchandiseTotal = Math.max(0, totalPreVatMerchandise - totalItemDiscount);
+
+    // Second Pass: Whole Bill Discount Proration & Dedicated Tax Separation
     let netTaxableSum = 0;
+    let netNonTaxableSum = 0;
     let totalVatAmount = 0;
+    let dominantTaxRate = parseNum(defaultVatRateInput?.value) || 13;
 
     rowCalculations.forEach(item => {
-      let effectiveTaxable = item.taxableBase;
-
-      // Allocate whole bill discount proportionally
-      if (totalTaxableBeforeWholeBillDisc > 0 && item.taxPercent > 0 && wholeBillDiscount > 0) {
-        const share = (item.taxableBase / totalTaxableBeforeWholeBillDisc) * wholeBillDiscount;
-        effectiveTaxable = Math.max(0, effectiveTaxable - share);
+      // Prorate whole bill discount proportionally across all merchandise
+      let lineBillDiscountShare = 0;
+      if (netMerchandiseTotal > 0 && wholeBillDiscount > 0) {
+        lineBillDiscountShare = (item.netLineBase / netMerchandiseTotal) * wholeBillDiscount;
       }
+
+      const effectiveBase = Math.max(0, item.netLineBase - lineBillDiscountShare);
 
       let vatAmt = 0;
       if (item.taxPercent > 0) {
-        vatAmt = effectiveTaxable * (item.taxPercent / 100);
+        // TAXABLE ITEM: Accumulate strictly into taxable base and compute VAT
+        vatAmt = effectiveBase * (item.taxPercent / 100);
+        netTaxableSum += effectiveBase;
+        totalVatAmount += vatAmt;
+        dominantTaxRate = item.taxPercent;
+      } else {
+        // NON-TAXABLE ITEM: Accumulate strictly into non-taxable base (NEVER into taxable sum!)
+        netNonTaxableSum += effectiveBase;
       }
 
-      const netLineAmount = effectiveTaxable + vatAmt;
+      const netLineAmount = effectiveBase + vatAmt;
 
       // Overhead allocation proportional to pre-VAT merchandise base
       let rowAllocOverhead = 0;
-      if (totalPreVatMerchandise > 0) {
-        rowAllocOverhead = (item.taxableBase / (totalTaxableBeforeWholeBillDisc || totalPreVatMerchandise)) * totalOverheads;
+      if (netMerchandiseTotal > 0) {
+        rowAllocOverhead = (item.netLineBase / netMerchandiseTotal) * totalOverheads;
       } else if (totalItemUnits > 0) {
         rowAllocOverhead = (item.qty / totalItemUnits) * totalOverheads;
       }
 
-      // Landed Cost per Unit = (Taxable Base + Prorated Overhead) / Qty
+      // Landed Cost per Unit = (Merchandise Base + Prorated Overhead) / Qty
       let landedUnitCost = 0;
       if (item.qty > 0) {
-        landedUnitCost = (effectiveTaxable + rowAllocOverhead) / item.qty;
+        landedUnitCost = (effectiveBase + rowAllocOverhead) / item.qty;
       }
-
-      netTaxableSum += effectiveTaxable;
-      totalVatAmount += vatAmt;
 
       // Update DOM values safely
       const elTaxable = item.row.querySelector('.item-taxable-amount');
@@ -1567,19 +1577,20 @@ table.items-table select {
       const elAlloc = item.row.querySelector('.item-alloc-overhead');
       const elLanded = item.row.querySelector('.item-landed-unit-cost');
 
-      if (elTaxable) elTaxable.value = effectiveTaxable.toFixed(2);
+      // If item has 0% tax, Taxable Amount displays 0.00
+      if (elTaxable) elTaxable.value = (item.taxPercent > 0 ? effectiveBase : 0).toFixed(2);
       if (elVat) elVat.value = vatAmt.toFixed(2);
       if (elNet) elNet.value = netLineAmount.toFixed(2);
       if (elAlloc) elAlloc.value = rowAllocOverhead.toFixed(2);
       if (elLanded) elLanded.value = landedUnitCost.toFixed(2);
     });
 
-    // FINAL VALUATIONS
-    const grandTotalPurchase = netTaxableSum + totalNonTaxable + totalVatAmount;
-    const totalLandedCost = netTaxableSum + totalNonTaxable + totalOverheads;
+    // FINAL RECONCILED VALUATIONS (Zero Double-Counting)
+    const grandTotalPurchase = netTaxableSum + netNonTaxableSum + totalVatAmount;
+    const totalLandedCost = netTaxableSum + netNonTaxableSum + totalOverheads;
     const supplierPayable = Math.max(0, grandTotalPurchase - spotPaid);
     const cashPaid = parseNum(cashPaidInput?.value);
-    const remainingCredit = Math.max(0, (netTaxableSum + totalNonTaxable + totalVatAmount) - cashPaid);
+    const remainingCredit = Math.max(0, grandTotalPurchase - cashPaid);
 
     // Section 4: Purchase Summary Panel
     const sSubtotal = document.getElementById('sumMerchandiseSubtotal');
@@ -1592,17 +1603,28 @@ table.items-table select {
     const sSpot = document.getElementById('sumSpotPaid');
     const sGrand = document.getElementById('sumGrandTotal');
     const sLanded = document.getElementById('sumTotalLandedCost');
+    const vatPctBadge = document.getElementById('summaryVatPct');
 
     if (sSubtotal) sSubtotal.textContent = formatCurrency(totalPreVatMerchandise);
     if (sItemDisc) sItemDisc.textContent = "- " + formatCurrency(totalItemDiscount);
     if (sBillDisc) sBillDisc.textContent = "- " + formatCurrency(wholeBillDiscount);
-    if (sNonTax) sNonTax.textContent = formatCurrency(totalNonTaxable);
+    if (sNonTax) sNonTax.textContent = formatCurrency(netNonTaxableSum);
     if (sTaxable) sTaxable.textContent = formatCurrency(netTaxableSum);
     if (sVat) sVat.textContent = formatCurrency(totalVatAmount);
     if (sOvh) sOvh.textContent = formatCurrency(totalOverheads);
     if (sSpot) sSpot.textContent = "- " + formatCurrency(spotPaid);
     if (sGrand) sGrand.textContent = formatCurrency(grandTotalPurchase);
     if (sLanded) sLanded.textContent = formatCurrency(totalLandedCost);
+
+    // Synchronize VAT % display in Summary Card
+    if (vatPctBadge) {
+      if (netTaxableSum > 0) {
+        vatPctBadge.textContent = dominantTaxRate.toString();
+      } else {
+        const topRate = parseNum(defaultVatRateInput?.value);
+        vatPctBadge.textContent = topRate > 0 ? topRate.toString() : "0";
+      }
+    }
 
     // Section 5: Landed Cost Reconciliation Step Cards
     const r1 = document.getElementById('reconStep1');
@@ -1611,7 +1633,7 @@ table.items-table select {
     const r4 = document.getElementById('reconStep4');
     const r5 = document.getElementById('reconStep5');
 
-    if (r1) r1.textContent = formatCurrency(totalPreVatMerchandise - totalItemDiscount - wholeBillDiscount);
+    if (r1) r1.textContent = formatCurrency(netTaxableSum + netNonTaxableSum);
     if (r2) r2.textContent = formatCurrency(totalVatAmount);
     if (r3) r3.textContent = formatCurrency(totalOverheads);
     if (r4) r4.textContent = formatCurrency(totalLandedCost);

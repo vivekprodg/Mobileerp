@@ -4,11 +4,11 @@ Commercial Purchase Returns (Debit Notes) & Supplier Udhaari Ledgers.
 
 Synchronized with `apps/purchases/models.py`:
 - Inward GRN features 5-Section Financial Summary Cards:
-    1. Gross Merchandise Value (Pre-VAT Base)
-    2. Dedicated 13% VAT Amount (Respects Exclusive vs. Inclusive mode)
+    1. Gross Merchandise Value & Pre-VAT Bases (Dual-pot split: Taxable vs. Non-Taxable)
+    2. Dedicated 13% VAT Amount (Calculated strictly on the Taxable Base; 0% on Exempt)
     3. Total Overheads (Freight + Customs + Handling + Transit Insurance + Other Overheads)
-    4. Total Landed Valuation / Inventory COGS (Taxable Base + 5-tier Overheads)
-    5. Net Due / Supplier Debt (Total Bill - Paid Amount)
+    4. Total Landed Valuation / Inventory COGS (Net Merchandise + 5-tier Overheads)
+    5. Net Due / Supplier Debt (Total Invoice - Paid Amount)
 - Inline item support for dual discount types: Flat Amount (रू) vs Percentage (%).
 - Line-item physical Batch Number (`batch_number`) tracking.
 - Distinct delivery challan reference fields (`challan_no`, `challan_date`, `challan_date_bs`).
@@ -306,8 +306,8 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         'bill_date', 'bill_date_bs', 'fiscal_year',
         'status_badge', 'vat_mode_badge', 'is_vat_badge',
         'formatted_gross_amount', 'formatted_taxable_amount',
-        'formatted_vat_amount', 'formatted_landed_cost',
-        'formatted_net_total', 'formatted_due'
+        'formatted_non_taxable_amount', 'formatted_vat_amount',
+        'formatted_landed_cost', 'formatted_net_total', 'formatted_due'
     ]
     list_filter = [
         'status', 'vat_handling_mode', 'is_vat_bill', 'distributor_mdms_certified',
@@ -349,7 +349,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
             )
         }),
         (_("3. Procurement Financial Valuation & Landed COGS Summary"), {
-            'description': _("Live breakdown of Pre-VAT Gross, Line & Bill Discounts, VAT Mode, 13% VAT, 5-tier Overheads, and Net Payable."),
+            'description': _("Audited breakdown of Pre-VAT Gross, Taxable vs Non-Taxable Merchandise Pots, Line & Bill Discounts, 13% VAT, 5-tier Overheads, and Net Payable."),
             'fields': (
                 'financial_summary_card',
                 ('gross_amount', 'total_line_discount'),
@@ -394,22 +394,30 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
 
         gross = obj.gross_amount or Decimal('0.00')
         vat = obj.vat_amount or Decimal('0.00')
+        taxable = obj.taxable_amount or Decimal('0.00')
+        net_total = obj.net_total_amount or Decimal('0.00')
         overheads = obj.overhead_total or Decimal('0.00')
         landed = obj.total_landed_cost or Decimal('0.00')
         due = obj.due_amount or Decimal('0.00')
 
+        # Calculate exact Non-Taxable Merchandise Base
+        net_merchandise = max(Decimal('0.00'), net_total - vat)
+        non_taxable = max(Decimal('0.00'), net_merchandise - taxable)
+
         vat_mode_label = " (Mode: Incl)" if obj.vat_handling_mode == 'INCLUSIVE' else " (Mode: Excl)"
         vat_status = ("13% VAT Active" + vat_mode_label) if obj.is_vat_bill else "Non-VAT (0.00)"
-        vat_color = "#059669" if obj.is_vat_bill else "#64748b"
+        vat_color = "#059669" if (obj.is_vat_bill and vat > Decimal('0.00')) else "#64748b"
 
         return format_html(
             '''
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 18px;">
-                <!-- 1. Gross Merchandise Value -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 18px;">
+                <!-- 1. Gross Merchandise Value & Dual Pots -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid #2563eb; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">1. Gross Merchandise</div>
                     <div style="font-size: 18px; font-weight: 800; color: #1e293b; margin-top: 4px;">Rs. {:,.2f}</div>
-                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Pre-VAT Base (Before Disc)</div>
+                    <div style="font-size: 11px; color: #334155; margin-top: 3px; font-weight: 600;">
+                        Taxable: Rs. {:,.2f} | Non-Tax: Rs. {:,.2f}
+                    </div>
                 </div>
 
                 <!-- 2. Dedicated 13% VAT Amount -->
@@ -426,11 +434,11 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
                     <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Freight + Duty + Handl + Ins + Ovh</div>
                 </div>
 
-                <!-- 4. Total Landed Valuation -->
+                <!-- 4. Total Landed Valuation (COGS) -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid #7c3aed; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">4. Total Landed (COGS)</div>
                     <div style="font-size: 18px; font-weight: 800; color: #6d28d9; margin-top: 4px;">Rs. {:,.2f}</div>
-                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Pre-VAT Taxable + 5 Overheads</div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Net Merchandise Base + 5 Overheads</div>
                 </div>
 
                 <!-- 5. Net Due / Supplier Debt -->
@@ -442,6 +450,8 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
             </div>
             ''',
             gross,
+            taxable,
+            non_taxable,
             vat_color,
             vat_color,
             vat,
@@ -511,6 +521,15 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     formatted_taxable_amount.short_description = _("Taxable Base")
     formatted_taxable_amount.admin_order_field = 'taxable_amount'
 
+    def formatted_non_taxable_amount(self, obj):
+        net_merchandise = (obj.net_total_amount or Decimal('0.00')) - (obj.vat_amount or Decimal('0.00'))
+        taxable = obj.taxable_amount or Decimal('0.00')
+        non_tax = max(Decimal('0.00'), net_merchandise - taxable)
+        if non_tax > Decimal('0.00'):
+            return format_html('<span style="color: #64748b; font-weight: 600;">Rs. {:,.2f}</span>', non_tax)
+        return format_html('<span style="color: #94a3b8;">Rs. 0.00</span>')
+    formatted_non_taxable_amount.short_description = _("Non-Tax Base")
+
     def formatted_vat_amount(self, obj):
         val = obj.vat_amount or Decimal('0.00')
         color = '#059669' if val > Decimal('0.00') else '#64748b'
@@ -539,7 +558,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     def save_related(self, request, form, formsets, change):
         """
         Executes after inline GRN items are saved to database.
-        Recalculates all line discounts, gross amounts, bill discounts, VAT,
+        Recalculates dual-pot pre-VAT merchandise, dedicated 13% VAT, bill discounts,
         and accurately distributes overheads proportionally to calculate line unit landed costs.
         """
         super().save_related(request, form, formsets, change)

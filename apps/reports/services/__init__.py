@@ -1,6 +1,5 @@
 """
 Report Domain Business Logic Services Package.
-File Path: apps/reports/services/__init__.py
 
 Exposes specialized calculation engines for:
 1. Core Historical Inventory & Ledger (Summary, Bin Card, Snapshots, Low/Zero Stock, Valuation)

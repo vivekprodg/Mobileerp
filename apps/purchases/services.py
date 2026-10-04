@@ -2,11 +2,15 @@
 Purchase GRN & Commercial Purchase Return (Debit Note) Services.
 
 Core Capabilities:
-1. Dual VAT Mode Calculations:
+1. Dual VAT Mode Calculations & Dual-Pot Separation:
+   - Evaluates line items into two distinct pots: Taxable vs. Non-Taxable.
    - When VAT Excluded (EXCLUSIVE): Purchase rate is treated directly as pre-VAT base.
-   - When VAT Included (INCLUSIVE): Pre-VAT base is extracted:
+   - When VAT Included (INCLUSIVE): Pre-VAT base is extracted on taxable lines:
      Pre-VAT Base = (Gross - Line Discount) / (1 + (Tax Rate / 100))
      Gross Pre-VAT = Pre-VAT Base + Line Discount.
+   - VAT (13%) is calculated strictly on the net Taxable pot after whole-bill discount.
+   - Non-taxable items are completely insulated from VAT calculations.
+   - Net Invoice Total = Net Taxable Base + Non-Taxable Base + VAT Amount.
 2. 5-Tier Proportional Landed Cost Overhead Allocation:
    - Distributes all 5 overhead categories (Freight, Customs Duty, Handling & Unloading,
      Transit Insurance, and Other Overheads) proportionally across line items based on net merchandise value.
@@ -429,7 +433,7 @@ class PurchaseService:
                             )
 
     # =========================================================================
-    # STEP 2: MATHEMATICAL VALUATION & OVERHEAD ALLOCATION (FINANCIALS ONLY)
+    # STEP 2: MATHEMATICAL VALUATION & DUAL-POT OVERHEAD ALLOCATION (FINANCIALS ONLY)
     # =========================================================================
     @classmethod
     def _calculate_financials_only(
@@ -439,16 +443,22 @@ class PurchaseService:
     ) -> Decimal:
         """
         Executes unified mathematical valuation across line items and whole-bill overheads:
-        - Resolves VAT Exclusive vs. Inclusive modes.
+        - Resolves VAT Exclusive vs. Inclusive modes per line item.
+        - Segregates items into Taxable vs. Non-Taxable merchandise pots.
         - Calculates line discounts (AMOUNT or PERCENTAGE).
-        - Prorates whole-bill discount.
-        - Prorates all 5 overhead expense categories across items.
-        - Updates line unit landed costs and GRN header valuation totals in memory.
+        - Prorates whole-bill discount proportionally across merchandise pots.
+        - Calculates 13% VAT strictly on the net Taxable Base after discounts.
+        - Non-taxable merchandise is completely insulated from VAT additions.
+        - Net Total Payable = Net Taxable Base + Non-Taxable Base + VAT Amount.
+        - Total Landed Cost = Net Taxable Base + Non-Taxable Base + 5 Overheads.
+        - Distributes bill discounts and overhead expenses across items to compute exact unit landed cost.
         """
         total_line_gross = Decimal('0.00')
         total_line_discount = Decimal('0.00')
+        gross_taxable_lines = Decimal('0.00')
+        gross_non_taxable_lines = Decimal('0.00')
 
-        # Phase 1: Line Item Gross & Line Discount Computations
+        # Phase 1: Line Item Gross, Line Discounts & Initial Pot Separation
         for item in items:
             qty = item.purchased_quantity if (item.purchased_quantity and item.purchased_quantity > Decimal('0.000')) else Decimal('1.000')
             raw_rate = item.purchase_rate or Decimal('0.00')
@@ -475,25 +485,34 @@ class PurchaseService:
                 item.item_discount_amount = Decimal('0.00')
                 item.discount_percent = Decimal('0.00')
 
-            taxable_line_raw = max(Decimal('0.00'), raw_gross - item.item_discount_amount)
+            net_line_base = max(Decimal('0.00'), raw_gross - item.item_discount_amount)
 
-            # VAT Handling Mode: If INCLUSIVE, extract the pre-VAT base
-            item_vat_rate = item.vat_rate if (item.vat_rate and item.vat_rate > Decimal('0.00')) else Decimal('13.00')
-            is_vat = grn.is_vat_bill or item.is_vat_applicable
+            # Determine whether this specific line item is taxable under Nepal VAT rules
+            line_has_vat = (item.vat_rate and item.vat_rate > Decimal('0.00'))
+            is_line_taxable = bool(grn.is_vat_bill and item.is_vat_applicable and line_has_vat)
 
-            if getattr(grn, 'vat_handling_mode', 'EXCLUSIVE') == 'INCLUSIVE' and is_vat and item_vat_rate > Decimal('0.00'):
+            item_vat_rate = item.vat_rate if line_has_vat else Decimal('13.00')
+
+            # VAT Handling Mode: If INCLUSIVE and line is taxable, extract pre-VAT base
+            if getattr(grn, 'vat_handling_mode', 'EXCLUSIVE') == 'INCLUSIVE' and is_line_taxable:
                 tax_divisor = Decimal('1.00') + (item_vat_rate / Decimal('100.00'))
-                taxable_base = (taxable_line_raw / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item.gross_amount = (taxable_base + item.item_discount_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item.line_total = taxable_base
+                taxable_extracted = (net_line_base / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.gross_amount = (taxable_extracted + item.item_discount_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                item.line_total = taxable_extracted
             else:
                 item.gross_amount = raw_gross
-                item.line_total = taxable_line_raw
+                item.line_total = net_line_base
 
             total_line_gross += item.gross_amount
             total_line_discount += item.item_discount_amount
 
-        net_lines_subtotal = max(Decimal('0.00'), total_line_gross - total_line_discount)
+            # Accumulate into distinct merchandise pots
+            if is_line_taxable:
+                gross_taxable_lines += item.line_total
+            else:
+                gross_non_taxable_lines += item.line_total
+
+        net_merchandise_subtotal = max(Decimal('0.00'), total_line_gross - total_line_discount)
 
         # Phase 2: Whole-Bill Discount Calculation
         bill_disc_type = grn.bill_discount_type or 'NONE'
@@ -501,34 +520,42 @@ class PurchaseService:
 
         if bill_disc_type == 'PERCENTAGE':
             pct = min(Decimal('100.00'), max(Decimal('0.00'), bill_disc_input))
-            b_disc = (net_lines_subtotal * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            grn.bill_discount_amount = min(b_disc, net_lines_subtotal)
+            b_disc = (net_merchandise_subtotal * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            grn.bill_discount_amount = min(b_disc, net_merchandise_subtotal)
         elif bill_disc_type == 'AMOUNT':
             amt = max(Decimal('0.00'), bill_disc_input)
-            grn.bill_discount_amount = min(amt, net_lines_subtotal)
+            grn.bill_discount_amount = min(amt, net_merchandise_subtotal)
         else:
             grn.bill_discount_type = 'NONE'
             grn.bill_discount_input_value = Decimal('0.00')
             grn.bill_discount_amount = Decimal('0.00')
 
-        # Phase 3: Taxable Pre-VAT Base
-        consolidated_discounts = total_line_discount + grn.bill_discount_amount
-        taxable_base = max(Decimal('0.00'), total_line_gross - consolidated_discounts)
+        # Phase 3: Proportional Allocation of Bill Discount to Taxable & Non-Taxable Pots
+        if net_merchandise_subtotal > Decimal('0.00') and grn.bill_discount_amount > Decimal('0.00'):
+            taxable_share_disc = (grn.bill_discount_amount * (gross_taxable_lines / net_merchandise_subtotal)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            non_taxable_share_disc = grn.bill_discount_amount - taxable_share_disc
+        else:
+            taxable_share_disc = Decimal('0.00')
+            non_taxable_share_disc = Decimal('0.00')
 
-        # Phase 4: Dedicated 13% VAT Calculation (Strictly on Pre-VAT Base)
-        if grn.is_vat_bill:
+        net_taxable_base = max(Decimal('0.00'), gross_taxable_lines - taxable_share_disc)
+        net_non_taxable_base = max(Decimal('0.00'), gross_non_taxable_lines - non_taxable_share_disc)
+
+        # Phase 4: Dedicated 13% VAT Calculation (Strictly on Pre-VAT Taxable Base)
+        if grn.is_vat_bill and net_taxable_base > Decimal('0.00'):
             rate = grn.vat_rate if (grn.vat_rate and grn.vat_rate > Decimal('0.00')) else Decimal('13.00')
             grn.vat_rate = rate
-            vat_amount = (taxable_base * (rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            vat_amount = (net_taxable_base * (rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         else:
             vat_amount = Decimal('0.00')
 
         # Phase 5: Overheads (Aggregating all 5 Overhead Categories)
         overheads = grn.overhead_total
 
-        # Phase 6: Landed Cost Valuation & Final Bill Total
-        total_landed_valuation = (taxable_base + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        net_invoice_total = (taxable_base + vat_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # Phase 6: Landed Cost Valuation & Final Reconciled Bill Total (Zero Double-Counting)
+        total_merchandise_net = net_taxable_base + net_non_taxable_base
+        total_landed_valuation = (total_merchandise_net + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        net_invoice_total = (total_merchandise_net + vat_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         paid = grn.paid_amount or Decimal('0.00')
         net_due = max(Decimal('0.00'), net_invoice_total - paid)
@@ -536,8 +563,8 @@ class PurchaseService:
         # Update GRN Header In-Memory Values
         grn.gross_amount = total_line_gross
         grn.total_line_discount = total_line_discount
-        grn.discount_amount = consolidated_discounts
-        grn.taxable_amount = taxable_base
+        grn.discount_amount = total_line_discount + grn.bill_discount_amount
+        grn.taxable_amount = net_taxable_base
         grn.vat_amount = vat_amount
         grn.total_landed_cost = total_landed_valuation
         grn.net_total_amount = net_invoice_total
@@ -550,8 +577,8 @@ class PurchaseService:
             base_qty = (item.purchased_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
             item.base_unit_quantity = base_qty
 
-            if net_lines_subtotal > Decimal('0.00'):
-                weight = item.line_total / net_lines_subtotal
+            if net_merchandise_subtotal > Decimal('0.00'):
+                weight = item.line_total / net_merchandise_subtotal
             else:
                 weight = Decimal('1.00') / Decimal(item_count) if item_count > 0 else Decimal('0.00')
 

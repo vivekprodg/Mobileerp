@@ -28,8 +28,13 @@ urlpatterns = [
     path('settings/', SystemSettingsView.as_view(), name='settings'),
     path('audit-logs/', AuditLogListView.as_view(), name='audit_logs'),
 
-    # 3. Utilities & Global Search API Endpoints
+    # 3. Utilities & Global Search API Endpoints (Standard Paths)
     path('api/convert-date/', ConvertDateAPIView.as_view(), name='convert_date_api'),
     path('api/barcode-preview/', BarcodePreviewAPIView.as_view(), name='barcode_preview_api'),
     path('api/global-search/', GlobalSearchAPIView.as_view(), name='global_search_api'),
+
+    # 4. Compatibility Aliases (Supports frontend requests prefixed with /core/)
+    path('core/api/convert-date/', ConvertDateAPIView.as_view(), name='convert_date_api_alias'),
+    path('core/api/barcode-preview/', BarcodePreviewAPIView.as_view(), name='barcode_preview_api_alias'),
+    path('core/api/global-search/', GlobalSearchAPIView.as_view(), name='global_search_api_alias'),
 ]

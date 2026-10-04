@@ -1,6 +1,5 @@
 """
 Batch-Wise Stock Report (Accessories & Spare Parts) Business Logic Service.
-File Path: apps/reports/services/batch_stock_service.py
 
 Capabilities:
 1. Queries ProductBatch records tracking non-serialized merchandise (fast chargers, cables,
