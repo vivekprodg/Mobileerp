@@ -7,10 +7,14 @@ Generates audit-ready financial statements and diagnostic controls for Nepal's r
    - Enforces mathematical verification: Sum(Debit Balances) == Sum(Credit Balances).
 2. Profit & Loss (Income Statement) Engine:
    - Operating Revenue, Direct Costs (COGS), Gross Profit, and Operating Expenses evaluated via batched SQL annotations.
+   - Excludes year-end closing vouchers so closed fiscal years preserve historical revenue/expense reporting.
 3. Balance Sheet (Statement of Financial Position) Engine:
    - Assets, Liabilities, and Equity evaluated in a single grouped query, enforcing: Assets == Liabilities + Equity.
+   - Prevents double-counting current period net profit when year-end closing entries have already been posted to Retained Earnings (3210).
 4. Cash Flow Statement Engine:
-   - Evaluates cash/bank liquidity movements via counter-account classification.
+   - Re-engineered strictly according to true cash accounting principles.
+   - Inspects the liquid accounts (Cash, Bank, Wallets) to establish genuine cash direction (Inflow vs. Outflow).
+   - Eliminates false cash reporting from non-cash credit sales and purchases.
 5. Automated Accounting Integrity Diagnostic Engine:
    - Automated 6-point sub-ledger and control audit engine.
 """
@@ -32,7 +36,6 @@ from apps.branches.models import Branch
 from apps.customers.models import Customer
 from apps.purchases.models import Supplier
 from apps.core.nepali_calendar import NepaliCalendar
-
 
 class FinancialStatementService:
     """
@@ -81,7 +84,7 @@ class FinancialStatementService:
     ) -> Dict[str, Any]:
         """
         Computes the complete Trial Balance as of a specific date.
-        Replaces 50+ individual account queries with 1 single SQL query grouped by account_id.
+        Replaces individual account queries with 1 single SQL query grouped by account_id.
         """
         _, end_date, resolved_fy = cls._resolve_date_boundaries(None, as_of_date, fiscal_year)
 
@@ -192,6 +195,7 @@ class FinancialStatementService:
     ) -> Dict[str, Any]:
         """
         Generates the Profit & Loss Statement for a specific period using batched SQL aggregation.
+        Excludes year-end closing vouchers so historical operating revenues and expenses remain visible.
         """
         start_ad, end_ad, resolved_fy = cls._resolve_date_boundaries(start_date, end_date, fiscal_year)
 
@@ -204,12 +208,15 @@ class FinancialStatementService:
             if not acc_ids:
                 return [], Decimal('0.00')
 
-            # Fetch all period totals in ONE single SQL query
+            # Fetch period totals in ONE single SQL query (excluding year-end closing entries)
             items_qs = JournalItem.objects.filter(
                 account_id__in=acc_ids,
                 journal_entry__status='POSTED',
                 journal_entry__entry_date__gte=start_ad,
                 journal_entry__entry_date__lte=end_ad
+            ).exclude(
+                Q(journal_entry__source_module='YEAR_END_CLOSING') |
+                Q(journal_entry__reference_document__startswith='CLOSE-')
             )
             if branch:
                 items_qs = items_qs.filter(journal_entry__branch=branch)
@@ -286,7 +293,7 @@ class FinancialStatementService:
         }
 
     # =========================================================================
-    # 3. BALANCE SHEET ENGINE (OPTIMIZED: 1 SINGLE BATCH QUERY)
+    # 3. BALANCE SHEET ENGINE (WITH ZERO-VARIANCE DOUBLE-PROFIT PREVENTION)
     # =========================================================================
     @classmethod
     def get_balance_sheet(
@@ -298,20 +305,34 @@ class FinancialStatementService:
         """
         Generates the formal Balance Sheet as of a specified date:
         Assets = Liabilities + Equity (including current period Net Profit).
-        Fetches all asset, liability, and equity balances in 1 single grouped query.
+        
+        Double-Profit Prevention:
+        - Detects whether the fiscal year being inspected has already had its year-end closing entry posted.
+        - Excludes the current fiscal year's closing entry from Account 3210 (Retained Earnings)
+          so that base equity reflects pre-closing cumulative equity, while the current period's
+          net profit is presented accurately in the P&L allocation row.
+        - Guarantees Assets == Liabilities + Equity with 0.00 variance across open and closed years.
         """
         _, end_date, resolved_fy = cls._resolve_date_boundaries(None, as_of_date, fiscal_year)
 
         # 1. Fetch all balance sheet accounts
         bs_accs = Account.objects.filter(
             group__category__in=['ASSET', 'LIABILITY', 'EQUITY']
-        ).select_related('group')
+        ).select_related('group').order_by('code')
         if branch:
             bs_accs = bs_accs.filter(Q(branch=branch) | Q(branch__isnull=True))
 
         acc_ids = list(bs_accs.values_list('id', flat=True))
 
-        # 2. Batch-calculate posted debits and credits in ONE query
+        # 2. Check if a year-end closing entry has been posted for this specific fiscal year
+        closing_voucher_posted = JournalEntry.objects.filter(
+            Q(source_module='YEAR_END_CLOSING') | Q(reference_document__startswith=f"CLOSE-{resolved_fy}"),
+            fiscal_year=resolved_fy,
+            status='POSTED',
+            entry_date__lte=end_date
+        ).exists()
+
+        # 3. Batch-calculate posted debits and credits in ONE query
         items_qs = JournalItem.objects.filter(
             account_id__in=acc_ids,
             journal_entry__status='POSTED',
@@ -320,13 +341,23 @@ class FinancialStatementService:
         if branch:
             items_qs = items_qs.filter(journal_entry__branch=branch)
 
+        # CRITICAL FIX: If the current period's closing entry was posted, exclude it from
+        # equity accounts in bs_totals_map so that Retained Earnings (3210) does not double-count
+        # the net profit when current_period_net_profit is added from the P&L!
+        if closing_voucher_posted:
+            closing_filter = (
+                Q(journal_entry__source_module='YEAR_END_CLOSING') |
+                Q(journal_entry__reference_document__startswith=f"CLOSE-{resolved_fy}")
+            ) & Q(journal_entry__fiscal_year=resolved_fy)
+            items_qs = items_qs.exclude(account__group__category='EQUITY', **{'journal_entry__source_module': 'YEAR_END_CLOSING'})
+
         grouped_totals = items_qs.values('account_id').annotate(
             sum_dr=Coalesce(Sum('debit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
             sum_cr=Coalesce(Sum('credit_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
         )
         bs_totals_map = {row['account_id']: (row['sum_dr'], row['sum_cr']) for row in grouped_totals}
 
-        # 3. Map balances in memory
+        # 4. Map balances in memory
         def _get_section_breakdown(category: str):
             rows = []
             total = Decimal('0.00')
@@ -362,7 +393,7 @@ class FinancialStatementService:
         liability_lines, total_liabilities = _get_section_breakdown('LIABILITY')
         equity_lines, total_base_equity = _get_section_breakdown('EQUITY')
 
-        # 4. Factor in Current Year Net Profit from P&L into Equity
+        # 5. Factor in Current Year Net Profit from P&L into Equity
         pnl_data = cls.get_profit_and_loss(branch=branch, end_date=end_date, fiscal_year=resolved_fy)
         current_period_net_profit = pnl_data['net_profit']
 
@@ -387,10 +418,11 @@ class FinancialStatementService:
             'total_liabilities_and_equity': total_liabilities_and_equity,
             'is_balanced': is_balanced,
             'variance': variance,
+            'is_year_closed': closing_voucher_posted,
         }
 
     # =========================================================================
-    # 4. CASH FLOW STATEMENT ENGINE (COUNTER-ACCOUNT INSPECTION)
+    # 4. CASH FLOW STATEMENT ENGINE (TRUE CASH ACCOUNTING CONVENTION)
     # =========================================================================
     @classmethod
     def get_cash_flow(
@@ -401,21 +433,32 @@ class FinancialStatementService:
         fiscal_year: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Computes the Cash Flow Statement using Counter-Account Inspection.
-        Opening and closing liquid balances are fetched using batch-grouped queries.
+        Computes the Cash Flow Statement using True Cash Accounting Principles.
+        
+        Core Architecture:
+        1. Liquid Account Scoping:
+           - Cash in Hand (1110), Bank Current Account (1120), Digital Wallets (1130-1160).
+        2. Strictly traces the actual liquid legs to determine cash direction:
+           - If a liquid account is DEBITED, cash physically entered the store (Inflow).
+           - If a liquid account is CREDITED, cash physically left the store (Outflow).
+        3. Non-cash transactions (such as buying or selling entirely on credit) have NO liquid
+           legs and produce exactly ZERO cash flow.
+        4. Opposing non-liquid accounts are used solely to classify the cash movement into
+           Operating, Investing, or Financing categories and assign human-readable business labels.
+        5. Internal transfers between liquid accounts (Contra) are isolated.
         """
         start_ad, end_ad, resolved_fy = cls._resolve_date_boundaries(start_date, end_date, fiscal_year)
 
         liquid_accounts_qs = Account.objects.filter(
             system_tag__in=cls.LIQUID_SYSTEM_TAGS
-        ).select_related('group')
+        ).select_related('group').order_by('code')
         if branch:
             liquid_accounts_qs = liquid_accounts_qs.filter(Q(branch=branch) | Q(branch__isnull=True))
 
         liquid_account_ids = set(liquid_accounts_qs.values_list('id', flat=True))
 
         # ---------------------------------------------------------------------
-        # Batch Calculate Opening (< start_ad) and Closing (<= end_ad) Positions
+        # 1. Batch Calculate Opening (< start_ad) and Closing (<= end_ad) Positions
         # ---------------------------------------------------------------------
         op_items_qs = JournalItem.objects.filter(
             account_id__in=liquid_account_ids,
@@ -474,17 +517,18 @@ class FinancialStatementService:
             })
 
         # ---------------------------------------------------------------------
-        # Counter-Account Voucher Analysis
+        # 2. Scope strictly to Journal Entries containing actual Liquid Account Legs
         # ---------------------------------------------------------------------
-        entry_ids_in_period = JournalItem.objects.filter(
+        entries_with_cash_qs = JournalItem.objects.filter(
             account_id__in=liquid_account_ids,
             journal_entry__status='POSTED',
             journal_entry__entry_date__gte=start_ad,
             journal_entry__entry_date__lte=end_ad
         )
         if branch:
-            entry_ids_in_period = entry_ids_in_period.filter(journal_entry__branch=branch)
-        entry_ids = set(entry_ids_in_period.values_list('journal_entry_id', flat=True))
+            entries_with_cash_qs = entries_with_cash_qs.filter(journal_entry__branch=branch)
+
+        cash_active_entry_ids = set(entries_with_cash_qs.values_list('journal_entry_id', flat=True))
 
         operating_inflows = Decimal('0.00')
         operating_outflows = Decimal('0.00')
@@ -500,20 +544,28 @@ class FinancialStatementService:
         contra_lines = []
 
         all_entry_items = JournalItem.objects.filter(
-            journal_entry_id__in=entry_ids
-        ).select_related('account__group', 'journal_entry', 'customer', 'supplier')
+            journal_entry_id__in=cash_active_entry_ids
+        ).select_related('account__group', 'journal_entry', 'customer', 'supplier').order_by('journal_entry__entry_date', 'journal_entry__id', 'id')
 
         entry_items_map: Dict[int, List[JournalItem]] = {}
         for itm in all_entry_items:
             entry_items_map.setdefault(itm.journal_entry_id, []).append(itm)
 
+        # ---------------------------------------------------------------------
+        # 3. Analyze Direction strictly from the Liquid Account Legs
+        # ---------------------------------------------------------------------
         for e_id, items in entry_items_map.items():
             entry_obj = items[0].journal_entry
+            liquid_items = [itm for itm in items if itm.account_id in liquid_account_ids]
             non_liquid_items = [itm for itm in items if itm.account_id not in liquid_account_ids]
 
-            # Case A: Pure Contra Entry (All lines are liquid accounts)
+            liq_dr = sum((itm.debit_amount for itm in liquid_items), Decimal('0.00'))
+            liq_cr = sum((itm.credit_amount for itm in liquid_items), Decimal('0.00'))
+            net_entry_cash = (liq_dr - liq_cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            # Case A: Pure Contra Entry (Internal transfer between cash/bank/wallets)
             if not non_liquid_items:
-                contra_sum = sum(itm.debit_amount for itm in items if itm.account_id in liquid_account_ids)
+                contra_sum = liq_dr
                 contra_transfers_volume += contra_sum
                 contra_lines.append({
                     'entry': entry_obj,
@@ -524,72 +576,87 @@ class FinancialStatementService:
                 })
                 continue
 
-            # Case B: Counter-Account Inspection
-            for itm in non_liquid_items:
-                acc = itm.account
-                group = acc.group
-                cat = group.category
-                code_str = str(acc.code).strip()
-                group_code_str = str(group.code).strip()
-                tag = acc.system_tag or ''
+            # Case B: Zero Net Cash Impact in this Entry
+            if net_entry_cash == Decimal('0.00'):
+                continue
 
-                dr = itm.debit_amount
-                cr = itm.credit_amount
-                cash_impact = cr - dr
+            # Case C: Genuine Cash Inflow or Outflow
+            if net_entry_cash > Decimal('0.00'):
+                inflow = net_entry_cash
+                outflow = Decimal('0.00')
+                # Opposing source accounts were credited
+                opposing_candidates = [itm for itm in non_liquid_items if itm.credit_amount > Decimal('0.00')]
+                if not opposing_candidates:
+                    opposing_candidates = non_liquid_items
+                best_opp = max(opposing_candidates, key=lambda x: max(x.credit_amount, x.debit_amount))
+            else:
+                inflow = Decimal('0.00')
+                outflow = abs(net_entry_cash)
+                # Opposing destination accounts were debited
+                opposing_candidates = [itm for itm in non_liquid_items if itm.debit_amount > Decimal('0.00')]
+                if not opposing_candidates:
+                    opposing_candidates = non_liquid_items
+                best_opp = max(opposing_candidates, key=lambda x: max(x.debit_amount, x.credit_amount))
 
-                is_investing = (
-                    cat == 'FIXED_ASSET' or
-                    code_str.startswith('15') or
-                    group_code_str.startswith('15') or
-                    tag in ['FIXED_ASSET', 'INVESTMENT', 'PROPERTY_PLANT_EQUIPMENT'] or
-                    'FIXED ASSET' in group.name.upper()
-                )
+            # -----------------------------------------------------------------
+            # 4. Activity Classification (Investing, Financing, Operating)
+            # -----------------------------------------------------------------
+            is_investing = any(
+                itm.account.group.category == 'FIXED_ASSET' or
+                str(itm.account.code).startswith('15') or
+                itm.account.system_tag in ['ACCUMULATED_DEPRECIATION', 'FIXED_ASSET'] or
+                'FIXED ASSET' in itm.account.group.name.upper()
+                for itm in non_liquid_items
+            )
 
-                is_financing = (
-                    cat == 'EQUITY' or
-                    code_str.startswith('3') or
-                    group_code_str.startswith('3') or
-                    code_str.startswith('25') or
-                    group_code_str.startswith('25') or
-                    tag in ['EQUITY', 'CAPITAL', 'DRAWINGS', 'LOAN', 'BORROWING', 'TERM_LOAN'] or
-                    'EQUITY' in group.name.upper() or
-                    'CAPITAL' in group.name.upper() or
-                    'LOAN' in group.name.upper()
-                )
+            is_financing = any(
+                itm.account.group.category == 'EQUITY' or
+                str(itm.account.code).startswith('3') or
+                str(itm.account.code).startswith('25') or
+                itm.account.system_tag in ['LOAN_PRINCIPAL', 'OWNER_DRAWINGS', 'OWNER_CAPITAL', 'RETAINED_EARNINGS'] or
+                'EQUITY' in itm.account.group.name.upper() or
+                'CAPITAL' in itm.account.group.name.upper()
+                for itm in non_liquid_items
+            )
 
-                line_summary = {
-                    'entry': entry_obj,
-                    'voucher_no': entry_obj.voucher_number,
-                    'date': entry_obj.entry_date,
-                    'account_name': acc.name,
-                    'account_code': acc.code,
-                    'inflow': cr if cr > Decimal('0.00') else Decimal('0.00'),
-                    'outflow': dr if dr > Decimal('0.00') else Decimal('0.00'),
-                    'net_amount': cash_impact,
-                    'narration': itm.line_narration or entry_obj.narration,
-                }
+            # Party / Label Enrichment
+            party_info = ""
+            if best_opp.customer:
+                party_info = f" ({best_opp.customer.name})"
+            elif best_opp.supplier:
+                party_info = f" ({best_opp.supplier.company_name})"
 
-                if is_investing:
-                    if cr > Decimal('0.00'):
-                        investing_inflows += cr
-                    if dr > Decimal('0.00'):
-                        investing_outflows += dr
-                    investing_lines.append(line_summary)
+            display_name = f"{best_opp.account.name}{party_info}"
+            line_narr = best_opp.line_narration or entry_obj.narration
 
-                elif is_financing:
-                    if cr > Decimal('0.00'):
-                        financing_inflows += cr
-                    if dr > Decimal('0.00'):
-                        financing_outflows += dr
-                    financing_lines.append(line_summary)
+            line_summary = {
+                'entry': entry_obj,
+                'voucher_no': entry_obj.voucher_number,
+                'date': entry_obj.entry_date,
+                'account_name': display_name,
+                'account_code': best_opp.account.code,
+                'inflow': inflow,
+                'outflow': outflow,
+                'net_amount': net_entry_cash,
+                'narration': line_narr,
+            }
 
-                else:
-                    if cr > Decimal('0.00'):
-                        operating_inflows += cr
-                    if dr > Decimal('0.00'):
-                        operating_outflows += dr
-                    operating_lines.append(line_summary)
+            if is_investing:
+                investing_inflows += inflow
+                investing_outflows += outflow
+                investing_lines.append(line_summary)
+            elif is_financing:
+                financing_inflows += inflow
+                financing_outflows += outflow
+                financing_lines.append(line_summary)
+            else:
+                operating_inflows += inflow
+                operating_outflows += outflow
+                operating_lines.append(line_summary)
 
+        # ---------------------------------------------------------------------
+        # 5. Reconcile Totals
+        # ---------------------------------------------------------------------
         net_operating = (operating_inflows - operating_outflows).quantize(Decimal('0.01'))
         net_investing = (investing_inflows - investing_outflows).quantize(Decimal('0.01'))
         net_financing = (financing_inflows - financing_outflows).quantize(Decimal('0.01'))

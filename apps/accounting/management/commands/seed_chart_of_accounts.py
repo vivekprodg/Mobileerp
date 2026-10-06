@@ -6,8 +6,10 @@ for Nepal's retail and wholesale smartphone, electronics, and optical ecosystems
 
 Pre-populates:
 1. Standard Account Groups (Assets, Liabilities, Equity, Revenue, Direct Costs, Operating Expenses)
-2. All 34 master general ledger accounts with accurate Nepali translations and system tags:
+2. All 36 master general ledger accounts with accurate Nepali translations and system tags:
    - Dedicated digital clearing accounts: FonePay (1130), eSewa (1140), Khalti (1150), Card POS (1160)
+   - Trade-In Buy-Back Clearing (2150)
+   - Sales Returns & Deductions (4020)
    - Fixed asset contra-accounts: Accumulated Depreciation (1520)
    - Liabilities & Equity: Bank Term Loans (2510), Owner Drawings (3130)
    - Operational revenue & expenses: Inventory Surplus (4030), Gateway MDR Fees (6190), Interest Expense (6210)
@@ -26,7 +28,6 @@ from apps.accounting.models import (
 from apps.branches.models import Branch
 from apps.core.models import SystemConfiguration
 from apps.core.nepali_calendar import NepaliCalendar
-
 
 class Command(BaseCommand):
     help = "Seeds standard double-entry Chart of Accounts, fiscal years, and system ledger bindings."
@@ -108,7 +109,7 @@ class Command(BaseCommand):
             created_groups[g['code']] = group_obj
 
         # =========================================================================
-        # 2. MASTER GENERAL LEDGER ACCOUNTS (ALL 34 STANDARD ACCOUNTS)
+        # 2. MASTER GENERAL LEDGER ACCOUNTS (ALL 36 STANDARD ACCOUNTS)
         # =========================================================================
         self.stdout.write("--> Creating Master General Ledger Accounts...")
 
@@ -245,6 +246,15 @@ class Command(BaseCommand):
                 'description': 'Supplier Udhaari owed to national importers and distributors.'
             },
             {
+                'code': '2150',
+                'name': 'Trade-In Buy-Back Clearing / Payable',
+                'name_np': 'पुरानो फोन साटासाट हिसाब (Trade-In Clearing)',
+                'group': '2100',
+                'system_tag': 'TRADE_IN_CLEARING',
+                'nature': 'CREDIT',
+                'description': 'Clearing ledger tracking buy-back valuation of customer traded-in handsets.'
+            },
+            {
                 'code': '2210',
                 'name': 'Output VAT 13%',
                 'name_np': 'बिक्री भ्याट (१३%)',
@@ -320,6 +330,15 @@ class Command(BaseCommand):
             },
 
             # --- 4000 Revenue (4000, 4100 & 4200) ---
+            {
+                'code': '4020',
+                'name': 'Sales Returns & Customer Deductions',
+                'name_np': 'बिक्री फिर्ता तथा छुट हिसाब',
+                'group': '4000',
+                'system_tag': 'SALES_RETURN',
+                'nature': 'DEBIT',
+                'description': 'Contra-revenue ledger tracking customer sales returns, credit notes, and post-sale deductions.'
+            },
             {
                 'code': '4030',
                 'name': 'Inventory Audit Surplus & Stock Gain',
@@ -482,7 +501,7 @@ class Command(BaseCommand):
                 'name': 'Payment Gateway & Bank Merchant Fees (MDR)',
                 'name_np': 'डिजिटल भुक्तानी सेवा शुल्क (MDR)',
                 'group': '6100',
-                'system_tag': 'GATEWAY_COMMISSION',
+                'system_tag': 'PAYMENT_GATEWAY_FEE',
                 'nature': 'DEBIT',
                 'description': 'Merchant Discount Rate (MDR) fees deducted by FonePay, eSewa, Khalti, and POS card acquirers.'
             },
@@ -554,6 +573,8 @@ class Command(BaseCommand):
             'default_khalti_clearing_account': '1150',
             'default_card_clearing_account': '1160',
             'default_card_account': '1160',
+            'default_trade_in_clearing_account': '2150',
+            'default_sales_return_account': '4020',
             'default_accumulated_depreciation_account': '1520',
             'default_loan_account': '2510',
             'default_term_loan_account': '2510',

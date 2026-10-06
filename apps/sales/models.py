@@ -22,6 +22,9 @@ Key Capabilities & Forensic Architecture:
    - Implements standard `get_absolute_url()` resolving to the detailed invoice sheet view.
 6. Safe IMEI Schema Architecture:
    - imei_number and secondary_imei allow null=True, blank=True at the database level.
+7. Decoupled KYC Document Storage:
+   - TradeInLegalUndertaking upload fields use safe settings fallbacks, preventing module import
+     and server startup crashes if custom directory variables are omitted.
 """
 
 import re
@@ -46,6 +49,13 @@ from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# DOCUMENT STORAGE CONFIGURATION (SAFE DECOUPLED FALLBACK)
+# =============================================================================
+TRADE_IN_UPLOAD_PATH = getattr(
+    settings, 'TRADE_IN_DOCUMENT_UPLOAD_DIR', 'sales/trade_in_kyc/%Y/%m/'
+)
 
 # =============================================================================
 # CHOICES DEFINITIONS
@@ -402,12 +412,12 @@ class SalesEstimate(TimeStampedModel):
     def _propagate_date_changes(self) -> None:
         """
         Propagates updated historical dates across linked records:
-        - Accounting General Ledger Journal Entries (dynamically handling model column naming)
+        - Accounting General Ledger Journal Entries
         - Serialized ItemInstance sale and warranty records
         - Active DeviceComponentWarranty expiration schedules
         - Customer Udhaari Debt Ledger entries
         """
-        # 1. Synchronize Accounting Journal Entries (Dynamically checking field names)
+        # 1. Synchronize Accounting Journal Entries
         try:
             from apps.accounting.models import JournalEntry
             je_fields = {f.name for f in JournalEntry._meta.get_fields()}
@@ -1049,6 +1059,7 @@ class TradeInInspectionChecklist(TimeStampedModel):
 class TradeInLegalUndertaking(TimeStampedModel):
     """
     Police-Compliant Customer Ownership Handover & Undertaking Record (जिम्मानामा तथा मञ्जुरीनामा).
+    Uses safe storage path definitions to prevent server startup attribute crashes.
     """
     ID_TYPE_CHOICES = [
         ('CITIZENSHIP', _('Nepali Citizenship Card (नागरिकता प्रमाणपत्र)')),
@@ -1072,16 +1083,17 @@ class TradeInLegalUndertaking(TimeStampedModel):
     permanent_address = models.CharField(max_length=255, verbose_name=_("Permanent Address (District, Ward, Municipality)"))
     current_address = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("Current Residence / Room Address"))
 
+    # Decoupled Upload Paths with Safe Fallbacks
     id_front_image = models.ImageField(
-        upload_to=settings.TRADE_IN_DOCUMENT_UPLOAD_DIR, blank=True, null=True,
+        upload_to=TRADE_IN_UPLOAD_PATH, blank=True, null=True,
         verbose_name=_("Citizenship / NID Front Photo")
     )
     id_back_image = models.ImageField(
-        upload_to=settings.TRADE_IN_DOCUMENT_UPLOAD_DIR, blank=True, null=True,
+        upload_to=TRADE_IN_UPLOAD_PATH, blank=True, null=True,
         verbose_name=_("Citizenship / NID Back Photo")
     )
     customer_live_photo = models.ImageField(
-        upload_to=settings.TRADE_IN_DOCUMENT_UPLOAD_DIR, blank=True, null=True,
+        upload_to=TRADE_IN_UPLOAD_PATH, blank=True, null=True,
         verbose_name=_("Customer Live Photo Snapshot (Holding Phone)")
     )
     customer_digital_signature = models.TextField(

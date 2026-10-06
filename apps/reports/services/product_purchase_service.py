@@ -1,6 +1,5 @@
 """
 Product-Wise & Handset Purchase Intelligence Service.
-File Path: apps/reports/services/product_purchase_service.py
 
 Capabilities:
 1. Audits smartphone and accessory purchasing volumes and costs across custom date ranges.

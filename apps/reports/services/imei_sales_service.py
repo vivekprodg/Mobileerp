@@ -1,6 +1,5 @@
 """
 Sold Handset IMEI Registry & Warranty History Service.
-File Path: apps/reports/services/imei_sales_service.py
 
 Capabilities:
 1. Provides a forensic audit ledger of every serialized mobile phone sold to retail customers.

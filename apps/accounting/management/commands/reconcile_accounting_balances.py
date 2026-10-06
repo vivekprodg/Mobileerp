@@ -1,12 +1,16 @@
 """
 Accounting Sub-Ledger & Cache Balance Reconciliation Command.
 
-
 Executes a 4-point programmatic audit and repair:
 1. Recomputes Account.current_balance from opening_balance + Sum(debit) - Sum(credit).
 2. Recomputes Customer.current_credit_balance from CustomerUdhaariLedger and reconciles against GL 1210 (AR).
 3. Recomputes Supplier.current_balance from SupplierUdhaariLedger and reconciles against GL 2110 (AP).
 4. Recomputes stock from StockMovementLog and reconciles BranchStock.quantity and Account 1310 (Inventory Asset).
+
+Branch Scoping Architecture:
+- When --branch is provided, filters control accounts strictly by that store branch.
+- When running consolidated (organization-wide), aggregates balances across all matching branch
+  control accounts instead of calling .first(), preventing false multi-branch variance warnings.
 
 Usage:
     python manage.py reconcile_accounting_balances
@@ -18,7 +22,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, List, Optional
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from django.db.models import Sum, Q, F
+from django.db.models import Sum, Q, F, Value, DecimalField
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.accounting.models import Account, JournalItem, JournalEntry
@@ -26,7 +31,6 @@ from apps.customers.models import Customer, CustomerUdhaariLedger
 from apps.purchases.models import Supplier, SupplierUdhaariLedger
 from apps.inventory.models import BranchStock, StockMovementLog, Product
 from apps.branches.models import Branch
-
 
 class Command(BaseCommand):
     help = (
@@ -69,7 +73,9 @@ class Command(BaseCommand):
             self.stdout.write(self.style.NOTICE(">>> AUDIT ONLY (DRY-RUN): Pass --fix to automatically repair balances. <<<\n"))
 
         if target_branch:
-            self.stdout.write(f"Branch Filter: {target_branch.name} ({target_branch.code})\n")
+            self.stdout.write(f"Branch Scope Filter: {target_branch.name} ({target_branch.code})\n")
+        else:
+            self.stdout.write("Scope: Consolidated Multi-Branch Organization-Wide\n")
 
         # ---------------------------------------------------------------------
         # CHECK 1: GENERAL LEDGER ACCOUNTS (Account.current_balance)
@@ -143,7 +149,6 @@ class Command(BaseCommand):
             for acc in accounts_qs:
                 total_checked += 1
 
-                # Recompute exact balance from posted JournalItems
                 items_qs = JournalItem.objects.filter(
                     account=acc,
                     journal_entry__status='POSTED'
@@ -199,7 +204,7 @@ class Command(BaseCommand):
         return {'total_checked': total_checked, 'drift_count': drift_count}
 
     # =========================================================================
-    # CHECK 2: CUSTOMERS RECONCILIATION & AR CONTROL
+    # CHECK 2: CUSTOMERS RECONCILIATION & AR CONTROL (BRANCH-AWARE)
     # =========================================================================
     def _reconcile_customers(self, branch: Optional[Branch], fix_mode: bool) -> Dict[str, Any]:
         customer_qs = Customer.objects.all().order_by('name')
@@ -239,14 +244,22 @@ class Command(BaseCommand):
             if not fix_mode:
                 transaction.set_rollback(True)
 
-        # Reconcile with GL 1210 AR Control Account
-        ar_acc = Account.objects.filter(
-            Q(code='1210') | Q(system_tag='ACCOUNTS_RECEIVABLE')
-        ).first()
-        gl_ar_balance = (ar_acc.current_balance or Decimal('0.00')) if ar_acc else Decimal('0.00')
+        # Scoped Control Account Lookup (Branch vs. Consolidated)
+        ar_acc_filter = Q(code='1210') | Q(code__startswith='1210-') | Q(system_tag='ACCOUNTS_RECEIVABLE')
+        if branch:
+            ar_accounts = Account.objects.filter(ar_acc_filter).filter(Q(branch=branch) | Q(branch__isnull=True))
+            scope_desc = f"Branch ({branch.code})"
+        else:
+            ar_accounts = Account.objects.filter(ar_acc_filter)
+            scope_desc = "Consolidated All Branches"
+
+        gl_ar_balance = ar_accounts.aggregate(
+            tot=Coalesce(Sum('current_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )['tot'] or Decimal('0.00')
+
         control_variance = abs(total_subledger_balance - gl_ar_balance).quantize(Decimal('0.01'))
 
-        self.stdout.write(f"  Sub-ledger Total: Rs. {total_subledger_balance:,.2f} | GL 1210 Control: Rs. {gl_ar_balance:,.2f} | Variance: Rs. {control_variance:,.2f}")
+        self.stdout.write(f"  Sub-ledger Total: Rs. {total_subledger_balance:,.2f} | GL 1210 Control [{scope_desc}]: Rs. {gl_ar_balance:,.2f} | Variance: Rs. {control_variance:,.2f}")
 
         return {
             'total_checked': total_checked,
@@ -256,7 +269,7 @@ class Command(BaseCommand):
         }
 
     # =========================================================================
-    # CHECK 3: SUPPLIERS RECONCILIATION & AP CONTROL
+    # CHECK 3: SUPPLIERS RECONCILIATION & AP CONTROL (BRANCH-AWARE)
     # =========================================================================
     def _reconcile_suppliers(self, branch: Optional[Branch], fix_mode: bool) -> Dict[str, Any]:
         supplier_qs = Supplier.objects.all().order_by('company_name')
@@ -292,14 +305,22 @@ class Command(BaseCommand):
             if not fix_mode:
                 transaction.set_rollback(True)
 
-        # Reconcile with GL 2110 AP Control Account
-        ap_acc = Account.objects.filter(
-            Q(code='2110') | Q(system_tag='ACCOUNTS_PAYABLE')
-        ).first()
-        gl_ap_balance = (ap_acc.current_balance or Decimal('0.00')) if ap_acc else Decimal('0.00')
+        # Scoped Control Account Lookup (Branch vs. Consolidated)
+        ap_acc_filter = Q(code='2110') | Q(code__startswith='2110-') | Q(system_tag='ACCOUNTS_PAYABLE')
+        if branch:
+            ap_accounts = Account.objects.filter(ap_acc_filter).filter(Q(branch=branch) | Q(branch__isnull=True))
+            scope_desc = f"Branch ({branch.code})"
+        else:
+            ap_accounts = Account.objects.filter(ap_acc_filter)
+            scope_desc = "Consolidated All Branches"
+
+        gl_ap_balance = ap_accounts.aggregate(
+            tot=Coalesce(Sum('current_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )['tot'] or Decimal('0.00')
+
         control_variance = abs(total_subledger_balance - gl_ap_balance).quantize(Decimal('0.01'))
 
-        self.stdout.write(f"  Sub-ledger Total: Rs. {total_subledger_balance:,.2f} | GL 2110 Control: Rs. {gl_ap_balance:,.2f} | Variance: Rs. {control_variance:,.2f}")
+        self.stdout.write(f"  Sub-ledger Total: Rs. {total_subledger_balance:,.2f} | GL 2110 Control [{scope_desc}]: Rs. {gl_ap_balance:,.2f} | Variance: Rs. {control_variance:,.2f}")
 
         return {
             'total_checked': total_checked,
@@ -309,7 +330,7 @@ class Command(BaseCommand):
         }
 
     # =========================================================================
-    # CHECK 4: STOCK MOVEMENTS & INVENTORY ASSET VALUATION
+    # CHECK 4: STOCK MOVEMENTS & INVENTORY ASSET VALUATION (BRANCH-AWARE)
     # =========================================================================
     def _reconcile_stock(self, branch: Optional[Branch], fix_mode: bool) -> Dict[str, Any]:
         stocks_qs = BranchStock.objects.select_related('product', 'branch').all().order_by('product__name')
@@ -330,7 +351,6 @@ class Command(BaseCommand):
                 cost = prod.purchase_price or Decimal('0.00')
                 total_valuation += (bs.quantity * cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-                # Recompute quantity from StockMovementLog
                 log_sum = StockMovementLog.objects.filter(
                     product=prod,
                     branch=bs.branch
@@ -359,14 +379,22 @@ class Command(BaseCommand):
             if not fix_mode:
                 transaction.set_rollback(True)
 
-        # Reconcile Physical Valuation with GL 1310 Inventory Asset
-        inv_acc = Account.objects.filter(
-            Q(code='1310') | Q(system_tag='INVENTORY_ASSET')
-        ).first()
-        gl_inv_balance = (inv_acc.current_balance or Decimal('0.00')) if inv_acc else Decimal('0.00')
+        # Scoped Control Account Lookup (Branch vs. Consolidated)
+        inv_acc_filter = Q(code='1310') | Q(code__startswith='1310-') | Q(system_tag='INVENTORY_ASSET')
+        if branch:
+            inv_accounts = Account.objects.filter(inv_acc_filter).filter(Q(branch=branch) | Q(branch__isnull=True))
+            scope_desc = f"Branch ({branch.code})"
+        else:
+            inv_accounts = Account.objects.filter(inv_acc_filter)
+            scope_desc = "Consolidated All Branches"
+
+        gl_inv_balance = inv_accounts.aggregate(
+            tot=Coalesce(Sum('current_balance'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )['tot'] or Decimal('0.00')
+
         control_variance = abs(total_valuation - gl_inv_balance).quantize(Decimal('0.01'))
 
-        self.stdout.write(f"  Physical Stock Value: Rs. {total_valuation:,.2f} | GL 1310 Asset: Rs. {gl_inv_balance:,.2f} | Variance: Rs. {control_variance:,.2f}")
+        self.stdout.write(f"  Physical Stock Value: Rs. {total_valuation:,.2f} | GL 1310 Asset [{scope_desc}]: Rs. {gl_inv_balance:,.2f} | Variance: Rs. {control_variance:,.2f}")
 
         return {
             'total_checked': total_checked,

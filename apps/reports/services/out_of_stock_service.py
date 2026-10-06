@@ -1,6 +1,5 @@
 """
 Out of Stock (Zero Inventory) Business Logic Service.
-File Path: apps/reports/services/out_of_stock_service.py
 
 Detects exhausted stock items (quantity <= 0), measures stockout duration
 in elapsed days since the last sale via StockMovementLog, evaluates potential

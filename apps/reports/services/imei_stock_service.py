@@ -1,6 +1,5 @@
 """
 Live IMEI & Serial Number Stock Business Logic Service.
-File Path: apps/reports/services/imei_stock_service.py
 
 Queries and audits active smartphone handsets sitting in the showcase or safe,
 identifying Primary IMEI 1, Secondary IMEI 2, Dual-SIM pending status, condition grades,

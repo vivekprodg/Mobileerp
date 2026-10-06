@@ -1,6 +1,5 @@
 """
 Stock Adjustment & Write-Off Report Business Logic Service.
-File Path: apps/reports/services/stock_adjustment_service.py
 
 Capabilities:
 1. Detects stock theft, shrinkage, breakages, expired stock, damage write-offs,

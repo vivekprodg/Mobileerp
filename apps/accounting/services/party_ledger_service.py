@@ -25,9 +25,10 @@ Capabilities & Architectural Rules:
 4. Robust Nepali/South Asian Number-to-Words Converter:
    - Formats amounts into standard words (Crores, Lakhs, Thousands, Hundreds, Rupees, and Paisa).
    - Handles zero balances ("Zero Rupees Only"), negative/credit offsets, and decimal paisa fractions accurately.
-5. Anti-Double Counting Subledger Query Filter:
-   - Scopes queries strictly to control accounts (ACCOUNTS_RECEIVABLE / ACCOUNTS_PAYABLE)
-     and non-clearing lines, preventing double-counting of counter cash/bank lines in multi-line vouchers.
+5. Strict Control Account Subledger Scoping (Anti-Counter-Line Filter):
+   - Scopes queries strictly to control accounts: Account 1210 (ACCOUNTS_RECEIVABLE) for Customers
+     and Account 2110 (ACCOUNTS_PAYABLE) for Suppliers.
+   - Strictly eliminates counter-legs (Cash, Discounts, Revenue, Overheads) from contaminating the statement.
 """
 
 import re
@@ -153,13 +154,6 @@ class PartyLedgerService:
     balance confirmations, running transaction statements, and legal audit letters.
     """
 
-    # Internal payment clearing tags to prevent line doubling in double-entry vouchers
-    PAYMENT_CLEARING_TAGS = [
-        'CASH', 'BANK', 'FONEPAY', 'ESEWA', 'KHALTI',
-        'CARD_CLEARING', 'SALES_REVENUE', 'COGS',
-        'OUTPUT_VAT', 'INPUT_VAT', 'INVENTORY_ASSET'
-    ]
-
     @classmethod
     def get_available_fiscal_years(cls) -> List[str]:
         """Returns ordered list of official Nepali Fiscal Years (e.g. '2083/84', '2082/83')."""
@@ -173,8 +167,7 @@ class PartyLedgerService:
     @classmethod
     def _parse_date_input(cls, raw_val: Any) -> Optional[Tuple[date, str]]:
         """
-        Parses arbitrary date strings in either Gregorian AD or Nepali BS
-        (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD, or Devanagari digits).
+        Parses arbitrary date strings in either Gregorian AD or Nepali BS.
         Returns a clean (gregorian_ad_date, standardized_bs_date_string) tuple or None.
         """
         if not raw_val:
@@ -219,12 +212,6 @@ class PartyLedgerService:
         """
         Resolves query parameters into standardized date bounds:
         Returns: (start_date_ad, end_date_ad, start_date_bs, end_date_bs, fiscal_year_label)
-
-        Strict Date Boundary Rules:
-        - When custom dates are supplied within an earlier month or historical period,
-          the end_date strictly respects that requested period and NEVER silently defaults to today.
-        - If a fiscal year preset is chosen, the entire range of that fiscal year is returned.
-        - If no parameters are given, defaults to the ongoing active fiscal year.
         """
         fy_param = str(params.get('fiscal_year') or '').strip()
         start_param = str(params.get('start_date') or params.get('start_date_bs') or '').strip()
@@ -303,13 +290,12 @@ class PartyLedgerService:
     ) -> Dict[str, Any]:
         """
         Produces the authoritative party ledger and confirmation statement payload.
-        Handles both historical migrated data and new fiscal year periods seamlessly.
-
-        Accounting Equation Enforced:
-        - Opening Balance (as of start_date_ad) = Net sum of all transactions prior to start_date_ad.
-        - For Debtors (Customers): Running Balance = Opening (Dr) + Debits - Credits.
-        - For Creditors (Suppliers): Running Balance = Opening (Cr) + Credits - Debits.
-        - Closing Balance = Running Balance at period end.
+        
+        Strict Subledger Rule (Anti-Counter-Line Protection):
+        - For Customers (Debtors): Scopes query STRICTLY to Control Account 1210 (Accounts Receivable).
+        - For Suppliers (Creditors): Scopes query STRICTLY to Control Account 2110 (Accounts Payable).
+        - Any counter-lines (such as Cash, Discount, Revenue, Inventory, or Overheads) that have
+          the customer or supplier attached as audit metadata are completely ignored.
         """
         party_type_norm = str(party_type).strip().upper()
         if party_type_norm not in ['CUSTOMER', 'SUPPLIER']:
@@ -318,7 +304,7 @@ class PartyLedgerService:
         start_date_ad, end_date_ad, start_date_bs, end_date_bs, fiscal_year = cls.resolve_period_dates(params)
 
         # -------------------------------------------------------------
-        # 1. Resolve Party Profile Entity
+        # 1. Resolve Party Profile Entity & Strict Control Account Filter
         # -------------------------------------------------------------
         if party_type_norm == 'CUSTOMER':
             party = get_object_or_404(Customer, pk=party_id)
@@ -328,8 +314,14 @@ class PartyLedgerService:
             party_pan = party.pan_number or "-"
             party_address = party.address or "Kathmandu, Nepal"
             is_debtor = True
-            control_tag = 'ACCOUNTS_RECEIVABLE'
-            control_code_prefix = '1210'
+
+            party_filter = Q(customer=party)
+            # STRICT FILTER: Only Accounts Receivable (1210) lines belong to Customer sub-ledger!
+            control_account_filter = (
+                Q(account__system_tag='ACCOUNTS_RECEIVABLE') |
+                Q(account__code='1210') |
+                Q(account__code__startswith='1210-')
+            )
         else:
             party = get_object_or_404(Supplier, pk=party_id)
             party_name = party.company_name
@@ -338,27 +330,21 @@ class PartyLedgerService:
             party_pan = party.pan_number or "-"
             party_address = party.address or "Kathmandu, Nepal"
             is_debtor = False
-            control_tag = 'ACCOUNTS_PAYABLE'
-            control_code_prefix = '2110'
+
+            party_filter = Q(supplier=party)
+            # STRICT FILTER: Only Accounts Payable (2110) lines belong to Supplier sub-ledger!
+            control_account_filter = (
+                Q(account__system_tag='ACCOUNTS_PAYABLE') |
+                Q(account__code='2110') |
+                Q(account__code__startswith='2110-')
+            )
 
         # -------------------------------------------------------------
-        # 2. Base QuerySet Scoped Strictly to Subledger Transactions
+        # 2. Base QuerySet Scoped Strictly to Subledger Control Accounts
         # -------------------------------------------------------------
         base_items = JournalItem.objects.filter(
             journal_entry__status='POSTED'
         ).select_related('journal_entry', 'account', 'journal_entry__branch')
-
-        if is_debtor:
-            party_filter = Q(customer=party)
-        else:
-            party_filter = Q(supplier=party)
-
-        # Scope strictly to the party control ledger line (prevents doubling against counter cash lines)
-        control_account_filter = (
-            Q(account__system_tag=control_tag) |
-            Q(account__code__startswith=control_code_prefix) |
-            ~Q(account__system_tag__in=cls.PAYMENT_CLEARING_TAGS)
-        )
 
         scoped_items = base_items.filter(party_filter).filter(control_account_filter)
 

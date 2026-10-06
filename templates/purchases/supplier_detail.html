@@ -311,7 +311,12 @@
                 <tbody>
                     {% for entry in ledger_entries %}
                     <tr>
-                        <td class="ps-4 text-nowrap">{{ entry.created_at|date:"Y-m-d H:i" }}</td>
+                        <td class="ps-4 text-nowrap">
+                            <span class="fw-semibold text-dark">{{ entry.entry_date|default:entry.created_at|date:"Y-m-d" }}</span>
+                            {% if entry.entry_date_bs %}
+                                <small class="text-muted d-block font-monospace fs-3xs">{{ entry.entry_date_bs }} BS</small>
+                            {% endif %}
+                        </td>
                         <td>
                             <span class="badge bg-{% if entry.transaction_type == 'PURCHASE_BILL' %}danger{% elif entry.transaction_type == 'PAYMENT' %}success{% else %}info{% endif %} fs-2xs">
                                 {{ entry.get_transaction_type_display }}
@@ -337,18 +342,19 @@
 
 <!-- ==========================================================================
      STANDARDIZED MODAL: RECORD SUPPLIER PAYOUT & INVOICE SETTLEMENT
+     (WITH RETROACTIVE DUAL-CALENDAR BS/AD DATE CONTROLS)
      ========================================================================== -->
 <div class="modal fade" id="supplierPayoutModal" tabindex="-1" aria-labelledby="supplierPayoutModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-            <form action="{% url 'purchases:supplier_payment' supplier.pk %}" method="post" id="supplierPayoutForm">
+            <form action="{% url 'purchases:supplier_payment' supplier.pk %}" method="post" id="supplierPayoutForm" novalidate>
                 {% csrf_token %}
                 <div class="modal-header bg-success text-white border-0 py-3">
                     <div class="d-flex align-items-center gap-2">
                         <span class="badge bg-white text-success p-2 rounded-circle fs-6"><i class="fas fa-hand-holding-dollar"></i></span>
                         <div>
                             <h5 class="modal-title fs-6 fw-bold mb-0" id="supplierPayoutModalLabel">Record Supplier Payout / Debt Settlement</h5>
-                            <small class="text-white-50 fs-2xs">Disburse payments to {{ supplier.company_name }} with linked GRN tracking</small>
+                            <small class="text-white-50 fs-2xs">Disburse payments to {{ supplier.company_name }} with linked GRN tracking and true historical dates</small>
                         </div>
                     </div>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -401,19 +407,47 @@
                             </div>
                         </div>
 
-                        <!-- Payout Amount -->
+                        <!-- 1. DUAL-CALENDAR PAYMENT DATE (B.S. & A.D.) -->
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">
+                                Payment Date (B.S.) <span class="text-danger">*</span>
+                            </label>
+                            {{ payment_form.entry_date_bs }}
+                            {% if payment_form.entry_date_bs.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ payment_form.entry_date_bs.errors.0 }}</div>
+                            {% endif %}
+                            <small class="text-muted fs-3xs d-block mt-0.5">Bikram Sambat date (YYYY-MM-DD).</small>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label class="form-label fw-bold text-dark fs-xs">
+                                Payment Date (A.D.) <span class="text-danger">*</span>
+                            </label>
+                            {{ payment_form.entry_date }}
+                            {% if payment_form.entry_date.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ payment_form.entry_date.errors.0 }}</div>
+                            {% endif %}
+                            <small class="text-muted fs-3xs d-block mt-0.5">Gregorian date for accounting indexing.</small>
+                        </div>
+
+                        <!-- 2. PAYOUT AMOUNT & PAYMENT MODE -->
                         <div class="col-12 col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Payout Amount (NPR) <span class="text-danger">*</span></label>
                             {{ payment_form.amount }}
+                            {% if payment_form.amount.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ payment_form.amount.errors.0 }}</div>
+                            {% endif %}
                         </div>
 
-                        <!-- Payment Mode -->
                         <div class="col-12 col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Payment Mode <span class="text-danger">*</span></label>
                             {{ payment_form.payment_mode }}
+                            {% if payment_form.payment_mode.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ payment_form.payment_mode.errors.0 }}</div>
+                            {% endif %}
                         </div>
 
-                        <!-- Standard Accounting Payment Clearing Account Lookup -->
+                        <!-- 3. PAYMENT CLEARING ACCOUNT & REFERENCE -->
                         <div class="col-12 col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Payment Clearing Account (Bank / Cash)</label>
                             <div class="contextual-search-wrapper" 
@@ -430,29 +464,36 @@
                             <small class="text-muted fs-2xs mt-1 d-block">Source ledger account where disbursement is debited.</small>
                         </div>
 
-                        <!-- Reference No. (Cheque / Bank Auth / Voucher) -->
                         <div class="col-12 col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Reference No. (Cheque / FonePay Trace / Voucher)</label>
                             {{ payment_form.reference_number }}
+                            {% if payment_form.reference_number.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ payment_form.reference_number.errors.0 }}</div>
+                            {% endif %}
                         </div>
 
-                        <!-- Cheque Date -->
+                        <!-- 4. CHEQUE CLEARANCE & REMARKS -->
                         <div class="col-12 col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Cheque Clearance Date (If Cheque)</label>
                             {{ payment_form.cheque_date }}
+                            {% if payment_form.cheque_date.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ payment_form.cheque_date.errors.0 }}</div>
+                            {% endif %}
                         </div>
 
-                        <!-- Remarks / Notes -->
                         <div class="col-12 col-md-6">
                             <label class="form-label fw-bold text-dark fs-xs">Remarks / Settlement Notes</label>
                             {{ payment_form.remarks }}
+                            {% if payment_form.remarks.errors %}
+                                <div class="text-danger fs-2xs mt-1">{{ payment_form.remarks.errors.0 }}</div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
 
                 <div class="modal-footer bg-light border-0 py-3">
                     <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-success btn-sm px-5 rounded-pill fw-bold shadow-sm">
+                    <button type="submit" class="btn btn-success btn-sm px-5 rounded-pill fw-bold shadow-sm" id="submitPayoutBtn">
                         <i class="fas fa-check-circle me-1"></i> Post Payout &amp; Deduct Debt
                     </button>
                 </div>
@@ -473,6 +514,94 @@ document.addEventListener('DOMContentLoaded', () => {
     const fillFullDueBtn = document.getElementById('fillFullDueBtn');
     const clearingAccountWrapper = document.getElementById('payoutClearingAccountWrapper');
     const paymentModeSelect = document.querySelector('#supplierPayoutForm select[name="payment_mode"]');
+    const submitPayoutBtn = document.getElementById('submitPayoutBtn');
+
+    // Date Inputs
+    const entryDateInput = document.querySelector('#supplierPayoutForm input[name="entry_date"]');
+    const entryDateBsInput = document.querySelector('#supplierPayoutForm input[name="entry_date_bs"]');
+
+    if (entryDateBsInput) {
+        entryDateBsInput.classList.add('nepali-datepicker');
+    }
+
+    // Bidirectional Date Synchronization (B.S. <-> A.D.)
+    function syncDateFields() {
+        if (!entryDateInput || !entryDateBsInput) return;
+
+        // If NepaliFunctions is available globally via nepali.datepicker
+        if (typeof NepaliFunctions !== 'undefined') {
+            // 1. BS -> AD
+            entryDateBsInput.addEventListener('ndpChange', function() {
+                const bsVal = entryDateBsInput.value.trim();
+                if (bsVal) {
+                    try {
+                        const adVal = NepaliFunctions.BS2AD(bsVal);
+                        if (adVal) entryDateInput.value = adVal;
+                    } catch (err) {
+                        console.warn('BS2AD conversion error:', err);
+                    }
+                }
+            });
+
+            entryDateBsInput.addEventListener('input', function() {
+                const bsVal = entryDateBsInput.value.trim();
+                if (bsVal && bsVal.length === 10) {
+                    try {
+                        const adVal = NepaliFunctions.BS2AD(bsVal);
+                        if (adVal) entryDateInput.value = adVal;
+                    } catch (err) {}
+                }
+            });
+
+            // 2. AD -> BS
+            entryDateInput.addEventListener('change', function() {
+                const adVal = entryDateInput.value.trim();
+                if (adVal) {
+                    try {
+                        const bsVal = NepaliFunctions.AD2BS(adVal);
+                        if (bsVal) entryDateBsInput.value = bsVal;
+                    } catch (err) {
+                        console.warn('AD2BS conversion error:', err);
+                    }
+                }
+            });
+        }
+    }
+
+    syncDateFields();
+
+    // Default dates to today when modal opens if empty
+    const supplierPayoutModalEl = document.getElementById('supplierPayoutModal');
+    if (supplierPayoutModalEl) {
+        supplierPayoutModalEl.addEventListener('shown.bs.modal', function () {
+            const todayAd = new Date().toISOString().slice(0, 10);
+            if (entryDateInput && !entryDateInput.value) {
+                entryDateInput.value = todayAd;
+            }
+            if (entryDateBsInput && !entryDateBsInput.value && typeof NepaliFunctions !== 'undefined') {
+                try {
+                    entryDateBsInput.value = NepaliFunctions.AD2BS(todayAd);
+                } catch (e) {}
+            }
+
+            // Re-initialize Nepali datepicker plugin if available
+            if (typeof $.fn !== 'undefined' && typeof $.fn.nepaliDatePicker !== 'undefined' && entryDateBsInput) {
+                $(entryDateBsInput).nepaliDatePicker({
+                    ndpYear: true,
+                    ndpMonth: true,
+                    ndpYearCount: 10,
+                    onChange: function() {
+                        if (typeof NepaliFunctions !== 'undefined') {
+                            try {
+                                const adVal = NepaliFunctions.BS2AD(entryDateBsInput.value);
+                                if (adVal) entryDateInput.value = adVal;
+                            } catch(e){}
+                        }
+                    }
+                });
+            }
+        });
+    }
 
     let currentSelectedGrnDue = 0;
     const totalSupplierDue = parseFloat('{{ supplier.current_balance|default:"0" }}') || 0;
@@ -542,6 +671,15 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (tag === 'FONEPAY' || text.includes('FONEPAY') || text.includes('QR')) {
                 paymentModeSelect.value = 'FONEPAY';
             }
+        });
+    }
+
+    // Prevent double form submission on fast clicking
+    const payoutForm = document.getElementById('supplierPayoutForm');
+    if (payoutForm && submitPayoutBtn) {
+        payoutForm.addEventListener('submit', () => {
+            submitPayoutBtn.disabled = true;
+            submitPayoutBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Posting Payout...';
         });
     }
 });

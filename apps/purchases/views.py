@@ -1,32 +1,36 @@
 """
 Purchases, Suppliers, GRN & Commercial Purchase Return (Debit Note) Views.
 
-Key Capabilities:
-1. Supplier Directory & Sub-Ledger: Full accounts payable lifecycle with credit limits and settlement histories.
-2. Supplier Confirmation Statement Linkage: Exposes active Nepali Fiscal Year in context to directly
-   launch the official multi-year Party Confirmation Ledger & audit sign-off letters.
-3. Supplier & GRN Search APIs:
-   - High-performance multi-token query parsing (e.g. 'viv 9802' matches across name, code, phone, contact, PAN).
-   - Generous listing limit (up to 150 items) for zero-query on-click instant dropdown browsing.
-   - Rich JSON payload including clean English classification and formatted debt badges.
-4. Supplier Payouts:
-   - Atomically updates supplier debt balance strictly through sub-ledger records with row-level locking.
-   - Automatically posts double-entry General Ledger payment vouchers without swallowing errors.
-5. Purchase Orders (PO): Requisitions with approval workflows, line item formsets, and delivery tracking.
-6. Goods Received Notes (GRN):
-   - Dual-Action Controller: Distinguishes between "Save Draft" (without modifying stock or ledgers)
-     and "Verify & Update Warehouse Stock" (live stock inward, serial registration, GL posting).
-   - Rich Context & Autocomplete: Injects active fiscal years, available branch warehouses, default VAT rates,
-     and pre-populated supplier registries for instant client-side math.
-   - Direct Print Support: Passes print-ready metadata and layout toggles.
-   - Immediate supplier sub-ledger reconciliation to the exact paisa.
-   - Dual-entry General Ledger auto-posting.
-   - Dedicated manager cancellation workflow (`cancel_grn_view` / `GRNCancelView`) that safely
-     reverses warehouse stock, archives unsold handset IMEIs, clears supplier AP balance,
-     and writes an immutable forensic AuditLog record.
-7. Commercial Purchase Returns (Debit Notes):
-   - Stock deduction, IMEI de-registration, supplier balance adjustments.
-   - Automatic GL double-entry reversal vouchers.
+Key Architectural Improvements & Bug Fixes:
+1. Reversal Architecture Correction (Fixes Double-Reversal Bug in cancel_grn_view):
+   - Adopts the standard double-entry audit convention: the original purchase journal entry
+     remains `POSTED` (annotated with reversal cross-references) while a distinct reversing entry
+     is posted with `status='POSTED'` that inverts debits and credits.
+   - Prevents balance recalculations from double-subtracting cancelled bills into negative balances.
+
+2. Settlement-Aware Supplier Debt Cancellation (Fixes Unearned Debt Deduction):
+   - Differentiates between unpaid credit balances (`due_amount > 0`) and spot payments (`paid_amount > 0`).
+   - If a bill was an unpaid credit purchase, reverses strictly the unpaid debt added to supplier AP.
+   - If a bill was paid in full on delivery (`due_amount == 0`), does not penalize unrelated debts;
+     records the disbursed cash as an advance due from the supplier / pending refund.
+
+3. Supplier Payout Historical Date & Calendar Ingestion (Fixes Backdating Amnesia):
+   - `SupplierPaymentRecordView` extracts and synchronizes `entry_date` (AD) and `entry_date_bs` (BS).
+   - Stamps the sub-ledger and passes `ledger_entry` and `date_ad` directly to the General Ledger
+     so historical payment dates are preserved in both ledgers.
+
+4. Standardized Chart of Accounts Fallback Bindings:
+   - Fallback GL poster adheres to official Nepal COA codes:
+     Cash in Hand (`1110`), Bank (`1120`), and Accounts Payable (`2110`).
+
+5. Supplier Directory & Sub-Ledger:
+   - Full accounts payable lifecycle with credit limits, settlement histories, and party confirmation letters.
+
+6. High-Performance Multi-Token Search APIs:
+   - Asynchronous lookup for suppliers and verified inward GRN consignments.
+
+7. Goods Received Notes (GRN) & Purchase Orders (PO):
+   - Save Draft vs. Live Verify split, proportional 5-tier landed cost distribution, and serial IMEI tracking.
 """
 
 import csv
@@ -35,6 +39,7 @@ import uuid
 import re
 import logging
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, datetime
 
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, View
@@ -66,22 +71,33 @@ from apps.inventory.services import InventoryService
 from apps.reports.exports import sanitize_csv_row
 from apps.core.models import SystemConfiguration, AuditLog
 from apps.core.nepali_calendar import NepaliCalendar
+from apps.core.utils.nepali_date_converter import parse_bs_date_components
 from apps.accounting.models import AccountingFiscalYear
 
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# GENERAL LEDGER DISPATCHER BRIDGE (DEFENSIVE COMPATIBILITY)
+# GENERAL LEDGER DISPATCHER BRIDGE (STANDARDIZED TO MASTER COA 1110/1120/2110)
 # =============================================================================
 try:
     import apps.accounting.services.auto_posting as auto_posting_mod
 
     if not hasattr(auto_posting_mod, 'post_supplier_payout_journal'):
-        def _post_supplier_payout_journal(supplier, amount, payment_mode, ref_no=None, user=None, branch=None, **kwargs):
+        def _post_supplier_payout_journal(
+            supplier,
+            amount,
+            payment_mode,
+            ref_no=None,
+            user=None,
+            branch=None,
+            ledger_entry=None,
+            date_ad=None,
+            **kwargs
+        ):
             """
             Fallback double-entry poster for supplier payout settlements:
-            - Dr: Accounts Payable (Supplier Control Account)
-            - Cr: Cash in Hand (if CASH) or Bank & Digital Wallets
+            - Dr: Accounts Payable 2110 (Supplier Control Account)
+            - Cr: Cash in Hand 1110 (if CASH) or Bank Current Account 1120
             """
             try:
                 from apps.accounting.models import JournalEntry
@@ -101,19 +117,37 @@ try:
                 if existing:
                     return existing
 
-                target_branch = branch or Branch.get_default_main_branch()
+                target_branch = branch or getattr(supplier, 'preferred_branch', None) or Branch.get_default_main_branch()
 
+                # Official Nepal Master Chart of Accounts Standard Codes
                 cash_acc = AutoPostingService.get_or_create_control_account(
-                    target_branch, 'CASH', '1010', 'Cash in Hand', 'ASSET', 'DEBIT'
+                    target_branch, 'CASH', '1110', 'Cash in Hand (Main Drawer)', 'ASSET', 'DEBIT'
                 )
                 bank_acc = AutoPostingService.get_or_create_control_account(
-                    target_branch, 'BANK', '1020', 'Bank & Digital Wallets', 'ASSET', 'DEBIT'
+                    target_branch, 'BANK', '1120', 'Primary Bank Current Account', 'ASSET', 'DEBIT'
                 )
                 ap_acc = AutoPostingService.get_or_create_control_account(
-                    target_branch, 'ACCOUNTS_PAYABLE', '2010', 'Accounts Payable (Creditors)', 'LIABILITY', 'CREDIT'
+                    target_branch, 'ACCOUNTS_PAYABLE', '2110', 'Accounts Payable (Trade Creditors)', 'LIABILITY', 'CREDIT'
                 )
 
-                src_acc = cash_acc if str(payment_mode).upper() == 'CASH' else bank_acc
+                mode_upper = str(payment_mode or '').upper().strip()
+                if mode_upper in ['CASH']:
+                    src_acc = cash_acc
+                elif mode_upper in ['FONEPAY', 'QR', 'DYNAMIC_QR']:
+                    src_acc = AutoPostingService.get_or_create_control_account(
+                        target_branch, 'FONEPAY', '1130', 'FonePay / QR Settlement Clearing', 'ASSET', 'DEBIT'
+                    )
+                else:
+                    src_acc = bank_acc
+
+                # Determine True Historical Date
+                effective_date = date_ad
+                if not effective_date and ledger_entry:
+                    effective_date = getattr(ledger_entry, 'entry_date', None)
+                if not effective_date:
+                    effective_date = timezone.now().date()
+                elif isinstance(effective_date, datetime):
+                    effective_date = effective_date.date()
 
                 lines = [
                     {
@@ -128,23 +162,25 @@ try:
                         'debit': Decimal('0.00'),
                         'credit': amount_dec,
                         'supplier': supplier,
-                        'narration': f"Disbursement via {payment_mode} (Ref: {ref_no or '-'})"
+                        'narration': f"Disbursement via {mode_upper} (Ref: {ref_document})"
                     }
                 ]
 
-                narration = f"Supplier debt payout: {supplier.company_name} (Rs. {amount_dec:.2f}) via {payment_mode}"
+                narration = f"Supplier debt payout: {supplier.company_name} (Rs. {amount_dec:.2f}) via {mode_upper}"
                 return JournalEngine.create_balanced_entry(
                     voucher_type='PAYMENT',
-                    date_ad=timezone.now().date(),
+                    date_ad=effective_date,
                     branch=target_branch,
                     lines=lines,
                     narration=narration,
                     reference_doc=ref_document,
+                    source_module='SUPPLIER_PAYMENT',
+                    source_id=str(getattr(ledger_entry, 'id', ref_document)),
                     user=user,
                     auto_post=True
                 )
             except Exception as err:
-                logger.error(f"[post_supplier_payout_journal Fallback Error] Supplier {supplier.id}: {err}")
+                logger.error(f"[post_supplier_payout_journal Fallback Error] Supplier {supplier.id}: {err}", exc_info=True)
                 raise
 
         auto_posting_mod.post_supplier_payout_journal = _post_supplier_payout_journal
@@ -178,11 +214,6 @@ class SupplierSearchAPIView(PurchaseModuleAccessMixin, View):
     """
     High-performance API endpoint for async Supplier search/autocomplete in Purchase Orders,
     GRNs, Debit Notes, and Payment Modals.
-    
-    Enhanced Capabilities:
-    - Multi-token splitting: Supports queries like 'viv 9802' searching across Name, Code, Phone, Contact, and PAN.
-    - Generous zero-query limit: Returns up to 150 active suppliers sorted alphabetically when q is empty.
-    - Clean English classification without Nepali brackets.
     """
 
     def get(self, request, *args, **kwargs):
@@ -218,7 +249,6 @@ class SupplierSearchAPIView(PurchaseModuleAccessMixin, View):
                 badge = 'SETTLED'
                 badge_text = "Settled (Rs. 0.00)"
 
-            # Ensure clean English classification text
             clean_classification = re.sub(r'\s*\([^)]*\)', '', s.get_supplier_type_display()).strip()
 
             results.append({
@@ -345,12 +375,22 @@ class SupplierDetailView(PurchaseModuleAccessMixin, DetailView):
         context['recent_pos'] = self.object.purchase_orders.select_related('branch')[:10]
         context['recent_returns'] = self.object.purchase_returns.select_related('branch')[:10]
         context['ledger_entries'] = self.object.ledger_entries.select_related('branch', 'recorded_by')[:30]
-        context['payment_form'] = SupplierPaymentForm()
+
+        # Initialize Payment Form with default today's dates
+        today_ad = timezone.now().date()
+        try:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today_ad)
+            today_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+        except Exception:
+            today_bs = ''
+
+        context['payment_form'] = SupplierPaymentForm(initial={
+            'entry_date': today_ad,
+            'entry_date_bs': today_bs
+        })
 
         # Resolve active Nepali Fiscal Year for party confirmation link
-        today = timezone.now().date()
         try:
-            bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(today)
             current_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
         except Exception:
             active_fy_obj = AccountingFiscalYear.objects.filter(is_closed=False).first()
@@ -409,9 +449,11 @@ class SupplierUpdateView(PurchaseModuleAccessMixin, UpdateView):
 class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
     """
     Processes payouts made to suppliers via Cash, Bank Transfer, or Cheque.
-    Enforces role authorization (Owner, Manager, Accountant) and acquires a database
-    row-level lock (select_for_update) inside an atomic transaction.
-    Automatically posts a balanced double-entry payment voucher to the General Ledger.
+    Features:
+    - Ingests true historical dates (`entry_date` and `entry_date_bs`) with dual-calendar synchronization.
+    - Validates that retroactive dates do not fall into closed fiscal periods.
+    - Acquires row-level locks on Supplier inside an atomic database transaction.
+    - Synchronizes `SupplierUdhaariLedger`, updates `supplier.last_payment_date`, and auto-posts to the General Ledger.
     """
 
     def post(self, request, pk, *args, **kwargs):
@@ -424,15 +466,55 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
             cheque_dt = form.cleaned_data.get('cheque_date')
             remarks = form.cleaned_data.get('remarks', '')
 
+            # 1. Extract and Synchronize Historical Payment Dates
+            entry_date = form.cleaned_data.get('entry_date')
+            entry_date_bs = form.cleaned_data.get('entry_date_bs')
+
+            if entry_date_bs and not entry_date:
+                try:
+                    bs_y, bs_m, bs_d = parse_bs_date_components(str(entry_date_bs).strip())
+                    entry_date = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                except Exception as ex:
+                    messages.error(request, f"Invalid Nepali payment date: {ex}")
+                    return redirect('purchases:supplier_detail', pk=pk)
+            elif entry_date and not entry_date_bs:
+                try:
+                    ad_d = entry_date.date() if isinstance(entry_date, datetime) else entry_date
+                    bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(ad_d)
+                    entry_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                except Exception:
+                    pass
+
+            if not entry_date:
+                entry_date = timezone.now().date()
+            elif isinstance(entry_date, datetime):
+                entry_date = entry_date.date()
+
+            # Closed Fiscal Year Pre-check
+            try:
+                bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(entry_date)
+                fy_name = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+                locked_fy = AccountingFiscalYear.objects.filter(name=fy_name, is_closed=True).first()
+                if locked_fy:
+                    active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
+                    open_name = active_open_fy.name if active_open_fy else "an active fiscal year (2083/84)"
+                    messages.error(
+                        request,
+                        f"Payment Rejected: Date ({entry_date_bs or entry_date}) falls into Fiscal Year {fy_name}, "
+                        f"which is audited and closed. Only payouts within {open_name} are permitted."
+                    )
+                    return redirect('purchases:supplier_detail', pk=pk)
+            except Exception as e:
+                logger.warning(f"[SupplierPaymentRecordView] FY check: {e}")
+
             try:
                 with transaction.atomic():
-                    # 1. Acquire row lock on Supplier record
                     supplier = Supplier.objects.select_for_update().get(pk=pk)
                     prev_bal = supplier.current_balance or Decimal('0.00')
 
                     active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
-                    # 2. Record sub-ledger entry
+                    # 2. Record sub-ledger entry with historical entry dates
                     ledger_entry = SupplierUdhaariLedger.objects.create(
                         supplier=supplier,
                         branch=active_branch,
@@ -442,6 +524,8 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
                         resulting_balance=prev_bal - amount,
                         payment_mode=payment_mode,
                         reference_number=ref_no,
+                        entry_date=entry_date,
+                        entry_date_bs=entry_date_bs,
                         cheque_date=cheque_dt,
                         remarks=remarks,
                         recorded_by=request.user
@@ -453,13 +537,19 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
                         ledger_entry.resulting_balance = new_bal
                         ledger_entry.save(update_fields=['resulting_balance'])
 
-                    # 4. Post Double-Entry Journal to General Ledger (Dr Accounts Payable, Cr Cash/Bank)
+                    # Update last payment date on supplier profile
+                    supplier.last_payment_date = entry_date
+                    supplier.save(update_fields=['last_payment_date', 'updated_at'])
+
+                    # 4. Post Double-Entry Journal to General Ledger with historical date
                     import apps.accounting.services.auto_posting as auto_posting_service
                     gl_entry = auto_posting_service.post_supplier_payout_journal(
+                        ledger_entry=ledger_entry,
                         supplier=supplier,
                         amount=amount,
                         payment_mode=payment_mode,
                         ref_no=ref_no or f"SUP-PAY-{ledger_entry.id}",
+                        date_ad=entry_date,
                         user=request.user,
                         branch=active_branch
                     )
@@ -479,6 +569,8 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
                         ip_address=request.META.get('REMOTE_ADDR'),
                         details={
                             'amount': str(amount),
+                            'entry_date_ad': str(entry_date),
+                            'entry_date_bs': entry_date_bs or '',
                             'prev_balance': str(prev_bal),
                             'new_balance': str(new_bal),
                             'payment_mode': payment_mode,
@@ -486,10 +578,11 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
                         }
                     )
 
+                date_label = f" ({entry_date_bs} BS)" if entry_date_bs else ""
                 messages.success(
                     request,
-                    f"Payment of Rs. {amount:.2f} successfully recorded for {supplier.company_name} "
-                    f"(New Balance: Rs. {new_bal:.2f})."
+                    f"Payment of Rs. {amount:,.2f} recorded for {supplier.company_name} on {entry_date}{date_label} "
+                    f"(New Balance: Rs. {new_bal:,.2f})."
                 )
                 return redirect('purchases:supplier_detail', pk=supplier.pk)
 
@@ -501,7 +594,10 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
                 messages.error(request, f"Error processing payment: {str(e)}")
                 return redirect('purchases:supplier_detail', pk=pk)
         else:
-            messages.error(request, "Invalid payment values submitted. Please verify the amount.")
+            err_msgs = []
+            for field, errs in form.errors.items():
+                err_msgs.append(f"{field.replace('_', ' ').title()}: {', '.join(errs)}")
+            messages.error(request, f"Invalid payment values: {'; '.join(err_msgs)}")
             return redirect('purchases:supplier_detail', pk=pk)
 
 # ==============================================================================
@@ -637,7 +733,7 @@ class PurchaseOrderCreateView(PurchaseModuleAccessMixin, View):
                         }
                     )
 
-                messages.success(request, f"Purchase Order {po.po_number} created with {valid_items_count} item lines (Total: Rs. {po.total_amount:.2f}).")
+                messages.success(request, f"Purchase Order {po.po_number} created with {valid_items_count} item lines (Total: Rs. {po.total_amount:,.2f}).")
                 return redirect('purchases:po_detail', pk=po.pk)
 
             except Exception as e:
@@ -856,7 +952,6 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
         branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
         config = SystemConfiguration.get_solo()
 
-        # Action Detection: Save Draft vs Verify Stock
         action = (request.POST.get('action') or request.POST.get('submit_action') or '').strip().lower()
         is_draft = (action in ['save_draft', 'draft'] or 'save_draft' in request.POST)
 
@@ -866,7 +961,6 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
         if form.is_valid() and formset.is_valid():
             try:
                 with transaction.atomic():
-                    # 1. Resolve Warehouse / Branch selection
                     grn = form.save(commit=False)
                     selected_branch_id = request.POST.get('branch') or request.POST.get('warehouse')
                     if selected_branch_id:
@@ -875,16 +969,13 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
                             branch = br_obj
                     grn.branch = branch
 
-                    # 2. Sequential GRN Number Allocation
                     if not grn.grn_number:
                         grn.grn_number = BranchDocumentSequence.get_next_sequence_number(
                             branch=branch,
                             document_type='GOODS_RECEIPT'
                         )
 
-                    # -------------------------------------------------------------
-                    # PATH A: SAVE AS DRAFT (NO STOCK MUTATION / NO GL ENTRIES)
-                    # -------------------------------------------------------------
+                    # PATH A: SAVE AS DRAFT
                     if is_draft:
                         grn.status = 'DRAFT'
                         grn.save()
@@ -900,7 +991,6 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
                         for del_item in formset.deleted_objects:
                             del_item.delete()
 
-                        # Calculate draft projections in memory
                         PurchaseService.save_grn_draft(grn=grn, items=None, user=request.user)
 
                         msg = f"GRN Draft {grn.grn_number} saved successfully into local store."
@@ -916,9 +1006,7 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
                         messages.success(request, msg)
                         return redirect('purchases:grn_detail', pk=grn.pk)
 
-                    # -------------------------------------------------------------
                     # PATH B: FINAL VERIFICATION & PHYSICAL STOCK INWARD
-                    # -------------------------------------------------------------
                     grn.status = 'DRAFT'
                     grn.save()
 
@@ -942,11 +1030,9 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
                     # Full Approval & Stock Update Pipeline
                     PurchaseService.process_grn_approval_and_stock_in(grn=grn, user=request.user)
 
-                    # Reconcile master supplier debt balance to the exact paisa
                     if grn.supplier:
                         grn.supplier.recalculate_balance_from_ledger(save=True)
 
-                    # Close linked Purchase Order if applicable
                     if grn.purchase_order:
                         po = grn.purchase_order
                         po.status = 'COMPLETED'
@@ -955,7 +1041,7 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
                 success_msg = (
                     f"GRN Voucher {grn.grn_number} verified successfully! Warehouse stock updated. "
                     f"Total Bill: Rs. {grn.net_total_amount:,.2f} (Pre-VAT Base: Rs. {grn.taxable_amount:,.2f}, "
-                    f"13% VAT: Rs. {grn.vat_amount:,.2f}, Net Due: Rs. {grn.due_amount:,.2f})."
+                    f"VAT: Rs. {grn.vat_amount:,.2f}, Net Due: Rs. {grn.due_amount:,.2f})."
                 )
 
                 if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
@@ -1011,7 +1097,7 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
         return render(request, self.template_name, context)
 
 # ==============================================================================
-# DEDICATED PURCHASE BILL (GRN) CANCELLATION CONTROLLER
+# DEDICATED PURCHASE BILL (GRN) CANCELLATION CONTROLLER (AUDIT COMPLIANT)
 # ==============================================================================
 @login_required
 @require_http_methods(["POST"])
@@ -1022,11 +1108,15 @@ def cancel_grn_view(request, pk):
     1. Checks role authorization (Superuser, Owner, Manager).
     2. Mandates a formal cancellation justification reason.
     3. Verifies that received handsets (IMEIs) have not already been sold to retail customers.
-    4. Deducts the inward merchandise quantities back out of BranchStock via InventoryService.
+    4. Deducts inward merchandise quantities back out of BranchStock via InventoryService.
     5. Depletes / archives active FIFO ProductBatch records associated with this GRN.
     6. Archives unsold ItemInstance handset records so they cannot be sold.
-    7. Atomically reduces the supplier's balance in Supplier and records a reversal entry in SupplierUdhaariLedger.
-    8. Voids original General Ledger purchase journal voucher and posts reversing double-entry voucher.
+    7. Atomically reconciles SupplierUdhaariLedger and updates supplier balance:
+       - If unpaid credit purchase: reverses exact due debt added to supplier AP.
+       - If paid on delivery: records spot cash disbursed as an advance due from supplier / pending refund.
+    8. Adopts Method 1 (Audit Standard) for General Ledger reversal:
+       - Leaves original purchase journal voucher with status `POSTED` (annotated with reversal ref).
+       - Posts a distinct reversing double-entry journal entry with status `POSTED` that inverts debits/credits.
     9. Sets GRN status to 'CANCELLED'.
     10. Records an immutable forensic event in AuditLog.
     """
@@ -1118,29 +1208,78 @@ def cancel_grn_view(request, pk):
                 updated_at=timezone.now()
             )
 
-            # 4. Reverse Supplier Udhaari Balance & Record Ledger Reversal Entry
+            # 4. Settle Supplier Balance & Udhaari Ledger with Full Mathematical Continuity
             supplier = Supplier.objects.select_for_update().get(pk=grn.supplier_id)
             prev_bal = supplier.current_balance or Decimal('0.00')
-            debt_to_reverse = grn.due_amount if grn.due_amount > Decimal('0.00') else grn.net_total_amount
-            new_bal = max(Decimal('0.00'), prev_bal - debt_to_reverse)
 
-            supplier.current_balance = new_bal
-            supplier.save(update_fields=['current_balance', 'updated_at'])
+            due = grn.due_amount or Decimal('0.00')
+            paid = grn.paid_amount or Decimal('0.00')
 
-            SupplierUdhaariLedger.objects.create(
-                supplier=supplier,
-                branch=grn.branch,
-                transaction_type='PURCHASE_RETURN',
-                amount=debt_to_reverse,
-                previous_balance=prev_bal,
-                resulting_balance=new_bal,
-                payment_mode='OTHER',
-                reference_number=f"VOID-{grn.grn_number}",
-                recorded_by=request.user,
-                remarks=f"Cancellation reversal of purchase GRN {grn.grn_number} (Supplier Bill: {grn.supplier_bill_no}). Reason: {reason}"
-            )
+            if due > Decimal('0.00') and paid == Decimal('0.00'):
+                # Case A: Entirely unpaid credit bill
+                new_bal = prev_bal - due
+                supplier.current_balance = new_bal
+                supplier.save(update_fields=['current_balance', 'updated_at'])
 
-            # 5. Void & Reverse General Ledger Journal Entry if posted
+                SupplierUdhaariLedger.objects.create(
+                    supplier=supplier,
+                    branch=grn.branch,
+                    transaction_type='PURCHASE_RETURN',
+                    amount=due,
+                    previous_balance=prev_bal,
+                    resulting_balance=new_bal,
+                    payment_mode='OTHER',
+                    reference_number=f"VOID-{grn.grn_number}",
+                    recorded_by=request.user,
+                    remarks=f"Cancellation of unpaid bill {grn.grn_number} (Ref: {grn.supplier_bill_no}). Unpaid debt reversed: Rs. {due:,.2f}. Reason: {reason}"
+                )
+
+            elif due > Decimal('0.00') and paid > Decimal('0.00'):
+                # Case B: Partially paid bill
+                total_reversal = due + paid
+                new_bal = prev_bal - total_reversal
+                supplier.current_balance = new_bal
+                supplier.save(update_fields=['current_balance', 'updated_at'])
+
+                SupplierUdhaariLedger.objects.create(
+                    supplier=supplier,
+                    branch=grn.branch,
+                    transaction_type='PURCHASE_RETURN',
+                    amount=total_reversal,
+                    previous_balance=prev_bal,
+                    resulting_balance=new_bal,
+                    payment_mode='OTHER',
+                    reference_number=f"VOID-{grn.grn_number}",
+                    recorded_by=request.user,
+                    remarks=(
+                        f"Cancellation of partially paid bill {grn.grn_number} (Ref: {grn.supplier_bill_no}). "
+                        f"Unpaid debt reversed: Rs. {due:,.2f}. Cash paid on delivery (Rs. {paid:,.2f}) recorded as advance due from supplier. Reason: {reason}"
+                    )
+                )
+
+            else:
+                # Case C: Fully paid on delivery (due == 0.00)
+                new_bal = prev_bal - paid
+                supplier.current_balance = new_bal
+                supplier.save(update_fields=['current_balance', 'updated_at'])
+
+                SupplierUdhaariLedger.objects.create(
+                    supplier=supplier,
+                    branch=grn.branch,
+                    transaction_type='PURCHASE_RETURN',
+                    amount=paid,
+                    previous_balance=prev_bal,
+                    resulting_balance=new_bal,
+                    payment_mode='OTHER',
+                    reference_number=f"VOID-{grn.grn_number}",
+                    recorded_by=request.user,
+                    remarks=(
+                        f"Cancellation of fully paid bill {grn.grn_number} (Ref: {grn.supplier_bill_no}). "
+                        f"No credit debt existed. Cash paid on delivery (Rs. {paid:,.2f}) recorded as advance due from supplier / pending refund. Reason: {reason}"
+                    )
+                )
+
+            # 5. Method 1 (Audit Standard) General Ledger Reversal
             try:
                 from apps.accounting.models import JournalEntry
                 from apps.accounting.services.auto_posting import JournalEngine
@@ -1152,8 +1291,10 @@ def cancel_grn_view(request, pk):
                 ).first()
 
                 if orig_entry:
-                    orig_entry.status = 'CANCELLED'
-                    orig_entry.save(update_fields=['status', 'updated_at'])
+                    cross_ref_tag = f"[REVERSED by REV-{grn.grn_number} on {timezone.now().strftime('%Y-%m-%d')}]"
+                    if cross_ref_tag not in (orig_entry.narration or ""):
+                        orig_entry.narration = f"{orig_entry.narration or ''} {cross_ref_tag}".strip()
+                        orig_entry.save(update_fields=['narration', 'updated_at'])
 
                     reversing_lines = []
                     for itm in orig_entry.items.select_related('account'):
@@ -1173,13 +1314,15 @@ def cancel_grn_view(request, pk):
                             lines=reversing_lines,
                             narration=f"Full Reversal of Cancelled Purchase GRN {grn.grn_number}. Reason: {reason}",
                             reference_doc=f"REV-{grn.grn_number}",
+                            source_module='PURCHASE',
+                            source_id=f"REV-{grn.grn_number}",
                             user=request.user,
                             auto_post=True
                         )
-            except Exception:
-                pass
+            except Exception as gl_err:
+                logger.warning(f"[GRN Cancellation GL Reversal]: {gl_err}")
 
-            # 6. Mark GRN Status as CANCELLED and record reason
+            # 6. Mark GRN Status as CANCELLED
             grn.status = 'CANCELLED'
             if hasattr(grn, 'cancellation_reason'):
                 grn.cancellation_reason = reason
@@ -1190,7 +1333,7 @@ def cancel_grn_view(request, pk):
             else:
                 grn.save(update_fields=['status', 'updated_at'])
 
-            # 7. Forensic AuditLog
+            # 7. Forensic AuditLog Record
             AuditLog.objects.create(
                 user=request.user,
                 branch=grn.branch,
@@ -1203,8 +1346,9 @@ def cancel_grn_view(request, pk):
                     'supplier_bill_no': grn.supplier_bill_no,
                     'reason': reason,
                     'net_amount': str(grn.net_total_amount),
-                    'due_amount_reversed': str(grn.due_amount),
-                    'paid_amount_reversed': str(grn.paid_amount),
+                    'due_amount_reversed': str(due),
+                    'paid_amount_reversed': str(paid),
+                    'new_supplier_balance': str(new_bal),
                     'items_count': grn.items.count()
                 }
             )
@@ -1441,7 +1585,7 @@ class PurchaseReturnCreateView(PurchaseModuleAccessMixin, View):
                 messages.success(
                     request,
                     f"Purchase Return / Debit Note '{purchase_return.return_number}' processed successfully! "
-                    f"Total refund value: Rs. {purchase_return.net_refund_amount:.2f} ({purchase_return.get_refund_mode_display()})."
+                    f"Total refund value: Rs. {purchase_return.net_refund_amount:,.2f} ({purchase_return.get_refund_mode_display()})."
                 )
                 return redirect('purchases:purchase_return_detail', pk=purchase_return.pk)
 

@@ -146,6 +146,7 @@
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-6 { grid-template-columns: repeat(6, 1fr); }
 .col-span-2 { grid-column: span 2; }
+.col-span-4 { grid-column: span 4; }
 
 .form-group-grn {
   display: flex;
@@ -232,13 +233,33 @@ textarea.form-control-grn {
   font-family: var(--font-mono);
 }
 
-/* TOGGLE SWITCHES */
+/* SUMMARY VAT TOGGLE SWITCH */
+.summary-vat-toggle-box {
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.summary-vat-toggle-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--slate-700);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .toggle-group-grn {
   display: flex;
   border: 1px solid var(--slate-300);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  height: 34px;
+  height: 32px;
   background-color: var(--slate-100);
 }
 
@@ -246,14 +267,15 @@ textarea.form-control-grn {
   flex: 1;
   border: none;
   background: transparent;
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
   color: var(--slate-600);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.15s, color 0.15s;
+  padding: 0 8px;
 }
 
 .toggle-btn-grn.active {
@@ -309,6 +331,12 @@ table.items-table select {
   height: 30px;
   font-size: 12px;
   padding: 4px 6px;
+}
+
+.select-tax-rate {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--slate-800);
 }
 
 .text-right { text-align: right !important; }
@@ -788,30 +816,13 @@ table.items-table select {
       </div>
     </section>
 
-    <!-- SECTION 2: TAX, DISCOUNT & ADDITIONAL CHARGES -->
+    <!-- SECTION 2: DISCOUNT & ADDITIONAL CHARGES (CLEANED UP & SIMPLIFIED) -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
-        <span>2. Tax, Discount &amp; Additional Charges</span>
-        <span class="tag">Overheads &amp; Landed Logistics</span>
+        <span>2. Discount &amp; Additional Landed Charges</span>
+        <span class="tag">Direct Logistics &amp; Overheads</span>
       </div>
-      <div class="grid-grn grid-6">
-        <!-- VAT Handling Mode Toggle -->
-        <div class="form-group-grn">
-          <label>VAT Handling Mode</label>
-          <input type="hidden" name="vat_handling_mode" id="id_vat_handling_mode" value="{{ form.vat_handling_mode.value|default:'EXCLUSIVE' }}">
-          <input type="hidden" name="is_vat_bill" id="id_is_vat_bill" value="{% if form.is_vat_bill.value %}true{% else %}true{% endif %}">
-          <div class="toggle-group-grn" id="vatModeToggle">
-            <button type="button" class="toggle-btn-grn {% if form.vat_handling_mode.value != 'INCLUSIVE' %}active{% endif %}" data-mode="EXCLUSIVE">VAT Excluded</button>
-            <button type="button" class="toggle-btn-grn {% if form.vat_handling_mode.value == 'INCLUSIVE' %}active{% endif %}" data-mode="INCLUSIVE">VAT Included</button>
-          </div>
-        </div>
-
-        <!-- Standard VAT Rate (%) -->
-        <div class="form-group-grn">
-          <label for="defaultVatRate">Standard VAT Rate (%)</label>
-          <input type="number" name="vat_rate" id="defaultVatRate" value="{{ form.vat_rate.value|default:default_vat_rate|default:'13.00' }}" step="0.5" min="0" max="100">
-        </div>
-
+      <div class="grid-grn grid-4">
         <!-- Whole Bill Discount -->
         <div class="form-group-grn">
           <label for="wholeBillDiscount">Whole Bill / Consignment Disc.</label>
@@ -877,8 +888,8 @@ table.items-table select {
         </div>
 
         <!-- Total Overheads Display -->
-        <div class="form-group-grn col-span-2" style="grid-column: span 3;">
-          <label>Total Overheads Capitalized to Landed Cost</label>
+        <div class="form-group-grn">
+          <label>Total Overheads (Landed)</label>
           <input type="text" id="totalOverheadsDisplay" value="Rs. 0.00" readonly class="readonly-display font-mono" style="font-weight: 700; color: #b45309;">
         </div>
       </div>
@@ -904,11 +915,11 @@ table.items-table select {
               <th style="width: 170px;">Serial / IMEI Refs</th>
               <th style="width: 85px;" class="text-right">Qty <span class="required-star">*</span></th>
               <th style="width: 80px;">UOM</th>
-              <th style="width: 110px;" class="text-right">Rate (Pre-VAT) <span class="required-star">*</span></th>
+              <th style="width: 110px;" class="text-right" id="thRateLabel">Rate <span class="required-star">*</span></th>
               <th style="width: 110px;" class="text-right">MRP / Retail</th>
               <th style="width: 90px;">Disc. Type</th>
               <th style="width: 85px;" class="text-right">Disc. Val</th>
-              <th style="width: 65px;" class="text-right">Tax %</th>
+              <th style="width: 110px;" class="text-center">Tax Rate <span class="required-star">*</span></th>
               <th style="width: 110px;" class="text-right">Taxable Amt</th>
               <th style="width: 95px;" class="text-right">VAT Amt</th>
               <th style="width: 115px;" class="text-right">Net Amount</th>
@@ -981,9 +992,12 @@ table.items-table select {
                 <input type="number" name="items-{{ forloop.counter0 }}-discount_input_value" class="item-disc-val text-right font-mono" value="{{ item_form.discount_input_value.value|default:'0.00' }}" min="0" step="0.01">
               </td>
 
-              <!-- Tax % -->
+              <!-- Tax Rate (Strict Dropdown: 13% or 0%) -->
               <td>
-                <input type="number" name="items-{{ forloop.counter0 }}-vat_rate" class="item-tax-percent text-right font-mono" value="{{ item_form.vat_rate.value|default:'13.00' }}" min="0" step="0.5">
+                <select name="items-{{ forloop.counter0 }}-vat_rate" class="item-tax-percent select-tax-rate text-center">
+                  <option value="13.00" {% if item_form.vat_rate.value == '13.00' or item_form.vat_rate.value == 13 or not item_form.vat_rate.value %}selected{% endif %}>13%</option>
+                  <option value="0.00" {% if item_form.vat_rate.value == '0.00' or item_form.vat_rate.value == 0 %}selected{% endif %}>0% (Exempt)</option>
+                </select>
               </td>
 
               <!-- Taxable Amount (Readonly) -->
@@ -1152,11 +1166,32 @@ table.items-table select {
 
       </div>
 
-      <!-- SECTION 4: PURCHASE SUMMARY (RIGHT COLUMN) -->
+      <!-- SECTION 4: PURCHASE SUMMARY (RIGHT COLUMN WITH RELOCATED VAT TOGGLE) -->
       <div class="summary-card-grn">
         <div class="card-title-grn">
           <span>4. Purchase Summary</span>
           <span class="tag">Financial Breakdown</span>
+        </div>
+
+        <!-- RELOCATED VAT CALCULATION MODE SWITCH -->
+        <div class="summary-vat-toggle-box">
+          <div class="summary-vat-toggle-label">
+            <span>VAT Calculation Mode</span>
+            <span id="vatModeLabelBadge" style="color: var(--primary); font-size: 10px;">EXCLUSIVE</span>
+          </div>
+          <!-- Hidden inputs to submit to server -->
+          <input type="hidden" name="vat_handling_mode" id="id_vat_handling_mode" value="{{ form.vat_handling_mode.value|default:'EXCLUSIVE' }}">
+          <input type="hidden" name="is_vat_bill" id="id_is_vat_bill" value="{% if form.is_vat_bill.value %}true{% else %}true{% endif %}">
+          <input type="hidden" name="vat_rate" id="defaultVatRate" value="13.00">
+
+          <div class="toggle-group-grn" id="vatModeToggle">
+            <button type="button" class="toggle-btn-grn {% if form.vat_handling_mode.value != 'INCLUSIVE' %}active{% endif %}" data-mode="EXCLUSIVE">
+              VAT Excluded (Tax on Top)
+            </button>
+            <button type="button" class="toggle-btn-grn {% if form.vat_handling_mode.value == 'INCLUSIVE' %}active{% endif %}" data-mode="INCLUSIVE">
+              VAT Included (Tax Extracted)
+            </button>
+          </div>
         </div>
 
         <div class="summary-row-grn">
@@ -1232,7 +1267,7 @@ table.items-table select {
 <!-- TOAST NOTIFICATION CONTAINER -->
 <div id="toast-notification">Notification Message</div>
 
-<!-- TEMPLATE FOR DYNAMIC ROWS -->
+<!-- TEMPLATE FOR DYNAMIC ROWS (STRICT 13% OR 0% DROPDOWN) -->
 <template id="rowTemplate">
   <tr class="item-row" data-row-idx="__prefix__">
     <td class="text-center row-sn font-mono" style="font-weight:600; color:var(--slate-500);">1</td>
@@ -1278,7 +1313,10 @@ table.items-table select {
       <input type="number" name="items-__prefix__-discount_input_value" class="item-disc-val text-right font-mono" value="0.00" min="0" step="0.01">
     </td>
     <td>
-      <input type="number" name="items-__prefix__-vat_rate" class="item-tax-percent text-right font-mono" value="13.00" min="0" step="0.5">
+      <select name="items-__prefix__-vat_rate" class="item-tax-percent select-tax-rate text-center">
+        <option value="13.00" selected>13%</option>
+        <option value="0.00">0% (Exempt)</option>
+      </select>
     </td>
     <td>
       <input type="text" class="item-taxable-amount text-right readonly-display font-mono" readonly value="0.00">
@@ -1313,7 +1351,8 @@ table.items-table select {
   const btnAddRowBottom = document.getElementById('btnAddRowBottom');
   const vatModeToggle = document.getElementById('vatModeToggle');
   const vatModeHidden = document.getElementById('id_vat_handling_mode');
-  const defaultVatRateInput = document.getElementById('defaultVatRate');
+  const vatModeLabelBadge = document.getElementById('vatModeLabelBadge');
+  const thRateLabel = document.getElementById('thRateLabel');
   const wholeBillDiscountInput = document.getElementById('wholeBillDiscount');
   const spotPaidDeliveryInput = document.getElementById('spotPaidDelivery');
   const cashPaidInput = document.getElementById('cashPaidInput');
@@ -1365,17 +1404,31 @@ table.items-table select {
     }, 3500);
   }
 
-  // VAT TOGGLE HANDLER
-  vatModeToggle.addEventListener('click', (e) => {
-    const btn = e.target.closest('.toggle-btn-grn');
-    if (!btn) return;
-    vatModeToggle.querySelectorAll('.toggle-btn-grn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    vatMode = btn.dataset.mode;
-    vatModeHidden.value = vatMode;
-    calculateAll();
-    showToast(`VAT Mode changed to: ${vatMode === 'EXCLUSIVE' ? 'VAT Excluded (Added on Top)' : 'VAT Included (Extracted from Rate)'}`);
-  });
+  // VAT HANDLING MODE TOGGLE IN SECTION 4 (PURCHASE SUMMARY)
+  function updateVatModeUI() {
+    if (vatModeLabelBadge) {
+      vatModeLabelBadge.textContent = vatMode === 'INCLUSIVE' ? 'INCLUSIVE (TAX EXTRACTED)' : 'EXCLUSIVE (TAX ON TOP)';
+    }
+    if (thRateLabel) {
+      thRateLabel.innerHTML = vatMode === 'INCLUSIVE' 
+        ? 'Rate (Incl-VAT) <span class="required-star">*</span>' 
+        : 'Rate (Pre-VAT) <span class="required-star">*</span>';
+    }
+  }
+
+  if (vatModeToggle) {
+    vatModeToggle.addEventListener('click', (e) => {
+      const btn = e.target.closest('.toggle-btn-grn');
+      if (!btn) return;
+      vatModeToggle.querySelectorAll('.toggle-btn-grn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      vatMode = btn.dataset.mode;
+      if (vatModeHidden) vatModeHidden.value = vatMode;
+      updateVatModeUI();
+      calculateAll();
+      showToast(`Calculation Mode: ${vatMode === 'EXCLUSIVE' ? 'VAT Excluded (13% Added On Top)' : 'VAT Included (13% Extracted From Rate)'}`);
+    });
+  }
 
   // ATTACH ROW EVENT LISTENERS
   function attachRowEvents(row) {
@@ -1455,15 +1508,13 @@ table.items-table select {
   });
 
   // =========================================================================
-  // MATHEMATICALLY STRICT RECONCILIATION & DUAL-POT CALCULATION ENGINE
+  // MATHEMATICALLY STRICT DUAL-POT CALCULATION ENGINE (13% / 0% LOCKED)
   // =========================================================================
   function calculateAll() {
     const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
     let totalPreVatMerchandise = 0;
     let totalItemDiscount = 0;
     let totalItemUnits = 0;
-    let grossTaxableLines = 0;
-    let grossNonTaxableLines = 0;
 
     // 1. Gather Overheads
     const freight = parseNum(document.getElementById('freightCharge')?.value);
@@ -1482,75 +1533,77 @@ table.items-table select {
 
     const rowCalculations = [];
 
-    // First Pass: Gross, Discounts & Initial Pot Separation
+    // Phase 1: Line Item Gross, Line Discounts & Initial Pre-Tax Extraction
     rows.forEach(row => {
       const qty = parseNum(row.querySelector('.item-qty')?.value);
       const rate = parseNum(row.querySelector('.item-rate')?.value);
       const discType = row.querySelector('.item-disc-type')?.value || 'NONE';
       const discVal = parseNum(row.querySelector('.item-disc-val')?.value);
-      const taxPercent = parseNum(row.querySelector('.item-tax-percent')?.value);
+      const taxPercent = parseNum(row.querySelector('.item-tax-percent')?.value); // Strict: 13 or 0
 
       totalItemUnits += qty;
-      let rawGross = qty * rate;
+      const rawGross = qty * rate;
       let lineDisc = 0;
 
       if (discType === 'PERCENTAGE') {
-        lineDisc = rawGross * (discVal / 100);
+        lineDisc = rawGross * (Math.min(100, Math.max(0, discVal)) / 100);
       } else if (discType === 'AMOUNT' || discType === 'Flat') {
-        lineDisc = discVal;
+        lineDisc = Math.max(0, discVal);
       }
       if (lineDisc > rawGross) lineDisc = rawGross;
 
-      let netLineBase = Math.max(0, rawGross - lineDisc);
+      const netLineBase = Math.max(0, rawGross - lineDisc);
+      let preTaxBase = netLineBase;
       let effectiveGross = rawGross;
 
-      // Extract pre-VAT base if VAT Included
+      // Extract pre-VAT base if VAT Included and line item is 13% taxable
       if (vatMode === 'INCLUSIVE' && taxPercent > 0) {
-        const divisor = 1 + (taxPercent / 100);
-        netLineBase = netLineBase / divisor;
-        effectiveGross = netLineBase + lineDisc;
+        const divisor = 1 + (taxPercent / 100); // 1.13
+        preTaxBase = netLineBase / divisor;
+        effectiveGross = (netLineBase / divisor) + (lineDisc / divisor);
       }
 
       totalPreVatMerchandise += effectiveGross;
-      totalItemDiscount += lineDisc;
-
-      if (taxPercent > 0) {
-        grossTaxableLines += netLineBase;
-      } else {
-        grossNonTaxableLines += netLineBase;
-      }
+      totalItemDiscount += (vatMode === 'INCLUSIVE' && taxPercent > 0) ? (lineDisc / 1.13) : lineDisc;
 
       rowCalculations.push({
-        row, qty, rate, gross: effectiveGross, lineDisc, netLineBase, taxPercent
+        row,
+        qty,
+        rate,
+        rawGross,
+        lineDisc,
+        netLineBase,
+        preTaxBase,
+        taxPercent
       });
     });
 
     const netMerchandiseTotal = Math.max(0, totalPreVatMerchandise - totalItemDiscount);
 
-    // Second Pass: Whole Bill Discount Proration & Dedicated Tax Separation
+    // Phase 2: Whole Bill Discount Proration & Line VAT
     let netTaxableSum = 0;
     let netNonTaxableSum = 0;
     let totalVatAmount = 0;
-    let dominantTaxRate = parseNum(defaultVatRateInput?.value) || 13;
+    let hasTaxableItem = false;
 
     rowCalculations.forEach(item => {
-      // Prorate whole bill discount proportionally across all merchandise
+      // Prorate whole bill discount proportionally across pre-tax merchandise base
       let lineBillDiscountShare = 0;
       if (netMerchandiseTotal > 0 && wholeBillDiscount > 0) {
-        lineBillDiscountShare = (item.netLineBase / netMerchandiseTotal) * wholeBillDiscount;
+        lineBillDiscountShare = (item.preTaxBase / netMerchandiseTotal) * wholeBillDiscount;
       }
 
-      const effectiveBase = Math.max(0, item.netLineBase - lineBillDiscountShare);
+      const effectiveBase = Math.max(0, item.preTaxBase - lineBillDiscountShare);
 
       let vatAmt = 0;
       if (item.taxPercent > 0) {
-        // TAXABLE ITEM: Accumulate strictly into taxable base and compute VAT
+        // 13% TAXABLE ITEM: Accumulate strictly into taxable base and compute 13% VAT
+        hasTaxableItem = true;
         vatAmt = effectiveBase * (item.taxPercent / 100);
         netTaxableSum += effectiveBase;
         totalVatAmount += vatAmt;
-        dominantTaxRate = item.taxPercent;
       } else {
-        // NON-TAXABLE ITEM: Accumulate strictly into non-taxable base (NEVER into taxable sum!)
+        // 0% NON-TAXABLE ITEM: Accumulate strictly into non-taxable base
         netNonTaxableSum += effectiveBase;
       }
 
@@ -1559,12 +1612,12 @@ table.items-table select {
       // Overhead allocation proportional to pre-VAT merchandise base
       let rowAllocOverhead = 0;
       if (netMerchandiseTotal > 0) {
-        rowAllocOverhead = (item.netLineBase / netMerchandiseTotal) * totalOverheads;
+        rowAllocOverhead = (item.preTaxBase / netMerchandiseTotal) * totalOverheads;
       } else if (totalItemUnits > 0) {
         rowAllocOverhead = (item.qty / totalItemUnits) * totalOverheads;
       }
 
-      // Landed Cost per Unit = (Merchandise Base + Prorated Overhead) / Qty
+      // Landed Cost per Unit = (Effective Pre-tax Base + Prorated Overhead) / Qty
       let landedUnitCost = 0;
       if (item.qty > 0) {
         landedUnitCost = (effectiveBase + rowAllocOverhead) / item.qty;
@@ -1577,7 +1630,6 @@ table.items-table select {
       const elAlloc = item.row.querySelector('.item-alloc-overhead');
       const elLanded = item.row.querySelector('.item-landed-unit-cost');
 
-      // If item has 0% tax, Taxable Amount displays 0.00
       if (elTaxable) elTaxable.value = (item.taxPercent > 0 ? effectiveBase : 0).toFixed(2);
       if (elVat) elVat.value = vatAmt.toFixed(2);
       if (elNet) elNet.value = netLineAmount.toFixed(2);
@@ -1585,7 +1637,7 @@ table.items-table select {
       if (elLanded) elLanded.value = landedUnitCost.toFixed(2);
     });
 
-    // FINAL RECONCILED VALUATIONS (Zero Double-Counting)
+    // FINAL RECONCILED CONSIGNMENT VALUATIONS
     const grandTotalPurchase = netTaxableSum + netNonTaxableSum + totalVatAmount;
     const totalLandedCost = netTaxableSum + netNonTaxableSum + totalOverheads;
     const supplierPayable = Math.max(0, grandTotalPurchase - spotPaid);
@@ -1616,14 +1668,9 @@ table.items-table select {
     if (sGrand) sGrand.textContent = formatCurrency(grandTotalPurchase);
     if (sLanded) sLanded.textContent = formatCurrency(totalLandedCost);
 
-    // Synchronize VAT % display in Summary Card
+    // Synchronize VAT % display in Summary Card (Shows 13% if any item is taxable, else 0%)
     if (vatPctBadge) {
-      if (netTaxableSum > 0) {
-        vatPctBadge.textContent = dominantTaxRate.toString();
-      } else {
-        const topRate = parseNum(defaultVatRateInput?.value);
-        vatPctBadge.textContent = topRate > 0 ? topRate.toString() : "0";
-      }
+      vatPctBadge.textContent = hasTaxableItem ? "13" : "0";
     }
 
     // Section 5: Landed Cost Reconciliation Step Cards
@@ -1650,7 +1697,7 @@ table.items-table select {
   }
 
   // =========================================================================
-  // ENHANCED PRODUCT AUTOCOMPLETE WITH KEYBOARD SUPPORT & SELECTION AUTOFILL
+  // ENHANCED PRODUCT AUTOCOMPLETE WITH SELECTION AUTOFILL
   // =========================================================================
   function initProductAutocomplete(row) {
     const input = row.querySelector('.item-name');
@@ -1761,7 +1808,7 @@ table.items-table select {
       hiddenId.value = p.id || p.product_id;
       input.value = p.name;
 
-      // 2. Pre-VAT Rate
+      // 2. Rate
       const rateInput = row.querySelector('.item-rate');
       if (rateInput && cost > 0) {
         rateInput.value = cost.toFixed(2);
@@ -1791,13 +1838,13 @@ table.items-table select {
         }
       }
 
-      // 5. Tax % / VAT Rate
-      const taxInput = row.querySelector('.item-tax-percent');
-      if (taxInput) {
-        if (p.is_vat_applicable === false || p.tax_pricing_type === 'EXEMPT') {
-          taxInput.value = '0.00';
-        } else if (p.vat_rate !== undefined && p.vat_rate !== null) {
-          taxInput.value = parseFloat(p.vat_rate).toFixed(2);
+      // 5. Strict Tax Rate Dropdown (13% or 0%)
+      const taxSelect = row.querySelector('.item-tax-percent');
+      if (taxSelect) {
+        if (p.is_vat_applicable === false || p.tax_pricing_type === 'EXEMPT' || p.vat_rate === 0 || p.vat_rate === '0.00') {
+          taxSelect.value = '0.00';
+        } else {
+          taxSelect.value = '13.00';
         }
       }
 
@@ -1840,7 +1887,7 @@ table.items-table select {
       }
     });
 
-    // Progressive real-time typing with debouncing (v -> vi -> viv)
+    // Progressive real-time typing with debouncing
     input.addEventListener('input', () => {
       clearTimeout(timer);
       hiddenId.value = ''; // Reset product ID while typing
@@ -1977,14 +2024,6 @@ table.items-table select {
       calculateAll();
     });
   }
-  if (defaultVatRateInput) {
-    defaultVatRateInput.addEventListener('input', () => {
-      document.querySelectorAll('.item-tax-percent').forEach(el => el.value = defaultVatRateInput.value);
-      const vatPctEl = document.getElementById('summaryVatPct');
-      if (vatPctEl) vatPctEl.textContent = defaultVatRateInput.value;
-      calculateAll();
-    });
-  }
 
   // DATE SYNCHRONIZERS
   const billDate = document.getElementById('billDate');
@@ -2049,6 +2088,7 @@ table.items-table select {
   });
 
   // INITIALIZE ON LOAD
+  updateVatModeUI();
   tableBody.querySelectorAll('.item-row').forEach(row => attachRowEvents(row));
   initSupplierAutocomplete();
   calculateAll();

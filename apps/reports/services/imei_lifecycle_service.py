@@ -1,6 +1,5 @@
 """
 Forensic Single-IMEI Lifecycle Journey & Audit History Service.
-File Path: apps/reports/services/imei_lifecycle_service.py
 
 Traces the entire cradle-to-grave lifecycle of any physical smartphone:
 1. When was it received via GRN? (Date, Supplier, Landed Cost, Bill No)
@@ -22,7 +21,6 @@ from apps.sales.models import SalesEstimateItem, PhoneExchangeTradeIn, SalesRetu
 from apps.repairs.models import RepairTicket
 from apps.purchases.models import GoodsReceivedNote, GRNItem
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
-
 
 class IMEILifecycleService:
     """
@@ -213,6 +211,10 @@ class IMEILifecycleService:
         # EVENT E: Customer Warranty Registration
         warranties = DeviceComponentWarranty.objects.filter(item_instance=device)
         for w in warranties:
+            # Defensive check: skip warranty records lacking a valid start date to prevent combine() crashes
+            if not w.warranty_start_date:
+                continue
+
             try:
                 w_dt = timezone.make_aware(datetime.combine(w.warranty_start_date, time.min))
             except Exception:

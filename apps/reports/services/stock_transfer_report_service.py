@@ -1,6 +1,5 @@
 """
 Inter-Branch Stock Transfers & Logistics Report Business Logic Service.
-File Path: apps/reports/services/stock_transfer_report_service.py
 
 Provides comprehensive oversight into merchandise logistics moving between store branches:
 - Origin and Destination routing analysis.

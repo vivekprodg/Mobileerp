@@ -1,6 +1,5 @@
 """
 Salesperson Performance & Commission Intelligence Service.
-File Path: apps/reports/services/salesperson_sales_service.py
 
 Capabilities:
 1. Evaluates sales counter staff productivity, sales volume, and gross profit generation.

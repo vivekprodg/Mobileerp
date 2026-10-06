@@ -5,22 +5,26 @@ Features:
 1. Strict GRN Inward Double-Entry Synchronization (Nepal Tax Standard):
    - Debit: Merchandise Inventory Asset (Account 1310 at Total Landed Cost = Pre-VAT Base + All 5 Overheads:
      Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads).
-   - Debit: Input VAT 13% (Account 1410 for Dedicated 13% Input VAT).
-   - Credit: Cash/Bank/Wallet (for spot payments made on delivery).
-   - Credit: Accounts Payable (Account 2110 for remaining Supplier Udhaari due debt).
+   - Debit: Dedicated 13% Input VAT (Account 1410 for Input VAT claimable on supplier tax bill).
+   - Credit: Cash/Bank/Wallet for spot cash payments made to merchandise supplier upon delivery.
+   - Credit: Accounts Payable (Account 2110) strictly for the merchandise supplier's remaining debt (Net Invoice - Paid).
+   - Credit: Cash in Hand (1110) or Freight/Logistics Clearing (2160) for the 5-tier shipping overheads.
+     Strictly isolates third-party logistics overheads from the merchandise supplier's debt ledger.
    - Enforces absolute mathematical equality: Sum(Debits) == Sum(Credits) with penny rounding reconciliation.
 2. Three-Way Sales Tax Split & Trade-In Clearing Alignment:
    - Dr: Genuine Monetary Payment Modes (Cash, FonePay, eSewa, Khalti, Card, Bank) for paid collections.
    - Dr: Customer Accounts Receivable (1210) strictly for the remaining unpaid Udhaari due debt.
-   - Dr: Trade-In Buy-Back Clearing (Account 2150) offsetting previous buy-back intake.
-   - Dr: Sales Discount Allowed (6170) if concessions were given.
-   - Cr: Cash in Hand (1110) if change was returned or trade-in surplus cash paid to walk-in customer.
+   - Dr: Trade-In Buy-Back Clearing (Account 2150) for the FULL buy-back valuation of the traded-in device.
+   - Dr: Sales Discount Allowed (6170) if commercial concessions were granted.
+   - Cr: Cash in Hand (1110) if physical cash change was returned to a customer or trade-in surplus cash paid to walk-in customer.
+   - Cr: Customer Accounts Receivable (1210) for surplus trade-in buy-back credit deposited into a registered customer profile.
    - Cr: Sales Revenue Account (4110) (Taxable Base + Non-Taxable / Exempt Base).
    - Cr: Output VAT 13% Account (2210) (Output VAT Collected).
    - COGS / Inventory Asset: Relieved at landed cost (skipped if cost == 0.00 for historical migrations).
 3. Non-Monetary Tender Isolation (Double-Accounting Prevention):
    - In post_sales_estimate, 'CREDIT' and 'UDHAARI' tenders inside the payment loop are skipped.
    - The dedicated estimate.due_amount handler creates the single authoritative debit to AR (1210).
+   - In post_customer_payment, non-monetary store credit / trade-in adjustments are shielded from posting fake cash receipts.
 4. Historical Backdating Integrity & Fiscal Year Lock Enforcement:
    - post_sales_estimate strictly stamps vouchers with estimate.bill_date_ad.
    - post_grn_receipt strictly stamps vouchers with grn.bill_date.
@@ -32,7 +36,8 @@ Features:
    - Skips COGS and Inventory Asset credits when total_cost_amount is 0.00,
      preventing artificial inventory deficits during historical data migrations.
 6. Omnichannel Payment Ledger Routing:
-   - Cash (1110), Bank (1120), FonePay (1130), eSewa (1140), Khalti (1150), Card POS (1160), AR (1210), AP (2110), Trade-In Clearing (2150).
+   - Cash (1110), Bank (1120), FonePay (1130), eSewa (1140), Khalti (1150), Card POS (1160),
+     AR (1210), AP (2110), Trade-In Clearing (2150), Freight Clearing (2160).
 """
 
 import uuid
@@ -284,9 +289,16 @@ class AutoPostingService:
         Finds the exact GL control account scoped to this branch or organization-wide;
         auto-initializes it if not present.
         """
-        acc = Account.objects.filter(
-            system_tag=system_tag
-        ).filter(Q(branch=branch) | Q(branch__isnull=True)).first()
+        acc = None
+        if system_tag and system_tag != 'NONE':
+            acc = Account.objects.filter(
+                system_tag=system_tag
+            ).filter(Q(branch=branch) | Q(branch__isnull=True)).first()
+
+        if not acc and default_code:
+            acc = Account.objects.filter(
+                Q(code=default_code) | Q(code__startswith=f"{default_code}-")
+            ).filter(Q(branch=branch) | Q(branch__isnull=True)).first()
 
         if not acc:
             group = AccountGroup.objects.filter(category=group_category).first()
@@ -385,7 +397,7 @@ class AutoPostingService:
                 return cls.get_or_create_control_account(branch, 'BANK', '1120', 'Primary Bank Current Account', 'ASSET', 'DEBIT')
 
     # =========================================================================
-    # 1. POS SALES CHECKOUT POSTING (3-WAY VAT SPLIT & HISTORICAL DATE CALIBRATION)
+    # 1. POS SALES CHECKOUT POSTING (3-WAY VAT SPLIT & TRADE-IN ALIGNMENT)
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -393,6 +405,13 @@ class AutoPostingService:
         """
         Creates a balanced double-entry voucher for a finalized Sales POS Invoice.
         Strictly uses estimate.bill_date_ad and validates against closed fiscal years.
+        
+        Trade-In & Surplus Credit Rules:
+        - The full agreed buy-back value of the traded-in device debits Trade-In Clearing (Account 2150).
+        - The portion covering new merchandise credits Sales Revenue and Output VAT.
+        - Any remaining surplus credit on a registered customer profile directly credits Customer
+          Accounts Receivable (Account 1210) as an advance liability.
+        - Never routes surplus trade-in credit through Cash or Bank accounts.
         """
         source_module = 'SALES'
         source_id = str(estimate.id)
@@ -511,37 +530,49 @@ class AutoPostingService:
             })
 
         # ---------------------------------------------------------------------
-        # 2. DEBIT: Trade-In Buy-Back Tender Settlement
+        # 2. DEBIT: Trade-In Buy-Back Tender Settlement & Surplus Allocation
         # ---------------------------------------------------------------------
-        trade_in_surplus_cash = Decimal('0.00')
-
         if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > Decimal('0.00'):
-            effective_trade_in = min(estimate.grand_total, estimate.trade_in_discount_amount)
+            trade_in_val = estimate.trade_in_discount_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            voucher_ref = estimate.trade_in_voucher_reference or "EXCHANGE"
 
-            if not estimate.customer_id and estimate.trade_in_discount_amount > estimate.grand_total:
-                trade_in_surplus_cash = (estimate.trade_in_discount_amount - estimate.grand_total).quantize(
-                    Decimal('0.01'), rounding=ROUND_HALF_UP
-                )
-
-            total_trade_in_debit = effective_trade_in + trade_in_surplus_cash
-
+            # 1. Full agreed buy-back value of the old device MUST debit Trade-In Buy-Back Clearing (2150)
             lines.append({
                 'account': trade_in_clearing_acc,
-                'debit': total_trade_in_debit,
+                'debit': trade_in_val,
                 'credit': Decimal('0.00'),
                 'customer': estimate.customer,
-                'narration': f"Trade-in buy-back settlement from voucher {estimate.trade_in_voucher_reference or 'EXCHANGE'}"
+                'narration': f"Trade-In buy-back voucher {voucher_ref} applied against bill {estimate.estimate_number}"
             })
 
+            # 2. Check if old phone valuation exceeds the new merchandise bill
+            if trade_in_val > estimate.grand_total:
+                excess_trade_in = (trade_in_val - estimate.grand_total).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+                if estimate.customer_id:
+                    # Registered customer: Credit Customer Accounts Receivable (1210) as store credit / advance liability
+                    # Never routes surplus trade-in credit through Cash or Bank accounts!
+                    lines.append({
+                        'account': ar_acc,
+                        'debit': Decimal('0.00'),
+                        'credit': excess_trade_in,
+                        'customer': estimate.customer,
+                        'narration': f"Surplus trade-in buy-back credit deposited as store credit from voucher {voucher_ref}"
+                    })
+                else:
+                    # Walk-in customer: Physical cash change paid out from drawer float.
+                    # This is handled below in change_returned (which credits Cash in Hand 1110).
+                    pass
+
         # ---------------------------------------------------------------------
-        # 3. CREDIT: Cash Change Returned (Normal Change & Trade-In Surplus Cash)
+        # 3. CREDIT: Cash Change Returned (Normal Change & Walk-In Trade-In Surplus Cash)
         # ---------------------------------------------------------------------
         if estimate.change_returned > Decimal('0.00'):
             lines.append({
                 'account': cash_acc,
                 'debit': Decimal('0.00'),
                 'credit': estimate.change_returned,
-                'narration': f"Cash change / trade-in payout on bill {estimate.estimate_number}"
+                'narration': f"Cash change returned on bill {estimate.estimate_number}"
             })
 
         # ---------------------------------------------------------------------
@@ -645,7 +676,7 @@ class AutoPostingService:
         )
 
     # =========================================================================
-    # 2. INWARD GRN PROCUREMENT POSTING (ALL 5 OVERHEADS & PARITY AP CREDIT)
+    # 2. INWARD GRN PROCUREMENT POSTING (ALL 5 OVERHEADS & ISOLATED AP DEBT)
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -655,9 +686,11 @@ class AutoPostingService:
         1. Debit: Merchandise Inventory Asset (1310) at Total Landed Cost (Pre-VAT Base + All 5 Overheads:
            Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads).
         2. Debit: Dedicated 13% Input VAT (1410) for tax claimable on supplier tax bill.
-        3. Credit: Cash/Bank/Wallet for spot cash payments made upon delivery.
-        4. Credit: Accounts Payable (2110 Supplier Udhaari) for the remaining balance.
-        5. Enforces exact mathematical double-entry equality: Sum(Debits) == Sum(Credits).
+        3. Credit: Cash/Bank/Wallet for spot cash payments made to merchandise supplier upon delivery.
+        4. Credit: Accounts Payable (2110) strictly for the merchandise supplier's remaining debt (Net Invoice - Paid).
+        5. Credit: Cash in Hand (1110) or Freight/Logistics Clearing (2160) for the 5-tier shipping overheads.
+           Strictly isolates third-party logistics overheads from the merchandise supplier's debt ledger.
+        6. Enforces exact mathematical double-entry equality: Sum(Debits) == Sum(Credits).
         """
         source_module = 'PURCHASE'
         source_id = str(grn.id)
@@ -745,42 +778,77 @@ class AutoPostingService:
                 'narration': f"Dedicated 13% Input VAT claimed on supplier invoice {grn.supplier_bill_no}"
             })
 
-        # Total Debits to Balance
-        total_debits = (landed_asset_value + input_vat).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # ---------------------------------------------------------------------
+        # 3. CREDIT: Merchandise Supplier Settlement (Strictly Merchandise Net + VAT)
+        # ---------------------------------------------------------------------
+        net_supplier_invoice = (
+            grn.net_total_amount or (pre_tax_base + input_vat)
+        ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # ---------------------------------------------------------------------
-        # 3. CREDIT: Spot Delivery Payout & Accounts Payable (Supplier Udhaari)
-        # ---------------------------------------------------------------------
         paid = (grn.paid_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        effective_paid = min(paid, net_supplier_invoice)
 
-        # If spot cash/bank payment was made
-        if paid > Decimal('0.00'):
+        # Spot cash/bank payment disbursed to merchandise supplier
+        if effective_paid > Decimal('0.00'):
             payment_mode = getattr(grn, 'preferred_payment_method', None) or getattr(grn, 'payment_mode', 'CASH') or 'CASH'
             spot_acc = cls.resolve_payment_account(branch, payment_mode, for_party='SUPPLIER')
-            effective_paid = min(paid, total_debits)
             lines.append({
                 'account': spot_acc,
                 'debit': Decimal('0.00'),
                 'credit': effective_paid,
                 'supplier': grn.supplier,
-                'narration': f"Spot payment made to {grn.supplier.company_name} on GRN {grn.grn_number} via {payment_mode}"
+                'narration': f"Spot payment disbursed to {grn.supplier.company_name} on GRN {grn.grn_number} via {payment_mode}"
             })
-            remaining_ap = (total_debits - effective_paid).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        else:
-            remaining_ap = total_debits
 
-        # Remaining balance credits Accounts Payable (Account 2110)
-        if remaining_ap > Decimal('0.00'):
+        # Remaining due owed strictly to the merchandise supplier (matches grn.due_amount and SupplierUdhaariLedger)
+        supplier_due = max(Decimal('0.00'), net_supplier_invoice - effective_paid)
+        if supplier_due > Decimal('0.00'):
             lines.append({
                 'account': ap_acc,
                 'debit': Decimal('0.00'),
-                'credit': remaining_ap,
+                'credit': supplier_due,
                 'supplier': grn.supplier,
-                'narration': f"Supplier Udhaari debt owed to {grn.supplier.company_name} on bill {grn.supplier_bill_no}"
+                'narration': f"Supplier Accounts Payable owed to {grn.supplier.company_name} on bill {grn.supplier_bill_no}"
             })
 
         # ---------------------------------------------------------------------
-        # 4. Penny Rounding Residual Reconciliation
+        # 4. CREDIT: 5-Tier Overheads (Freight, Customs, Handling, Insurance, Other)
+        # Strictly isolates shipping/customs overheads from the merchandise supplier's debt!
+        # ---------------------------------------------------------------------
+        if overheads_5_tier > Decimal('0.00'):
+            overhead_payment_mode = str(
+                kwargs.get('overhead_payment_mode') or
+                getattr(grn, 'overhead_payment_mode', '') or
+                kwargs.get('overhead_payment_method') or
+                getattr(grn, 'overhead_payment_method', '') or ''
+            ).strip().upper()
+
+            if overhead_payment_mode in ['CASH', 'COD', 'PAID_IN_CASH', 'SPOT_CASH', 'CASH_ON_DELIVERY'] or kwargs.get('overhead_paid_in_cash') is True:
+                overhead_acc = cls.get_or_create_control_account(
+                    branch, 'CASH', '1110', 'Cash in Hand (Main Drawer)', 'ASSET', 'DEBIT'
+                )
+                overhead_narr = f"Overhead expenses (Freight/Duty/Handling) paid in cash for GRN {grn.grn_number}"
+            elif overhead_payment_mode in ['BANK', 'BANK_TRANSFER', 'CHEQUE', 'CONNECT_IPS', 'WIRE']:
+                overhead_acc = cls.get_or_create_control_account(
+                    branch, 'BANK', '1120', 'Primary Bank Current Account', 'ASSET', 'DEBIT'
+                )
+                overhead_narr = f"Overhead expenses (Freight/Duty/Handling) paid via bank for GRN {grn.grn_number}"
+            else:
+                overhead_acc = cls.get_or_create_control_account(
+                    branch, 'NONE', '2160', 'Freight & Logistics Clearing / Payables', 'LIABILITY', 'CREDIT'
+                )
+                overhead_narr = f"Overhead expenses (Freight/Duty/Handling) clearing payable for GRN {grn.grn_number}"
+
+            lines.append({
+                'account': overhead_acc,
+                'debit': Decimal('0.00'),
+                'credit': overheads_5_tier,
+                'supplier': None,  # Strictly NO merchandise supplier debt created for freight/customs
+                'narration': overhead_narr
+            })
+
+        # ---------------------------------------------------------------------
+        # 5. Penny Rounding Residual Reconciliation
         # ---------------------------------------------------------------------
         sum_dr = sum(l['debit'] for l in lines)
         sum_cr = sum(l['credit'] for l in lines)
@@ -830,11 +898,22 @@ class AutoPostingService:
         """
         Posts customer Udhaari debt collection into double-entry accounts.
         Reads the true historical payment date (entry_date) from CustomerUdhaariLedger.
+        Filters out non-monetary store credit / trade-in adjustments to avoid phantom cash debits.
         """
         if ledger_entry:
             cust = ledger_entry.customer
             amt = ledger_entry.amount
-            mode = ledger_entry.payment_mode or 'CASH'
+            mode = (ledger_entry.payment_mode or 'CASH').upper().strip()
+
+            # Non-monetary adjustments (Store Credit, Trade-In Surplus, Opening Balance)
+            # must NOT trigger cash/bank receipt vouchers!
+            if mode in ['OTHER', 'ADJUSTMENT', 'STORE_CREDIT', 'TRADE_IN', 'NON_MONETARY']:
+                return None
+
+            remarks_str = (getattr(ledger_entry, 'remarks', '') or '').upper()
+            if 'SURPLUS TRADE-IN' in remarks_str or 'STORE CREDIT' in remarks_str:
+                return None
+
             br = ledger_entry.branch or getattr(cust, 'preferred_branch', None) or Branch.get_default_main_branch()
             ref_doc = getattr(ledger_entry, 'reference_invoice', None) or f"UDH-CUST-{ledger_entry.id}"
             source_id = str(ledger_entry.id)
@@ -848,7 +927,11 @@ class AutoPostingService:
         else:
             cust = customer
             amt = Decimal(str(amount or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            mode = payment_mode
+            mode = (payment_mode or 'CASH').upper().strip()
+
+            if mode in ['OTHER', 'ADJUSTMENT', 'STORE_CREDIT', 'TRADE_IN', 'NON_MONETARY']:
+                return None
+
             br = branch or getattr(cust, 'preferred_branch', None) or Branch.get_default_main_branch()
             ref_doc = reference or f"UDH-CUST-{cust.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
             source_id = ref_doc
@@ -940,7 +1023,11 @@ class AutoPostingService:
         if ledger_entry:
             supp = ledger_entry.supplier
             amt = ledger_entry.amount
-            mode = ledger_entry.payment_mode or 'CASH'
+            mode = (ledger_entry.payment_mode or 'CASH').upper().strip()
+
+            if mode in ['OTHER', 'ADJUSTMENT', 'NON_MONETARY']:
+                return None
+
             br = ledger_entry.branch or Branch.get_default_main_branch()
             ref_doc = getattr(ledger_entry, 'reference_number', None) or f"SUP-PAY-{ledger_entry.id}"
             source_id = str(ledger_entry.id)
@@ -954,7 +1041,11 @@ class AutoPostingService:
         else:
             supp = supplier
             amt = Decimal(str(amount or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            mode = payment_mode
+            mode = (payment_mode or 'CASH').upper().strip()
+
+            if mode in ['OTHER', 'ADJUSTMENT', 'NON_MONETARY']:
+                return None
+
             br = branch or Branch.get_default_main_branch()
             ref_doc = ref_no or f"SUP-PAY-{supp.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
             source_id = ref_doc
@@ -1455,7 +1546,7 @@ class AutoPostingService:
 
         if fee > Decimal('0.00'):
             fee_acc = cls.get_or_create_control_account(
-                branch, 'GATEWAY_COMMISSION', '6190', 'Payment Gateway & Bank Merchant Fees (MDR)', 'INDIRECT_EXPENSE', 'DEBIT'
+                branch, 'PAYMENT_GATEWAY_FEE', '6190', 'Payment Gateway & Bank Merchant Fees (MDR)', 'INDIRECT_EXPENSE', 'DEBIT'
             )
             lines.append({
                 'account': fee_acc,
@@ -1489,6 +1580,75 @@ class AutoPostingService:
             user=user,
             auto_post=True
         )
+
+    # =========================================================================
+    # TRACE ANNOTATIONS
+    # =========================================================================
+    @classmethod
+    def _enrich_voucher_payment_narrations(
+        cls,
+        estimate: SalesEstimate,
+        payment_transactions: List[SalesPaymentTransaction],
+        result_voucher=None
+    ) -> None:
+        """
+        Annotates journal line items with external payment trace identifiers safely.
+        """
+        voucher = result_voucher if isinstance(result_voucher, JournalEntry) else None
+        if not voucher:
+            voucher = JournalEntry.objects.filter(
+                voucher_type='SALES',
+                reference_document=estimate.estimate_number
+            ).order_by('-created_at').first()
+
+        if not voucher:
+            return
+
+        unmatched_refs = [
+            tx for tx in payment_transactions
+            if tx.transaction_ref and tx.amount > Decimal('0.00')
+        ]
+
+        if not unmatched_refs:
+            return
+
+        items = list(voucher.items.filter(debit_amount__gt=Decimal('0.00')).select_related('account'))
+
+        for tx in unmatched_refs:
+            tx_ref = tx.transaction_ref
+            mode_upper = tx.payment_mode.upper()
+            matched_item = None
+
+            for itm in items:
+                acct_name = (itm.account.name or '').upper() if itm.account else ''
+                line_narr = (getattr(itm, 'line_narration', '') or '').upper()
+                if itm.debit_amount == tx.amount and (mode_upper in acct_name or mode_upper in line_narr):
+                    matched_item = itm
+                    break
+
+            if not matched_item:
+                for itm in items:
+                    if itm.debit_amount == tx.amount:
+                        matched_item = itm
+                        break
+
+            if not matched_item:
+                for itm in items:
+                    acct_name = (itm.account.name or '').upper() if itm.account else ''
+                    if mode_upper in acct_name:
+                        matched_item = itm
+                        break
+
+            if matched_item:
+                current_narr = getattr(matched_item, 'line_narration', '') or ''
+                if tx_ref not in current_narr:
+                    ref_tag = f"[{tx.payment_mode} Ref: {tx_ref}]"
+                    if current_narr:
+                        matched_item.line_narration = f"{current_narr} {ref_tag}"[:255]
+                    else:
+                        matched_item.line_narration = f"Receipt via {tx.payment_mode} {ref_tag} for {estimate.estimate_number}"[:255]
+                    matched_item.save(update_fields=['line_narration'])
+                items.remove(matched_item)
 
 # =============================================================================
 # MODULE-LEVEL CONVENIENCE BRIDGES (ZERO-IMPORT FAILURE GUARANTEE)

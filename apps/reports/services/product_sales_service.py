@@ -1,6 +1,5 @@
 """
 Product-Wise Sales & Volume Intelligence Service.
-File Path: apps/reports/services/product_sales_service.py
 
 Capabilities:
 1. Aggregates sales volume, revenue, trade concessions, and margins grouped by catalog product.

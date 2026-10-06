@@ -1,6 +1,5 @@
 """
 Dead & Slow-Moving Inventory Business Logic Service.
-File Path: apps/reports/services/slow_moving_service.py
 
 Capabilities:
 1. Queries all products with active positive warehouse stock (quantity > 0).

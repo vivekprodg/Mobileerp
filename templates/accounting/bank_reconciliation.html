@@ -356,7 +356,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function selectBankAccount(acc) {
         bankHidden.value = acc.id;
         bankName.innerText = `${acc.code} - ${acc.name}`;
-        bankDetails.innerText = `Type: Bank Asset | Branch: ${acc.branch_name || 'All'}`;
+        const branchLabel = acc.branch_name || acc.branch_code || 'All Branches';
+        bankDetails.innerText = `Type: Bank Asset | Branch: ${branchLabel}`;
         bankCard.classList.remove('d-none');
         bankWrapper.classList.add('d-none');
         bankResults.classList.remove('show');
@@ -391,10 +392,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 let html = '';
                 accounts.forEach(a => {
+                    const branchDisplay = a.branch_name || a.branch_code || 'All Branches';
                     html += `
                         <div class="async-result-item" data-acc='${JSON.stringify(a).replace(/'/g, "&apos;")}'>
                             <div class="fw-bold text-dark fs-xs"><i class="fas fa-building-columns text-primary me-1"></i>${escapeHtml(a.code)} &bull; ${escapeHtml(a.name)}</div>
-                            <div class="text-muted fs-2xs">${escapeHtml(a.bank_name || a.group_name || 'Bank Asset')}</div>
+                            <div class="text-muted fs-2xs">${escapeHtml(a.bank_name || a.group_name || 'Bank Asset')} &bull; Branch: ${escapeHtml(branchDisplay)}</div>
                         </div>
                     `;
                 });

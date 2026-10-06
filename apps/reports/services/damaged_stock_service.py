@@ -1,6 +1,5 @@
 """
 Damaged & Quarantined Defective Stock Business Logic Service.
-File Path: apps/reports/services/damaged_stock_service.py
 
 Capabilities:
 1. Tracks defective parts from customer repair workshop jobs (swollen batteries,

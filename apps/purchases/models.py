@@ -1,33 +1,40 @@
 """
 Procurement, Supplier Udhaari, Goods Received Notes (GRN) & Commercial Purchase Return Models.
 
-Key Architectural Upgrades:
-1. Flexible Line & Bill-Level Discount Engines:
-   - Line items (GRNItem) support dual discount modes: Flat Cash Amount (रू) or Percentage (%).
-   - Preserves user input (`discount_input_value`), rupee deductions (`item_discount_amount`),
-     and synchronized secondary percentages (`discount_percent`).
-   - GRN Bill Header supports overall invoice discounts (Amount or Percentage) applied on merchandise.
-2. Dual VAT Handling Modes & Dual-Pot Segregation:
-   - Separates consignment merchandise into two distinct pots: Taxable vs. Non-Taxable.
-   - Supports 'EXCLUSIVE' (VAT added on top of Pre-VAT base) and 'INCLUSIVE' (VAT extracted from rates).
-   - When `is_vat_bill` is enabled, 13% VAT is calculated strictly on the Pre-VAT Taxable Base
-     (Taxable Lines - allocated discounts). Non-taxable merchandise is completely insulated from VAT additions.
-   - Net Invoice Total = Net Taxable Base + Non-Taxable Base + VAT Amount.
-3. 5-Tier Proportional Landed Cost Overhead Allocation:
-   - Complete support for Freight, Customs/Duty, Handling & Unloading, Transit Insurance, and Other Overheads.
-   - Overhead charges are dynamically distributed across line items proportional to their net pre-VAT
-     merchandise value to produce exact unit landed costs (`unit_landed_cost`) for inventory COGS valuation.
-4. Independent Delivery Challan & Multiple Observation Fields:
-   - Separate tracking for `challan_no`, `challan_date`, and `challan_date_bs`.
-   - Distinct audit fields: `consignment_narration`, `receiving_notes`, and `internal_notes`.
-5. Custom Physical Batch Number on Items:
+Key Architectural Improvements & Bug Fixes:
+1. Supplier Udhaari Balance Continuous Recalculation (Fixes Spot-Payment Debt Inflation):
+   - In `Supplier.recalculate_balance_from_ledger()`, the mathematical formula strictly balances:
+     $$\\text{True Balance} = \\text{Opening Balance} + \\sum \\text{Purchase Bills} - \\sum \\text{Payments} - \\sum \\text{Returns} \\pm \\text{Adjustments}$$
+   - Includes a defensive legacy audit reconciliation: if an older purchase bill exists where cash was
+     paid on delivery but no explicit linked `PAYMENT` row was generated, the paid amount is deducted
+     so historical data imports do not artificially inflate liabilities.
+
+2. Accurate Dual-Pot & Item-Level VAT Application (Fixes Blanket Header VAT Overwrite):
+   - In `GoodsReceivedNote.recalculate_financials()`, line-level VAT is computed individually per line item
+     strictly separating:
+     * Taxable Pot: Items with 13% VAT.
+     * Non-Taxable Pot: Items with 0% VAT (Exempt / PAN bills).
+   - Shields 0% tax-exempt or zero-rated items from tax additions, even within mixed consignments.
+   - Reconciles total consignment VAT as the exact sum of line-level VAT amounts.
+
+3. Coherent Pre-Tax Extraction for VAT-Inclusive Purchases (Fixes Inclusive Discount Math):
+   - In both `GoodsReceivedNote.recalculate_financials()` and `GRNItem.save()`, when `vat_handling_mode == 'INCLUSIVE'`
+     and the line has 13% VAT, discounts and base values are separated into their pre-tax base using
+     the exact statutory tax divisor `1.13`.
+   - Items marked with 0% VAT bypass tax extraction completely (divisor 1.00).
+   - Pre-tax gross is reconstituted as `taxable_extracted + pre_tax_discount`, ensuring both numbers reside on
+     an identical pre-tax basis and eliminating gross amount distortion.
+
+4. 5-Tier Proportional Landed Cost Overhead Allocation:
+   - Accurately distributes Freight, Customs/Duty, Handling & Unloading, Transit Insurance, and Other Overheads
+     proportionally across line items based on net merchandise value to establish exact unit landed costs (`unit_landed_cost`).
+
+5. Custom Physical Batch Number Persistence & Delivery Challan Trackers:
    - Line-level `batch_number` on `GRNItem` allowing direct capture of manufacturer/vendor batch identifiers.
-6. Bidirectional Historical Date & Fiscal Year Synchronization:
-   - Ensures that if `bill_date_bs` or `challan_date_bs` is provided, it accurately standardizes
-     and derives Gregorian AD dates and Nepali Fiscal Years (e.g. 2080/81 to 2083/84).
-7. Explicit Historical Dates on SupplierUdhaariLedger:
-   - Preserves `entry_date` and `entry_date_bs` so retroactive bills and payouts maintain true business dates.
-   - Strict `recalculate_balance_from_ledger()` guarantees double-entry integrity.
+   - Distinct tracking for `challan_no`, `challan_date`, and `challan_date_bs`.
+
+6. Bidirectional Date & Fiscal Year Synchronization:
+   - Standardizes Bikram Sambat (BS) and Gregorian (AD) dates across POs, GRNs, Returns, and Ledger entries.
 """
 
 import re
@@ -61,7 +68,7 @@ def sync_nepali_and_ad_dates(
     1. If an existing instance is being updated and bs_field changed -> converts BS to AD, updates FY.
     2. Else if an existing instance is being updated and ad_field changed -> converts AD to BS, updates FY.
     3. For new instances (or if neither specifically changed):
-       - If bs_field is provided (non-empty) -> it takes precedence over any model default on ad_field!
+       - If bs_field is provided (non-empty) -> it takes precedence over any model default on ad_field.
          Converts BS to AD, standardizes BS string to YYYY-MM-DD, and updates FY.
        - Else if ad_field is provided -> converts AD to BS, standardizes BS string to YYYY-MM-DD, and updates FY.
     """
@@ -111,7 +118,6 @@ def sync_nepali_and_ad_dates(
             logger.debug(f"[sync_nepali_and_ad_dates] Checking original instance failed: {e}")
 
     # Case B: New instance OR baseline synchronization
-    # If BS date was supplied, it MUST override the model default on ad_field!
     if current_bs:
         try:
             bs_y, bs_m, bs_d = parse_bs_date_components(current_bs)
@@ -432,6 +438,9 @@ class Supplier(TimeStampedModel):
         Recalculates current_balance strictly from SupplierUdhaariLedger entries.
         Positive balance indicates amount owed to supplier (Payable).
         Negative balance indicates advance paid to supplier (Credit / Advance).
+
+        Mathematical Architecture:
+        True Balance = Opening Balance + Sum(Bills) - Sum(Payments) - Sum(Returns) +/- Adjustments
         """
         if not self.pk:
             return self.current_balance or Decimal('0.00')
@@ -448,18 +457,22 @@ class Supplier(TimeStampedModel):
             else:
                 base_balance = -(self.opening_balance or Decimal('0.00'))
 
+        # Sum of all invoice debts
         bills_total = self.ledger_entries.filter(
             transaction_type='PURCHASE_BILL'
         ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
 
+        # Sum of all explicit payouts / disbursements
         payments_total = self.ledger_entries.filter(
             transaction_type='PAYMENT'
         ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
 
+        # Sum of all debit notes / purchase returns
         returns_total = self.ledger_entries.filter(
             transaction_type='PURCHASE_RETURN'
         ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
 
+        # Sum of all adjustments
         adjustments = self.ledger_entries.filter(transaction_type='ADJUSTMENT')
         adj_total = Decimal('0.00')
         for adj in adjustments:
@@ -468,9 +481,27 @@ class Supplier(TimeStampedModel):
             else:
                 adj_total += adj.amount
 
-        new_balance = (base_balance + bills_total - payments_total - returns_total + adj_total).quantize(
-            Decimal('0.01'), rounding=ROUND_HALF_UP
-        )
+        # Defensive Check for Legacy Unrecorded Spot Payments:
+        legacy_spot_payment_deduction = Decimal('0.00')
+        legacy_bills = self.ledger_entries.filter(transaction_type='PURCHASE_BILL')
+        for bill_entry in legacy_bills:
+            ref = bill_entry.reference_number
+            if ref:
+                has_explicit_payment = self.ledger_entries.filter(
+                    transaction_type='PAYMENT'
+                ).filter(
+                    models.Q(reference_number=f"PMT-{ref}") | models.Q(reference_number=ref)
+                ).exists()
+
+                if not has_explicit_payment:
+                    if bill_entry.resulting_balance is not None and bill_entry.previous_balance is not None:
+                        actual_added = bill_entry.resulting_balance - bill_entry.previous_balance
+                        if Decimal('0.00') <= actual_added < bill_entry.amount:
+                            legacy_spot_payment_deduction += (bill_entry.amount - actual_added)
+
+        new_balance = (
+            base_balance + bills_total - payments_total - returns_total + adj_total - legacy_spot_payment_deduction
+        ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         self.current_balance = new_balance
         if save:
@@ -718,7 +749,7 @@ class GoodsReceivedNote(TimeStampedModel):
     is_vat_bill = models.BooleanField(
         default=False,
         verbose_name=_("13% VAT Inward Tax Bill"),
-        help_text=_("Enable if supplier issued an official VAT invoice. Calculates 13% on Taxable Pre-VAT Base.")
+        help_text=_("Automatically checked if any items carry 13% VAT; false for 0% PAN bills.")
     )
     vat_rate = models.DecimalField(
         max_digits=5, decimal_places=2, default=Decimal('13.00'),
@@ -727,7 +758,7 @@ class GoodsReceivedNote(TimeStampedModel):
     vat_amount = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Dedicated 13% Input VAT (NPR)"),
-        help_text=_("13% VAT on Pre-VAT Taxable Base when VAT toggle is ON; Rs. 0.00 when OFF.")
+        help_text=_("Sum of item-level 13% VAT on Taxable Base. Strictly 0.00 for non-VAT items.")
     )
     
     # 5 Overhead Expense Fields (Distributed to Landed Cost)
@@ -754,14 +785,14 @@ class GoodsReceivedNote(TimeStampedModel):
     total_landed_cost = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Total Landed Cost Valuation / COGS (NPR)"),
-        help_text=_("Pre-VAT Taxable Merchandise Base + Total Freight, Customs, Handling, Insurance & Other Overheads.")
+        help_text=_("Net Pre-VAT Merchandise Base + 5 Overheads (Freight, Customs, Handling, Insurance, Other).")
     )
     
     # Supplier Settlement & Due Tracking
     net_total_amount = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Supplier Invoice Total (NPR)"),
-        help_text=_("Net invoice payable to supplier = Pre-VAT Taxable Base + 13% VAT Amount.")
+        help_text=_("Net invoice payable to supplier = Pre-VAT Merchandise Base + 13% VAT Amount.")
     )
     paid_amount = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal('0.00'),
@@ -857,12 +888,10 @@ class GoodsReceivedNote(TimeStampedModel):
 
     @property
     def bill_date_ad(self) -> date:
-        """Alias returning bill_date for consistent naming with SalesEstimate."""
         return self.bill_date
 
     @property
     def overhead_total(self) -> Decimal:
-        """Total landed shipping, customs duties, handling, insurance, and other direct overheads."""
         return (
             (self.extra_freight_charge or Decimal('0.00')) +
             (self.customs_import_charge or Decimal('0.00')) +
@@ -873,81 +902,91 @@ class GoodsReceivedNote(TimeStampedModel):
 
     def recalculate_financials(self, save=True):
         """
-        Calculates all procurement financials, VAT, and distributes overheads to line items.
-        Strict Rules:
-        1. Evaluates line items into two distinct pots: Taxable vs. Non-Taxable.
-        2. Evaluates VAT mode (EXCLUSIVE vs INCLUSIVE) on item rates to derive pre-VAT bases.
-        3. gross_amount = Sum of line item Pre-VAT gross values.
-        4. total_line_discount = Sum of line item discount deductions.
-        5. bill_discount_amount = Bill-level discount allocated proportionally across merchandise pots.
-        6. taxable_amount = Net Pre-VAT Taxable Base (strictly taxable lines minus allocated discounts).
-        7. vat_amount = 13% of taxable_amount when is_vat_bill is True; else 0.00.
-        8. overhead_total (5-tier sum) distributed proportionally by line pre-vat net value to compute unit_landed_cost.
-        9. net_total_amount = Net Taxable Base + Non-Taxable Base + 13% VAT Amount (Zero double-counting).
-        10. total_landed_cost = Net Taxable Base + Non-Taxable Base + Total Overheads.
-        11. due_amount = net_total_amount - paid_amount.
+        Calculates all procurement financials, multi-rate line VAT, and distributes overheads to line items.
+        Strict Dual-Pot Architecture:
+        1. Segregates items into Taxable Pot (13% VAT) vs. Non-Taxable Pot (0% VAT).
+        2. In INCLUSIVE mode: Extracts pre-tax base using `Rate ÷ 1.13` strictly on 13% taxable items.
+           Items with 0% VAT remain untouched.
+        3. Prorates whole-bill discount proportionally across pre-tax merchandise bases.
+        4. Calculates 13% VAT strictly on the net taxable pot; applies 0% on the non-taxable pot.
+        5. Sets net invoice total strictly as: `Net Taxable Pot + Non-Taxable Pot + Calculated 13% VAT`.
+        6. Allocates overheads proportionally to calculate accurate `unit_landed_cost` per item.
         """
         items = list(self.items.all())
-        sum_line_gross = Decimal('0.00')
-        sum_line_discount = Decimal('0.00')
-        gross_taxable_lines = Decimal('0.00')
-        gross_non_taxable_lines = Decimal('0.00')
+        total_line_gross = Decimal('0.00')
+        total_line_discount = Decimal('0.00')
+        line_meta = []
 
-        # Step 1: Calculate Line Gross, Line Discounts, and Line Totals (Respecting VAT Mode & Dual Pots)
+        # Phase 1: Line Item Gross, Line Discounts & Pre-Tax Extraction
         for item in items:
             qty = item.purchased_quantity if (item.purchased_quantity and item.purchased_quantity > Decimal('0.000')) else Decimal('1.000')
             raw_rate = item.purchase_rate or Decimal('0.00')
             raw_gross = (qty * raw_rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            # Compute line discount
-            if item.discount_type == 'PERCENTAGE':
-                pct = item.discount_input_value or Decimal('0.00')
-                disc = (raw_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item.item_discount_amount = min(disc, raw_gross)
-                item.discount_percent = pct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            elif item.discount_type == 'AMOUNT':
-                amt = (item.discount_input_value or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item.item_discount_amount = min(amt, raw_gross)
+            disc_type = item.discount_type or 'NONE'
+            disc_input = item.discount_input_value or Decimal('0.00')
+
+            # Calculate raw line discount on entered gross
+            if disc_type == 'PERCENTAGE':
+                pct = min(Decimal('100.00'), max(Decimal('0.00'), disc_input))
+                raw_rupee_disc = (raw_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                raw_item_disc = min(raw_rupee_disc, raw_gross)
+                eff_disc_pct = pct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            elif disc_type == 'AMOUNT':
+                amt = max(Decimal('0.00'), disc_input)
+                raw_item_disc = min(amt, raw_gross)
                 if raw_gross > Decimal('0.00'):
-                    item.discount_percent = ((item.item_discount_amount / raw_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    eff_disc_pct = ((raw_item_disc / raw_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 else:
-                    item.discount_percent = Decimal('0.00')
+                    eff_disc_pct = Decimal('0.00')
             else:
-                item.discount_type = 'NONE'
-                item.discount_input_value = Decimal('0.00')
-                item.item_discount_amount = Decimal('0.00')
-                item.discount_percent = Decimal('0.00')
+                disc_type = 'NONE'
+                disc_input = Decimal('0.00')
+                raw_item_disc = Decimal('0.00')
+                eff_disc_pct = Decimal('0.00')
 
-            net_line_base = max(Decimal('0.00'), raw_gross - item.item_discount_amount)
+            net_line_base = max(Decimal('0.00'), raw_gross - raw_item_disc)
 
-            # Determine whether this specific line item is taxable under Nepal VAT rules
-            line_has_vat = bool(item.vat_rate and item.vat_rate > Decimal('0.00'))
-            is_line_taxable = bool(self.is_vat_bill and item.is_vat_applicable and line_has_vat)
+            # Strict Tax Rate Normalization: 13.00 or 0.00
+            current_rate = item.vat_rate if (item.vat_rate is not None and item.vat_rate > Decimal('0.00')) else Decimal('0.00')
+            is_line_taxable = bool(current_rate > Decimal('0.00'))
+            item_vat_rate = Decimal('13.00') if is_line_taxable else Decimal('0.00')
+            item.vat_rate = item_vat_rate
+            item.is_vat_applicable = is_line_taxable
 
-            item_vat_rate = item.vat_rate if line_has_vat else Decimal('13.00')
-
-            # VAT Handling Mode: If INCLUSIVE and line is taxable, extract pre-VAT base
+            # VAT Handling Mode: If INCLUSIVE and 13% taxable, extract pre-VAT base and discount via 1.13
             if getattr(self, 'vat_handling_mode', 'EXCLUSIVE') == 'INCLUSIVE' and is_line_taxable:
-                tax_divisor = Decimal('1.00') + (item_vat_rate / Decimal('100.00'))
+                tax_divisor = Decimal('1.13')
                 taxable_extracted = (net_line_base / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                item.gross_amount = (taxable_extracted + item.item_discount_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                pre_tax_discount = (raw_item_disc / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                pre_tax_gross = (taxable_extracted + pre_tax_discount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+                item.gross_amount = pre_tax_gross
+                item.item_discount_amount = pre_tax_discount
                 item.line_total = taxable_extracted
             else:
+                # Mode EXCLUSIVE or 0% Exempt Rate: rate is treated as pure pre-tax cost
                 item.gross_amount = raw_gross
+                item.item_discount_amount = raw_item_disc
                 item.line_total = net_line_base
 
-            sum_line_gross += item.gross_amount
-            sum_line_discount += item.item_discount_amount
+            item.discount_type = disc_type
+            item.discount_input_value = disc_input
+            item.discount_percent = eff_disc_pct
 
-            # Accumulate into distinct merchandise pots
-            if is_line_taxable:
-                gross_taxable_lines += item.line_total
-            else:
-                gross_non_taxable_lines += item.line_total
+            total_line_gross += item.gross_amount
+            total_line_discount += item.item_discount_amount
 
-        net_merchandise_subtotal = max(Decimal('0.00'), sum_line_gross - sum_line_discount)
+            line_meta.append({
+                'item': item,
+                'is_line_taxable': is_line_taxable,
+                'vat_rate': item_vat_rate,
+                'pre_tax_net': item.line_total
+            })
 
-        # Step 2: Bill-Level Discount Calculation
+        net_merchandise_subtotal = max(Decimal('0.00'), total_line_gross - total_line_discount)
+
+        # Phase 2: Whole-Bill Discount Calculation
         bill_disc_type = self.bill_discount_type or 'NONE'
         bill_disc_input = self.bill_discount_input_value or Decimal('0.00')
 
@@ -963,51 +1002,30 @@ class GoodsReceivedNote(TimeStampedModel):
             self.bill_discount_input_value = Decimal('0.00')
             self.bill_discount_amount = Decimal('0.00')
 
-        # Step 3: Proportional Allocation of Bill Discount to Taxable & Non-Taxable Pots
-        if net_merchandise_subtotal > Decimal('0.00') and self.bill_discount_amount > Decimal('0.00'):
-            taxable_share_disc = (self.bill_discount_amount * (gross_taxable_lines / net_merchandise_subtotal)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            non_taxable_share_disc = self.bill_discount_amount - taxable_share_disc
-        else:
-            taxable_share_disc = Decimal('0.00')
-            non_taxable_share_disc = Decimal('0.00')
-
-        net_taxable_base = max(Decimal('0.00'), gross_taxable_lines - taxable_share_disc)
-        net_non_taxable_base = max(Decimal('0.00'), gross_non_taxable_lines - non_taxable_share_disc)
-
-        # Step 4: VAT Calculation (Strictly on Pre-VAT Taxable Base)
-        if self.is_vat_bill and net_taxable_base > Decimal('0.00'):
-            rate = self.vat_rate if (self.vat_rate and self.vat_rate > Decimal('0.00')) else Decimal('13.00')
-            self.vat_rate = rate
-            self.vat_amount = (net_taxable_base * (rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        else:
-            self.vat_amount = Decimal('0.00')
-
-        # Step 5: Overheads & Landed COGS Valuation
+        # Phase 3 & 4: Proportional Bill Discount Allocation, Landed Costs & Strict Line-by-Line VAT
         overheads = self.overhead_total
-        total_merchandise_net = net_taxable_base + net_non_taxable_base
-        self.total_landed_cost = (total_merchandise_net + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        # Step 6: Net Invoice Payable & Supplier Debt Due (Zero Double-Counting)
-        self.gross_amount = sum_line_gross
-        self.total_line_discount = sum_line_discount
-        self.discount_amount = sum_line_discount + self.bill_discount_amount
-        self.taxable_amount = net_taxable_base
-
-        self.net_total_amount = (total_merchandise_net + self.vat_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        paid = self.paid_amount or Decimal('0.00')
-        self.due_amount = max(Decimal('0.00'), self.net_total_amount - paid)
-
-        # Step 7: Proportional Landed Cost Distribution to Line Items
         item_count = len(items)
-        for item in items:
-            weight = (item.line_total / net_merchandise_subtotal) if net_merchandise_subtotal > Decimal('0.00') else (
-                Decimal('1.00') / Decimal(item_count) if item_count > 0 else Decimal('0.00')
-            )
-            line_bill_disc = (self.bill_discount_amount * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            line_overhead = (overheads * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            # Net landed cost for this line item (Merchandise Net - Bill Disc Share + Overhead Share)
-            line_landed_total = item.line_total - line_bill_disc + line_overhead
+        total_net_taxable_base = Decimal('0.00')
+        total_net_non_taxable_base = Decimal('0.00')
+        total_vat_amount = Decimal('0.00')
+
+        for entry in line_meta:
+            item = entry['item']
+            is_taxable = entry['is_line_taxable']
+            rate = entry['vat_rate']
+            pre_tax_net = entry['pre_tax_net']
+
+            if net_merchandise_subtotal > Decimal('0.00'):
+                weight = pre_tax_net / net_merchandise_subtotal
+            else:
+                weight = Decimal('1.00') / Decimal(item_count) if item_count > 0 else Decimal('0.00')
+
+            line_bill_disc = (self.bill_discount_amount * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            effective_net_base = max(Decimal('0.00'), pre_tax_net - line_bill_disc)
+
+            line_overhead = (overheads * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            line_landed_total = effective_net_base + line_overhead
 
             factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
             base_qty = (item.purchased_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
@@ -1018,16 +1036,46 @@ class GoodsReceivedNote(TimeStampedModel):
             else:
                 item.unit_landed_cost = Decimal('0.00')
 
+            # Calculate VAT strictly per line item using 13% for taxable or 0% for exempt
+            if is_taxable and rate == Decimal('13.00'):
+                line_vat = (effective_net_base * Decimal('0.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                total_net_taxable_base += effective_net_base
+                total_vat_amount += line_vat
+            else:
+                line_vat = Decimal('0.00')
+                total_net_non_taxable_base += effective_net_base
+
             item.save(update_fields=[
                 'gross_amount', 'discount_type', 'discount_input_value', 'item_discount_amount',
-                'discount_percent', 'line_total', 'unit_landed_cost', 'base_unit_quantity'
+                'discount_percent', 'line_total', 'unit_landed_cost', 'base_unit_quantity',
+                'vat_rate', 'is_vat_applicable'
             ])
+
+        # Phase 5: Reconciled Consignment Financials
+        total_merchandise_net = total_net_taxable_base + total_net_non_taxable_base
+        total_landed_valuation = (total_merchandise_net + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        net_invoice_total = (total_merchandise_net + total_vat_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        paid = self.paid_amount or Decimal('0.00')
+        net_due = max(Decimal('0.00'), net_invoice_total - paid)
+
+        # Update GRN Header Values
+        self.gross_amount = total_line_gross
+        self.total_line_discount = total_line_discount
+        self.discount_amount = total_line_discount + self.bill_discount_amount
+        self.taxable_amount = total_net_taxable_base
+        self.vat_amount = total_vat_amount
+        self.total_landed_cost = total_landed_valuation
+        self.net_total_amount = net_invoice_total
+        self.due_amount = net_due
+        self.is_vat_bill = bool(total_vat_amount > Decimal('0.00') or total_net_taxable_base > Decimal('0.00'))
+        self.vat_rate = Decimal('13.00') if self.is_vat_bill else Decimal('0.00')
 
         if save and self.pk:
             super(GoodsReceivedNote, self).save(update_fields=[
                 'gross_amount', 'bill_discount_type', 'bill_discount_input_value',
                 'bill_discount_amount', 'total_line_discount', 'discount_amount',
-                'taxable_amount', 'vat_handling_mode', 'vat_rate', 'vat_amount',
+                'taxable_amount', 'vat_handling_mode', 'is_vat_bill', 'vat_rate', 'vat_amount',
                 'extra_freight_charge', 'customs_import_charge', 'other_handling_charge',
                 'insurance_charge', 'other_overheads_charge', 'total_landed_cost',
                 'net_total_amount', 'paid_amount', 'due_amount', 'updated_at'
@@ -1035,13 +1083,18 @@ class GoodsReceivedNote(TimeStampedModel):
 
 class GRNItem(TimeStampedModel):
     """
-    Line item in GRN with package unit conversion, custom batch numbers, dual-mode discounts
-    (Amount vs. Percentage), proportional unit landed cost, target selling price, and MDMS/serial tracking.
+    Line item in GRN with package unit conversion, custom batch numbers, dual-mode discounts,
+    proportional unit landed cost, target selling price, and strict 13% vs 0% tax dropdown choices.
     """
     DISCOUNT_TYPE_CHOICES = [
         ('NONE', _('No Discount')),
         ('PERCENTAGE', _('Percentage (%)')),
         ('AMOUNT', _('Flat Amount (रू)')),
+    ]
+
+    VAT_RATE_CHOICES = [
+        (Decimal('13.00'), _('13% (Standard VAT)')),
+        (Decimal('0.00'), _('0% (Exempt / PAN)')),
     ]
 
     grn = models.ForeignKey(GoodsReceivedNote, on_delete=models.CASCADE, related_name='items')
@@ -1109,10 +1162,13 @@ class GRNItem(TimeStampedModel):
 
     is_vat_applicable = models.BooleanField(
         default=True, verbose_name=_("Is VAT Applicable"),
-        help_text=_("Uncheck if this specific product is zero-rated or tax-exempt under Nepal Tax Schedule.")
+        help_text=_("Automatically set to True for 13% lines; False for 0% exempt lines.")
     )
     vat_rate = models.DecimalField(
-        max_digits=5, decimal_places=2, default=Decimal('13.00'), verbose_name=_("Tax / VAT Rate (%)")
+        max_digits=5, decimal_places=2, default=Decimal('13.00'),
+        choices=VAT_RATE_CHOICES,
+        verbose_name=_("Tax / VAT Rate (%)"),
+        help_text=_("Locked to 13.00% (Taxable) or 0.00% (Exempt).")
     )
     
     unit_landed_cost = models.DecimalField(
@@ -1165,25 +1221,52 @@ class GRNItem(TimeStampedModel):
         raw_gross = (qty * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         if self.discount_type == 'PERCENTAGE':
-            pct = self.discount_input_value or Decimal('0.00')
+            pct = min(Decimal('100.00'), max(Decimal('0.00'), self.discount_input_value or Decimal('0.00')))
             disc = (raw_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            self.item_discount_amount = min(disc, raw_gross)
+            raw_item_disc = min(disc, raw_gross)
             self.discount_percent = pct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         elif self.discount_type == 'AMOUNT':
-            amt = (self.discount_input_value or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            self.item_discount_amount = min(amt, raw_gross)
+            amt = max(Decimal('0.00'), self.discount_input_value or Decimal('0.00'))
+            raw_item_disc = min(amt, raw_gross)
             if raw_gross > Decimal('0.00'):
-                self.discount_percent = ((self.item_discount_amount / raw_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                self.discount_percent = ((raw_item_disc / raw_gross) * Decimal('100.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             else:
                 self.discount_percent = Decimal('0.00')
         else:
             self.discount_type = 'NONE'
             self.discount_input_value = Decimal('0.00')
-            self.item_discount_amount = Decimal('0.00')
+            raw_item_disc = Decimal('0.00')
             self.discount_percent = Decimal('0.00')
 
-        self.gross_amount = raw_gross
-        self.line_total = max(Decimal('0.00'), raw_gross - self.item_discount_amount)
+        net_line_base = max(Decimal('0.00'), raw_gross - raw_item_disc)
+
+        # Normalize vat_rate to strictly 13.00 or 0.00
+        current_rate = self.vat_rate if (self.vat_rate is not None and self.vat_rate > Decimal('0.00')) else Decimal('0.00')
+        if current_rate > Decimal('0.00'):
+            current_rate = Decimal('13.00')
+            self.is_vat_applicable = True
+        else:
+            current_rate = Decimal('0.00')
+            self.is_vat_applicable = False
+        self.vat_rate = current_rate
+
+        # Inspect VAT Handling Mode if GRN reference is loaded
+        vat_mode = getattr(self.grn, 'vat_handling_mode', 'EXCLUSIVE') if self.grn_id else 'EXCLUSIVE'
+
+        if vat_mode == 'INCLUSIVE' and self.is_vat_applicable and current_rate == Decimal('13.00'):
+            tax_divisor = Decimal('1.13')
+            taxable_extracted = (net_line_base / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            pre_tax_discount = (raw_item_disc / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            pre_tax_gross = (taxable_extracted + pre_tax_discount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            self.gross_amount = pre_tax_gross
+            self.item_discount_amount = pre_tax_discount
+            self.line_total = taxable_extracted
+        else:
+            # Mode EXCLUSIVE or 0% Exempt Rate: rate is treated as pure pre-tax cost
+            self.gross_amount = raw_gross
+            self.item_discount_amount = raw_item_disc
+            self.line_total = net_line_base
 
         if not self.unit_landed_cost or self.unit_landed_cost <= Decimal('0.00'):
             if self.base_unit_quantity > Decimal('0.000'):
@@ -1379,7 +1462,7 @@ class PurchaseReturnItem(TimeStampedModel):
         factor = self.conversion_factor if (self.conversion_factor and self.conversion_factor > Decimal('0.000')) else Decimal('1.000')
         qty = self.returned_quantity if (self.returned_quantity and self.returned_quantity > Decimal('0.000')) else Decimal('1.000')
         self.base_unit_quantity = (qty * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
-        gross = qty * (self.purchase_rate or Decimal('0.00'))
+        gross = (qty * (self.purchase_rate or Decimal('0.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if self.tax_rate and self.tax_rate > Decimal('0.00'):
             self.tax_amount = (gross * (self.tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         else:

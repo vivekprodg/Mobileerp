@@ -6,11 +6,15 @@ Upgraded Capabilities:
    - Full bidirectional date synchronization between `bill_date` (A.D.) and `bill_date_bs` (B.S.).
    - Distinct delivery challan synchronization: `challan_no`, `challan_date` (AD), and `challan_date_bs` (BS).
    - Explicit Fiscal Year Lock Enforcement: Rejects bills falling within closed/audited fiscal years.
-   - Dual VAT Handling Modes: `vat_handling_mode` ('EXCLUSIVE' vs. 'INCLUSIVE').
+   - Dual VAT Handling Modes: `vat_handling_mode` ('EXCLUSIVE' vs. 'INCLUSIVE') with server-side validation.
+   - Automated Tax Alignment: Automatically aligns `is_vat_bill` based on whether any item lines have 13% VAT.
    - 5-Tier Overhead Expense Controls: Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads.
    - Multi-Field Observations: `consignment_narration`, `receiving_notes`, and `internal_notes`.
    - Flexible Draft Saving: Allows saving in-progress vouchers as drafts without failing on incomplete mandatory fields.
 2. GRNItemForm & BaseGRNItemFormSet:
+   - Locked Tax Rate Dropdown Widget: Renders `vat_rate` strictly as a locked select dropdown (13% or 0%).
+   - Strict Tax Rate Validation: Rejects arbitrary tax percentages (preventing typos like 130%).
+   - Automated Tax Applicability Sync: Sets `is_vat_applicable=True` on 13% and `is_vat_applicable=False` on 0%.
    - Captures physical vendor batch numbers via `batch_number`.
    - Dynamic Master Switch IMEI Enforcement:
      * When `enforce_imei_tracking=True` (Strict Mode): Enforces exact 1-to-1 match between handset quantity and scanned IMEIs on final verification.
@@ -338,9 +342,10 @@ class GoodsReceivedNoteForm(forms.ModelForm):
     Features:
     - Bidirectional date synchronization between `bill_date` (AD) and `bill_date_bs` (BS).
     - Distinct delivery challan synchronization: `challan_no`, `challan_date` (AD), `challan_date_bs` (BS).
-    - Fiscal Year Locking Guard: Prevents entering bills into closed fiscal years (e.g. 2080/81 to 2082/83).
+    - Fiscal Year Locking Guard: Prevents entering bills into closed fiscal years.
     - Dedicated whole-bill discount controls (`bill_discount_type`, `bill_discount_input_value`).
-    - Dual VAT handling modes: `vat_handling_mode` ('EXCLUSIVE' vs 'INCLUSIVE') with Nepal 13% VAT toggle.
+    - Dual VAT handling modes: `vat_handling_mode` ('EXCLUSIVE' vs 'INCLUSIVE') relocated to Summary.
+    - Automated Tax Alignment: `is_vat_bill` aligns with line-item VAT applicability.
     - 5 Overhead expenses (Freight, Customs, Handling & Unloading, Transit Insurance, Other Overheads).
     - Multi-field observations (`consignment_narration`, `receiving_notes`, `internal_notes`).
     - Flexible Draft Mode: Relaxed validation rules when saving in-progress vouchers.
@@ -382,9 +387,12 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             'bill_discount_input_value': forms.NumberInput(attrs={
                 'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00', 'placeholder': '0.00'
             }),
-            'vat_handling_mode': forms.Select(attrs={'class': 'form-select'}),
+            'vat_handling_mode': forms.Select(attrs={'class': 'form-select'}, choices=[
+                ('EXCLUSIVE', _('VAT Excluded (Tax on Top)')),
+                ('INCLUSIVE', _('VAT Included (Tax Extracted)')),
+            ]),
             'is_vat_bill': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
-            'vat_rate': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
+            'vat_rate': forms.HiddenInput(),
             'extra_freight_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'customs_import_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'other_handling_charge': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
@@ -456,6 +464,12 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             self.fields['paid_amount'].initial = Decimal('0.00')
             self.fields['distributor_mdms_certified'].initial = True
 
+    def clean_vat_handling_mode(self):
+        val = (self.cleaned_data.get('vat_handling_mode') or 'EXCLUSIVE').upper().strip()
+        if val not in ['EXCLUSIVE', 'INCLUSIVE']:
+            val = 'EXCLUSIVE'
+        return val
+
     def clean_bill_discount_input_value(self):
         val = self.cleaned_data.get('bill_discount_input_value')
         if val is None or val < Decimal('0.00'):
@@ -512,7 +526,6 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             self.add_error('bill_date', _("Bill date is mandatory."))
             return cleaned_data
         else:
-            # Fallback for draft with empty date
             today = date.today()
             bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
             cleaned_data['bill_date'] = today
@@ -567,6 +580,14 @@ class GoodsReceivedNoteForm(forms.ModelForm):
         elif b_type == 'PERCENTAGE' and b_input > Decimal('100.00'):
             self.add_error('bill_discount_input_value', _("Whole-bill percentage discount cannot exceed 100%."))
 
+        # -------------------------------------------------------------
+        # 5. VAT Handling Mode Normalization
+        # -------------------------------------------------------------
+        vat_mode = cleaned_data.get('vat_handling_mode') or 'EXCLUSIVE'
+        if vat_mode not in ['EXCLUSIVE', 'INCLUSIVE']:
+            vat_mode = 'EXCLUSIVE'
+        cleaned_data['vat_handling_mode'] = vat_mode
+
         return cleaned_data
 
 # ==============================================================================
@@ -576,6 +597,9 @@ class GRNItemForm(forms.ModelForm):
     """
     Line Item Input Validator for Goods Received Notes (GRN).
     Features:
+    - Locked Tax Rate Dropdown Widget: Renders `vat_rate` strictly as a choice of 13% or 0%.
+    - Clean Tax Rate Validation: Rejects invalid or arbitrary tax rates (prevents typos like 130%).
+    - Dynamic Tax Applicability Sync: Synchronizes `is_vat_applicable` (True for 13%, False for 0%).
     - Captures physical vendor batch code via `batch_number`.
     - Unit Purchase Rate accepts Pre-VAT or Post-VAT rates depending on selected VAT handling mode.
     - Two-Way Line Discount: Flat Amount (रू) or Percentage (%).
@@ -585,6 +609,11 @@ class GRNItemForm(forms.ModelForm):
       * When is_draft is True: Allows partial/in-progress scanning without blocking the draft save.
       * Accessories: Always bypass IMEI requirements regardless of mode.
     """
+
+    VAT_RATE_CHOICES = [
+        ('13.00', _('13% (Taxable)')),
+        ('0.00', _('0% (Exempt / PAN)')),
+    ]
 
     class Meta:
         model = GRNItem
@@ -616,7 +645,14 @@ class GRNItemForm(forms.ModelForm):
                 'class': 'form-control font-monospace text-end', 'step': '0.01', 'min': '0.00', 'placeholder': 'MRP / Sell Price'
             }),
             'is_vat_applicable': forms.CheckboxInput(attrs={'class': 'form-check-input grn-vat-check'}),
-            'vat_rate': forms.NumberInput(attrs={'class': 'form-control font-monospace text-end grn-vat-rate', 'step': '0.01', 'min': '0.00'}),
+            # Locked select dropdown widget preventing user typos
+            'vat_rate': forms.Select(
+                attrs={'class': 'form-select form-select-sm grn-vat-rate select-tax-rate text-center'},
+                choices=[
+                    ('13.00', _('13%')),
+                    ('0.00', _('0% (Exempt)')),
+                ]
+            ),
             'default_mdms_status': forms.Select(attrs={'class': 'form-select form-select-sm grn-mdms-select'}),
             'warranty_months': forms.NumberInput(attrs={'class': 'form-control', 'step': '1', 'min': '0'}),
             'warranty_provider': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Distributor'}),
@@ -675,6 +711,25 @@ class GRNItemForm(forms.ModelForm):
             return Decimal('0.00')
         return val
 
+    def clean_vat_rate(self):
+        """
+        Strict server-side validation: Ensures vat_rate is strictly 13.00 or 0.00.
+        Rejects arbitrary or typo inputs like 130%.
+        """
+        val = self.cleaned_data.get('vat_rate')
+        if val is None:
+            return Decimal('13.00')
+
+        try:
+            dec_val = Decimal(str(val))
+        except Exception:
+            raise forms.ValidationError(_("Invalid VAT rate format."))
+
+        if dec_val not in [Decimal('13.00'), Decimal('0.00'), Decimal('13'), Decimal('0')]:
+            raise forms.ValidationError(_("Invalid VAT rate. Only 13% (Taxable) or 0% (Exempt) are permitted."))
+
+        return Decimal('13.00') if dec_val > Decimal('0.00') else Decimal('0.00')
+
     def clean(self):
         cleaned_data = super().clean()
         product = cleaned_data.get('product')
@@ -688,7 +743,15 @@ class GRNItemForm(forms.ModelForm):
         if self.is_draft and not product:
             return cleaned_data
 
-        # 1. Validate Discount Logic Against Line Gross Value
+        # 1. Automatic Synchronization of is_vat_applicable from vat_rate
+        vat_rate = cleaned_data.get('vat_rate')
+        if vat_rate == Decimal('13.00'):
+            cleaned_data['is_vat_applicable'] = True
+        else:
+            cleaned_data['is_vat_applicable'] = False
+            cleaned_data['vat_rate'] = Decimal('0.00')
+
+        # 2. Validate Discount Logic Against Line Gross Value
         line_gross = (quantity * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if disc_type == 'PERCENTAGE':
             if disc_input > Decimal('100.00'):
@@ -700,7 +763,7 @@ class GRNItemForm(forms.ModelForm):
                     _(f"Discount amount (Rs. {disc_input:,.2f}) cannot exceed total line value (Rs. {line_gross:,.2f}).")
                 )
 
-        # 2. Dynamic Serialized IMEI Tracking Validation
+        # 3. Dynamic Serialized IMEI Tracking Validation
         if product and (product.requires_imei_tracking or product.requires_serial_tracking):
             factor = cleaned_data.get('conversion_factor') or Decimal('1.000')
             base_units = (quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
@@ -757,7 +820,8 @@ class GRNItemForm(forms.ModelForm):
 
 class BaseGRNItemFormSet(BaseInlineFormSet):
     """
-    Custom FormSet to propagate draft mode flag to child forms and cleanly handle tabular deletions.
+    Custom FormSet to propagate draft mode flag to child forms, cleanly handle tabular deletions,
+    and automatically align the parent GRN header's `is_vat_bill` based on child lines.
     """
     def __init__(self, *args, **kwargs):
         self.is_draft = kwargs.pop('is_draft', False)
@@ -769,6 +833,20 @@ class BaseGRNItemFormSet(BaseInlineFormSet):
         if self.is_draft:
             return
         super().clean()
+
+        # Automatically align parent GRN header is_vat_bill with line items
+        has_taxable_item = False
+        for form in self.forms:
+            if not hasattr(form, 'cleaned_data') or not form.cleaned_data:
+                continue
+            if form.cleaned_data.get('DELETE', False):
+                continue
+            if form.cleaned_data.get('vat_rate') == Decimal('13.00'):
+                has_taxable_item = True
+                break
+
+        if hasattr(self, 'instance') and self.instance:
+            self.instance.is_vat_bill = has_taxable_item
 
 GRNItemFormSet = inlineformset_factory(
     GoodsReceivedNote,

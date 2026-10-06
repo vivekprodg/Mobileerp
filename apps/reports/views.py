@@ -28,7 +28,7 @@ Capabilities:
    - SupplierOutstandingReportView (Supplier Udhaari Payables)
    - CancelledPurchasesReportView (Forensic Audit of Voided Inward GRNs - Part B)
 6. Sales, Turnover & Commercial Intelligence Suite:
-   - SalesSummaryReportView (Date-Wise Turnover & Collections)
+   - SalesSummaryReportView (Date-Wise Turnover, 14-Column Ledger, Tender Rollup & Udhaari Waterfall)
    - ItemWiseSalesReportView (Line-Item Breakdown & Deductions)
    - ProductWiseSalesReportView (Product Volume & Unit Margins)
    - BrandWiseSalesReportView (Brand Turnover & Share %)
@@ -44,10 +44,12 @@ Capabilities:
    - SlowSellingSalesReportView (Low Sales Velocity & Capital Stagnation)
    - CancelledSalesAuditReportView (Anti-Fraud Voided Invoices Audit - Part A)
 7. Financials, Audit Logs & Universal CSV Exporters
+   - DailySalesReportView (Dual-Calendar AD & BS Stacked Sync & Analytics)
 """
 
 import io
 import csv
+import re
 from datetime import date, datetime, timedelta, time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, List, Optional
@@ -84,7 +86,6 @@ from apps.reports.exports import CSVExportEngine, sanitize_csv_row
 # -----------------------------------------------------------------------------
 # DOMAIN SERVICES IMPORT
 # -----------------------------------------------------------------------------
-# 1. Inventory, Movements & Warehouse Services
 from apps.reports.services.stock_summary_service import StockSummaryService
 from apps.reports.services.stock_detail_service import StockDetailService
 from apps.reports.services.current_stock_service import CurrentStockService
@@ -101,14 +102,12 @@ from apps.reports.services.slow_moving_service import SlowMovingStockService
 from apps.reports.services.trade_in_inventory_service import TradeInInventoryService
 from apps.reports.services.batch_stock_service import BatchStockService
 
-# 2. Procurement Services
 from apps.reports.services.purchase_register_service import PurchaseRegisterService
 from apps.reports.services.supplier_purchase_service import SupplierPurchaseService
 from apps.reports.services.product_purchase_service import ProductPurchaseService
 from apps.reports.services.supplier_outstanding_service import SupplierOutstandingService
 from apps.reports.services.cancelled_purchase_service import CancelledPurchaseService
 
-# 3. Sales & Commercial Intelligence Services
 from apps.reports.services.sales_summary_service import SalesSummaryService
 from apps.reports.services.item_sales_service import ItemSalesService
 from apps.reports.services.product_sales_service import ProductSalesService
@@ -128,6 +127,7 @@ from apps.core.models import SystemConfiguration, AuditLog
 from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
 from apps.users.models import User
+
 
 # ==============================================================================
 # BASE PERMISSION MIXIN FOR REPORTS
@@ -150,86 +150,111 @@ class ReportAccessMixin(LoginRequiredMixin, UserPassesTestMixin):
         )
         return redirect('core:dashboard')
 
+
 # ==============================================================================
 # SALES REPORT 1: SALES SUMMARY REPORT (DATE-WISE ROLLUP)
 # ==============================================================================
 class SalesSummaryReportView(ReportAccessMixin, View):
     """
-    Date-wise sales rollup report reconciling invoices, units, gross billing,
-    item discounts, bill discounts, net turnover, COGS, gross profit, and tender breakdowns.
+    Executive date-wise sales rollup report reconciling invoices, unit splits (mobiles vs accessories),
+    gross billing, discounts, returns, net collections, landed COGS, gross profits, and tender channels.
     """
     template_name = 'reports/sales_summary.html'
 
     def get(self, request, *args, **kwargs):
         active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
+        # Point 2.1: Capture All Extended Filter Parameters
         filters = {
+            'fiscal_year': request.GET.get('fiscal_year', '').strip(),
             'start_date': request.GET.get('start_date', ''),
             'end_date': request.GET.get('end_date', ''),
+            'start_date_bs': request.GET.get('start_date_bs', ''),
+            'end_date_bs': request.GET.get('end_date_bs', ''),
             'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),
             'payment_status': request.GET.get('payment_status', '').strip(),
+            'customer_type': request.GET.get('customer_type', '').strip().lower(),
+            'sale_type': request.GET.get('sale_type', '').strip().lower(),
+            'category_id': request.GET.get('category_id') or request.GET.get('category', ''),
+            'salesperson_id': request.GET.get('salesperson_id') or request.GET.get('salesperson', ''),
+            'q': request.GET.get('q', '').strip(),
         }
 
         data = SalesSummaryService.get_sales_summary_data(filters=filters, user=request.user)
         records = data['records']
         totals = data['totals']
 
+        # Point 2.3: Upgraded 14-Column Ledger CSV Export
         export_mode = request.GET.get('export', '').strip().lower()
         if export_mode == 'csv':
-            response = HttpResponse(content_type='text/csv; charset=utf-8')
-            response['Content-Disposition'] = f'attachment; filename="Sales_Summary_{data["start_date"]}_{data["end_date"]}.csv"'
-            writer = csv.writer(response)
-            writer.writerow([
-                'Date (AD)', 'Date (BS)', 'Invoices', 'Units Sold', 'Gross Subtotal',
-                'Item Discounts', 'Bill Discounts', 'Total Discounts', 'Trade-In Credit',
-                'Taxable Base', 'Non-Taxable Base', 'VAT', 'Net Grand Total', 'COGS',
-                'Gross Profit', 'Margin %', 'Paid Amount', 'Due Udhaari',
-                'Cash', 'FonePay', 'eSewa', 'Khalti', 'Card', 'Bank', 'Credit'
-            ])
-            for r in records:
+            if hasattr(CSVExportEngine, 'export_sales_summary_csv'):
+                return CSVExportEngine.export_sales_summary_csv(
+                    records=records,
+                    totals=totals,
+                    filename=f"Sales_Summary_{data['start_date']}_{data['end_date']}.csv"
+                )
+            else:
+                response = HttpResponse(content_type='text/csv; charset=utf-8')
+                response['Content-Disposition'] = f'attachment; filename="Sales_Summary_{data["start_date"]}_{data["end_date"]}.csv"'
+                writer = csv.writer(response)
+                writer.writerow([
+                    'Date (AD)', 'Date (BS)', 'Bills', 'Mobiles Sold', 'Accessories Sold',
+                    'Gross Sales (NPR)', 'Total Discounts (NPR)', 'Net Sales (NPR)',
+                    'Landed Cost (COGS) (NPR)', 'Gross Profit (NPR)', 'Margin %',
+                    'Collected Inflow (NPR)', 'Credit / Due (NPR)', 'Refunds / Returns (NPR)',
+                    'Net Collection (NPR)'
+                ])
+                for r in records:
+                    writer.writerow(sanitize_csv_row([
+                        r['date_ad_str'], r['date_bs'], r['invoice_count'],
+                        f"{r['mobiles_sold']:.0f}", f"{r['accessories_sold']:.0f}",
+                        f"{r['gross_subtotal']:.2f}", f"{r['total_discount_sum']:.2f}",
+                        f"{r['net_sales']:.2f}", f"{r['cogs_amount']:.2f}",
+                        f"{r['gross_profit']:.2f}", f"{r['margin_percent']:.1f}%",
+                        f"{r['collected']:.2f}", f"{r['due_amount']:.2f}",
+                        f"{r['refund_amount']:.2f}", f"{r['net_collection']:.2f}"
+                    ]))
                 writer.writerow(sanitize_csv_row([
-                    r['date_ad_str'], r['date_bs'], r['invoice_count'], f"{r['units_sold']:.1f}",
-                    f"{r['gross_subtotal']:.2f}", f"{r['item_discount_sum']:.2f}", f"{r['bill_discount_sum']:.2f}",
-                    f"{r['total_discount_sum']:.2f}", f"{r['trade_in_credit_sum']:.2f}", f"{r['taxable_amount']:.2f}",
-                    f"{r['non_taxable_amount']:.2f}", f"{r['vat_amount']:.2f}", f"{r['grand_total']:.2f}",
-                    f"{r['cogs_amount']:.2f}", f"{r['gross_profit']:.2f}", f"{r['margin_percent']:.1f}%",
-                    f"{r['paid_amount']:.2f}", f"{r['due_amount']:.2f}", f"{r['cash_collected']:.2f}",
-                    f"{r['fonepay_collected']:.2f}", f"{r['esewa_collected']:.2f}", f"{r['khalti_collected']:.2f}",
-                    f"{r['card_collected']:.2f}", f"{r['bank_collected']:.2f}", f"{r['credit_authorized']:.2f}"
+                    'TOTALS', '', totals.get('total_invoices', 0),
+                    f"{totals.get('total_mobiles', 0):.0f}", f"{totals.get('total_accessories', 0):.0f}",
+                    f"{totals.get('total_gross', 0):.2f}", f"{totals.get('total_sales_disc', 0):.2f}",
+                    f"{totals.get('total_net_turnover', 0):.2f}", f"{totals.get('total_cogs', 0):.2f}",
+                    f"{totals.get('total_profit', 0):.2f}", f"{totals.get('overall_margin_pct', 0):.1f}%",
+                    f"{totals.get('total_collected', 0):.2f}", f"{totals.get('total_due', 0):.2f}",
+                    f"{totals.get('total_returns', 0):.2f}", f"{totals.get('total_net_collection', 0):.2f}"
                 ]))
-            writer.writerow(sanitize_csv_row([
-                'TOTALS', '', totals.get('total_invoices', 0), f"{totals.get('total_units_sold', 0):.1f}",
-                f"{totals.get('total_gross', 0):.2f}", f"{totals.get('total_item_disc', 0):.2f}",
-                f"{totals.get('total_bill_disc', 0):.2f}", f"{totals.get('total_sales_disc', 0):.2f}",
-                f"{totals.get('total_trade_in', 0):.2f}", f"{totals.get('total_taxable', 0):.2f}",
-                f"{totals.get('total_non_taxable', 0):.2f}", f"{totals.get('total_vat', 0):.2f}",
-                f"{totals.get('total_net_turnover', 0):.2f}", f"{totals.get('total_cogs', 0):.2f}",
-                f"{totals.get('total_profit', 0):.2f}", f"{totals.get('overall_margin_pct', 0):.1f}%",
-                f"{totals.get('total_paid', 0):.2f}", f"{totals.get('total_due', 0):.2f}",
-                f"{totals.get('total_cash', 0):.2f}", f"{totals.get('total_fonepay', 0):.2f}",
-                f"{totals.get('total_esewa', 0):.2f}", f"{totals.get('total_khalti', 0):.2f}",
-                f"{totals.get('total_card', 0):.2f}", f"{totals.get('total_bank', 0):.2f}",
-                f"{totals.get('total_credit', 0):.2f}"
-            ]))
-            return response
+                return response
 
         paginator = Paginator(records, 50)
         page_obj = paginator.get_page(request.GET.get('page', 1))
 
+        # Point 2.2: Supply Complete Context Including Dropdowns, Rollup & Reconciliation
         context = {
             'records': page_obj,
             'page_obj': page_obj,
             'is_paginated': page_obj.has_other_pages(),
             'totals': totals,
+            'kpi_cards': data.get('kpi_cards', {}),
+            'payment_rollup': data.get('payment_rollup', []),
+            'reconciliation': data.get('reconciliation', {}),
+            'mobile_overview': data.get('mobile_overview', {}),
+            'trade_in_summary': data.get('trade_in_summary', {}),
+            'returns_summary': data.get('returns_summary', {}),
             'branches': data['branches'],
+            'categories': data['categories'],
+            'brands': data['brands'],
+            'salespeople': data['salespeople'],
             'selected_branch': data['selected_branch'],
             'filters': filters,
             'start_date': data['start_date'],
             'end_date': data['end_date'],
             'start_date_bs': data['start_date_bs'],
             'end_date_bs': data['end_date_bs'],
+            'fiscal_year': data.get('fiscal_year', ''),
+            'available_fiscal_years': data.get('available_fiscal_years', []),
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # SALES REPORT 2: ITEM-WISE DETAILED SALES REPORT
@@ -245,6 +270,7 @@ class ItemWiseSalesReportView(ReportAccessMixin, View):
         active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
         filters = {
+            'fiscal_year': request.GET.get('fiscal_year', '').strip(),
             'start_date': request.GET.get('start_date', ''),
             'end_date': request.GET.get('end_date', ''),
             'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),
@@ -314,8 +340,11 @@ class ItemWiseSalesReportView(ReportAccessMixin, View):
             'end_date': data['end_date'],
             'start_date_bs': data['start_date_bs'],
             'end_date_bs': data['end_date_bs'],
+            'fiscal_year': data.get('fiscal_year', ''),
+            'available_fiscal_years': data.get('available_fiscal_years', []),
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # SALES REPORT 3: PRODUCT-WISE SALES REPORT
@@ -390,6 +419,7 @@ class ProductWiseSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
 # SALES REPORT 4: BRAND-WISE SALES REPORT
 # ==============================================================================
@@ -457,6 +487,7 @@ class BrandWiseSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
 # SALES REPORT 5: CATEGORY-WISE SALES REPORT
 # ==============================================================================
@@ -522,6 +553,7 @@ class CategoryWiseSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # SALES REPORT 6: SOLD IMEI & HANDSET REGISTRY REPORT
@@ -594,6 +626,7 @@ class SoldIMEIRegistryReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
 # SALES REPORT 7: SALESPERSON PERFORMANCE REPORT
 # ==============================================================================
@@ -662,6 +695,7 @@ class SalespersonSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # SALES REPORT 8: CASHIER-WISE COLLECTION REPORT
@@ -732,6 +766,7 @@ class CashierSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
 # SALES REPORT 9: PAYMENT METHOD-WISE REPORT
 # ==============================================================================
@@ -788,6 +823,7 @@ class PaymentMethodSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # SALES REPORT 10: DISCOUNT & PRICE OVERRIDE REPORT
@@ -862,6 +898,7 @@ class DiscountOverrideReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
 # SALES REPORT 11: TRADE-IN EXCHANGE SALES REPORT
 # ==============================================================================
@@ -929,6 +966,7 @@ class TradeInExchangeSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # SALES REPORT 12: GROSS PROFIT & MARGIN REALIZATION REPORT
@@ -1000,6 +1038,7 @@ class GrossProfitMarginReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
 # SALES REPORT 13: TOP-SELLING PRODUCTS REPORT
 # ==============================================================================
@@ -1069,6 +1108,7 @@ class TopSellingSalesReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # SALES REPORT 14: SLOW-SELLING PRODUCTS & DORMANT STOCK REPORT
@@ -1140,6 +1180,7 @@ class SlowSellingSalesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
 # SALES REPORT 15: CANCELLED & VOIDED SALES AUDIT REPORT (PART A)
 # ==============================================================================
@@ -1164,7 +1205,7 @@ class CancelledSalesAuditReportView(ReportAccessMixin, View):
         # Seamless BS to AD conversion if BS dates were submitted without AD parameters
         if not start_date_ad and start_date_bs:
             try:
-                parts = [int(p) for p in start_date_bs.split('-')]
+                parts = [int(p) for p in re.sub(r'[^\d]', '-', start_date_bs).split('-') if p]
                 if len(parts) == 3:
                     start_date_ad = NepaliCalendar.bs_to_ad(parts[0], parts[1], parts[2]).strftime('%Y-%m-%d')
             except Exception:
@@ -1172,7 +1213,7 @@ class CancelledSalesAuditReportView(ReportAccessMixin, View):
 
         if not end_date_ad and end_date_bs:
             try:
-                parts = [int(p) for p in end_date_bs.split('-')]
+                parts = [int(p) for p in re.sub(r'[^\d]', '-', end_date_bs).split('-') if p]
                 if len(parts) == 3:
                     end_date_ad = NepaliCalendar.bs_to_ad(parts[0], parts[1], parts[2]).strftime('%Y-%m-%d')
             except Exception:
@@ -1251,6 +1292,7 @@ class CancelledSalesAuditReportView(ReportAccessMixin, View):
             'date_basis': data.get('date_basis', 'bill_date'),
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # REPORT 16: CORE INVENTORY & LEDGER (SUMMARY, DETAIL, SNAPSHOTS)
@@ -1359,6 +1401,7 @@ class StockSummaryReportView(ReportAccessMixin, View):
 
         return render(request, self.template_name, context)
 
+
 class StockDetailReportView(ReportAccessMixin, View):
     template_name = 'reports/stock_detail.html'
     print_template_name = 'reports/stock_detail_print.html'
@@ -1460,6 +1503,7 @@ class StockDetailReportView(ReportAccessMixin, View):
 
         return render(request, self.template_name, context)
 
+
 class CurrentStockReportView(ReportAccessMixin, View):
     template_name = 'reports/current_stock.html'
 
@@ -1499,6 +1543,7 @@ class CurrentStockReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 class LowStockReportView(ReportAccessMixin, View):
     template_name = 'reports/low_stock.html'
 
@@ -1537,6 +1582,7 @@ class LowStockReportView(ReportAccessMixin, View):
             'selected_branch': selected_branch,
         }
         return render(request, self.template_name, context)
+
 
 class OutOfStockReportView(ReportAccessMixin, View):
     template_name = 'reports/out_of_stock.html'
@@ -1578,6 +1624,7 @@ class OutOfStockReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 class IMEIStockReportView(ReportAccessMixin, View):
     template_name = 'reports/imei_stock.html'
 
@@ -1618,6 +1665,7 @@ class IMEIStockReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 class IMEILifecycleReportView(ReportAccessMixin, View):
     template_name = 'reports/imei_lifecycle.html'
 
@@ -1633,6 +1681,7 @@ class IMEILifecycleReportView(ReportAccessMixin, View):
             'is_found': data['is_found'],
         }
         return render(request, self.template_name, context)
+
 
 class StockTransferReportView(ReportAccessMixin, View):
     template_name = 'reports/stock_transfer_report.html'
@@ -1670,6 +1719,7 @@ class StockTransferReportView(ReportAccessMixin, View):
             'end_date': result['end_date'],
         }
         return render(request, self.template_name, context)
+
 
 class StockAdjustmentReportView(ReportAccessMixin, View):
     template_name = 'reports/stock_adjustment_report.html'
@@ -1722,6 +1772,7 @@ class StockAdjustmentReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 class StockAgingReportView(ReportAccessMixin, View):
     template_name = 'reports/stock_aging.html'
 
@@ -1760,6 +1811,7 @@ class StockAgingReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 class SlowMovingStockReportView(ReportAccessMixin, View):
     template_name = 'reports/slow_moving.html'
 
@@ -1795,6 +1847,7 @@ class SlowMovingStockReportView(ReportAccessMixin, View):
             'filters': filters,
         }
         return render(request, self.template_name, context)
+
 
 class TradeInInventoryReportView(ReportAccessMixin, View):
     template_name = 'reports/trade_in_inventory.html'
@@ -1834,6 +1887,7 @@ class TradeInInventoryReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 class BatchStockReportView(ReportAccessMixin, View):
     template_name = 'reports/batch_stock.html'
 
@@ -1868,6 +1922,7 @@ class BatchStockReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 class DamagedStockReportView(ReportAccessMixin, View):
     template_name = 'reports/damaged_stock.html'
 
@@ -1898,6 +1953,7 @@ class DamagedStockReportView(ReportAccessMixin, View):
             'selected_branch': result['selected_branch'],
         }
         return render(request, self.template_name, context)
+
 
 class VendorRMAReportView(ReportAccessMixin, View):
     template_name = 'reports/vendor_rma_report.html'
@@ -1940,6 +1996,7 @@ class VendorRMAReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
 # REPORT 17: PURCHASE DOMAIN REPORTING SUITE
 # ==============================================================================
@@ -1951,6 +2008,7 @@ class PurchaseRegisterReportView(ReportAccessMixin, View):
         active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
         filters = {
+            'fiscal_year': request.GET.get('fiscal_year', '').strip(),
             'start_date': request.GET.get('start_date', ''),
             'end_date': request.GET.get('end_date', ''),
             'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),
@@ -1984,12 +2042,15 @@ class PurchaseRegisterReportView(ReportAccessMixin, View):
             'end_date': data['end_date'],
             'start_date_bs': data['start_date_bs'],
             'end_date_bs': data['end_date_bs'],
+            'fiscal_year': data.get('fiscal_year', ''),
+            'available_fiscal_years': data.get('available_fiscal_years', []),
         }
 
         try:
             return render(request, self.template_name, context)
         except Exception:
             return render(request, self.fallback_template_name, context)
+
 
 class SupplierPurchaseReportView(ReportAccessMixin, View):
     template_name = 'reports/supplier_purchase_report.html'
@@ -2032,6 +2093,7 @@ class SupplierPurchaseReportView(ReportAccessMixin, View):
             'end_date_bs': data['end_date_bs'],
         }
         return render(request, self.template_name, context)
+
 
 class ProductPurchaseReportView(ReportAccessMixin, View):
     template_name = 'reports/product_purchase_report.html'
@@ -2080,6 +2142,7 @@ class ProductPurchaseReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 class SupplierOutstandingReportView(ReportAccessMixin, View):
     """
     Supplier Outstanding & Accounts Payable Aging Report.
@@ -2090,10 +2153,8 @@ class SupplierOutstandingReportView(ReportAccessMixin, View):
     def get(self, request, *args, **kwargs):
         active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
-        # Step 1: Capture the Supplier Query Parameter from the URL
         supplier_id = request.GET.get('supplier', '').strip()
 
-        # Step 4: Retrieve the Supplier Database Object safely
         selected_supplier = None
         if supplier_id:
             try:
@@ -2101,8 +2162,8 @@ class SupplierOutstandingReportView(ReportAccessMixin, View):
             except (ValueError, TypeError):
                 selected_supplier = None
 
-        # Step 2: Add the Supplier Key into the Filters Dictionary
         filters = {
+            'fiscal_year': request.GET.get('fiscal_year', '').strip(),
             'start_date': request.GET.get('start_date', ''),
             'end_date': request.GET.get('end_date', ''),
             'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),
@@ -2113,7 +2174,6 @@ class SupplierOutstandingReportView(ReportAccessMixin, View):
             'q': request.GET.get('q', '').strip(),
         }
 
-        # Step 3: Pass the Supplier Filter to the Domain Service
         data = SupplierOutstandingService.get_supplier_outstanding_data(filters=filters, user=request.user)
         records = data['records']
         totals = data['totals']
@@ -2126,7 +2186,6 @@ class SupplierOutstandingReportView(ReportAccessMixin, View):
         paginator = Paginator(records, 40)
         page_obj = paginator.get_page(request.GET.get('page', 1))
 
-        # Step 5: Expose both the Filters and Selected Supplier to the Template Context
         context = {
             'records': page_obj,
             'page_obj': page_obj,
@@ -2141,8 +2200,11 @@ class SupplierOutstandingReportView(ReportAccessMixin, View):
             'end_date': data['end_date'],
             'start_date_bs': data['start_date_bs'],
             'end_date_bs': data['end_date_bs'],
+            'fiscal_year': data.get('fiscal_year', ''),
+            'available_fiscal_years': data.get('available_fiscal_years', []),
         }
         return render(request, self.template_name, context)
+
 
 # ==============================================================================
 # REPORT 17B: CANCELLED & VOIDED PURCHASES AUDIT REPORT (PART B - NEW)
@@ -2168,7 +2230,7 @@ class CancelledPurchasesReportView(ReportAccessMixin, View):
         # Seamless BS to AD conversion if BS dates were submitted without AD parameters
         if not start_date_ad and start_date_bs:
             try:
-                parts = [int(p) for p in start_date_bs.split('-')]
+                parts = [int(p) for p in re.sub(r'[^\d]', '-', start_date_bs).split('-') if p]
                 if len(parts) == 3:
                     start_date_ad = NepaliCalendar.bs_to_ad(parts[0], parts[1], parts[2]).strftime('%Y-%m-%d')
             except Exception:
@@ -2176,7 +2238,7 @@ class CancelledPurchasesReportView(ReportAccessMixin, View):
 
         if not end_date_ad and end_date_bs:
             try:
-                parts = [int(p) for p in end_date_bs.split('-')]
+                parts = [int(p) for p in re.sub(r'[^\d]', '-', end_date_bs).split('-') if p]
                 if len(parts) == 3:
                     end_date_ad = NepaliCalendar.bs_to_ad(parts[0], parts[1], parts[2]).strftime('%Y-%m-%d')
             except Exception:
@@ -2198,36 +2260,13 @@ class CancelledPurchasesReportView(ReportAccessMixin, View):
         records = data['records']
         totals = data['totals']
 
-        # Dedicated clean CSV export named 'Cancelled_Purchases_Report.csv'
         export_mode = request.GET.get('export', '').strip().lower()
         if export_mode == 'csv':
-            response = HttpResponse(content_type='text/csv; charset=utf-8')
-            response['Content-Disposition'] = 'attachment; filename="Cancelled_Purchases_Report.csv"'
-            writer = csv.writer(response)
-            writer.writerow([
-                'GRN Number', 'Supplier Bill Ref', 'Bill Date (AD)', 'Bill Date (BS)', 'Cancellation Timestamp',
-                'Branch Code', 'Branch Name', 'Supplier Name', 'Supplier PAN', 'Supplier Phone',
-                'Received By', 'Cancelled By User', 'IP Address', 'Cancellation Reason',
-                'Gross Amount (NPR)', 'Trade Discount (NPR)', 'Input VAT (NPR)',
-                'Net Invoice Total (NPR)', 'Paid Cash Reversed (NPR)', 'Due AP Reversed (NPR)',
-                'Stock Reversal Executed?'
-            ])
-            for r in records:
-                writer.writerow(sanitize_csv_row([
-                    r['grn_number'], r['supplier_bill_no'], r['bill_date_ad'], r['bill_date_bs'], r['cancel_date_ad_str'],
-                    r['branch_code'], r['branch_name'], r['supplier_name'], r['supplier_pan'], r['supplier_phone'],
-                    r['received_by'], r['cancelled_by'], r['cancel_ip'], r['cancellation_reason'],
-                    f"{r['gross_amount']:.2f}", f"{r['discount_amount']:.2f}", f"{r['vat_amount']:.2f}",
-                    f"{r['net_total_amount']:.2f}", f"{r['paid_amount_reversed']:.2f}",
-                    f"{r['due_amount_reversed']:.2f}", 'Yes (Confirmed Reverted)' if r['is_stock_reverted'] else 'Pending Verification'
-                ]))
-            writer.writerow(sanitize_csv_row([
-                'TOTALS', '', '', '', '', '', f"{totals.get('total_cancelled_bills', len(records))} Voided GRNs", '', '', '', '', '', '', '',
-                f"{totals.get('total_gross_amount', 0):.2f}", f"{totals.get('total_discount_amount', 0):.2f}",
-                f"{totals.get('total_vat_amount', 0):.2f}", f"{totals.get('total_cancelled_amount', 0):.2f}",
-                f"{totals.get('total_paid_reversed', 0):.2f}", f"{totals.get('total_due_reversed', 0):.2f}", ''
-            ]))
-            return response
+            return CSVExportEngine.export_cancelled_purchases_csv(
+                records=records,
+                totals=totals,
+                filename="Cancelled_Purchases_Report.csv"
+            )
 
         paginator = Paginator(records, 50)
         page_obj = paginator.get_page(request.GET.get('page', 1))
@@ -2249,39 +2288,118 @@ class CancelledPurchasesReportView(ReportAccessMixin, View):
         }
         return render(request, self.template_name, context)
 
+
 # ==============================================================================
-# REPORT 18: FINANCIALS & HISTORICAL AUDITS
+# REPORT 18: FINANCIALS & HISTORICAL AUDITS (REWRITTEN DUAL-CALENDAR ENGINE)
 # ==============================================================================
 class DailySalesReportView(ReportAccessMixin, TemplateView):
+    """
+    Daily Sales Turnover, Returns Deductions, Landed COGS & Gross Profit Realization.
+    Enhanced with intelligent dual-calendar resolution:
+    - Automatically parses either Gregorian AD (YYYY-MM-DD) or Bikram Sambat BS (YYYY-MM-DD).
+    - Bi-directionally syncs missing date representations.
+    - Protects against inverted date selections (auto-swaps if start > end).
+    - Returns synchronized AD and BS dates in template context to keep stacked inputs filled.
+    """
     template_name = 'reports/daily_sales.html'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         branch = getattr(self.request, 'active_branch', None)
 
-        start_date_str = self.request.GET.get('start_date', '').strip()
-        end_date_str = self.request.GET.get('end_date', '').strip()
+        start_date_ad_str = self.request.GET.get('start_date', '').strip()
+        end_date_ad_str = self.request.GET.get('end_date', '').strip()
+        start_date_bs_str = self.request.GET.get('start_date_bs', '').strip()
+        end_date_bs_str = self.request.GET.get('end_date_bs', '').strip()
+
         single_date_str = self.request.GET.get('date', '').strip()
+        single_date_bs_str = self.request.GET.get('date_bs', '').strip()
         compare_period = self.request.GET.get('compare', 'false').lower() == 'true'
 
-        today = date.today()
-        if start_date_str and end_date_str:
+        today = timezone.now().date()
+        start_date = None
+        end_date = None
+
+        if start_date_ad_str:
             try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
-                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
-            except ValueError:
-                start_date, end_date = today, today
-        elif single_date_str:
+                start_date = datetime.strptime(start_date_ad_str, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                start_date = None
+
+        if end_date_ad_str:
+            try:
+                end_date = datetime.strptime(end_date_ad_str, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                end_date = None
+
+        if not start_date and start_date_bs_str:
+            try:
+                clean_bs = re.sub(r'[^\d]', '-', start_date_bs_str)
+                parts = [int(p) for p in clean_bs.split('-') if p]
+                if len(parts) == 3:
+                    y, m, d = parts[0], parts[1], parts[2]
+                    if y < 2000 and parts[2] >= 2000:
+                        y, m, d = parts[2], parts[1], parts[0]
+                    m = max(1, min(12, m))
+                    max_d = NepaliCalendar.get_days_in_month(y, m)
+                    d = max(1, min(max_d, d))
+                    start_date = NepaliCalendar.bs_to_ad(y, m, d)
+            except Exception:
+                start_date = None
+
+        if not end_date and end_date_bs_str:
+            try:
+                clean_bs = re.sub(r'[^\d]', '-', end_date_bs_str)
+                parts = [int(p) for p in clean_bs.split('-') if p]
+                if len(parts) == 3:
+                    y, m, d = parts[0], parts[1], parts[2]
+                    if y < 2000 and parts[2] >= 2000:
+                        y, m, d = parts[2], parts[1], parts[0]
+                    m = max(1, min(12, m))
+                    max_d = NepaliCalendar.get_days_in_month(y, m)
+                    d = max(1, min(max_d, d))
+                    end_date = NepaliCalendar.bs_to_ad(y, m, d)
+            except Exception:
+                end_date = None
+
+        if not start_date and single_date_str:
             try:
                 start_date = datetime.strptime(single_date_str, '%Y-%m-%d').date()
                 end_date = start_date
-            except ValueError:
-                start_date, end_date = today, today
-        else:
-            start_date, end_date = today, today
+            except (ValueError, TypeError):
+                pass
+
+        if not start_date and single_date_bs_str:
+            try:
+                clean_bs = re.sub(r'[^\d]', '-', single_date_bs_str)
+                parts = [int(p) for p in clean_bs.split('-') if p]
+                if len(parts) == 3:
+                    y, m, d = parts[0], parts[1], parts[2]
+                    if y < 2000 and parts[2] >= 2000:
+                        y, m, d = parts[2], parts[1], parts[0]
+                    m = max(1, min(12, m))
+                    max_d = NepaliCalendar.get_days_in_month(y, m)
+                    d = max(1, min(max_d, d))
+                    start_date = NepaliCalendar.bs_to_ad(y, m, d)
+                    end_date = start_date
+            except Exception:
+                pass
+
+        if not start_date and not end_date:
+            start_date = today
+            end_date = today
+        elif not start_date:
+            start_date = end_date
+        elif not end_date:
+            end_date = start_date
 
         if start_date > end_date:
             start_date, end_date = end_date, start_date
+
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        start_date_bs = ad_to_bs_string(start_date, lang='en')
+        end_date_bs = ad_to_bs_string(end_date, lang='en')
 
         qs = SalesEstimate.objects.filter(
             bill_date_ad__gte=start_date,
@@ -2401,16 +2519,17 @@ class DailySalesReportView(ReportAccessMixin, TemplateView):
             'page_obj': page_obj,
             'is_paginated': page_obj.has_other_pages(),
             'totals': totals_summary,
-            'start_date': start_date.strftime('%Y-%m-%d'),
-            'end_date': end_date.strftime('%Y-%m-%d'),
-            'start_date_bs': ad_to_bs_string(start_date, lang='en'),
-            'end_date_bs': ad_to_bs_string(end_date, lang='en'),
+            'start_date': start_date_str,
+            'end_date': end_date_str,
+            'start_date_bs': start_date_bs,
+            'end_date_bs': end_date_bs,
             'is_single_day': start_date == end_date,
             'compare_period': compare_period,
             'comparison_data': comparison_data,
             'branches': Branch.objects.filter(is_active=True).order_by('name'),
         })
         return context
+
 
 class InventoryValuationReportView(ReportAccessMixin, ListView):
     model = BranchStock
@@ -2550,6 +2669,7 @@ class InventoryValuationReportView(ReportAccessMixin, ListView):
         })
         return context
 
+
 class CustomerUdhaariReportView(ReportAccessMixin, TemplateView):
     template_name = 'reports/customer_udhaari.html'
 
@@ -2568,6 +2688,7 @@ class CustomerUdhaariReportView(ReportAccessMixin, TemplateView):
             'total_outstanding': total_debt,
         })
         return context
+
 
 class ProductPriceHistoryReportView(ReportAccessMixin, ListView):
     model = ProductCostHistory
@@ -2631,6 +2752,7 @@ class ProductPriceHistoryReportView(ReportAccessMixin, ListView):
         })
         return context
 
+
 # ==============================================================================
 # UNIVERSAL CSV EXPORTER DISPATCHER
 # ==============================================================================
@@ -2642,9 +2764,48 @@ class ExportReportCSVView(ReportAccessMixin, View):
     def get(self, request, report_type):
         active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
-        if report_type in ['sales', 'sales_items', 'sales-items', 'sales_itemized', 'sales-itemized']:
+        if report_type in ['sales_summary', 'sales-summary', 'sales_rollup', 'sales-rollup']:
+            filters = {
+                'fiscal_year': request.GET.get('fiscal_year', '').strip(),
+                'start_date': request.GET.get('start_date', ''),
+                'end_date': request.GET.get('end_date', ''),
+                'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),
+                'payment_status': request.GET.get('payment_status', '').strip(),
+                'customer_type': request.GET.get('customer_type', '').strip().lower(),
+                'sale_type': request.GET.get('sale_type', '').strip().lower(),
+                'category_id': request.GET.get('category_id') or request.GET.get('category', ''),
+                'salesperson_id': request.GET.get('salesperson_id') or request.GET.get('salesperson', ''),
+            }
+            res = SalesSummaryService.get_sales_summary_data(filters=filters, user=request.user)
+            if hasattr(CSVExportEngine, 'export_sales_summary_csv'):
+                return CSVExportEngine.export_sales_summary_csv(
+                    records=res['records'],
+                    totals=res['totals'],
+                    filename=f"Sales_Summary_{res['start_date']}_{res['end_date']}.csv"
+                )
+
+        elif report_type in ['sales', 'sales_items', 'sales-items', 'sales_itemized', 'sales-itemized']:
             start_str = request.GET.get('start_date', '').strip()
             end_str = request.GET.get('end_date', '').strip()
+            start_bs = request.GET.get('start_date_bs', '').strip()
+            end_bs = request.GET.get('end_date_bs', '').strip()
+
+            if not start_str and start_bs:
+                try:
+                    parts = [int(p) for p in re.sub(r'[^\d]', '-', start_bs).split('-') if p]
+                    if len(parts) == 3:
+                        start_str = NepaliCalendar.bs_to_ad(parts[0], parts[1], parts[2]).strftime('%Y-%m-%d')
+                except Exception:
+                    pass
+
+            if not end_str and end_bs:
+                try:
+                    parts = [int(p) for p in re.sub(r'[^\d]', '-', end_bs).split('-') if p]
+                    if len(parts) == 3:
+                        end_str = NepaliCalendar.bs_to_ad(parts[0], parts[1], parts[2]).strftime('%Y-%m-%d')
+                except Exception:
+                    pass
+
             qs = SalesEstimate.objects.filter(status__in=['COMPLETED', 'PARTIALLY_RETURNED'])
 
             if active_branch and not request.user.is_superuser:
@@ -2686,35 +2847,11 @@ class ExportReportCSVView(ReportAccessMixin, View):
                 'date_basis': request.GET.get('date_basis', 'bill_date').strip(),
             }
             res = CancelledPurchaseService.get_cancelled_purchase_data(filters=filters, user=request.user)
-            records = res['records']
-            totals = res['totals']
-            response = HttpResponse(content_type='text/csv; charset=utf-8')
-            response['Content-Disposition'] = 'attachment; filename="Cancelled_Purchases_Report.csv"'
-            writer = csv.writer(response)
-            writer.writerow([
-                'GRN Number', 'Supplier Bill Ref', 'Bill Date (AD)', 'Bill Date (BS)', 'Cancellation Timestamp',
-                'Branch Code', 'Branch Name', 'Supplier Name', 'Supplier PAN', 'Supplier Phone',
-                'Received By', 'Cancelled By User', 'IP Address', 'Cancellation Reason',
-                'Gross Amount (NPR)', 'Trade Discount (NPR)', 'Input VAT (NPR)',
-                'Net Invoice Total (NPR)', 'Paid Cash Reversed (NPR)', 'Due AP Reversed (NPR)',
-                'Stock Reversal Executed?'
-            ])
-            for r in records:
-                writer.writerow(sanitize_csv_row([
-                    r['grn_number'], r['supplier_bill_no'], r['bill_date_ad'], r['bill_date_bs'], r['cancel_date_ad_str'],
-                    r['branch_code'], r['branch_name'], r['supplier_name'], r['supplier_pan'], r['supplier_phone'],
-                    r['received_by'], r['cancelled_by'], r['cancel_ip'], r['cancellation_reason'],
-                    f"{r['gross_amount']:.2f}", f"{r['discount_amount']:.2f}", f"{r['vat_amount']:.2f}",
-                    f"{r['net_total_amount']:.2f}", f"{r['paid_amount_reversed']:.2f}",
-                    f"{r['due_amount_reversed']:.2f}", 'Yes (Confirmed Reverted)' if r['is_stock_reverted'] else 'Pending Verification'
-                ]))
-            writer.writerow(sanitize_csv_row([
-                'TOTALS', '', '', '', '', '', f"{totals.get('total_cancelled_bills', len(records))} Voided GRNs", '', '', '', '', '', '', '',
-                f"{totals.get('total_gross_amount', 0):.2f}", f"{totals.get('total_discount_amount', 0):.2f}",
-                f"{totals.get('total_vat_amount', 0):.2f}", f"{totals.get('total_cancelled_amount', 0):.2f}",
-                f"{totals.get('total_paid_reversed', 0):.2f}", f"{totals.get('total_due_reversed', 0):.2f}", ''
-            ]))
-            return response
+            return CSVExportEngine.export_cancelled_purchases_csv(
+                records=res['records'],
+                totals=res['totals'],
+                filename="Cancelled_Purchases_Report.csv"
+            )
 
         elif report_type == 'imei_stock':
             filters = {
@@ -2808,6 +2945,7 @@ class ExportReportCSVView(ReportAccessMixin, View):
 
         elif report_type in ['purchase_register', 'purchase-register', 'purchase_book']:
             filters = {
+                'fiscal_year': request.GET.get('fiscal_year', '').strip(),
                 'start_date': request.GET.get('start_date', ''),
                 'end_date': request.GET.get('end_date', ''),
                 'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),
@@ -2847,9 +2985,9 @@ class ExportReportCSVView(ReportAccessMixin, View):
                 return CSVExportEngine.export_product_purchases_csv(res['records'], res['totals'])
 
         elif report_type in ['supplier_outstanding', 'supplier-outstanding', 'supplier_payables']:
-            # Synchronized supplier filter parameters for CSV export
             supplier_id = request.GET.get('supplier', '').strip()
             filters = {
+                'fiscal_year': request.GET.get('fiscal_year', '').strip(),
                 'start_date': request.GET.get('start_date', ''),
                 'end_date': request.GET.get('end_date', ''),
                 'branch_id': request.GET.get('branch', '') or (active_branch.id if not request.user.is_superuser else ''),

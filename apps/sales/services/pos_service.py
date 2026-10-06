@@ -37,12 +37,14 @@ Core Capabilities & Architectural Safeguards:
      a live physical IMEI in Strict Mode without throwing "Stock Not Found" crashes.
 8. Unified Excess Trade-In Settlement:
    - Routed authoritatively through TradeInValuationEngine.settle_excess_trade_in_credit.
-9. Trade-In Cash Return Guard (Cash Refund Scam Prevention):
-   - In process_sales_return, if an invoice utilized a trade-in exchange credit, cash refunds are
-     strictly capped to the net physical cash tendered on that invoice.
-10. Comprehensive Atomic Bill Cancellation with Payroll Commission Safeguards:
-   - Blocks voiding of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
-   - Restores sold physical merchandise stock, batches, serials, and voids active device warranties.
+9. Digital Tender-Aware Trade-In Cash Return Guard (Cash Refund Scam Prevention):
+   - In process_sales_return, inspects all genuine monetary tenders (Cash, FonePay, eSewa, Khalti, Card, Bank).
+   - Customers who paid via digital channels are not blocked from refunds up to their total monetary spend.
+10. Comprehensive Atomic Bill Cancellation with Payroll & Trade-In Safeguards:
+    - Leaves original journal entry as POSTED and posts an inverted balancing entry to eliminate double-reversal.
+    - Inspects traded-in handsets; if already resold to another customer, locks voucher from reactivation.
+    - Blocks voiding of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
+    - Restores sold physical merchandise stock, batches, serials, and voids active device warranties.
 """
 
 import re
@@ -51,7 +53,7 @@ import inspect
 import logging
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import date, datetime, timedelta
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 from django.db import transaction
 from django.db.models import Q, F, Sum
@@ -126,8 +128,13 @@ class SalesPOSService:
     and automated General Ledger double-entry synchronization.
     """
 
-    DIGITAL_PAYMENT_MODES = {
+    DIGITAL_PAYMENT_MODES: Set[str] = {
         'FONEPAY', 'ESEWA', 'KHALTI', 'CARD', 'POS', 'POS_CARD',
+        'BANK_TRANSFER', 'CONNECT_IPS', 'CHEQUE', 'BANK'
+    }
+
+    GENUINE_MONETARY_PAYMENT_MODES: Set[str] = {
+        'CASH', 'FONEPAY', 'ESEWA', 'KHALTI', 'CARD', 'POS', 'POS_CARD',
         'BANK_TRANSFER', 'CONNECT_IPS', 'CHEQUE', 'BANK'
     }
 
@@ -408,7 +415,6 @@ class SalesPOSService:
             is_vat_applicable=is_shop_vat_registered
         )
 
-        # If the model has a bill_type column, persist it; otherwise set on the in-memory instance
         if hasattr(estimate, 'bill_type'):
             estimate.bill_type = normalized_bill_type
         else:
@@ -1482,7 +1488,6 @@ class SalesPOSService:
                         'recorded_by': cashier
                     }
 
-                    # Safely stamp historical entry dates if columns exist on CustomerUdhaariLedger model
                     customer_ledger_fields = {f.name for f in CustomerUdhaariLedger._meta.get_fields()}
                     if 'entry_date' in customer_ledger_fields:
                         ledger_kwargs['entry_date'] = estimate.bill_date_ad
@@ -1627,7 +1632,7 @@ class SalesPOSService:
 
             for itm in items:
                 acct_name = (itm.account.name or '').upper() if itm.account else ''
-                line_narr = (itm.narration or '').upper()
+                line_narr = (getattr(itm, 'line_narration', '') or '').upper()
                 if itm.debit_amount == tx.amount and (mode_upper in acct_name or mode_upper in line_narr):
                     matched_item = itm
                     break
@@ -1646,17 +1651,18 @@ class SalesPOSService:
                         break
 
             if matched_item:
-                if tx_ref not in (matched_item.narration or ""):
+                current_narr = getattr(matched_item, 'line_narration', '') or ''
+                if tx_ref not in current_narr:
                     ref_tag = f"[{tx.payment_mode} Ref: {tx_ref}]"
-                    if matched_item.narration:
-                        matched_item.narration = f"{matched_item.narration} {ref_tag}"
+                    if current_narr:
+                        matched_item.line_narration = f"{current_narr} {ref_tag}"[:255]
                     else:
-                        matched_item.narration = f"Receipt via {tx.payment_mode} {ref_tag} for {estimate.estimate_number}"
-                    matched_item.save(update_fields=['narration'])
+                        matched_item.line_narration = f"Receipt via {tx.payment_mode} {ref_tag} for {estimate.estimate_number}"[:255]
+                    matched_item.save(update_fields=['line_narration'])
                 items.remove(matched_item)
 
     # =========================================================================
-    # ITEMIZED SALES RETURN & REVERSALS
+    # ITEMIZED SALES RETURN & REVERSALS (DIGITAL PAYMENTS TENDER AWARE)
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -1863,32 +1869,37 @@ class SalesPOSService:
 
             total_refund += refund_val
 
+        # ANTI-SCAM REIMBURSEMENT ENGINE (EXPANDED TO ALL GENUINE MONETARY TENDERS)
         has_trade_in = original_estimate.has_trade_in_exchange and (original_estimate.trade_in_discount_amount > Decimal('0.00'))
         actual_cash_refund = total_refund
         excess_store_credit = Decimal('0.00')
 
         if refund_mode == 'CASH' and has_trade_in:
-            total_cash_paid_on_invoice = original_estimate.payment_transactions.filter(
-                payment_mode='CASH'
-            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            # Query all genuine monetary tenders (Cash, FonePay, eSewa, Khalti, Card, Bank)
+            monetary_payments_qs = original_estimate.payment_transactions.exclude(
+                payment_mode__in=['CREDIT', 'UDHAARI', 'TRADE_IN', 'EXCHANGE']
+            )
+            total_monetary_paid_on_invoice = monetary_payments_qs.aggregate(
+                total=Sum('amount')
+            )['total'] or Decimal('0.00')
 
             previous_cash_refunded = SalesReturn.objects.filter(
                 original_estimate=original_estimate,
                 refund_mode='CASH'
             ).exclude(pk=sales_return.pk).aggregate(total=Sum('total_refund_amount'))['total'] or Decimal('0.00')
 
-            remaining_cash_refundable = max(Decimal('0.00'), total_cash_paid_on_invoice - previous_cash_refunded)
+            remaining_monetary_refundable = max(Decimal('0.00'), total_monetary_paid_on_invoice - previous_cash_refunded)
 
-            if total_refund > remaining_cash_refundable:
-                actual_cash_refund = remaining_cash_refundable
-                excess_store_credit = total_refund - remaining_cash_refundable
+            if total_refund > remaining_monetary_refundable:
+                actual_cash_refund = remaining_monetary_refundable
+                excess_store_credit = total_refund - remaining_monetary_refundable
 
                 if excess_store_credit > Decimal('0.00') and not original_estimate.customer_id:
                     raise ValidationError(
                         f"Anti-Scam Protection: Original invoice {original_estimate.estimate_number} used "
                         f"Rs. {original_estimate.trade_in_discount_amount:.2f} Trade-In exchange allowance. "
-                        f"Physical cash paid on this bill was Rs. {total_cash_paid_on_invoice:.2f} "
-                        f"(remaining cash refundable: Rs. {remaining_cash_refundable:.2f}). "
+                        f"Total real money tendered on this bill (Cash, FonePay, Card, Bank) was Rs. {total_monetary_paid_on_invoice:.2f} "
+                        f"(remaining monetary refund allowed: Rs. {remaining_monetary_refundable:.2f}). "
                         f"The excess return value of Rs. {excess_store_credit:.2f} cannot be paid out as hard cash and "
                         f"must be issued as Store Credit to a registered customer profile. Please select or register the customer."
                     )
@@ -1979,7 +1990,7 @@ class SalesPOSService:
         return sales_return
 
     # =========================================================================
-    # BILL CANCELLATION & BALANCED DOUBLE-ENTRY JOURNAL REVERSAL
+    # BILL CANCELLATION & BALANCED DOUBLE-ENTRY REVERSAL
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -1989,6 +2000,14 @@ class SalesPOSService:
         reason: str,
         user
     ) -> SalesEstimate:
+        """
+        Atomically voids / cancels an active SalesEstimate:
+        1. Leaves original sales journal voucher as POSTED and posts a distinct reversing
+           journal voucher as POSTED, preventing the double-reversal bug in trial balance.
+        2. Guards against resurrecting already-resold trade-in phones: if the traded-in phone
+           was already sold to another customer, the voucher is locked from re-activation.
+        3. Restores unsold inventory, voids device component warranties, and reverses debt.
+        """
         if estimate.status in ['CANCELLED', 'RETURNED']:
             raise ValidationError(f"Bill {estimate.estimate_number} is already {estimate.get_status_display().lower()}.")
 
@@ -2001,6 +2020,7 @@ class SalesPOSService:
 
         estimate = SalesEstimate.objects.select_for_update().get(pk=estimate.pk)
 
+        # 1. Reverse Sold Line Items & Physical Warehouse Stock
         for line in estimate.items.select_related('product', 'item_instance'):
             InventoryService.adjust_stock(
                 product=line.product,
@@ -2060,39 +2080,57 @@ class SalesPOSService:
                     updated_at=timezone.now()
                 )
 
+        # 2. Revert Trade-In Vouchers with Resold Phone Security Guard
         trade_in_filter = Q(pos_estimate=estimate)
         if estimate.trade_in_voucher_reference:
             trade_in_filter |= Q(voucher_number__iexact=estimate.trade_in_voucher_reference)
 
         linked_trade_ins = PhoneExchangeTradeIn.objects.select_for_update().filter(trade_in_filter).distinct()
         trade_ins_reversed = []
+        trade_ins_locked_resold = []
 
         for voucher in linked_trade_ins:
             restocked_item = voucher.restocked_item_instance
             if not restocked_item and voucher.imei_1:
                 restocked_item = ItemInstance.objects.select_for_update().filter(
-                    trade_in_voucher_reference=voucher.voucher_number,
-                    status='IN_STOCK'
-                ).first()
+                    trade_in_voucher_reference=voucher.voucher_number
+                ).exclude(status='ARCHIVED').first()
 
-            if restocked_item:
-                if restocked_item.status == 'IN_STOCK':
-                    restocked_item.status = 'ARCHIVED'
-                    restocked_item.save(update_fields=['status', 'updated_at'])
+            # SECURITY GUARD: Inspect if the traded-in phone was ALREADY resold to another customer!
+            if restocked_item and restocked_item.status == 'SOLD':
+                lock_note = (
+                    f"[LOCKED ON VOID] Traded-in phone (IMEI: {voucher.imei_1}) was already resold on another invoice "
+                    f"({restocked_item.sold_invoice_reference or 'Active Sale'}). "
+                    f"Voucher cannot be reset to VALUATED to prevent duplicate credit claims."
+                )
+                if hasattr(voucher, 'evaluation_notes'):
+                    voucher.evaluation_notes = f"{voucher.evaluation_notes or ''}\n{lock_note}".strip()
+                voucher.pos_estimate = None
+                voucher.status = 'RESTOCKED'
+                voucher.save(update_fields=['pos_estimate', 'status', 'evaluation_notes', 'updated_at'])
+                trade_ins_locked_resold.append(voucher.voucher_number)
+                logger.warning(f"[TradeIn Security Lock] {lock_note}")
+                continue
 
-                    if voucher.restocked_product:
-                        InventoryService.adjust_stock(
-                            product=voucher.restocked_product,
-                            branch=estimate.branch,
-                            quantity_delta=-Decimal('1.000'),
-                            movement_type='TRADE_IN_CANCELLATION',
-                            reference_doc=f"VOID-{estimate.estimate_number}",
-                            imei_or_serial=voucher.imei_1 or voucher.serial_number or "",
-                            remarks=f"Trade-in buy-back intake reversed due to voided bill {estimate.estimate_number}",
-                            user=user,
-                            allow_negative=True
-                        )
+            # If still IN_STOCK, archive it and remove from inventory
+            if restocked_item and restocked_item.status == 'IN_STOCK':
+                restocked_item.status = 'ARCHIVED'
+                restocked_item.save(update_fields=['status', 'updated_at'])
 
+                if voucher.restocked_product:
+                    InventoryService.adjust_stock(
+                        product=voucher.restocked_product,
+                        branch=estimate.branch,
+                        quantity_delta=-Decimal('1.000'),
+                        movement_type='TRADE_IN_CANCELLATION',
+                        reference_doc=f"VOID-{estimate.estimate_number}",
+                        imei_or_serial=voucher.imei_1 or voucher.serial_number or "",
+                        remarks=f"Trade-in buy-back intake reversed due to voided bill {estimate.estimate_number}",
+                        user=user,
+                        allow_negative=True
+                    )
+
+            # Reversal of surplus credit on customer account if applicable
             if estimate.customer_id and estimate.excess_trade_in_credit > Decimal('0.00'):
                 cust = Customer.objects.select_for_update().filter(id=estimate.customer_id, is_active=True).first()
                 if cust:
@@ -2114,6 +2152,7 @@ class SalesPOSService:
                         recorded_by=user
                     )
 
+            # Safe to reset un-sold device voucher back to VALUATED
             voucher.pos_estimate = None
             voucher.status = 'VALUATED'
             if restocked_item and restocked_item.status == 'ARCHIVED':
@@ -2122,6 +2161,7 @@ class SalesPOSService:
             voucher.save(update_fields=['pos_estimate', 'status', 'restocked_item_instance', 'restocked_product', 'updated_at'])
             trade_ins_reversed.append(voucher.voucher_number)
 
+        # 3. Revert Linked Repair Tickets & Payroll Commission
         linked_repairs = RepairTicket.objects.select_for_update().filter(
             pos_invoice_reference=estimate.estimate_number
         )
@@ -2185,6 +2225,7 @@ class SalesPOSService:
             ])
             repairs_reverted.append(ticket.ticket_number)
 
+        # 4. Reconcile Customer Udhaari Debt
         if estimate.customer_id and estimate.due_amount > Decimal('0.00'):
             cust = Customer.objects.select_for_update().filter(id=estimate.customer_id, is_active=True).first()
             if cust:
@@ -2207,14 +2248,20 @@ class SalesPOSService:
                     recorded_by=user
                 )
 
+        # 5. Mark Estimate Status as CANCELLED
         estimate.status = 'CANCELLED'
         estimate.cancellation_reason = reason
         estimate.save(update_fields=['status', 'cancellation_reason', 'updated_at'])
 
+        # 6. Audit Standard General Ledger Reversal (No Double-Reversal)
         try:
             from apps.accounting.models import JournalEntry
             from apps.accounting.services.auto_posting import JournalEngine
 
+            # In standard double-entry bookkeeping:
+            # - Keep the original sales entry as status='POSTED' (do NOT mark CANCELLED).
+            # - Post an equal and opposite reversing entry as status='POSTED'.
+            # - Both entries offset each other to exactly zero in general ledger recalculations.
             orig_entry = JournalEntry.objects.filter(
                 voucher_type='SALES',
                 reference_document=estimate.estimate_number,
@@ -2253,11 +2300,13 @@ class SalesPOSService:
             logger.error(f"[POS Bill Cancellation GL Error] Estimate {estimate.estimate_number}: {err}")
             raise ValidationError(f"Bill cancelled but General Ledger reversal failed: {err}")
 
+        # 7. Forensic Audit Log Entry
         audit_details = {
             'estimate_number': estimate.estimate_number,
             'grand_total': str(estimate.grand_total),
             'due_amount_reversed': str(estimate.due_amount),
             'trade_ins_reversed': trade_ins_reversed,
+            'trade_ins_locked_resold': trade_ins_locked_resold,
             'repairs_reverted': repairs_reverted,
             'reason': reason
         }

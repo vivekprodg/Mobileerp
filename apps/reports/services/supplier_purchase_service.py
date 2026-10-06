@@ -1,6 +1,5 @@
 """
 Supplier Purchase Turnover & Procurement Summary Service.
-File Path: apps/reports/services/supplier_purchase_service.py
 
 Capabilities:
 1. Calculates cumulative procurement turnover by supplier / distributor across any custom date range.

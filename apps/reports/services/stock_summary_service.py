@@ -1,6 +1,5 @@
 """
 Stock Summary Business Logic Service.
-File Path: apps/reports/services/stock_summary_service.py
 
 Calculates complete inventory stock summaries across custom date ranges,
 aggregating historical opening balances, movement transaction types (inward,

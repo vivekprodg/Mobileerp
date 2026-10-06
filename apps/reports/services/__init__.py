@@ -6,7 +6,7 @@ Exposes specialized calculation engines for:
 2. Serialized Phone & IMEI Intelligence (Live IMEI, Single-IMEI Lifecycle, Pre-Owned Trade-In)
 3. Stock Movements, Logistics & Claims (Transfers, Adjustments, Damaged Quarantine, Vendor RMA)
 4. Inventory Aging & FIFO Batches (Stock Aging, Slow-Moving, Batch Stock)
-5. Comprehensive Purchase Reports (Purchase Register, Supplier Purchases, Product Purchases, Supplier Outstanding)
+5. Comprehensive Purchase Reports (Purchase Register, Supplier Purchases, Product Purchases, Supplier Outstanding, Cancelled Purchases)
 6. Sales & Turnover Intelligence Suite (Sales Summary, Detailed Items, Product Sales, Brand, Category,
    Sold IMEIs, Salesperson, Cashier, Tender Modes, Discount Overrides, Trade-In Settlement,
    Gross Profit & Margin Tiers, Top/Slow Velocity, and Cancelled Void Audit)
@@ -50,6 +50,7 @@ from apps.reports.services.purchase_register_service import PurchaseRegisterServ
 from apps.reports.services.supplier_purchase_service import SupplierPurchaseService
 from apps.reports.services.product_purchase_service import ProductPurchaseService
 from apps.reports.services.supplier_outstanding_service import SupplierOutstandingService
+from apps.reports.services.cancelled_purchase_service import CancelledPurchaseService
 
 # -----------------------------------------------------------------------------
 # 6. SALES & TURNOVER INTELLIGENCE SERVICES
@@ -98,6 +99,7 @@ __all__ = [
     'SupplierPurchaseService',
     'ProductPurchaseService',
     'SupplierOutstandingService',
+    'CancelledPurchaseService',
 
     # 6. Sales & Turnover Suite
     'SalesSummaryService',

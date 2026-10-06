@@ -2,16 +2,17 @@
 Django Admin Configuration for Sales, Invoices, POS Checkouts,
 Trade-In Exchanges, and Itemized Sales Returns.
 
-Aligned with:
-- Standard Retail Turnover Accounting (Barter Trade-In = Tender Payment Offset).
-- Bidirectional Bikram Sambat (BS) and Gregorian (AD) Date Synchronization.
-- Safe Police-Compliant Undertaking Administration.
-- Forensic Financial Audit Trail with Role-Based Permission Scoping.
-- Admin-Level Backend Override Capabilities:
-  1. Superusers and Store Owners can safely modify bill dates, customer details,
-     and remarks even on cancelled invoices.
+Aligned with `apps/sales/models.py`:
+- Standard Retail Turnover Accounting: Grand Total reflects merchandise gross sales + tax;
+  Trade-In buy-back allowances operate strictly as tender settlement offsets (barter payment).
+- Bidirectional Bikram Sambat (BS) and Gregorian (AD) Date Synchronization with auto-propagation.
+- Police-Compliant Customer Ownership Undertaking Administration with image evidence previews.
+- Safe Counter and Backend Override Capabilities:
+  1. Superusers and Store Managers can safely modify bill dates, customer details,
+     and remarks without financial total corruption.
   2. Status transitions to CANCELLED in the admin panel are intercepted to execute
-     atomic inventory restock, phone IMEI release, debt reversal, and GL balancing.
+     atomic inventory restock, phone IMEI release, customer debt reversal, and GL balancing.
+- High-Performance Database Scoping using raw_id_fields for scalable customer and product lookups.
 """
 
 from decimal import Decimal
@@ -20,9 +21,14 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
 from apps.sales.models import (
-    SalesEstimate, SalesEstimateItem,
-    SalesPaymentTransaction, SalesReturn, SalesReturnItem,
-    PhoneExchangeTradeIn, TradeInInspectionChecklist, TradeInLegalUndertaking
+    SalesEstimate,
+    SalesEstimateItem,
+    SalesPaymentTransaction,
+    SalesReturn,
+    SalesReturnItem,
+    PhoneExchangeTradeIn,
+    TradeInInspectionChecklist,
+    TradeInLegalUndertaking,
 )
 from apps.sales.services import SalesPOSService
 from apps.core.models import AuditLog
@@ -33,6 +39,7 @@ from apps.core.models import AuditLog
 class SalesEstimateItemInline(admin.TabularInline):
     model = SalesEstimateItem
     extra = 0
+    raw_id_fields = ['product', 'unit_conversion', 'item_instance']
     fields = [
         'product', 'quantity', 'official_unit_price', 'unit_price',
         'price_override_amount', 'discount_type_badge', 'discount_input_value',
@@ -113,6 +120,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         'bill_date_bs', 'fiscal_year', 'trade_in_voucher_reference',
         'items__imei_number', 'items__secondary_imei', 'items__serial_number', 'discount_reason'
     ]
+    raw_id_fields = ['branch', 'customer', 'cashier', 'salesperson', 'manager_override_by']
     inlines = [SalesEstimateItemInline, SalesPaymentTransactionInline]
 
     fieldsets = (
@@ -252,7 +260,6 @@ class SalesEstimateAdmin(admin.ModelAdmin):
                     f"Cancellation failed for bill '{obj.estimate_number}': {str(err)}",
                     level=messages.ERROR
                 )
-                # Keep original status to prevent database inconsistency
                 obj.status = old_status
                 return
 
@@ -278,11 +285,9 @@ class SalesEstimateAdmin(admin.ModelAdmin):
             )
 
     def has_add_permission(self, request):
-        # Invoices must be generated through the POS Counter Terminal
         return False
 
     def has_delete_permission(self, request, obj=None):
-        # Bills cannot be hard-deleted; they must be voided to preserve audit continuity
         return False
 
     def has_change_permission(self, request, obj=None):
@@ -407,6 +412,7 @@ class TradeInLegalUndertakingInline(admin.StackedInline):
     model = TradeInLegalUndertaking
     extra = 0
     can_delete = False
+    raw_id_fields = ['verified_by']
     fields = [
         'customer_full_name', 'customer_father_or_spouse_name',
         ('id_type', 'id_number'),
@@ -462,6 +468,10 @@ class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
         'customer_name_manual', 'customer_phone_manual'
     ]
     readonly_fields = ['voucher_number', 'fiscal_year', 'created_at', 'updated_at']
+    raw_id_fields = [
+        'branch', 'customer', 'cashier', 'inspector_technician',
+        'pos_estimate', 'restocked_product', 'restocked_item_instance'
+    ]
     inlines = [TradeInInspectionChecklistInline, TradeInLegalUndertakingInline]
 
     fieldsets = (
@@ -552,6 +562,7 @@ class TradeInLegalUndertakingAdmin(admin.ModelAdmin):
         'customer_full_name', 'id_number', 'trade_in_voucher__voucher_number',
         'permanent_address', 'customer_father_or_spouse_name'
     ]
+    raw_id_fields = ['trade_in_voucher', 'verified_by']
     readonly_fields = ['preview_customer_photo', 'preview_id_front', 'preview_id_back', 'created_at', 'updated_at']
 
     fieldsets = (
@@ -615,6 +626,7 @@ class TradeInLegalUndertakingAdmin(admin.ModelAdmin):
 class SalesReturnItemInline(admin.TabularInline):
     model = SalesReturnItem
     extra = 0
+    raw_id_fields = ['estimate_item', 'product']
     fields = [
         'product', 'return_quantity', 'base_unit_quantity', 'refund_amount',
         'discount_type', 'discount_input_value', 'item_discount_amount',
@@ -642,6 +654,7 @@ class SalesReturnAdmin(admin.ModelAdmin):
         'customer__name', 'customer__phone_number', 'return_date_bs', 'fiscal_year',
         'reason', 'items__returned_imei'
     ]
+    raw_id_fields = ['original_estimate', 'branch', 'customer', 'processed_by']
     inlines = [SalesReturnItemInline]
     readonly_fields = ['return_number', 'fiscal_year', 'total_refund_amount', 'created_at', 'updated_at']
 

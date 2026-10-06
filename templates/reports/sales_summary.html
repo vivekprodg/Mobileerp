@@ -1,50 +1,121 @@
 {% extends "core/base.html" %}
-{% load humanize static %}
+{% load humanize static core_tags %}
 
 {% block title %}Sales Summary Report (Date-Wise &amp; Fiscal Year) | {{ COMPANY_NAME }}{% endblock %}
 
 {% block extra_head %}
+<!-- Chart.js CDN for Visual Trend Analytics -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
 <style>
+/* ==========================================================================
+   GROWERP / HISAAV SALES SUMMARY SUITE & 14-COLUMN LEDGER DESIGN SYSTEM
+   ========================================================================== */
+:root {
+    --rep-slate-900: #0f172a;
+    --rep-slate-800: #1e293b;
+    --rep-slate-700: #334155;
+    --rep-slate-600: #475569;
+    --rep-slate-500: #64748b;
+    --rep-slate-300: #cbd5e1;
+    --rep-slate-200: #e2e8f0;
+    --rep-slate-100: #f1f5f9;
+    --rep-slate-50:  #f8fafc;
+
+    --rep-primary:     #2563eb;
+    --rep-primary-subtle: #eff6ff;
+    --rep-success:     #10b981;
+    --rep-success-subtle: #ecfdf5;
+    --rep-warning:     #f59e0b;
+    --rep-warning-subtle: #fffbeb;
+    --rep-danger:      #ef4444;
+    --rep-danger-subtle: #fef2f2;
+    --rep-purple:      #8b5cf6;
+    --rep-purple-subtle: #f5f3ff;
+}
+
+/* Horizontal Ribbon Pills */
 .sales-suite-pill {
     padding: 6px 14px;
     border-radius: 999px;
     font-size: 0.75rem;
     font-weight: 700;
-    border: 1px solid var(--erp-slate-200);
+    border: 1px solid var(--rep-slate-200);
     background: #ffffff;
-    color: var(--erp-slate-600);
+    color: var(--rep-slate-600);
     text-decoration: none;
     transition: all 0.15s ease;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    white-space: nowrap;
 }
 .sales-suite-pill:hover, .sales-suite-pill.active {
-    background-color: var(--erp-primary) !important;
+    background-color: var(--rep-primary) !important;
     color: #ffffff !important;
-    border-color: var(--erp-primary) !important;
+    border-color: var(--rep-primary) !important;
     box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
 }
+
+/* 8 Executive KPI Cards */
 .report-kpi-card {
     background: #ffffff;
-    border: 1px solid var(--erp-slate-200);
+    border: 1px solid var(--rep-slate-200);
     border-radius: 16px;
-    padding: 18px 20px;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
-    transition: all 0.2s ease;
+    padding: 16px 18px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
 }
 .report-kpi-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 10px 20px -5px rgba(15, 23, 42, 0.08);
+}
+.kpi-accent-blue   { border-top: 4px solid var(--rep-primary); }
+.kpi-accent-green  { border-top: 4px solid var(--rep-success); }
+.kpi-accent-purple { border-top: 4px solid var(--rep-purple); }
+.kpi-accent-amber  { border-top: 4px solid var(--rep-warning); }
+.kpi-accent-slate  { border-top: 4px solid var(--rep-slate-700); }
+.kpi-accent-teal   { border-top: 4px solid #0d9488; }
+.kpi-accent-rose   { border-top: 4px solid #f43f5e; }
+.kpi-accent-red    { border-top: 4px solid var(--rep-danger); }
+
+/* Quick Date Jump Pills */
+.date-quick-pill {
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    border: 1px solid var(--rep-slate-200);
+    background: #ffffff;
+    color: var(--rep-slate-700);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+.date-quick-pill:hover, .date-quick-pill.active {
+    background: var(--rep-slate-800);
+    color: #ffffff;
+    border-color: var(--rep-slate-800);
+}
+
+/* Primary 14-Column Ledger Table */
+.sticky-table-container {
+    max-height: calc(100vh - 280px);
+    overflow: auto;
+    border-radius: 12px;
 }
 .table-sales-summary th {
-    font-size: 0.70rem;
+    font-size: 0.69rem;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    padding: 10px 8px;
+    padding: 9px 8px;
     white-space: nowrap;
-    background-color: #0f172a !important;
+    background-color: var(--rep-slate-900) !important;
     color: #ffffff !important;
     vertical-align: middle;
 }
@@ -55,38 +126,132 @@
     white-space: nowrap;
 }
 .col-num {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
     font-variant-numeric: tabular-nums;
     text-align: right;
 }
 .nepali-date-badge {
-    background-color: #eff6ff;
-    color: #1d4ed8;
+    background-color: var(--rep-primary-subtle);
+    color: var(--rep-primary);
     border: 1px solid #bfdbfe;
     font-weight: 800;
-    font-size: 0.78rem;
-    padding: 2px 8px;
+    font-size: 0.76rem;
+    padding: 2px 7px;
     border-radius: 6px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
     letter-spacing: 0.02em;
 }
 .fy-badge {
-    background: #0f172a;
+    background: var(--rep-slate-900);
     color: #ffffff;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
     font-weight: 700;
     font-size: 0.72rem;
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* Secondary & Tertiary Surface Panels */
+.report-sub-card {
+    background: #ffffff;
+    border: 1px solid var(--rep-slate-200);
+    border-radius: 16px;
+    padding: 20px;
+    height: 100%;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+.report-sub-header {
+    border-bottom: 1px solid var(--rep-slate-100);
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Waterfall Accounting Item */
+.waterfall-step {
+    padding: 10px 14px;
+    border-radius: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8125rem;
+    margin-bottom: 8px;
+    border: 1px solid transparent;
+}
+.waterfall-step.step-opening { background-color: #f8fafc; border-color: #e2e8f0; }
+.waterfall-step.step-add     { background-color: #fef2f2; border-color: #fecdd3; color: #b91c1c; }
+.waterfall-step.step-sub     { background-color: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+.waterfall-step.step-ret     { background-color: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.waterfall-step.step-closing { background-color: #0f172a; color: #ffffff; font-weight: 800; }
+
+/* Print Stylesheet Overrides (Point 3.9) */
+@media print {
+    .no-print,
+    .sales-suite-pill,
+    nav,
+    aside,
+    header,
+    footer,
+    #sidebarOffcanvas,
+    form,
+    .btn,
+    .pagination,
+    #salesTableFilterInput {
+        display: none !important;
+    }
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 8.5pt !important;
+    }
+    @page {
+        size: A4 landscape;
+        margin: 8mm 10mm;
+    }
+    .container-fluid {
+        max-width: 100% !important;
+        padding: 0 !important;
+    }
+    .report-kpi-card,
+    .report-sub-card,
+    .card {
+        border: 1px solid #cbd5e1 !important;
+        box-shadow: none !important;
+        page-break-inside: avoid;
+    }
+    .table-responsive,
+    .sticky-table-container {
+        overflow: visible !important;
+        max-height: none !important;
+    }
+    .table-sales-summary th {
+        background-color: #1e293b !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    tfoot tr {
+        background-color: #0f172a !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1760px;">
+<div class="container-fluid px-3 px-md-4 py-4" style="max-width: 1760px;">
 
-    <!-- Sales Suite Navigation Ribbon -->
-    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
+    <!-- =====================================================================
+         1. SALES SUITE HORIZONTAL NAVIGATION RIBBON (ALL 15 MODULES)
+         ===================================================================== -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap no-print">
         <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-layer-group text-primary me-1"></i> Sales Suite:</span>
         <a href="{% url 'reports:sales_summary' %}" class="sales-suite-pill active text-nowrap">
             <i class="fas fa-chart-pie text-white"></i> Daily Summary
@@ -115,6 +280,12 @@
         <a href="{% url 'reports:payment_methods' %}" class="sales-suite-pill text-nowrap">
             <i class="fas fa-wallet text-secondary"></i> Payment Modes
         </a>
+        <a href="{% url 'reports:discount_overrides' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-percent text-secondary"></i> Discounts &amp; Overrides
+        </a>
+        <a href="{% url 'reports:trade_in_sales' %}" class="sales-suite-pill text-nowrap">
+            <i class="fas fa-repeat text-secondary"></i> Trade-In Deals
+        </a>
         <a href="{% url 'reports:gross_profit' %}" class="sales-suite-pill text-nowrap">
             <i class="fas fa-coins text-warning"></i> Gross Profit
         </a>
@@ -129,24 +300,26 @@
         </a>
     </div>
 
-    <!-- Page Header & Action Controls -->
+    <!-- =====================================================================
+         2. PAGE HEADER STRIP (POINT 3.2)
+         ===================================================================== -->
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
             <div class="d-flex align-items-center gap-2 flex-wrap">
-                <h4 class="fw-bold text-dark mb-0">
+                <h4 class="fw-bold text-dark mb-0 tracking-tight">
                     <i class="fas fa-calendar-days text-primary me-2"></i> Date-Wise Sales Summary &amp; Collection Rollup
                 </h4>
                 {% if fiscal_year %}
                     <span class="fy-badge">
-                        <i class="fas fa-landmark me-1 text-warning"></i> FY {{ fiscal_year }} (आ.व. {{ fiscal_year }})
+                        <i class="fas fa-landmark text-warning"></i> FY {{ fiscal_year }} (आ.व. {{ fiscal_year }})
                     </span>
                 {% endif %}
             </div>
             <p class="text-muted fs-xs mb-0 mt-1">
-                Chronological daily rollup of sales volume, line and bill discounts, output VAT, landed COGS, gross profit, and tender breakdowns
+                Executive master ledger reconciling daily turnover, mobile vs. accessory units, commercial discounts, customer returns, net cash/digital inflow, and gross margins
             </p>
         </div>
-        <div class="d-flex flex-wrap gap-2 align-items-center">
+        <div class="d-flex flex-wrap gap-2 align-items-center no-print">
             <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
                class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
                 <i class="fas fa-file-csv me-1"></i> Export CSV
@@ -155,105 +328,57 @@
                 <i class="fas fa-print me-1"></i> Print Sheet
             </button>
             <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning btn-sm rounded-pill px-4 fw-bold text-dark shadow-xs">
-                <i class="fas fa-bolt me-1"></i> Open POS Terminal
+                <i class="fas fa-bolt me-1"></i> Open POS Terminal [F2]
             </a>
         </div>
     </div>
 
-    <!-- 4 High-Priority Financial KPI Cards -->
-    <div class="row g-3 mb-4">
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="report-kpi-card border-start border-primary border-4 h-100">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="text-muted text-uppercase fw-bold fs-2xs">Net Turnover Billed</span>
-                    <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle">
-                        <i class="fas fa-receipt fs-6"></i>
-                    </span>
-                </div>
-                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
-                    Rs. {{ totals.total_net_turnover|default:0|floatformat:2|intcomma }}
-                </h3>
-                <small class="text-muted fs-2xs">{{ totals.total_invoices|default:0 }} Bills &bull; {{ totals.total_units_sold|floatformat:0 }} Units Sold</small>
-            </div>
+    <!-- =====================================================================
+         3. PREMIUM MULTI-PARAMETER FILTER PANEL (POINT 3.3)
+         ===================================================================== -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 p-md-4 bg-white mb-4 no-print">
+        
+        <!-- Upper Row: Quick Date Jump Pills -->
+        <div class="d-flex align-items-center gap-1.5 mb-3 pb-2.5 border-bottom flex-wrap">
+            <span class="fs-2xs fw-bold text-uppercase text-muted pe-1">
+                <i class="fas fa-bolt-lightning text-warning me-1"></i> Quick Dates:
+            </span>
+            <button type="button" class="date-quick-pill" data-preset="today">Today (आज)</button>
+            <button type="button" class="date-quick-pill" data-preset="yesterday">Yesterday (हिजो)</button>
+            <button type="button" class="date-quick-pill" data-preset="this_week">This Week (यो हप्ता)</button>
+            <button type="button" class="date-quick-pill" data-preset="this_month">This Month (यो महिना)</button>
+            <button type="button" class="date-quick-pill" data-preset="last_month">Last Month (अघिल्लो महिना)</button>
+            <button type="button" class="date-quick-pill" data-preset="custom">Custom Range</button>
         </div>
 
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="report-kpi-card border-start border-success border-4 h-100">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="text-success text-uppercase fw-bold fs-2xs">Realized Gross Profit</span>
-                    <span class="badge bg-success bg-opacity-10 text-success p-2 rounded-circle">
-                        <i class="fas fa-arrow-trend-up fs-6"></i>
-                    </span>
-                </div>
-                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
-                    Rs. {{ totals.total_profit|default:0|floatformat:2|intcomma }}
-                </h3>
-                <small class="text-success fs-2xs fw-bold">{{ totals.overall_margin_pct }}% Average Gross Margin</small>
-            </div>
-        </div>
-
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="report-kpi-card border-start border-warning border-4 h-100">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Total Discounts Given</span>
-                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis p-2 rounded-circle">
-                        <i class="fas fa-percent fs-6"></i>
-                    </span>
-                </div>
-                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
-                    -Rs. {{ totals.total_sales_disc|default:0|floatformat:2|intcomma }}
-                </h3>
-                <small class="text-muted fs-2xs">Items: Rs. {{ totals.total_item_disc|floatformat:2|intcomma }} | Bill: Rs. {{ totals.total_bill_disc|floatformat:2|intcomma }}</small>
-            </div>
-        </div>
-
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="report-kpi-card border-start border-danger border-4 h-100">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="text-danger text-uppercase fw-bold fs-2xs">Pending Due (Udhaari)</span>
-                    <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle">
-                        <i class="fas fa-hand-holding-dollar fs-6"></i>
-                    </span>
-                </div>
-                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
-                    Rs. {{ totals.total_due|default:0|floatformat:2|intcomma }}
-                </h3>
-                <small class="text-muted fs-2xs">Paid on Invoicing: Rs. {{ totals.total_paid|floatformat:2|intcomma }}</small>
-            </div>
-        </div>
-    </div>
-
-    <!-- Enhanced Multi-Calendar Filter Toolbar with Fiscal Year Selector & Dual B.S. Datepicker Inputs -->
-    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-end" id="salesSummaryFilterForm">
+        <form method="get" class="row g-2.5 align-items-end" id="salesSummaryFilterForm">
             
-            <!-- 1. Nepali Fiscal Year Selector (Dropdown) -->
-            <div class="col-12 col-md-3">
+            <!-- 1. Fiscal Year Selector -->
+            <div class="col-12 col-sm-6 col-md-3 col-xl-2">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">
-                    <i class="fas fa-landmark text-primary me-1"></i> Nepali Fiscal Year (आर्थिक वर्ष)
+                    <i class="fas fa-landmark text-primary me-1"></i> Fiscal Year (आ.व.)
                 </label>
                 <select name="fiscal_year" id="fiscalYearSelect" class="form-select form-select-sm bg-light border-0 fw-bold text-dark">
-                    <option value="">-- Custom Date Range --</option>
+                    <option value="">-- Custom Range --</option>
                     {% if available_fiscal_years %}
                         {% for fy in available_fiscal_years %}
-                            <option value="{{ fy }}" {% if request.GET.fiscal_year == fy or fiscal_year == fy and not request.GET.start_date %}selected{% endif %}>
-                                Fiscal Year {{ fy }} (आ.व. {{ fy }})
+                            <option value="{{ fy }}" {% if filters.fiscal_year == fy or fiscal_year == fy and not filters.start_date %}selected{% endif %}>
+                                FY {{ fy }} (आ.व. {{ fy }})
                             </option>
                         {% endfor %}
                     {% else %}
-                        <option value="2082/83" {% if request.GET.fiscal_year == "2082/83" %}selected{% endif %}>Fiscal Year 2082/83 (आ.व. २०८२/८३)</option>
-                        <option value="2081/82" {% if request.GET.fiscal_year == "2081/82" or fiscal_year == "2081/82" and not request.GET.start_date %}selected{% endif %}>Fiscal Year 2081/82 (आ.व. २०८१/८२)</option>
-                        <option value="2080/81" {% if request.GET.fiscal_year == "2080/81" or fiscal_year == "2080/81" and not request.GET.start_date %}selected{% endif %}>Fiscal Year 2080/81 (आ.व. २०८०/८१)</option>
-                        <option value="2079/80" {% if request.GET.fiscal_year == "2079/80" %}selected{% endif %}>Fiscal Year 2079/80 (आ.व. २०७९/८०)</option>
-                        <option value="2078/79" {% if request.GET.fiscal_year == "2078/79" %}selected{% endif %}>Fiscal Year 2078/79 (आ.व. २०७८/७९)</option>
+                        <option value="2083/84" {% if fiscal_year == "2083/84" %}selected{% endif %}>FY 2083/84</option>
+                        <option value="2082/83" {% if fiscal_year == "2082/83" %}selected{% endif %}>FY 2082/83</option>
+                        <option value="2081/82" {% if fiscal_year == "2081/82" %}selected{% endif %}>FY 2081/82</option>
+                        <option value="2080/81" {% if fiscal_year == "2080/81" %}selected{% endif %}>FY 2080/81</option>
                     {% endif %}
                 </select>
             </div>
 
-            <!-- 2. Dual Nepali Date Input 1: Start Date (B.S.) with Interactive Calendar Picker -->
-            <div class="col-6 col-md-2">
+            <!-- 2. Start Date (B.S. & A.D. Sync) -->
+            <div class="col-6 col-md-2 col-xl-2">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">
-                    <i class="far fa-calendar-alt text-primary me-1"></i> Start Date (B.S. मिति)
+                    From Date (B.S. / मिति)
                 </label>
                 <div class="input-group input-group-sm">
                     <input type="text" 
@@ -263,14 +388,14 @@
                            class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
                            placeholder="YYYY-MM-DD (BS)" 
                            autocomplete="off">
-                    <span class="input-group-text bg-light border-0 text-muted fs-2xs">BS</span>
+                    <span class="input-group-text bg-light border-0 text-muted fs-3xs">BS</span>
                 </div>
             </div>
 
-            <!-- 3. Dual Nepali Date Input 2: End Date (B.S.) with Interactive Calendar Picker -->
-            <div class="col-6 col-md-2">
+            <!-- 3. End Date (B.S. & A.D. Sync) -->
+            <div class="col-6 col-md-2 col-xl-2">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">
-                    <i class="far fa-calendar-alt text-primary me-1"></i> End Date (B.S. मिति)
+                    To Date (B.S. / मिति)
                 </label>
                 <div class="input-group input-group-sm">
                     <input type="text" 
@@ -280,15 +405,15 @@
                            class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
                            placeholder="YYYY-MM-DD (BS)" 
                            autocomplete="off">
-                    <span class="input-group-text bg-light border-0 text-muted fs-2xs">BS</span>
+                    <span class="input-group-text bg-light border-0 text-muted fs-3xs">BS</span>
                 </div>
             </div>
 
-            <!-- 4. Store Outlet Branch Selector -->
-            <div class="col-6 col-md-2">
+            <!-- 4. Store Outlet Branch -->
+            <div class="col-6 col-md-2 col-xl-2">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">Store Outlet</label>
                 <select name="branch" class="form-select form-select-sm bg-light border-0">
-                    <option value="all">All Outlets</option>
+                    <option value="all">All Store Outlets</option>
                     {% for br in branches %}
                         <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>
                             {{ br.name }} ({{ br.code }})
@@ -297,28 +422,76 @@
                 </select>
             </div>
 
-            <!-- 5. Payment Status Selector -->
-            <div class="col-6 col-md-2">
+            <!-- 5. Sales Representative -->
+            <div class="col-6 col-md-3 col-xl-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Sales Representative</label>
+                <select name="salesperson" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Sales Reps</option>
+                    {% for sp in salespeople %}
+                        <option value="{{ sp.id }}" {% if filters.salesperson_id == sp.id|stringformat:"s" %}selected{% endif %}>
+                            {{ sp.get_full_name|default:sp.username }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 6. Customer Type Filter -->
+            <div class="col-6 col-md-2 col-xl-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Customer Type</label>
+                <select name="customer_type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Customer Types</option>
+                    <option value="walkin" {% if filters.customer_type == 'walkin' %}selected{% endif %}>Walk-in (Counter Retail)</option>
+                    <option value="registered" {% if filters.customer_type == 'registered' %}selected{% endif %}>Registered Regular Clients</option>
+                    <option value="wholesale" {% if filters.customer_type == 'wholesale' %}selected{% endif %}>B2B / Wholesale Dealers</option>
+                </select>
+            </div>
+
+            <!-- 7. Sale Type Filter -->
+            <div class="col-6 col-md-2 col-xl-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Sale Settlement Type</label>
+                <select name="sale_type" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Transactions</option>
+                    <option value="cash" {% if filters.sale_type == 'cash' %}selected{% endif %}>100% Cash / Instant Paid</option>
+                    <option value="credit" {% if filters.sale_type == 'credit' %}selected{% endif %}>Udhaari / Credit Bills</option>
+                    <option value="exchange" {% if filters.sale_type == 'exchange' %}selected{% endif %}>Trade-In Exchange Deals</option>
+                </select>
+            </div>
+
+            <!-- 8. Merchandise Category -->
+            <div class="col-6 col-md-3 col-xl-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Category</label>
+                <select name="category" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Categories</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat.id }}" {% if filters.category_id == cat.id|stringformat:"s" %}selected{% endif %}>
+                            {{ cat.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 9. Payment Status -->
+            <div class="col-6 col-md-2 col-xl-2">
                 <label class="form-label fs-2xs fw-bold text-muted mb-1">Payment Status</label>
                 <select name="payment_status" class="form-select form-select-sm bg-light border-0">
-                    <option value="">All Payments</option>
+                    <option value="">All Statuses</option>
                     <option value="PAID" {% if filters.payment_status == 'PAID' %}selected{% endif %}>Fully Paid</option>
                     <option value="PARTIAL" {% if filters.payment_status == 'PARTIAL' %}selected{% endif %}>Partial Payment</option>
                     <option value="DUE" {% if filters.payment_status == 'DUE' %}selected{% endif %}>Full Due (Udhaari)</option>
                 </select>
             </div>
 
-            <!-- 6. Filter & Reset Controls -->
-            <div class="col-12 col-md-1 d-flex gap-1">
-                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
-                {% if filters.start_date or filters.end_date or filters.branch_id or filters.payment_status or request.GET.fiscal_year %}
-                <a href="{% url 'reports:sales_summary' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
-                {% endif %}
+            <!-- Filter Submit & Reset -->
+            <div class="col-12 col-xl-2 d-flex gap-1.5 ms-auto">
+                <button type="submit" class="btn btn-primary btn-sm w-100 rounded-3 fw-bold">
+                    <i class="fas fa-filter me-1"></i> Apply Filter
+                </button>
+                <a href="{% url 'reports:sales_summary' %}" class="btn btn-outline-secondary btn-sm rounded-3 px-2.5" title="Reset Filters">↺</a>
             </div>
         </form>
 
-        <!-- Active Scope Feedback Strip -->
-        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 pt-2 border-top fs-2xs text-muted">
+        <!-- Active Scope Summary Feedback Strip -->
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-2.5 border-top fs-2xs text-muted">
             <div class="d-flex align-items-center gap-2 flex-wrap">
                 <span>Active Scope (B.S.): <strong class="text-primary font-mono">{{ start_date_bs }}</strong> to <strong class="text-primary font-mono">{{ end_date_bs }} BS</strong></span>
                 <span class="text-muted">&bull;</span>
@@ -330,156 +503,927 @@
             </div>
             <div>
                 Store Context: <strong class="text-dark">{{ selected_branch.name|default:"All Outlets" }}</strong>
+                <span class="badge bg-light text-dark border ms-1.5">{{ records.paginator.count|default:records|length }} Days Logged</span>
             </div>
         </div>
     </div>
 
-    <!-- Date-Wise Rollup Table (Prominent Nepali B.S. Date per row) -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
-        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-            <h6 class="fw-bold text-dark mb-0">
-                <i class="fas fa-table-list text-secondary me-2"></i> Daily Sales Aggregations
-            </h6>
-            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Days Logged</span>
+    <!-- =====================================================================
+         4. 8 EXECUTIVE FINANCIAL KPI CARDS (POINT 3.4)
+         ===================================================================== -->
+    <div class="row g-3 mb-4">
+        
+        <!-- Card 1: Total Sales / Net Turnover -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card kpi-accent-blue">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-muted text-uppercase fw-bold fs-2xs">Total Net Turnover</span>
+                        <span class="badge bg-primary bg-opacity-10 text-primary p-2 rounded-circle"><i class="fas fa-receipt fs-6"></i></span>
+                    </div>
+                    <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                        Rs. {{ kpi_cards.total_sales|default:totals.total_net_turnover|floatformat:2|intcomma }}
+                    </h3>
+                </div>
+                <div class="pt-2 border-top mt-2 text-muted fs-2xs">
+                    Gross Subtotal: <strong class="text-dark font-mono">Rs. {{ kpi_cards.gross_sales|default:totals.total_gross|floatformat:2|intcomma }}</strong>
+                </div>
+            </div>
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 table-sales-summary table-bordered">
+        <!-- Card 2: Realized Gross Profit -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card kpi-accent-green">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-success text-uppercase fw-bold fs-2xs">Realized Gross Profit</span>
+                        <span class="badge bg-success bg-opacity-10 text-success fw-bold font-monospace fs-2xs px-2 py-1">
+                            {{ kpi_cards.overall_margin_pct|default:totals.overall_margin_pct }}% Margin
+                        </span>
+                    </div>
+                    <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                        Rs. {{ kpi_cards.gross_profit|default:totals.total_profit|floatformat:2|intcomma }}
+                    </h3>
+                </div>
+                <div class="pt-2 border-top mt-2 text-muted fs-2xs">
+                    Total Landed COGS: <strong class="text-dark font-mono">Rs. {{ kpi_cards.total_cogs|default:totals.total_cogs|floatformat:2|intcomma }}</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 3: Amount Collected -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card kpi-accent-purple">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-purple text-uppercase fw-bold fs-2xs" style="color: var(--rep-purple);">Amount Collected</span>
+                        <span class="badge bg-purple bg-opacity-10 text-purple fw-bold font-monospace fs-2xs px-2 py-1" style="color: var(--rep-purple); background: var(--rep-purple-subtle);">
+                            {{ kpi_cards.collection_rate_pct|default:"0.0" }}% Realized
+                        </span>
+                    </div>
+                    <h3 class="fw-extrabold font-monospace mt-2 mb-0" style="color: var(--rep-purple);">
+                        Rs. {{ kpi_cards.amount_collected|default:totals.total_collected|floatformat:2|intcomma }}
+                    </h3>
+                </div>
+                <div class="pt-2 border-top mt-2 text-muted fs-2xs">
+                    Cash &amp; Digital Inflow Tendered
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 4: Credit / Due Sales (New Udhaari) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card kpi-accent-amber">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-warning-emphasis text-uppercase fw-bold fs-2xs">Credit Sales (New Udhaari)</span>
+                        <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold font-monospace fs-2xs px-2 py-1">
+                            {{ kpi_cards.credit_bills_count|default:0 }} Bills
+                        </span>
+                    </div>
+                    <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-2 mb-0">
+                        Rs. {{ kpi_cards.credit_due_sales|default:totals.total_due|floatformat:2|intcomma }}
+                    </h3>
+                </div>
+                <div class="pt-2 border-top mt-2 text-muted fs-2xs">
+                    New debt incurred during selected period
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 5: Total Invoices / Bills -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card kpi-accent-slate">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-muted text-uppercase fw-bold fs-2xs">Total Invoices Billed</span>
+                        <span class="badge bg-dark text-white p-2 rounded-circle"><i class="fas fa-file-invoice fs-6"></i></span>
+                    </div>
+                    <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                        {{ kpi_cards.total_bills|default:totals.total_invoices|default:0 }} <span class="fs-6 fw-normal text-muted">Bills</span>
+                    </h3>
+                </div>
+                <div class="pt-2 border-top mt-2 text-muted fs-2xs">
+                    Avg Basket Value: <strong class="text-dark font-mono">Rs. {{ kpi_cards.avg_bill_value|default:"0.00"|floatformat:2|intcomma }}</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 6: Total Units Sold (Handset vs Accessory Split) -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card kpi-accent-teal">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-uppercase fw-bold fs-2xs" style="color: #0f766e;">Total Units Sold</span>
+                        <span class="badge bg-teal bg-opacity-10 text-teal p-2 rounded-circle" style="background:#ccfbf1; color:#0f766e;"><i class="fas fa-boxes-stacked fs-6"></i></span>
+                    </div>
+                    <h3 class="fw-extrabold font-monospace mt-2 mb-0" style="color: #0f766e;">
+                        {{ kpi_cards.units_sold|default:totals.total_units_sold|floatformat:0|intcomma }} <span class="fs-6 fw-normal text-muted">Units</span>
+                    </h3>
+                </div>
+                <div class="pt-2 border-top mt-2 text-muted fs-2xs d-flex justify-content-between">
+                    <span>📱 Phones: <strong class="text-dark">{{ kpi_cards.mobiles_sold|default:totals.total_mobiles|floatformat:0 }}</strong></span>
+                    <span>🎧 Accessories: <strong class="text-dark">{{ kpi_cards.accessories_sold|default:totals.total_accessories|floatformat:0 }}</strong></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 7: Total Discounts Conceded -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card kpi-accent-rose">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-uppercase fw-bold fs-2xs" style="color: #be123c;">Discounts Conceded</span>
+                        <span class="badge bg-danger bg-opacity-10 text-danger p-2 rounded-circle"><i class="fas fa-percent fs-6"></i></span>
+                    </div>
+                    <h3 class="fw-extrabold font-monospace mt-2 mb-0" style="color: #be123c;">
+                        -Rs. {{ kpi_cards.total_discounts|default:totals.total_sales_disc|floatformat:2|intcomma }}
+                    </h3>
+                </div>
+                <div class="pt-2 border-top mt-2 text-muted fs-2xs d-flex justify-content-between">
+                    <span>Line: <strong class="text-dark">-Rs. {{ totals.total_item_disc|floatformat:2|intcomma }}</strong></span>
+                    <span>Bill: <strong class="text-dark">-Rs. {{ totals.total_bill_disc|floatformat:2|intcomma }}</strong></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card 8: Outstanding Customer Receivable -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card kpi-accent-red">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-danger text-uppercase fw-bold fs-2xs">Reconciled Receivables</span>
+                        <span class="badge bg-danger text-white p-2 rounded-circle"><i class="fas fa-scale-balanced fs-6"></i></span>
+                    </div>
+                    <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                        Rs. {{ kpi_cards.outstanding_receivable|default:reconciliation.closing_due|floatformat:2|intcomma }}
+                    </h3>
+                </div>
+                <div class="pt-2 border-top mt-2 text-muted fs-2xs">
+                    Closing customer ledger debt standing
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- =====================================================================
+         5. LIGHTWEIGHT DUAL-AXIS VISUAL ANALYTICS (POINT 3.5)
+         ===================================================================== -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 mb-3">
+            <div>
+                <h6 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-chart-line text-primary me-2"></i> Daily Sales Turnover vs. Collections &amp; Gross Profit
+                </h6>
+                <small class="text-muted fs-2xs">Visual comparison of revenue performance against cash/digital realization</small>
+            </div>
+            <div class="d-flex align-items-center gap-3 fs-2xs text-muted">
+                <span class="d-inline-flex align-items-center gap-1.5">
+                    <span style="width: 10px; height: 10px; border-radius: 50%; background: #2563eb; display: inline-block;"></span> Net Sales
+                </span>
+                <span class="d-inline-flex align-items-center gap-1.5">
+                    <span style="width: 10px; height: 10px; border-radius: 50%; background: #10b981; display: inline-block;"></span> Collections
+                </span>
+                <span class="d-inline-flex align-items-center gap-1.5">
+                    <span style="width: 10px; height: 10px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span> Gross Profit
+                </span>
+            </div>
+        </div>
+
+        <div style="position: relative; height: 250px; width: 100%;">
+            <canvas id="salesSummaryTrendCanvas"></canvas>
+        </div>
+    </div>
+
+    <!-- =====================================================================
+         6. PRIMARY 14-COLUMN DATE-WISE SALES TABLE (POINT 3.6)
+         ===================================================================== -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2.5">
+            <div>
+                <h6 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-table-list text-secondary me-2"></i> Chronological Daily Ledger Breakdown (14-Column Format)
+                </h6>
+                <small class="text-muted fs-3xs">Daily revenue, unit splits, concessions, VAT, COGS, returns, and net cash/digital inflow</small>
+            </div>
+            
+            <div class="d-flex align-items-center gap-2 no-print">
+                <!-- Instant Client-Side Table Filter Input -->
+                <div class="input-group input-group-sm" style="width: 260px;">
+                    <span class="input-group-text bg-white border"><i class="fas fa-search text-muted fs-3xs"></i></span>
+                    <input type="text" id="salesTableFilterInput" class="form-control font-monospace border" placeholder="Filter daily rows in view...">
+                </div>
+                <span class="badge bg-secondary rounded-pill px-3 py-1 fs-2xs" id="tableRowsCounterBadge">
+                    {{ records.paginator.count|default:records|length }} Days Logged
+                </span>
+            </div>
+        </div>
+
+        <div class="table-responsive sticky-table-container">
+            <table class="table table-hover align-middle mb-0 table-sales-summary table-bordered" id="masterSalesSummaryTable">
                 <thead>
                     <tr>
-                        <th class="ps-3">Nepali Date (B.S.) / A.D.</th>
-                        <th class="text-center">Bills</th>
-                        <th class="text-center">Units Sold</th>
-                        <th class="text-end">Gross Subtotal</th>
-                        <th class="text-end">Total Discounts</th>
-                        <th class="text-end">Trade-In Credit</th>
-                        <th class="text-end">Tax / VAT</th>
-                        <th class="text-end">Grand Total</th>
-                        <th class="text-end">Landed COGS</th>
-                        <th class="text-end">Gross Profit</th>
-                        <th class="text-end">Margin %</th>
-                        <th class="text-end">Cash Inflow</th>
-                        <th class="text-end">Digital (QR/Wallets)</th>
-                        <th class="text-end pe-3">Udhaari Added</th>
+                        <th class="ps-3">1. Date (B.S. / A.D.)</th>
+                        <th class="text-center">2. Bills</th>
+                        <th class="text-center">3. Mobiles</th>
+                        <th class="text-center">4. Accessories</th>
+                        <th class="text-end">5. Gross Sales</th>
+                        <th class="text-end">6. Discounts</th>
+                        <th class="text-end">7. Net Sales</th>
+                        <th class="text-end">8. COGS Cost</th>
+                        <th class="text-end">9. Gross Profit</th>
+                        <th class="text-end">10. Margin %</th>
+                        <th class="text-end">11. Collected</th>
+                        <th class="text-end">12. Credit (Due)</th>
+                        <th class="text-end">13. Returns</th>
+                        <th class="text-end pe-3">14. Net Collection</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="salesSummaryTableBody">
                     {% for r in records %}
-                    <tr>
-                        <!-- Prominent Nepali B.S. Date as Primary Identifier -->
+                    <tr class="summary-data-row">
+                        <!-- 1. Prominent B.S. Date Badge with Gregorian A.D. -->
                         <td class="ps-3 font-monospace">
                             <span class="nepali-date-badge">
                                 <i class="far fa-calendar-check me-1 text-primary"></i>{{ r.date_bs }} BS
                             </span>
-                            <small class="text-muted d-block fs-2xs mt-1 ps-1">AD: {{ r.date_ad_str }}</small>
+                            <small class="text-muted d-block fs-3xs mt-0.5 ps-0.5">AD: {{ r.date_ad_str }}</small>
                         </td>
 
-                        <td class="text-center font-monospace fw-bold">{{ r.invoice_count }}</td>
-                        <td class="text-center font-monospace fw-semibold">{{ r.units_sold|floatformat:0 }}</td>
-                        <td class="col-num">Rs. {{ r.gross_subtotal|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-danger">{% if r.total_discount_sum > 0 %}-Rs. {{ r.total_discount_sum|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
-                        <td class="col-num text-warning-emphasis">{% if r.trade_in_credit_sum > 0 %}-Rs. {{ r.trade_in_credit_sum|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
-                        <td class="col-num text-muted">Rs. {{ r.vat_amount|floatformat:2|intcomma }}</td>
-                        <td class="col-num fw-bold text-dark">Rs. {{ r.grand_total|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-muted">Rs. {{ r.cogs_amount|floatformat:2|intcomma }}</td>
-                        
-                        <td class="col-num fw-bold text-success">
+                        <!-- 2. Bills Count Badge -->
+                        <td class="text-center font-monospace fw-bold">
+                            <span class="badge bg-light text-dark border">{{ r.invoice_count }}</span>
+                        </td>
+
+                        <!-- 3. Mobiles Sold Quantity -->
+                        <td class="text-center font-monospace fw-bold text-primary">
+                            {{ r.mobiles_sold|floatformat:0 }}
+                        </td>
+
+                        <!-- 4. Accessories Sold Quantity -->
+                        <td class="text-center font-monospace text-muted">
+                            {{ r.accessories_sold|floatformat:0 }}
+                        </td>
+
+                        <!-- 5. Gross Sales Subtotal -->
+                        <td class="col-num font-monospace text-muted">
+                            Rs. {{ r.gross_subtotal|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 6. Discounts (Highlighted in Red) -->
+                        <td class="col-num font-monospace text-danger fw-semibold">
+                            {% if r.total_discount_sum > 0 %}
+                                -Rs. {{ r.total_discount_sum|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <!-- 7. Net Sales Revenue (Grand Total) -->
+                        <td class="col-num font-monospace fw-bold text-dark">
+                            Rs. {{ r.net_sales|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 8. Landed COGS Cost -->
+                        <td class="col-num font-monospace text-muted">
+                            Rs. {{ r.cogs_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 9. Realized Gross Profit (Highlighted in Green) -->
+                        <td class="col-num font-monospace fw-bold text-success">
                             Rs. {{ r.gross_profit|floatformat:2|intcomma }}
                         </td>
 
+                        <!-- 10. Margin % (Semantic Pill Badge) -->
                         <td class="col-num">
-                            <span class="badge bg-success bg-opacity-10 text-success fw-bold font-monospace fs-2xs">
+                            <span class="badge bg-success bg-opacity-10 text-success fw-bold font-monospace fs-3xs px-2 py-0.5">
                                 {{ r.margin_percent }}%
                             </span>
                         </td>
 
-                        <td class="col-num text-dark">Rs. {{ r.cash_collected|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-primary">Rs. {{ r.fonepay_collected|add:r.esewa_collected|add:r.khalti_collected|floatformat:2|intcomma }}</td>
-                        
-                        <td class="col-num pe-3">
+                        <!-- 11. Amount Collected -->
+                        <td class="col-num font-monospace text-dark">
+                            Rs. {{ r.collected|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 12. Credit (Due Incurred, Highlighted in Amber) -->
+                        <td class="col-num font-monospace text-warning-emphasis fw-bold">
                             {% if r.due_amount > 0 %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold font-monospace fs-2xs">
-                                    Rs. {{ r.due_amount|floatformat:2|intcomma }}
-                                </span>
+                                Rs. {{ r.due_amount|floatformat:2|intcomma }}
                             {% else %}
-                                <span class="text-muted font-monospace fs-2xs">0.00</span>
+                                <span class="text-muted fw-normal">0.00</span>
                             {% endif %}
+                        </td>
+
+                        <!-- 13. Returns & Refunds Deducted (Highlighted in Red) -->
+                        <td class="col-num font-monospace text-danger">
+                            {% if r.refund_amount > 0 %}
+                                -Rs. {{ r.refund_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted">0.00</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 14. Net Collection (Real Inflow Retained) -->
+                        <td class="col-num pe-3 font-monospace fw-bold text-success fs-xs">
+                            Rs. {{ r.net_collection|floatformat:2|intcomma }}
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
                         <td colspan="14" class="text-center py-5 text-muted">
                             <i class="fas fa-calendar-xmark fs-1 text-secondary opacity-25 d-block mb-3"></i>
-                            <h6 class="fw-bold text-dark mb-1">No Sales Recorded in Period</h6>
-                            <p class="text-muted fs-xs mb-0">Try changing your fiscal year, selecting another date range, or switching store outlets.</p>
+                            <h6 class="fw-bold text-dark mb-1">No Sales Transactions Recorded</h6>
+                            <p class="text-muted fs-xs mb-0">No completed bills match your active fiscal year or date range.</p>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
 
+                <!-- Sticky Grand Total Footer Row -->
                 {% if records %}
-                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" id="salesSummaryTableFoot" style="background-color: var(--rep-slate-900) !important; color: #ffffff;">
                     <tr>
                         <td class="ps-3 text-uppercase text-white-50">Grand Totals:</td>
-                        <td class="text-center col-num text-white">{{ totals.total_invoices }}</td>
-                        <td class="text-center col-num text-white">{{ totals.total_units_sold|floatformat:0 }}</td>
-                        <td class="col-num text-white-50">Rs. {{ totals.total_gross|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-warning-emphasis">-Rs. {{ totals.total_sales_disc|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white-50">-Rs. {{ totals.total_trade_in|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white-50">Rs. {{ totals.total_vat|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white fs-6">Rs. {{ totals.total_net_turnover|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white-50">Rs. {{ totals.total_cogs|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-success fs-6">Rs. {{ totals.total_profit|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-success">{{ totals.overall_margin_pct }}%</td>
-                        <td class="col-num text-white">Rs. {{ totals.total_cash|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white">Rs. {{ totals.total_fonepay|add:totals.total_esewa|add:totals.total_khalti|floatformat:2|intcomma }}</td>
-                        <td class="col-num pe-3 text-danger fs-6">Rs. {{ totals.total_due|floatformat:2|intcomma }}</td>
+                        <td class="text-center col-num text-white fs-6" id="footBills">{{ totals.total_invoices|default:0 }}</td>
+                        <td class="text-center col-num text-primary fs-6" id="footMobiles">{{ totals.total_mobiles|default:0|floatformat:0 }}</td>
+                        <td class="text-center col-num text-white-50" id="footAccessories">{{ totals.total_accessories|default:0|floatformat:0 }}</td>
+                        <td class="col-num text-white-50" id="footGross">Rs. {{ totals.total_gross|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning-emphasis" id="footDiscounts">-Rs. {{ totals.total_sales_disc|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white fs-6" id="footNet">Rs. {{ totals.total_net_turnover|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50" id="footCogs">Rs. {{ totals.total_cogs|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success fs-6" id="footProfit">Rs. {{ totals.total_profit|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success" id="footMargin">{{ totals.overall_margin_pct|default:0 }}%</td>
+                        <td class="col-num text-white" id="footCollected">Rs. {{ totals.total_collected|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning" id="footDue">Rs. {{ totals.total_due|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger" id="footReturns">-Rs. {{ totals.total_returns|default:0|floatformat:2|intcomma }}</td>
+                        <td class="pe-3 col-num text-success fs-6" id="footNetCollection">Rs. {{ totals.total_net_collection|default:0|floatformat:2|intcomma }}</td>
                     </tr>
                 </tfoot>
                 {% endif %}
             </table>
         </div>
 
-        <div class="p-3 border-top bg-light">
+        <div class="p-3 border-top bg-light no-print">
             {% include "includes/_pagination.html" %}
         </div>
     </div>
 
+    <!-- =====================================================================
+         7. SECONDARY SPLIT GRID: PAYMENTS ROLLUP & RECONCILIATION (POINT 3.7)
+         ===================================================================== -->
+    <div class="row g-4 mb-4">
+        
+        <!-- Left: Payment Mode Breakdown Card -->
+        <div class="col-12 col-lg-6">
+            <div class="report-sub-card">
+                <div class="report-sub-header">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-wallet text-primary me-2"></i> Payment Tender Channel Rollup
+                        </h6>
+                        <small class="text-muted fs-2xs">Realized cash, digital QR wallets, bank transfers, and credit</small>
+                    </div>
+                    <span class="badge bg-primary rounded-pill px-2.5 py-1 font-mono fs-3xs">
+                        {{ payment_rollup|length }} Channels
+                    </span>
+                </div>
+
+                <div class="space-y-3">
+                    {% for p in payment_rollup %}
+                    <div class="p-2.5 bg-light rounded-3 border mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <div class="d-flex align-items-center gap-2">
+                                <span style="width: 10px; height: 10px; border-radius: 50%; background: {{ p.dot_color }}; display: inline-block;"></span>
+                                <strong class="text-dark fs-xs">{{ p.label }}</strong>
+                                <span class="badge bg-white text-muted border font-mono fs-3xs">{{ p.bills_count }} Bills</span>
+                            </div>
+                            <div class="text-end">
+                                <span class="font-mono fw-bold text-dark fs-xs">Rs. {{ p.amount|floatformat:2|intcomma }}</span>
+                                <span class="badge bg-white text-dark border font-mono fs-3xs ms-1">{{ p.percent }}%</span>
+                            </div>
+                        </div>
+                        <div class="progress" style="height: 6px; border-radius: 999px;">
+                            <div class="progress-bar" role="progressbar" style="width: {{ p.percent }}%; background-color: {{ p.dot_color }};"></div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div class="text-center py-4 text-muted fs-xs">No tender transactions logged.</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Daily Collection & Due Reconciliation Waterfall -->
+        <div class="col-12 col-lg-6">
+            <div class="report-sub-card">
+                <div class="report-sub-header">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-scale-balanced text-primary me-2"></i> Accounts Receivable (Udhaari) Reconciliation
+                        </h6>
+                        <small class="text-muted fs-2xs">Accounting waterfall linking credit sales to customer ledger</small>
+                    </div>
+                    <span class="badge bg-dark rounded-pill px-2.5 py-1 font-mono fs-3xs">Ledger Audit</span>
+                </div>
+
+                <div>
+                    <!-- Step 1: Opening Due -->
+                    <div class="waterfall-step step-opening">
+                        <span><strong>1. Opening Due Balance</strong> (Before Period)</span>
+                        <span class="font-mono fw-bold text-dark">Rs. {{ reconciliation.opening_due|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+
+                    <!-- Step 2: New Credit Sales -->
+                    <div class="waterfall-step step-add">
+                        <span><strong>(+) New Credit Incurred</strong> (Billed as Udhaari)</span>
+                        <span class="font-mono fw-bold">+Rs. {{ reconciliation.credit_sales|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+
+                    <!-- Step 3: Old Udhaari Collections Recovered -->
+                    <div class="waterfall-step step-sub">
+                        <span><strong>(&minus;) Old Collections Recovered</strong> (Cash/QR Payouts)</span>
+                        <span class="font-mono fw-bold">&minus;Rs. {{ reconciliation.collections_recovered|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+
+                    <!-- Step 4: Returns / Store Credit Adjustments -->
+                    <div class="waterfall-step step-ret">
+                        <span><strong>(&minus;) Returns &amp; Store Credit Adjusted</strong></span>
+                        <span class="font-mono fw-bold">&minus;Rs. {{ reconciliation.returns_adjustments|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+
+                    <!-- Step 5: Closing Due Receivable -->
+                    <div class="waterfall-step step-closing">
+                        <span><strong>(=) Reconciled Closing Receivable</strong> (End of Scope)</span>
+                        <span class="font-mono fw-bold fs-6">Rs. {{ reconciliation.closing_due|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                </div>
+
+                <small class="text-muted fs-3xs d-block mt-2">
+                    * Reconciled directly with customer sub-ledgers. Excludes voided bills and unauthorized entries.
+                </small>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- =====================================================================
+         8. TERTIARY GRID: MOBILES, BRANDS, EXCHANGE & RETURNS (POINT 3.8)
+         ===================================================================== -->
+    <div class="row g-4">
+        
+        <!-- Panel 1: Smartphones Overview & Top 5 Brands -->
+        <div class="col-12 col-lg-5">
+            <div class="report-sub-card">
+                <div class="report-sub-header">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-mobile-screen text-primary me-2"></i> Smartphone Sales &amp; Top Brands
+                        </h6>
+                        <small class="text-muted fs-2xs">Handset volumes, ASP, and brand performance</small>
+                    </div>
+                    <span class="badge bg-primary rounded-pill px-2.5 py-1 font-mono fs-3xs">Handset Audit</span>
+                </div>
+
+                <!-- Mini Phone Metrics Strip -->
+                <div class="row g-2 mb-3 fs-xs text-center">
+                    <div class="col-4 p-2 bg-light rounded-3 border">
+                        <span class="text-muted fs-3xs text-uppercase d-block fw-bold">Phones Sold</span>
+                        <strong class="text-primary font-mono fs-6">{{ mobile_overview.total_phones_sold|default:0 }}</strong>
+                    </div>
+                    <div class="col-4 p-2 bg-light rounded-3 border">
+                        <span class="text-muted fs-3xs text-uppercase d-block fw-bold">Turnover</span>
+                        <strong class="text-dark font-mono fs-xs">Rs. {{ mobile_overview.phone_sales_value|default:0|floatformat:0|intcomma }}</strong>
+                    </div>
+                    <div class="col-4 p-2 bg-light rounded-3 border">
+                        <span class="text-muted fs-3xs text-uppercase d-block fw-bold">Average Price (ASP)</span>
+                        <strong class="text-success font-mono fs-xs">Rs. {{ mobile_overview.asp|default:0|floatformat:0|intcomma }}</strong>
+                    </div>
+                </div>
+
+                <!-- Top 5 Phone Brands Table -->
+                <span class="text-uppercase fw-bold fs-3xs text-muted d-block mb-1.5">Top 5 Performing Brands:</span>
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered align-middle fs-xs mb-0">
+                        <thead class="bg-light text-muted fs-3xs text-uppercase">
+                            <tr>
+                                <th>Brand</th>
+                                <th class="text-center">Units</th>
+                                <th class="text-end">Revenue</th>
+                                <th class="text-end">Profit</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for b in mobile_overview.top_brands %}
+                            <tr>
+                                <td class="fw-bold text-dark">{{ b.brand_name }}</td>
+                                <td class="text-center font-mono">{{ b.units }}</td>
+                                <td class="text-end font-mono">Rs. {{ b.sales|floatformat:0|intcomma }}</td>
+                                <td class="text-end font-mono text-success fw-bold">Rs. {{ b.profit|floatformat:0|intcomma }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4" class="text-center py-2 text-muted fs-3xs">No smartphone brand sales recorded.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel 2: Trade-In / Satta Exchange Summary -->
+        <div class="col-12 col-sm-6 col-lg-3.5 col-xl-3.5">
+            <div class="report-sub-card">
+                <div class="report-sub-header">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-repeat text-warning me-2"></i> Trade-In &amp; Exchange Summary
+                        </h6>
+                        <small class="text-muted fs-2xs">Handset buy-backs &amp; barter credit</small>
+                    </div>
+                    <span class="badge bg-warning text-dark rounded-pill px-2.5 py-1 font-mono fs-3xs">Satta</span>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom fs-xs">
+                        <span class="text-muted">Exchange Handsets Received:</span>
+                        <strong class="font-mono text-dark">{{ trade_in_summary.exchange_phones_count|default:0 }} Phones</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom fs-xs">
+                        <span class="text-muted">Total Buy-Back Credit Allowed:</span>
+                        <strong class="font-mono text-danger">-Rs. {{ trade_in_summary.total_trade_in_value|default:0|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom fs-xs">
+                        <span class="text-muted">New Phone Sales on Exchange:</span>
+                        <strong class="font-mono text-dark">Rs. {{ trade_in_summary.new_phone_sales_exchange|default:0|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-2 fs-xs">
+                        <span class="text-muted">Cash Top-Up Recovered:</span>
+                        <strong class="font-mono text-success">Rs. {{ trade_in_summary.cash_topup_collected|default:0|floatformat:2|intcomma }}</strong>
+                    </div>
+                </div>
+
+                <div class="p-2.5 bg-warning bg-opacity-10 rounded-3 border border-warning border-opacity-25 mt-3 text-center">
+                    <a href="{% url 'reports:trade_in_sales' %}" class="fs-2xs fw-bold text-dark text-decoration-none">
+                        View Detailed Trade-In Deals &rarr;
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel 3: Returns & Adjustments Audit -->
+        <div class="col-12 col-sm-6 col-lg-3.5 col-xl-3.5">
+            <div class="report-sub-card">
+                <div class="report-sub-header">
+                    <div>
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-rotate-left text-danger me-2"></i> Returns &amp; Adjustments Audit
+                        </h6>
+                        <small class="text-muted fs-2xs">Reversals, restocks, and cash refunds</small>
+                    </div>
+                    <span class="badge bg-danger rounded-pill px-2.5 py-1 font-mono fs-3xs">Returns</span>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom fs-xs">
+                        <span class="text-muted">Returned Bills Handled:</span>
+                        <strong class="font-mono text-dark">{{ returns_summary.returned_bills_count|default:0 }} Vouchers</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom fs-xs">
+                        <span class="text-muted">Total Units Restocked:</span>
+                        <strong class="font-mono text-dark">{{ returns_summary.returned_units_count|default:0 }} Units</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-2 border-bottom fs-xs">
+                        <span class="text-muted">Total Return Refund Value:</span>
+                        <strong class="font-mono text-danger">-Rs. {{ returns_summary.total_return_amount|default:0|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center py-2 fs-xs">
+                        <span class="text-muted">Cash Payouts vs Store Credit:</span>
+                        <span class="font-mono fs-3xs">
+                            <strong class="text-danger">Rs. {{ returns_summary.cash_refunds_issued|default:0|floatformat:0 }}</strong> / 
+                            <strong class="text-info">Rs. {{ returns_summary.store_credit_issued|default:0|floatformat:0 }}</strong>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="p-2.5 bg-danger bg-opacity-10 rounded-3 border border-danger border-opacity-25 mt-3 text-center">
+                    <a href="{% url 'sales:return_list' %}" class="fs-2xs fw-bold text-danger text-decoration-none">
+                        View Customer Returns Registry &rarr;
+                    </a>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
 </div>
 
-<!-- Client-Side Synchronization Script for Fiscal Year & Dual B.S. Datepicker Inputs -->
+<!-- Data Islands for Visual Trend Chart -->
+<script id="data-daily-labels" type="application/json">
+    [{% for r in records reversed %}"{{ r.date_bs }}"{% if not forloop.last %},{% endif %}{% endfor %}]
+</script>
+<script id="data-daily-sales" type="application/json">
+    [{% for r in records reversed %}{{ r.net_sales|stringformat:".2f" }}{% if not forloop.last %},{% endif %}{% endfor %}]
+</script>
+<script id="data-daily-collections" type="application/json">
+    [{% for r in records reversed %}{{ r.collected|stringformat:".2f" }}{% if not forloop.last %},{% endif %}{% endfor %}]
+</script>
+<script id="data-daily-profit" type="application/json">
+    [{% for r in records reversed %}{{ r.gross_profit|stringformat:".2f" }}{% if not forloop.last %},{% endif %}{% endfor %}]
+</script>
+{% endblock %}
+
+{% block extra_scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const fySelect = document.getElementById('fiscalYearSelect');
-    const startDateInput = document.getElementById('startDateBs');
-    const endDateInput = document.getElementById('endDateBs');
+    // -------------------------------------------------------------
+    // 1. Chart.js Dual-Axis Trend Visualization (Point 3.5)
+    // -------------------------------------------------------------
+    function parseJsonIsland(id, fallback) {
+        const el = document.getElementById(id);
+        if (!el) return fallback;
+        try {
+            return JSON.parse(el.textContent.trim()) || fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
 
-    if (fySelect && startDateInput && endDateInput) {
-        // When user picks a fiscal year from the dropdown, clear the date fields so the backend evaluates the full fiscal year range cleanly
+    const chartCanvas = document.getElementById('salesSummaryTrendCanvas');
+    if (chartCanvas && typeof Chart !== 'undefined') {
+        const labels = parseJsonIsland('data-daily-labels', []);
+        const salesData = parseJsonIsland('data-daily-sales', []);
+        const collectionsData = parseJsonIsland('data-daily-collections', []);
+        const profitData = parseJsonIsland('data-daily-profit', []);
+
+        const ctx = chartCanvas.getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels.length ? labels : ['No Data'],
+                datasets: [
+                    {
+                        label: 'Net Sales Turnover',
+                        data: salesData.length ? salesData : [0],
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                        fill: true,
+                        tension: 0.35,
+                        borderWidth: 2.5,
+                        pointRadius: 3,
+                        pointHoverRadius: 6,
+                    },
+                    {
+                        label: 'Collections (Inflow)',
+                        data: collectionsData.length ? collectionsData : [0],
+                        borderColor: '#10b981',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        tension: 0.35,
+                        pointRadius: 2.5,
+                        pointHoverRadius: 5,
+                    },
+                    {
+                        label: 'Realized Gross Profit',
+                        data: profitData.length ? profitData : [0],
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        borderDash: [4, 4],
+                        tension: 0.35,
+                        pointRadius: 2.5,
+                        pointHoverRadius: 5,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#0f172a',
+                        titleFont: { family: 'Plus Jakarta Sans', size: 12, weight: '700' },
+                        bodyFont: { family: 'JetBrains Mono', size: 11 },
+                        padding: 10,
+                        cornerRadius: 8,
+                        callbacks: {
+                            label: function (context) {
+                                return ' ' + context.dataset.label + ': Rs. ' + Number(context.parsed.y).toLocaleString();
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { font: { family: 'JetBrains Mono', size: 10 }, color: '#64748b' }
+                    },
+                    y: {
+                        border: { dash: [4, 4] },
+                        grid: { color: '#f1f5f9' },
+                        ticks: {
+                            font: { family: 'JetBrains Mono', size: 10 },
+                            color: '#64748b',
+                            callback: function (val) {
+                                if (val >= 10000000) return (val / 10000000).toFixed(1) + ' Cr';
+                                if (val >= 100000) return (val / 100000).toFixed(0) + ' Lk';
+                                if (val >= 1000) return (val / 1000).toFixed(0) + 'k';
+                                return val;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // -------------------------------------------------------------
+    // 2. Quick Date Jump Preset Buttons (Point 3.3)
+    // -------------------------------------------------------------
+    const startBs = document.getElementById('startDateBs');
+    const endBs = document.getElementById('endDateBs');
+    const filterForm = document.getElementById('salesSummaryFilterForm');
+    const fySelect = document.getElementById('fiscalYearSelect');
+
+    const TODAY_BS = "{{ CURRENT_BS_DATE_EN|default:'' }}";
+
+    document.querySelectorAll('.date-quick-pill').forEach(pill => {
+        pill.addEventListener('click', function () {
+            document.querySelectorAll('.date-quick-pill').forEach(p => p.classList.remove('active'));
+            this.classList.add('active');
+
+            const preset = this.dataset.preset;
+            if (preset === 'custom') return;
+
+            if (fySelect) fySelect.value = '';
+
+            const today = new Date();
+            let start = new Date();
+            let end = new Date();
+
+            if (preset === 'today') {
+                if (startBs && endBs && TODAY_BS) {
+                    startBs.value = TODAY_BS;
+                    endBs.value = TODAY_BS;
+                    filterForm.submit();
+                    return;
+                }
+            } else if (preset === 'yesterday') {
+                start.setDate(today.getDate() - 1);
+                end.setDate(today.getDate() - 1);
+            } else if (preset === 'this_week') {
+                const day = today.getDay(); // 0 is Sunday
+                start.setDate(today.getDate() - day);
+            } else if (preset === 'this_month') {
+                // If Nepali picker functions exist, pick 1st of current BS month
+                if (TODAY_BS && TODAY_BS.length >= 7) {
+                    startBs.value = TODAY_BS.substring(0, 7) + '-01';
+                    endBs.value = TODAY_BS;
+                    filterForm.submit();
+                    return;
+                }
+                start.setDate(1);
+            } else if (preset === 'last_month') {
+                if (TODAY_BS && TODAY_BS.length >= 7) {
+                    const parts = TODAY_BS.split('-');
+                    let y = parseInt(parts[0], 10);
+                    let m = parseInt(parts[1], 10) - 1;
+                    if (m < 1) { m = 12; y -= 1; }
+                    const mm = String(m).padStart(2, '0');
+                    startBs.value = `${y}-${mm}-01`;
+                    endBs.value = `${y}-${mm}-30`;
+                    filterForm.submit();
+                    return;
+                }
+                start.setMonth(today.getMonth() - 1, 1);
+                end = new Date(today.getFullYear(), today.getMonth(), 0);
+            }
+
+            const formatDateAD = (d) => d.toISOString().split('T')[0];
+            if (startBs && endBs) {
+                startBs.value = formatDateAD(start);
+                endBs.value = formatDateAD(end);
+                filterForm.submit();
+            }
+        });
+    });
+
+    // -------------------------------------------------------------
+    // 3. Client-Side Instant Table Search & Recalculation (Point 3.6)
+    // -------------------------------------------------------------
+    const searchInput = document.getElementById('salesTableFilterInput');
+    const tableBody = document.getElementById('salesSummaryTableBody');
+    const counterBadge = document.getElementById('tableRowsCounterBadge');
+
+    if (searchInput && tableBody) {
+        searchInput.addEventListener('input', function () {
+            const query = this.value.toLowerCase().trim();
+            const rows = tableBody.querySelectorAll('tr.summary-data-row');
+
+            let visibleCount = 0;
+            let sumBills = 0;
+            let sumMobiles = 0;
+            let sumAccessories = 0;
+            let sumGross = 0;
+            let sumDiscounts = 0;
+            let sumNet = 0;
+            let sumCogs = 0;
+            let sumProfit = 0;
+            let sumCollected = 0;
+            let sumDue = 0;
+            let sumReturns = 0;
+            let sumNetCollection = 0;
+
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(query)) {
+                    row.style.display = '';
+                    visibleCount++;
+
+                    // Extract numbers from cells
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length >= 14) {
+                        sumBills += parseFloat(cells[1].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumMobiles += parseFloat(cells[2].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumAccessories += parseFloat(cells[3].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumGross += parseFloat(cells[4].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumDiscounts += Math.abs(parseFloat(cells[5].textContent.replace(/[^0-9.-]/g, '')) || 0);
+                        sumNet += parseFloat(cells[6].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumCogs += parseFloat(cells[7].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumProfit += parseFloat(cells[8].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumCollected += parseFloat(cells[10].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumDue += parseFloat(cells[11].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                        sumReturns += Math.abs(parseFloat(cells[12].textContent.replace(/[^0-9.-]/g, '')) || 0);
+                        sumNetCollection += parseFloat(cells[13].textContent.replace(/[^0-9.-]/g, '')) || 0;
+                    }
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+
+            if (counterBadge) {
+                counterBadge.textContent = `${visibleCount} Days Showing`;
+            }
+
+            // Update footer totals
+            const setFoot = (id, val, prefix = '') => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = `${prefix}${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            };
+
+            const footBills = document.getElementById('footBills');
+            if (footBills) footBills.textContent = sumBills.toString();
+
+            const footMobiles = document.getElementById('footMobiles');
+            if (footMobiles) footMobiles.textContent = sumMobiles.toString();
+
+            const footAccessories = document.getElementById('footAccessories');
+            if (footAccessories) footAccessories.textContent = sumAccessories.toString();
+
+            setFoot('footGross', sumGross, 'Rs. ');
+            setFoot('footDiscounts', sumDiscounts, '-Rs. ');
+            setFoot('footNet', sumNet, 'Rs. ');
+            setFoot('footCogs', sumCogs, 'Rs. ');
+            setFoot('footProfit', sumProfit, 'Rs. ');
+
+            const footMargin = document.getElementById('footMargin');
+            if (footMargin) {
+                const mPct = sumNet > 0 ? ((sumProfit / sumNet) * 100).toFixed(1) : '0.0';
+                footMargin.textContent = `${mPct}%`;
+            }
+
+            setFoot('footCollected', sumCollected, 'Rs. ');
+            setFoot('footDue', sumDue, 'Rs. ');
+            setFoot('footReturns', sumReturns, '-Rs. ');
+            setFoot('footNetCollection', sumNetCollection, 'Rs. ');
+        });
+    }
+
+    // -------------------------------------------------------------
+    // 4. Fiscal Year Dropdown Auto-Sync
+    // -------------------------------------------------------------
+    if (fySelect && startBs && endBs) {
         fySelect.addEventListener('change', () => {
-            const chosenFy = fySelect.value.trim();
-            if (chosenFy) {
-                startDateInput.value = '';
-                endDateInput.value = '';
-                startDateInput.placeholder = 'Fiscal Year Active';
-                endDateInput.placeholder = 'Fiscal Year Active';
+            const chosen = fySelect.value.trim();
+            if (chosen) {
+                startBs.value = '';
+                endBs.value = '';
+                startBs.placeholder = 'Fiscal Year Active';
+                endBs.placeholder = 'Fiscal Year Active';
             } else {
-                startDateInput.placeholder = 'YYYY-MM-DD (BS)';
-                endDateInput.placeholder = 'YYYY-MM-DD (BS)';
+                startBs.placeholder = 'YYYY-MM-DD (BS)';
+                endBs.placeholder = 'YYYY-MM-DD (BS)';
             }
         });
 
-        // When user picks or types into custom B.S. date fields, reset the fiscal year selector to custom mode
-        [startDateInput, endDateInput].forEach(inp => {
+        [startBs, endBs].forEach(inp => {
             inp.addEventListener('input', () => {
-                if (inp.value.trim() !== '') {
-                    fySelect.value = '';
-                }
-            });
-            inp.addEventListener('change', () => {
-                if (inp.value.trim() !== '') {
-                    fySelect.value = '';
-                }
+                if (inp.value.trim() !== '') fySelect.value = '';
             });
         });
     }

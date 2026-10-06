@@ -1,16 +1,17 @@
 """
 Taxation & Proforma Book Report Generator (Annex 5 Sales Book, Annex 7 Purchase Book & Daily VAT Ledger).
-File Path: apps/taxation/reports.py
 
 Capabilities:
-1. Generates Sales Register (Annex 5 style) in estimation / proforma breakdown format.
+1. Generates Sales Register (Annex 5 style) in estimation / proforma breakdown format:
    - Includes COMPLETED and PARTIALLY_RETURNED sales estimates.
-   - Accurately deducts return refunds and tax adjustments from taxable and non-taxable columns.
-2. Generates Purchase Register (Annex 7 style) for all verified GRN vouchers.
+   - Deducts sales returns based on the return's own verified date (return_date_ad), ensuring
+     cross-period returns correctly impact the tax period when the credit note occurred.
+2. Generates Purchase Register (Annex 7 style) for all verified GRN vouchers:
    - Retrieves the complete set of GRN fields: gross subtotal, trade discount, input VAT,
      shipping overheads (freight, customs, handling), landed inventory cost, net total,
      spot cash paid, and outstanding balance added to the supplier ledger.
-   - Computes cumulative summary totals across all financial columns.
+   - Accurately deducts confirmed PurchaseReturn vouchers (Debit Notes) to reflect net claimable
+     input VAT, harmonizing Annex 7 with the Day-Wise VAT Ledger.
 3. Generates Unified Day-Wise VAT Ledger:
    - Traverses date-by-date across any Gregorian or Bikram Sambat date boundary.
    - Merges daily sales output VAT and inward GRN purchase input VAT.
@@ -29,7 +30,6 @@ from apps.branches.models import Branch
 from apps.core.models import SystemConfiguration
 from apps.core.nepali_calendar import NepaliCalendar
 
-
 class TaxationReportGenerator:
     """
     Generates Sales Register (Annex 5 style), Purchase Register (Annex 7 style),
@@ -41,10 +41,16 @@ class TaxationReportGenerator:
         """
         Compiles the Annex 5 Sales Book reconciling gross billing, customer returns,
         taxable base, and output VAT.
+        
+        Harmonization Fix:
+        Sales returns are queried strictly by their own return date (return_date_ad)
+        within the reporting period, ensuring credit notes apply to the tax period
+        when the return occurred rather than the original invoice's bill date.
         """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
 
+        # 1. Outward Invoices in Date Range
         qs = SalesEstimate.objects.filter(
             branch=branch,
             bill_date_ad__gte=start_date,
@@ -65,32 +71,43 @@ class TaxationReportGenerator:
         vat_sum = totals['total_vat']
         grand_sum = totals['total_grand']
 
-        returns_aggregate = SalesReturn.objects.filter(original_estimate__in=qs).aggregate(
-            total_refund=Coalesce(Sum('total_refund_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        # 2. Query Sales Returns that occurred strictly within the reporting period
+        period_returns_qs = SalesReturn.objects.filter(
+            branch=branch,
+            return_date_ad__gte=start_date,
+            return_date_ad__lte=end_date
         )
-        total_refund_amount = returns_aggregate['total_refund']
+
+        total_refund_amount = period_returns_qs.aggregate(
+            total_refund=Coalesce(Sum('total_refund_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )['total_refund']
+
+        returned_items = SalesReturnItem.objects.filter(
+            sales_return__branch=branch,
+            sales_return__return_date_ad__gte=start_date,
+            sales_return__return_date_ad__lte=end_date
+        ).select_related('estimate_item', 'sales_return')
+
+        return_taxable_deduct = Decimal('0.00')
+        return_vat_deduct = Decimal('0.00')
+        return_non_taxable_deduct = Decimal('0.00')
+
+        for r_item in returned_items:
+            est_item = r_item.estimate_item
+            if is_vat_shop and est_item and est_item.is_vat_applicable and est_item.vat_rate > Decimal('0.00'):
+                rate = est_item.vat_rate
+                if est_item.tax_pricing_type == 'INCLUSIVE':
+                    base_val = (r_item.refund_amount / (Decimal('1.00') + (rate / Decimal('100.00')))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    vat_val = r_item.refund_amount - base_val
+                else:
+                    base_val = r_item.refund_amount
+                    vat_val = (base_val * (rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                return_taxable_deduct += base_val
+                return_vat_deduct += vat_val
+            else:
+                return_non_taxable_deduct += r_item.refund_amount
 
         if is_vat_shop:
-            returned_items = SalesReturnItem.objects.filter(sales_return__original_estimate__in=qs).select_related('estimate_item')
-            return_taxable_deduct = Decimal('0.00')
-            return_vat_deduct = Decimal('0.00')
-            return_non_taxable_deduct = Decimal('0.00')
-
-            for r_item in returned_items:
-                est_item = r_item.estimate_item
-                if est_item.is_vat_applicable and est_item.vat_rate > Decimal('0.00'):
-                    rate = est_item.vat_rate
-                    if est_item.tax_pricing_type == 'INCLUSIVE':
-                        base_val = (r_item.refund_amount / (Decimal('1.00') + (rate / Decimal('100.00')))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                        vat_val = r_item.refund_amount - base_val
-                    else:
-                        base_val = r_item.refund_amount
-                        vat_val = (base_val * (rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                    return_taxable_deduct += base_val
-                    return_vat_deduct += vat_val
-                else:
-                    return_non_taxable_deduct += r_item.refund_amount
-
             taxable_sum = max(Decimal('0.00'), taxable_sum - return_taxable_deduct)
             vat_sum = max(Decimal('0.00'), vat_sum - return_vat_deduct)
             non_taxable_sum = max(Decimal('0.00'), non_taxable_sum - return_non_taxable_deduct)
@@ -103,6 +120,7 @@ class TaxationReportGenerator:
 
         return {
             'records': qs,
+            'returns': period_returns_qs,
             'is_vat_shop': is_vat_shop,
             'totals': {
                 'taxable': taxable_sum,
@@ -110,6 +128,8 @@ class TaxationReportGenerator:
                 'vat': vat_sum,
                 'grand_total': grand_sum,
                 'total_refunds': total_refund_amount,
+                'return_taxable_deduct': return_taxable_deduct,
+                'return_vat_deduct': return_vat_deduct,
             }
         }
 
@@ -118,7 +138,12 @@ class TaxationReportGenerator:
         """
         Compiles the Annex 7 Purchase Register retrieving all commercial GRN metrics:
         gross, trade discount, input VAT, freight/customs overheads, landed costs, paid amounts, and due debts.
+        
+        Harmonization Fix:
+        Subtracts confirmed PurchaseReturn vouchers (Debit Notes) that occurred within the date range,
+        reflecting net claimable input VAT matching the Day-Wise VAT Ledger.
         """
+        # 1. Inward Goods Received Notes in Range
         qs = GoodsReceivedNote.objects.filter(
             branch=branch,
             bill_date__gte=start_date,
@@ -129,6 +154,7 @@ class TaxationReportGenerator:
         totals = qs.aggregate(
             total_gross=Coalesce(Sum('gross_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
             total_discount=Coalesce(Sum('discount_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_taxable=Coalesce(Sum('taxable_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
             total_vat=Coalesce(Sum('vat_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
             total_freight=Coalesce(Sum('extra_freight_charge'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
             total_customs=Coalesce(Sum('customs_import_charge'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
@@ -143,20 +169,49 @@ class TaxationReportGenerator:
             totals['total_freight'] + totals['total_customs'] + totals['total_handling']
         ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+        # 2. Confirmed Purchase Returns (Debit Notes) in Range
+        purchase_returns_qs = PurchaseReturn.objects.filter(
+            branch=branch,
+            return_date__gte=start_date,
+            return_date__lte=end_date,
+            status='CONFIRMED'
+        ).select_related('supplier', 'branch', 'processed_by').order_by('return_date', 'return_number')
+
+        pret_totals = purchase_returns_qs.aggregate(
+            total_return_taxable=Coalesce(Sum('total_return_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_return_vat=Coalesce(Sum('tax_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
+            total_return_refund=Coalesce(Sum('net_refund_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
+        )
+
+        # Net figures after deducting Debit Notes (matching Daily VAT Ledger)
+        net_purchase_taxable = max(Decimal('0.00'), totals['total_taxable'] - pret_totals['total_return_taxable'])
+        net_purchase_vat = max(Decimal('0.00'), totals['total_vat'] - pret_totals['total_return_vat'])
+        net_purchase_net = max(Decimal('0.00'), totals['total_net'] - pret_totals['total_return_refund'])
+        net_purchase_gross = max(Decimal('0.00'), totals['total_gross'] - pret_totals['total_return_taxable'])
+        net_purchase_landed = max(Decimal('0.00'), totals['total_landed'] - pret_totals['total_return_taxable'])
+
         return {
             'records': qs,
+            'purchase_returns': purchase_returns_qs,
             'totals': {
-                'gross': totals['total_gross'],
+                'gross': net_purchase_gross,
                 'discount': totals['total_discount'],
-                'vat': totals['total_vat'],
+                'taxable': net_purchase_taxable,
+                'vat': net_purchase_vat,
                 'freight': totals['total_freight'],
                 'customs': totals['total_customs'],
                 'handling': totals['total_handling'],
                 'overheads': total_overheads,
-                'landed': totals['total_landed'],
-                'net': totals['total_net'],
+                'landed': net_purchase_landed,
+                'net': net_purchase_net,
                 'paid': totals['total_paid'],
                 'due': totals['total_due'],
+                # Supplementary return metadata
+                'returns_taxable': pret_totals['total_return_taxable'],
+                'returns_vat': pret_totals['total_return_vat'],
+                'returns_total': pret_totals['total_return_refund'],
+                'gross_vat_before_returns': totals['total_vat'],
+                'gross_taxable_before_returns': totals['total_taxable'],
             }
         }
 

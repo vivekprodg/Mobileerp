@@ -1,6 +1,5 @@
 """
 Stock Aging Analysis Business Logic Service.
-File Path: apps/reports/services/stock_aging_service.py
 
 Capabilities:
 1. Evaluates in-stock physical smartphones (ItemInstance) and non-serialized accessories (ProductBatch).

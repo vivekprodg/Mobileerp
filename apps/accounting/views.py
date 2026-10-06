@@ -21,6 +21,7 @@ Capabilities:
 12. Accounting Integrity Check Dashboard: Automated 6-point sub-ledger and control audit engine.
 13. Gateway Settlement Engine: Daily digital clearing settlement with MDR commission calculation.
 14. Fast Account Search API: High-speed, indexed autocomplete for instant lookup by code, name, Devanagari, or tag.
+    Enriched with both 'branch_code' and 'branch_name' attributes for seamless frontend badge rendering.
 """
 
 import uuid
@@ -64,6 +65,8 @@ from apps.core.nepali_calendar import NepaliCalendar
 class AccountSearchAPIView(LoginRequiredMixin, View):
     """
     High-Performance Search API for General Ledger Accounts.
+    Enriched with both branch_code and branch_name attributes to support multi-branch
+    selectors and bank reconciliation cards seamlessly.
     """
     def get(self, request, *args, **kwargs):
         q = request.GET.get('q', '').strip()
@@ -157,7 +160,8 @@ class AccountSearchAPIView(LoginRequiredMixin, View):
                 'nature_display': nature_badge,
                 'category': acc.group.category,
                 'system_tag': acc.system_tag,
-                'branch_code': acc.branch.code if acc.branch else 'HQ'
+                'branch_code': acc.branch.code if acc.branch else 'HQ',
+                'branch_name': acc.branch.name if acc.branch else 'All Branches (HQ)',
             })
 
         return JsonResponse({'results': results, 'count': len(results)})

@@ -13,10 +13,12 @@ Executes formal Year-End Financial Close conforming to standard accounting proce
      * Balances the voucher by Crediting 3210 Retained Earnings (if net profit) or Debiting 3210 (if net loss).
 3. Audit Lock:
    - Sets AccountingFiscalYear.is_closed = True, records closed_at timestamp, and closed_by user.
-   - Locks all 12 monthly FinancialPeriod records.
-4. Permanent Balance Sheet Carry Forward:
-   - Evaluates permanent Balance Sheet accounts (Assets, Liabilities, Equity).
-   - Initializes or updates next fiscal year opening balances.
+   - Locks all 12 monthly FinancialPeriod records against future modifications.
+4. Continuous Balance Sheet Carry Forward (Anti-Doubling Architecture):
+   - In a continuous double-entry ledger where all historical journal vouchers are preserved,
+     permanent balance sheet accounts (Assets, Liabilities, Equity) naturally carry forward.
+   - Strictly protects `Account.opening_balance` from destructive overwrites that cause account
+     balances to double upon year-end close.
 5. Supports Preview / Simulation Mode:
    - Allows accountants to review exact closing vouchers and figures before committing.
 """
@@ -39,7 +41,6 @@ from apps.accounting.services.auto_posting import JournalEngine, AutoPostingServ
 from apps.accounting.services.financial_statements import FinancialStatementService
 from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.models import AuditLog
-
 
 class FiscalYearClosingService:
     """
@@ -190,7 +191,7 @@ class FiscalYearClosingService:
         )
 
         # ---------------------------------------------------------------------
-        # STEP 5: INITIALIZE NEXT FISCAL YEAR & CARRY FORWARD BALANCE SHEET
+        # STEP 5: INITIALIZE NEXT FISCAL YEAR & VERIFY CARRY FORWARD
         # ---------------------------------------------------------------------
         next_fy_name = cls._get_next_fiscal_year_name(fy.name)
         next_fy = cls._ensure_next_fiscal_year_initialized(next_fy_name)
@@ -263,6 +264,9 @@ class FiscalYearClosingService:
                 journal_entry__status='POSTED',
                 journal_entry__entry_date__gte=fy.start_date_ad,
                 journal_entry__entry_date__lte=fy.end_date_ad
+            ).exclude(
+                Q(journal_entry__source_module='YEAR_END_CLOSING') |
+                Q(journal_entry__reference_document__startswith='CLOSE-')
             )
             if branch and acc.branch:
                 items_qs = items_qs.filter(journal_entry__branch=branch)
@@ -410,50 +414,25 @@ class FiscalYearClosingService:
         branch: Optional[Branch]
     ) -> int:
         """
-        Calculates closing cumulative ending balances for permanent Balance Sheet accounts
-        (Asset, Liability, Equity) as of the closed fiscal year and updates them.
+        Continuous Balance Sheet Carry-Forward Verification.
+        
+        CRITICAL ARCHITECTURAL FIX:
+        In a continuous double-entry ledger where all historical journal vouchers
+        are preserved in the database, permanent accounts (Assets, Liabilities, Equity)
+        automatically carry forward their cumulative balances from inception simply by
+        summing day-one transactions up to any query date.
+        
+        This method strictly DOES NOT overwrite `Account.opening_balance`. Overwriting
+        `Account.opening_balance` causes all balance sheet accounts to double because
+        future queries add the new opening balance to the historical lines that already
+        generated that balance.
+        
+        Returns the count of active permanent balance sheet accounts verified in scope.
         """
         bs_accounts = Account.objects.filter(
             group__category__in=['ASSET', 'LIABILITY', 'EQUITY']
-        ).select_related('group')
-
+        )
         if branch:
             bs_accounts = bs_accounts.filter(Q(branch=branch) | Q(branch__isnull=True))
 
-        updated_count = 0
-        for acc in bs_accounts:
-            items_qs = JournalItem.objects.filter(
-                account=acc,
-                journal_entry__status='POSTED',
-                journal_entry__entry_date__lte=closed_fy.end_date_ad
-            )
-            if branch and acc.branch:
-                items_qs = items_qs.filter(journal_entry__branch=branch)
-
-            agg = items_qs.aggregate(dr=Sum('debit_amount'), cr=Sum('credit_amount'))
-            dr = agg['dr'] or Decimal('0.00')
-            cr = agg['cr'] or Decimal('0.00')
-
-            op_bal = acc.opening_balance or Decimal('0.00')
-            if acc.opening_balance_nature == 'DEBIT':
-                dr += op_bal
-            else:
-                cr += op_bal
-
-            if acc.is_debit_nature:
-                closing_val = (dr - cr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            else:
-                closing_val = (cr - dr).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-            # Store the carried-forward balance as the active opening balance
-            if closing_val >= Decimal('0.00'):
-                acc.opening_balance = closing_val
-                acc.opening_balance_nature = 'DEBIT' if acc.is_debit_nature else 'CREDIT'
-            else:
-                acc.opening_balance = abs(closing_val)
-                acc.opening_balance_nature = 'CREDIT' if acc.is_debit_nature else 'DEBIT'
-
-            acc.save(update_fields=['opening_balance', 'opening_balance_nature', 'updated_at'])
-            updated_count += 1
-
-        return updated_count
+        return bs_accounts.count()

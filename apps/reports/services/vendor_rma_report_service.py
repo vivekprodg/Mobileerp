@@ -1,6 +1,5 @@
 """
 Vendor RMA & Distributor Warranty Claims Report Business Logic Service.
-File Path: apps/reports/services/vendor_rma_report_service.py
 
 Capabilities:
 1. Monitors defective parts & handsets dispatched to authorized manufacturer /

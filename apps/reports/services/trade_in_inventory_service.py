@@ -1,6 +1,5 @@
 """
 Pre-Owned / Traded-In Phone Inventory & Margin Business Logic Service.
-File Path: apps/reports/services/trade_in_inventory_service.py
 
 Capabilities:
 1. Audits second-hand smartphones acquired from retail customers via trade-in exchange vouchers.

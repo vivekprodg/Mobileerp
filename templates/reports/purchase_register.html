@@ -1,0 +1,458 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Purchase Register (Inward Purchase Book) | {{ COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.purchase-suite-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.purchase-suite-pill:hover, .purchase-suite-pill.active {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    border-color: #0f172a !important;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.25);
+}
+.report-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.table-purchase-register th {
+    font-size: 0.69rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+.table-purchase-register td {
+    font-size: 0.78rem;
+    padding: 8px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.col-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+.fy-badge {
+    background: #0f172a;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+@media print {
+    .no-print, .purchase-suite-pill, form, .btn, .pagination {
+        display: none !important;
+    }
+    body {
+        background: #ffffff !important;
+        font-size: 10px !important;
+    }
+    .card {
+        box-shadow: none !important;
+        border: 1px solid #ccc !important;
+    }
+    .table-responsive {
+        overflow: visible !important;
+    }
+    .table-purchase-register {
+        min-width: 100% !important;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width: 1760px;">
+
+    <!-- 4. Purchases Suite Horizontal Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap no-print">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap">
+            <i class="fas fa-truck-ramp-box text-primary me-1"></i> Purchases Suite:
+        </span>
+        <a href="{% url 'reports:purchase_register' %}" class="purchase-suite-pill active text-nowrap">
+            <i class="fas fa-book-open text-white"></i> Purchase Register
+        </a>
+        <a href="{% url 'reports:supplier_purchases' %}" class="purchase-suite-pill text-nowrap">
+            <i class="fas fa-building text-secondary"></i> Supplier Turnover
+        </a>
+        <a href="{% url 'reports:product_purchases' %}" class="purchase-suite-pill text-nowrap">
+            <i class="fas fa-boxes-packing text-secondary"></i> Product Purchases
+        </a>
+        <a href="{% url 'reports:supplier_outstanding' %}" class="purchase-suite-pill text-nowrap">
+            <i class="fas fa-hand-holding-dollar text-secondary"></i> Supplier Payables
+        </a>
+        <a href="{% url 'reports:cancelled_purchases' %}" class="purchase-suite-pill text-nowrap">
+            <i class="fas fa-ban text-danger"></i> Cancelled Purchases
+        </a>
+    </div>
+
+    <!-- 5. Page Header & Action Controls -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <h4 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-book-open text-primary me-2"></i> Commercial Purchase Register (Inward Book)
+                </h4>
+                {% if fiscal_year %}
+                    <span class="fy-badge">
+                        <i class="fas fa-landmark me-1 text-warning"></i> FY {{ fiscal_year }} (आ.व. {{ fiscal_year }})
+                    </span>
+                {% endif %}
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Statutory purchase register (खरिद खाता / Annex 7 format) recording verified inward goods receipts (GRN), pre-VAT merchandise values, trade discounts, 13% input VAT, overheads, and supplier liabilities
+            </p>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center no-print">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export to CSV
+            </a>
+            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Register
+            </button>
+            <a href="{% url 'purchases:grn_create' %}" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-xs">
+                <i class="fas fa-truck-ramp-box me-1"></i> Receive Inward Goods (GRN)
+            </a>
+        </div>
+    </div>
+
+    <!-- 6. Four High-Priority Summary KPI Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-primary border-4 h-100">
+                <span class="text-primary text-uppercase fw-bold fs-2xs">Total Inward Bills</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+                    {{ totals.records_count|default:0 }} <span class="fs-6 fw-normal text-muted">GRNs</span>
+                </h3>
+                <small class="text-muted fs-2xs">Verified purchase consignments</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-dark border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Landed Cost (COGS)</span>
+                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_landed|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Inventory asset capitalized valuation</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-success border-4 h-100">
+                <span class="text-success text-uppercase fw-bold fs-2xs">Total Input VAT Claimed</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_vat|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-success fs-2xs fw-bold">Dedicated 13% claimable tax</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="report-kpi-card border-start border-danger border-4 h-100">
+                <span class="text-danger text-uppercase fw-bold fs-2xs">Added to Supplier Udhaari</span>
+                <h3 class="fw-extrabold text-danger font-monospace mt-2 mb-0">
+                    Rs. {{ totals.total_due|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Paid on receipt: Rs. {{ totals.total_paid|default:0|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. Multi-Parameter Filter Toolbar -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 no-print">
+        <form method="get" class="row g-2 align-items-end" id="purchaseRegisterFilterForm">
+            <!-- Keyword Search -->
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Search Keywords</label>
+                <input type="text" name="q" value="{{ filters.q|default:'' }}" 
+                       class="form-control form-control-sm bg-light border-0 font-monospace" 
+                       placeholder="GRN, Bill Ref, Supplier, PAN...">
+            </div>
+
+            <!-- Fiscal Year Dropdown -->
+            {% if available_fiscal_years %}
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Fiscal Year</label>
+                <select name="fiscal_year" class="form-select form-select-sm bg-light border-0 fw-semibold text-dark">
+                    <option value="">-- Custom Range --</option>
+                    {% for fy in available_fiscal_years %}
+                        <option value="{{ fy }}" {% if filters.fiscal_year == fy or fiscal_year == fy and not filters.start_date %}selected{% endif %}>
+                            FY {{ fy }} (आ.व. {{ fy }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+
+            <!-- Active Supplier Selector -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Supplier / Distributor</label>
+                <select name="supplier" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All Suppliers</option>
+                    {% for s in suppliers %}
+                        <option value="{{ s.id }}" {% if filters.supplier_id == s.id|stringformat:"s" %}selected{% endif %}>
+                            {{ s.company_name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Store Branch Selector -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Outlet Branch</label>
+                <select name="branch" class="form-select form-select-sm bg-light border-0">
+                    <option value="all">All Outlets</option>
+                    {% for br in branches %}
+                        <option value="{{ br.id }}" {% if filters.branch_id == br.id|stringformat:"s" %}selected{% endif %}>
+                            {{ br.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Tax Mode Selector -->
+            <div class="col-6 col-md-1">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Tax Mode</label>
+                <select name="tax_mode" class="form-select form-select-sm bg-light border-0">
+                    <option value="">All</option>
+                    <option value="vat" {% if filters.tax_mode == 'vat' %}selected{% endif %}>13% VAT</option>
+                    <option value="pan" {% if filters.tax_mode == 'pan' %}selected{% endif %}>PAN Only</option>
+                </select>
+            </div>
+
+            <!-- Date Range Pickers -->
+            <div class="col-12 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Dates (AD)</label>
+                <div class="input-group input-group-sm">
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-control bg-light border-0" title="Start Date (AD)">
+                    <span class="input-group-text bg-light border-0">&rarr;</span>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-control bg-light border-0" title="End Date (AD)">
+                </div>
+            </div>
+
+            <!-- Filter & Reset Controls -->
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if filters.q or filters.supplier_id or filters.branch_id or filters.tax_mode or filters.start_date or filters.end_date or filters.fiscal_year %}
+                <a href="{% url 'reports:purchase_register' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 pt-2 border-top fs-2xs text-muted">
+            <span>Date Range: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong> ({{ start_date_bs }} to {{ end_date_bs }} BS)</span>
+            <span>Active Store Context: <strong>{{ selected_branch.name|default:"All Outlets" }}</strong></span>
+        </div>
+    </div>
+
+    <!-- 8. Master Purchase Register Table (Statutory Annex 7 Format) -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <h6 class="fw-bold text-dark mb-0">
+                <i class="fas fa-table text-secondary me-2"></i> Inward Purchase Book (खरिद खाता)
+            </h6>
+            <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:records|length }} Vouchers Listed</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 table-purchase-register table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3 text-center" style="width: 45px;">S.N.</th>
+                        <th>GRN Number</th>
+                        <th>Supplier Bill Ref</th>
+                        <th>Bill Date (AD / BS)</th>
+                        <th>Supplier / Distributor</th>
+                        <th>Supplier PAN</th>
+                        <th class="text-center">Tax Mode</th>
+                        <th class="text-end">Gross Subtotal</th>
+                        <th class="text-end">Trade Disc.</th>
+                        <th class="text-end">Input VAT</th>
+                        <th class="text-end">Overheads</th>
+                        <th class="text-end">Landed COGS</th>
+                        <th class="text-end">Net Payable</th>
+                        <th class="text-end">Paid Amount</th>
+                        <th class="text-end pe-3">Due (Udhaari)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <!-- 1. S.N. -->
+                        <td class="ps-3 text-center text-muted font-monospace fs-2xs">
+                            {{ r.sn|default:forloop.counter }}
+                        </td>
+
+                        <!-- 2. GRN Number (Hyperlinked to Detail) -->
+                        <td class="font-monospace fw-bold">
+                            <a href="{% url 'purchases:grn_detail' r.grn_id %}" class="text-primary text-decoration-none">
+                                {{ r.grn_number }}
+                            </a>
+                        </td>
+
+                        <!-- 3. Supplier Invoice Ref -->
+                        <td class="font-monospace fw-semibold text-dark">
+                            {{ r.supplier_bill_no }}
+                        </td>
+
+                        <!-- 4. Bill Date (AD / BS) -->
+                        <td>
+                            <span class="text-dark fw-semibold">{{ r.bill_date_str }}</span>
+                            <small class="text-muted d-block font-monospace fs-2xs">{{ r.bill_date_bs }} BS</small>
+                        </td>
+
+                        <!-- 5. Supplier Name & Branch Code -->
+                        <td>
+                            <strong class="text-dark">{{ r.supplier_name }}</strong>
+                            <small class="text-muted d-block">
+                                <span class="badge bg-light text-dark border font-monospace fs-3xs">{{ r.branch_code }}</span> {{ r.branch_name }}
+                            </small>
+                        </td>
+
+                        <!-- 6. Supplier PAN / VAT -->
+                        <td>
+                            {% if r.supplier_pan and r.supplier_pan != '-' %}
+                                <span class="badge bg-secondary bg-opacity-10 text-dark font-monospace fs-2xs border px-2 py-0.5">
+                                    {{ r.supplier_pan }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted fs-2xs">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 7. Tax Mode Badge -->
+                        <td class="text-center">
+                            {% if r.is_vat_bill %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-2xs px-2 py-0.5">
+                                    13% VAT
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs px-2 py-0.5">
+                                    PAN / Non-VAT
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 8. Gross Subtotal (NPR) -->
+                        <td class="col-num font-monospace">
+                            Rs. {{ r.gross_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 9. Trade Discount (NPR) -->
+                        <td class="col-num font-monospace text-danger">
+                            {% if r.discount_amount > 0 %}
+                                -Rs. {{ r.discount_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted">0.00</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 10. Input VAT (NPR) -->
+                        <td class="col-num font-monospace text-success fw-semibold">
+                            {% if r.vat_amount > 0 %}
+                                Rs. {{ r.vat_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted">0.00</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 11. Overheads (Freight, Duty, Handling) -->
+                        <td class="col-num font-monospace text-warning-emphasis">
+                            {% if r.overhead_total > 0 %}
+                                +Rs. {{ r.overhead_total|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted">0.00</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 12. Total Landed Cost (COGS) -->
+                        <td class="col-num font-monospace fw-bold text-dark">
+                            Rs. {{ r.total_landed_cost|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 13. Net Total Payable -->
+                        <td class="col-num font-monospace fw-bold text-primary">
+                            Rs. {{ r.net_total_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 14. Paid Amount -->
+                        <td class="col-num font-monospace text-success">
+                            Rs. {{ r.paid_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 15. Due Balance Added to Credit -->
+                        <td class="col-num pe-3 font-monospace fw-bold text-danger">
+                            {% if r.due_amount > 0 %}
+                                Rs. {{ r.due_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted font-normal">0.00</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <!-- 9. Empty State Row -->
+                    <tr>
+                        <td colspan="15" class="text-center py-5 text-muted">
+                            <i class="fas fa-book-open fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Purchase Records Found</h6>
+                            <p class="text-muted fs-xs mb-0">No verified goods received notes match the selected filters and date range.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                <!-- 10. Sticky Dark Totals Footer -->
+                {% if records %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="7" class="ps-3 text-end text-uppercase text-white-50">
+                            Grand Totals ({{ totals.records_count|default:0 }} Bills):
+                        </td>
+                        <td class="col-num text-white-50">Rs. {{ totals.total_gross|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning-emphasis">-Rs. {{ totals.total_discount|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success">Rs. {{ totals.total_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning-emphasis">+Rs. {{ totals.total_overheads|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white fs-6">Rs. {{ totals.total_landed|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white fs-6">Rs. {{ totals.total_net|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success">Rs. {{ totals.total_paid|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num pe-3 text-danger fs-6">Rs. {{ totals.total_due|default:0|floatformat:2|intcomma }}</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <!-- 11. Pagination Include -->
+        <div class="p-3 border-top bg-light no-print">
+            {% include "includes/_pagination.html" %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

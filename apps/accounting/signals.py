@@ -3,18 +3,19 @@ Accounting Event Listeners & Auto-Posting Signal Handlers.
 
 Core Architectural Design:
 1. Strict Fail-Closed Integrity:
-   - Exception swallowing (try...except logging without raising) has been removed.
    - If General Ledger voucher creation fails (e.g., locked fiscal period, missing
-     control account, or imbalance), the exception bubbles up, guaranteeing that the
+     control account, or imbalance), exceptions bubble up to guarantee that the
      enclosing database transaction rolls back.
-2. Standardized Explicit Service Coordination:
-   - Redundant post_save signal handlers for POS SalesEstimates and GoodsReceivedNotes (GRN)
-     have been removed. These operations execute GL auto-posting directly within their
-     respective atomic services (SalesService and PurchaseService). Removing them from signals
-     eliminates race conditions, lock contention, and duplicate posting vouchers.
-3. Event-Driven Asynchronous Operations:
-   - Customer Udhaari repayments, Supplier Udhaari payouts, Sales Returns, and manual inventory
-     write-offs/shrinkage continue to trigger GL vouchers here fail-closed.
+2. Non-Monetary Sub-Ledger Protection (Anti-Phantom Cash Shield):
+   - In `handle_customer_payment_auto_post`, filters out non-cash store credits
+     (such as surplus trade-in buy-back allowances, sales return store credit adjustments,
+     or opening balance equity offsets).
+   - Guarantees that only genuine physical or digital monetary receipts entering the store
+     trigger Cash/Bank receipt vouchers.
+3. Explicit Service Coordination:
+   - POS SalesEstimates and GoodsReceivedNotes (GRN) auto-posting are dispatched
+     directly inside their respective atomic services (SalesPOSService and PurchaseService)
+     to prevent race conditions, lock contention, and duplicate posting vouchers.
 """
 
 from decimal import Decimal
@@ -27,36 +28,60 @@ from apps.customers.models import CustomerUdhaariLedger
 from apps.inventory.models import StockMovementLog
 from apps.accounting.services.auto_posting import AutoPostingService
 
-
-# =============================================================================
-# EXPLICIT SERVICE CALL NOTICE:
-# SalesEstimate and GoodsReceivedNote auto-posting handlers have been removed from
-# signals.py to prevent race conditions and duplicate journal creation.
-# They are invoked directly inside:
-# - SalesService (at POS checkout / bill finalization)
-# - PurchaseService.process_grn_approval_and_stock_in (at GRN verification)
-# =============================================================================
-
+# Recognized genuine monetary payment modes where liquid funds entered the store
+GENUINE_MONETARY_PAYMENT_MODES = {
+    'CASH', 'BANK_TRANSFER', 'BANK', 'CHEQUE', 'CONNECT_IPS',
+    'FONEPAY', 'QR', 'DYNAMIC_QR', 'ESEWA', 'KHALTI', 'CARD', 'POS', 'POS_CARD'
+}
 
 @receiver(post_save, sender=CustomerUdhaariLedger)
 def handle_customer_payment_auto_post(sender, instance, created, **kwargs):
     """
-    Triggers double-entry receipt voucher when a customer repays Udhaari debt.
-    Exceptions bubble up to roll back the credit repayment transaction if GL posting fails.
+    Triggers double-entry receipt voucher when a customer repays Udhaari debt with genuine money.
+    
+    Protective Filters:
+    - Ignores non-monetary store credit deposits (e.g. Trade-In surplus credit from old phone buy-backs).
+    - Ignores return adjustments and credit notes already posted during sales return finalization.
+    - Exceptions bubble up to roll back the credit repayment transaction if GL posting fails.
     """
-    if created and instance.entry_type == 'CREDIT' and instance.amount > Decimal('0.00'):
-        AutoPostingService.post_customer_payment(ledger_entry=instance)
+    if not (created and instance.entry_type == 'CREDIT' and instance.amount > Decimal('0.00')):
+        return
 
+    mode = str(instance.payment_mode or '').upper().strip()
+
+    # 1. Reject non-monetary / internal adjustment modes
+    if mode in ['OTHER', 'ADJUSTMENT', 'STORE_CREDIT', 'TRADE_IN', 'NON_MONETARY', '']:
+        return
+
+    if mode not in GENUINE_MONETARY_PAYMENT_MODES:
+        return
+
+    # 2. Inspect remarks for trade-in / return / non-cash context
+    remarks_str = str(getattr(instance, 'remarks', '') or '').upper()
+    if any(keyword in remarks_str for keyword in [
+        'SURPLUS TRADE-IN', 'TRADE-IN BUY-BACK', 'TRADE-IN', 'STORE CREDIT',
+        'RETURN VOUCHER', 'OPENING BALANCE', 'BARTER'
+    ]):
+        return
+
+    # 3. Genuine monetary payment received: dispatch double-entry receipt voucher
+    AutoPostingService.post_customer_payment(ledger_entry=instance)
 
 @receiver(post_save, sender=SupplierUdhaariLedger)
 def handle_supplier_payment_auto_post(sender, instance, created, **kwargs):
     """
     Triggers double-entry payment voucher when a payout is issued to a vendor/distributor.
+    Filters out non-monetary adjustments (e.g. rate revisions, debit note reversals).
     Exceptions bubble up to roll back the payment transaction if GL posting fails.
     """
-    if created and instance.transaction_type == 'PAYMENT' and instance.amount > Decimal('0.00'):
-        AutoPostingService.post_supplier_payment(ledger_entry=instance)
+    if not (created and instance.transaction_type == 'PAYMENT' and instance.amount > Decimal('0.00')):
+        return
 
+    mode = str(instance.payment_mode or '').upper().strip()
+    if mode in ['OTHER', 'ADJUSTMENT', 'NON_MONETARY', '']:
+        return
+
+    AutoPostingService.post_supplier_payment(ledger_entry=instance)
 
 @receiver(post_save, sender=SalesReturn)
 def handle_sales_return_auto_post(sender, instance, created, **kwargs):
@@ -66,7 +91,6 @@ def handle_sales_return_auto_post(sender, instance, created, **kwargs):
     """
     if instance.total_refund_amount > Decimal('0.00'):
         AutoPostingService.post_sales_return(sales_return=instance)
-
 
 @receiver(post_save, sender=StockMovementLog)
 def handle_stock_shrinkage_auto_post(sender, instance, created, **kwargs):

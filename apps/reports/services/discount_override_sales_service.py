@@ -1,6 +1,5 @@
 """
 Discount, Concession & Supervisor Price Override Audit Service.
-File Path: apps/reports/services/discount_override_sales_service.py
 
 Capabilities:
 1. Audits counter discounts and commercial profit leakage:

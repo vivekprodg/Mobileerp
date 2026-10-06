@@ -1,6 +1,5 @@
 """
 Trade-In / Exchange Sales Settlement Report Business Logic Service.
-File Path: apps/reports/services/trade_in_sales_service.py
 
 Capabilities:
 1. Audits combined transactions where an old phone was traded in to buy a new smartphone.

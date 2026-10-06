@@ -834,7 +834,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 accountResults.querySelectorAll('.async-result-item').forEach(item => {
                     item.addEventListener('click', () => {
                         const accId = item.dataset.id;
-                        let targetUrl = `/accounting/general-ledger/${accId}/`;
+                        // FIXED: Uses configured route /accounting/ledger/<account_id>/ preventing 404 error
+                        let targetUrl = `/accounting/ledger/${accId}/`;
                         if (startDate || endDate) {
                             targetUrl += `?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
                         }

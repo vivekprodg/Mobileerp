@@ -13,11 +13,12 @@ Synchronized with `apps/purchases/models.py`:
 - Line-item physical Batch Number (`batch_number`) tracking.
 - Distinct delivery challan reference fields (`challan_no`, `challan_date`, `challan_date_bs`).
 - Dual VAT Handling Modes (`vat_handling_mode`: 'EXCLUSIVE' vs 'INCLUSIVE').
+- Strict Tax Rate Choices (`vat_rate`: 13.00% vs 0.00%).
 - Multi-field audit observations: `consignment_narration`, `receiving_notes`, and `internal_notes`.
 - Automatic overhead landed cost allocation across line items upon save.
 - Comprehensive date synchronization between Gregorian (AD) and Bikram Sambat (BS).
 - Explicit entry_date and entry_date_bs visibility in SupplierUdhaariLedger.
-- Supplier subledger double-entry recalculation actions.
+- Supplier subledger double-entry recalculation actions with spot-payment continuity safeguards.
 """
 
 from decimal import Decimal
@@ -71,7 +72,8 @@ class GRNItemInline(admin.TabularInline):
         'base_unit_quantity', 'purchase_rate', 'gross_amount',
         'discount_type', 'discount_input_value', 'item_discount_amount', 'discount_percent',
         'line_total', 'unit_landed_cost', 'is_vat_applicable', 'vat_rate',
-        'new_selling_price', 'default_mdms_status', 'scanned_imei_list'
+        'new_selling_price', 'default_mdms_status', 'scanned_imei_list',
+        'warranty_months', 'warranty_provider'
     ]
     readonly_fields = [
         'gross_amount', 'base_unit_quantity', 'item_discount_amount',
@@ -226,7 +228,7 @@ class SupplierAdmin(admin.ModelAdmin):
             recalculated_count += 1
         self.message_user(
             request,
-            f"Successfully recalculated outstanding debt balance for {recalculated_count} supplier(s) from their ledger history."
+            f"Successfully recalculated outstanding debt balance for {recalculated_count} supplier(s) with spot-payment continuity safeguards."
         )
 
 # =============================================================================
@@ -349,7 +351,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
             )
         }),
         (_("3. Procurement Financial Valuation & Landed COGS Summary"), {
-            'description': _("Audited breakdown of Pre-VAT Gross, Taxable vs Non-Taxable Merchandise Pots, Line & Bill Discounts, 13% VAT, 5-tier Overheads, and Net Payable."),
+            'description': _("Audited breakdown of Pre-VAT Gross, Taxable vs Non-Taxable Merchandise Pots, Line & Bill Discounts, Multi-Rate Line VAT, 5-tier Overheads, and Net Payable."),
             'fields': (
                 'financial_summary_card',
                 ('gross_amount', 'total_line_discount'),
@@ -405,7 +407,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         non_taxable = max(Decimal('0.00'), net_merchandise - taxable)
 
         vat_mode_label = " (Mode: Incl)" if obj.vat_handling_mode == 'INCLUSIVE' else " (Mode: Excl)"
-        vat_status = ("13% VAT Active" + vat_mode_label) if obj.is_vat_bill else "Non-VAT (0.00)"
+        vat_status = ("13% VAT Active" + vat_mode_label) if (obj.is_vat_bill and vat > Decimal('0.00')) else "PAN / 0% Exempt"
         vat_color = "#059669" if (obj.is_vat_bill and vat > Decimal('0.00')) else "#64748b"
 
         return format_html(
@@ -477,7 +479,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     vat_mode_badge.short_description = _("VAT Mode")
 
     def is_vat_badge(self, obj):
-        if obj.is_vat_bill:
+        if obj.is_vat_bill and (obj.vat_amount or Decimal('0.00')) > Decimal('0.00'):
             return format_html(
                 '<span style="color: #065f46; background-color: #ecfdf5; border: 1px solid #a7f3d0; '
                 'padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">13% VAT</span>'
@@ -534,7 +536,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         val = obj.vat_amount or Decimal('0.00')
         color = '#059669' if val > Decimal('0.00') else '#64748b'
         return format_html('<span style="color: {}; font-weight: 600;">Rs. {:,.2f}</span>', color, val)
-    formatted_vat_amount.short_description = _("13% VAT")
+    formatted_vat_amount.short_description = _("VAT Total")
     formatted_vat_amount.admin_order_field = 'vat_amount'
 
     def formatted_landed_cost(self, obj):
@@ -558,13 +560,13 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     def save_related(self, request, form, formsets, change):
         """
         Executes after inline GRN items are saved to database.
-        Recalculates dual-pot pre-VAT merchandise, dedicated 13% VAT, bill discounts,
+        Recalculates dual-pot pre-VAT merchandise, multi-rate line VAT, bill discounts,
         and accurately distributes overheads proportionally to calculate line unit landed costs.
         """
         super().save_related(request, form, formsets, change)
         form.instance.recalculate_financials(save=True)
 
-    @admin.action(description=_("Recalculate Pre-VAT, 13% VAT, Overheads & Landed Costs for selected GRNs"))
+    @admin.action(description=_("Recalculate Pre-VAT, Multi-Rate VAT, Overheads & Landed Costs for selected GRNs"))
     def recalculate_all_grn_totals(self, request, queryset):
         count = 0
         for grn in queryset:
@@ -572,7 +574,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
             count += 1
         self.message_user(
             request,
-            f"Successfully recalculated Pre-VAT bases, 13% VAT, and landed costs for {count} GRN voucher(s)."
+            f"Successfully recalculated Pre-VAT bases, line-level VAT, and landed costs for {count} GRN voucher(s)."
         )
 
 @admin.register(GRNItem)
@@ -580,9 +582,9 @@ class GRNItemAdmin(admin.ModelAdmin):
     list_display = [
         'grn', 'product', 'batch_number', 'purchased_quantity', 'base_unit_quantity',
         'purchase_rate', 'gross_amount', 'discount_type', 'item_discount_amount',
-        'line_total', 'unit_landed_cost', 'default_mdms_status'
+        'line_total', 'unit_landed_cost', 'vat_rate', 'is_vat_applicable', 'default_mdms_status'
     ]
-    list_filter = ['discount_type', 'is_vat_applicable', 'default_mdms_status', 'grn__branch']
+    list_filter = ['discount_type', 'vat_rate', 'is_vat_applicable', 'default_mdms_status', 'grn__branch']
     search_fields = [
         'grn__grn_number', 'grn__supplier_bill_no', 'grn__challan_no',
         'product__name', 'supplier_item_code', 'batch_number', 'scanned_imei_list'

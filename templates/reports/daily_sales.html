@@ -19,6 +19,74 @@
     font-weight: 700;
     font-family: 'JetBrains Mono', monospace;
 }
+
+/* Stacked Date Picker Cards (BS Directly Below AD) */
+.date-stacked-card {
+    background: #f8fafc;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.date-stacked-card:focus-within {
+    border-color: var(--erp-primary, #2563eb);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+    background: #ffffff;
+}
+
+.date-field-unit {
+    display: flex;
+    flex-direction: column;
+}
+
+.date-field-unit label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--erp-slate-700, #334155);
+}
+
+.date-field-unit input {
+    height: 34px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    border: 1px solid var(--erp-slate-300, #cbd5e1);
+    border-radius: 6px;
+    padding: 4px 8px;
+    background-color: #ffffff;
+    color: #0f172a;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.date-field-unit input:focus {
+    border-color: var(--erp-primary, #2563eb);
+}
+
+.date-sync-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--erp-slate-400, #94a3b8);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    user-select: none;
+    margin: -4px 0;
+    gap: 8px;
+}
+
+.date-sync-indicator::before,
+.date-sync-indicator::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--erp-slate-200, #e2e8f0);
+}
 </style>
 {% endblock %}
 
@@ -35,7 +103,9 @@
             </p>
         </div>
         <div class="d-flex flex-wrap gap-2">
-            <a href="{% url 'reports:export_csv' 'sales' %}?start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
+            <a href="{% url 'reports:export_csv' 'sales' %}?start_date={{ start_date }}&end_date={{ end_date }}" 
+               id="exportSalesCsvBtn" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
                 <i class="fas fa-file-csv me-1"></i> Export Sales CSV
             </a>
             <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
@@ -46,18 +116,94 @@
 
     <!-- Date Range & Growth Comparison Filter Toolbar -->
     <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
-        <form method="get" class="row g-3 align-items-end">
-            <div class="col-12 col-md-3">
-                <label class="form-label fs-xs fw-bold text-dark mb-1">Start Date (AD) <span class="text-danger">*</span></label>
-                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm bg-light border-0 fw-semibold" required>
+        <form method="get" class="row g-3 align-items-center" id="dailySalesFilterForm">
+            
+            <!-- 1. START DATE COLUMN (AD ON TOP, BS DIRECTLY BELOW) -->
+            <div class="col-12 col-md-4 col-xl-3">
+                <div class="date-stacked-card">
+                    <!-- AD Field -->
+                    <div class="date-field-unit">
+                        <label class="form-label mb-1" for="startDateAD">
+                            Start Date (AD) <span class="text-danger">*</span>
+                        </label>
+                        <input type="date" 
+                               name="start_date" 
+                               id="startDateAD" 
+                               value="{{ start_date }}" 
+                               class="font-mono" 
+                               required>
+                    </div>
+
+                    <!-- Auto-Sync Divider -->
+                    <div class="date-sync-indicator">
+                        <i class="fas fa-arrows-up-down fs-3xs"></i> Auto-Sync
+                    </div>
+
+                    <!-- BS Field -->
+                    <div class="date-field-unit">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label mb-0" for="startDateBS">
+                                Start Date (BS) <span class="text-danger">*</span>
+                            </label>
+                            <span class="badge bg-light text-primary border font-mono fs-3xs">नेपाली पात्रो</span>
+                        </div>
+                        <input type="text" 
+                               name="start_date_bs" 
+                               id="startDateBS" 
+                               value="{{ start_date_bs }}" 
+                               class="font-mono nepali-datepicker" 
+                               placeholder="YYYY-MM-DD (BS)" 
+                               maxlength="10" 
+                               autocomplete="off" 
+                               required>
+                    </div>
+                </div>
             </div>
 
-            <div class="col-12 col-md-3">
-                <label class="form-label fs-xs fw-bold text-dark mb-1">End Date (AD) <span class="text-danger">*</span></label>
-                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm bg-light border-0 fw-semibold" required>
+            <!-- 2. END DATE COLUMN (AD ON TOP, BS DIRECTLY BELOW) -->
+            <div class="col-12 col-md-4 col-xl-3">
+                <div class="date-stacked-card">
+                    <!-- AD Field -->
+                    <div class="date-field-unit">
+                        <label class="form-label mb-1" for="endDateAD">
+                            End Date (AD) <span class="text-danger">*</span>
+                        </label>
+                        <input type="date" 
+                               name="end_date" 
+                               id="endDateAD" 
+                               value="{{ end_date }}" 
+                               class="font-mono" 
+                               required>
+                    </div>
+
+                    <!-- Auto-Sync Divider -->
+                    <div class="date-sync-indicator">
+                        <i class="fas fa-arrows-up-down fs-3xs"></i> Auto-Sync
+                    </div>
+
+                    <!-- BS Field -->
+                    <div class="date-field-unit">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label mb-0" for="endDateBS">
+                                End Date (BS) <span class="text-danger">*</span>
+                            </label>
+                            <span class="badge bg-light text-primary border font-mono fs-3xs">नेपाली पात्रो</span>
+                        </div>
+                        <input type="text" 
+                               name="end_date_bs" 
+                               id="endDateBS" 
+                               value="{{ end_date_bs }}" 
+                               class="font-mono nepali-datepicker" 
+                               placeholder="YYYY-MM-DD (BS)" 
+                               maxlength="10" 
+                               autocomplete="off" 
+                               required>
+                    </div>
+                </div>
             </div>
 
-            <div class="col-12 col-md-3">
+            <!-- 3. COMPARE TOGGLE SWITCH -->
+            <div class="col-12 col-md-4 col-xl-3">
                 <div class="form-check form-switch pb-1">
                     <input class="form-check-input" type="checkbox" name="compare" value="true" id="comparePeriodCheck" {% if compare_period %}checked{% endif %}>
                     <label class="form-check-label fs-xs fw-bold text-dark" for="comparePeriodCheck">
@@ -67,18 +213,22 @@
                 <small class="text-muted fs-2xs d-block">Evaluates sales &amp; margin growth against preceding days</small>
             </div>
 
-            <div class="col-12 col-md-3 d-flex gap-2">
+            <!-- 4. ACTION BUTTONS -->
+            <div class="col-12 col-md-12 col-xl-3 d-flex gap-2">
                 <button type="submit" class="btn btn-primary btn-sm w-100 rounded-3 fw-bold py-2 shadow-xs">
                     <i class="fas fa-filter me-1"></i> Calculate Analytics
                 </button>
-                <a href="{% url 'reports:daily_sales' %}" class="btn btn-outline-secondary btn-sm rounded-3 py-2" title="Reset to Today">↺ Today</a>
+                <button type="button" id="btnTodayReset" class="btn btn-outline-secondary btn-sm rounded-3 py-2 text-nowrap fw-semibold" title="Reset all dates to Today">
+                    ↺ Today
+                </button>
             </div>
         </form>
 
+        <!-- Dynamic Query Scope Line -->
         <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-3 border-top fs-2xs text-muted">
             <div>
-                Query Scope: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong> 
-                &bull; BS: <strong>{{ start_date_bs }}</strong> to <strong>{{ end_date_bs }} BS</strong>
+                Query Scope: <strong id="scopeTextAD">{{ start_date }} to {{ end_date }}</strong> 
+                &bull; BS: <strong id="scopeTextBS">{{ start_date_bs }} to {{ end_date_bs }} BS</strong>
             </div>
             <div>
                 Active Outlet: <strong class="text-dark">{{ ACTIVE_BRANCH.name|default:"All Outlets" }}</strong>
@@ -158,7 +308,8 @@
     <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
         <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
             <h6 class="fw-bold text-dark mb-0">
-                <i class="fas fa-list-check text-secondary me-2"></i> Estimation Invoices in Period ({{ start_date }} to {{ end_date }})
+                <i class="fas fa-list-check text-secondary me-2"></i> 
+                <span id="tablePeriodHeading">Estimation Invoices in Period ({{ start_date }} to {{ end_date }})</span>
             </h6>
             <span class="badge bg-secondary rounded-pill px-3">{{ page_obj.paginator.count|default:estimates|length }} Slips</span>
         </div>
@@ -266,4 +417,274 @@
         </div>
     </div>
 </div>
+
+<!-- =========================================================================
+     BI-DIRECTIONAL AD <-> BS REAL-TIME SYNCHRONIZATION JAVASCRIPT
+     ========================================================================= -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const startAdInput = document.getElementById('startDateAD');
+    const startBsInput = document.getElementById('startDateBS');
+    const endAdInput = document.getElementById('endDateAD');
+    const endBsInput = document.getElementById('endDateBS');
+
+    const scopeTextAD = document.getElementById('scopeTextAD');
+    const scopeTextBS = document.getElementById('scopeTextBS');
+    const tableHeading = document.getElementById('tablePeriodHeading');
+    const exportBtn = document.getElementById('exportSalesCsvBtn');
+    const todayBtn = document.getElementById('btnTodayReset');
+
+    // Reference today strings from backend context
+    const initialTodayAD = "{{ start_date|default:'' }}";
+    const initialTodayBS = "{{ start_date_bs|default:'' }}";
+
+    // -----------------------------------------------------------------
+    // 1. High-Precision Local Conversion Engine (with NepaliFunctions fallback)
+    // -----------------------------------------------------------------
+    const BS_CALENDAR_DATA = {
+        2080: [31, 31, 32, 32, 31, 30, 30, 29, 30, 29, 30, 30],
+        2081: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
+        2082: [31, 32, 31, 32, 31, 30, 30, 30, 29, 29, 30, 30],
+        2083: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 29, 31],
+        2084: [31, 31, 31, 32, 31, 31, 30, 29, 30, 29, 30, 30],
+        2085: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30]
+    };
+    const ANCHOR_AD = new Date(Date.UTC(2026, 9, 4)); // 2026-10-04
+    const ANCHOR_BS = { year: 2083, month: 6, day: 18 }; // 2083-06-18
+
+    function convertADtoBS(adStr) {
+        if (!adStr) return "";
+
+        // Try global library first if available
+        if (typeof NepaliFunctions !== 'undefined' && typeof NepaliFunctions.AD2BS === 'function') {
+            try {
+                const res = NepaliFunctions.AD2BS(adStr);
+                if (typeof res === 'string') return res;
+                if (res && res.year) {
+                    return `${res.year}-${String(res.month).padStart(2, '0')}-${String(res.day).padStart(2, '0')}`;
+                }
+            } catch (e) {}
+        }
+
+        // Standalone mathematical converter
+        const parts = adStr.split('-').map(Number);
+        if (parts.length !== 3) return "";
+        const targetAD = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+        let diffDays = Math.round((targetAD - ANCHOR_AD) / (1000 * 60 * 60 * 24));
+
+        let y = ANCHOR_BS.year, m = ANCHOR_BS.month, d = ANCHOR_BS.day;
+        if (diffDays >= 0) {
+            while (diffDays > 0) {
+                const maxD = (BS_CALENDAR_DATA[y] && BS_CALENDAR_DATA[y][m - 1]) || 30;
+                if (d + diffDays <= maxD) {
+                    d += diffDays;
+                    diffDays = 0;
+                } else {
+                    diffDays -= (maxD - d + 1);
+                    d = 1;
+                    m++;
+                    if (m > 12) { m = 1; y++; }
+                }
+            }
+        } else {
+            while (diffDays < 0) {
+                if (d + diffDays >= 1) {
+                    d += diffDays;
+                    diffDays = 0;
+                } else {
+                    diffDays += d;
+                    m--;
+                    if (m < 1) { m = 12; y--; }
+                    d = (BS_CALENDAR_DATA[y] && BS_CALENDAR_DATA[y][m - 1]) || 30;
+                }
+            }
+        }
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+
+    function convertBStoAD(bsStr) {
+        if (!bsStr || bsStr.length !== 10) return "";
+
+        // Try global library first if available
+        if (typeof NepaliFunctions !== 'undefined' && typeof NepaliFunctions.BS2AD === 'function') {
+            try {
+                const res = NepaliFunctions.BS2AD(bsStr);
+                if (typeof res === 'string') return res;
+                if (res && res.year) {
+                    return `${res.year}-${String(res.month).padStart(2, '0')}-${String(res.day).padStart(2, '0')}`;
+                }
+            } catch (e) {}
+        }
+
+        const [y, m, d] = bsStr.split('-').map(Number);
+        if (isNaN(y) || isNaN(m) || isNaN(d)) return "";
+
+        let daysDiff = 0;
+        if (y > ANCHOR_BS.year || (y === ANCHOR_BS.year && m > ANCHOR_BS.month) || (y === ANCHOR_BS.year && m === ANCHOR_BS.month && d >= ANCHOR_BS.day)) {
+            let cy = ANCHOR_BS.year, cm = ANCHOR_BS.month, cd = ANCHOR_BS.day;
+            while (!(cy === y && cm === m && cd === d)) {
+                daysDiff++;
+                cd++;
+                const maxDays = (BS_CALENDAR_DATA[cy] && BS_CALENDAR_DATA[cy][cm - 1]) || 30;
+                if (cd > maxDays) { cd = 1; cm++; if (cm > 12) { cm = 1; cy++; } }
+            }
+        } else {
+            let cy = ANCHOR_BS.year, cm = ANCHOR_BS.month, cd = ANCHOR_BS.day;
+            while (!(cy === y && cm === m && cd === d)) {
+                daysDiff--;
+                cd--;
+                if (cd < 1) {
+                    cm--;
+                    if (cm < 1) { cm = 12; cy--; }
+                    cd = (BS_CALENDAR_DATA[cy] && BS_CALENDAR_DATA[cy][cm - 1]) || 30;
+                }
+            }
+        }
+        const targetAD = new Date(ANCHOR_AD.getTime() + daysDiff * (1000 * 60 * 60 * 24));
+        return targetAD.toISOString().split('T')[0];
+    }
+
+    // -----------------------------------------------------------------
+    // 2. Dynamic Live On-Screen Display Updates
+    // -----------------------------------------------------------------
+    function refreshLiveDisplay() {
+        const adStart = startAdInput.value || '';
+        const adEnd = endAdInput.value || '';
+        const bsStart = startBsInput.value || '';
+        const bsEnd = endBsInput.value || '';
+
+        if (scopeTextAD) scopeTextAD.textContent = `${adStart} to ${adEnd}`;
+        if (scopeTextBS) scopeTextBS.textContent = `${bsStart} to ${bsEnd} BS`;
+        if (tableHeading) tableHeading.textContent = `Estimation Invoices in Period (${adStart} to ${adEnd})`;
+
+        if (exportBtn) {
+            const baseUrl = "{% url 'reports:export_csv' 'sales' %}";
+            exportBtn.href = `${baseUrl}?start_date=${encodeURIComponent(adStart)}&end_date=${encodeURIComponent(adEnd)}`;
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // 3. Bi-Directional Synchronizer Event Handlers
+    // -----------------------------------------------------------------
+    function onStartADChanged(adVal) {
+        if (!adVal) return;
+        const bsVal = convertADtoBS(adVal);
+        if (bsVal && startBsInput.value !== bsVal) {
+            startBsInput.value = bsVal;
+        }
+        refreshLiveDisplay();
+    }
+
+    function onStartBSChanged(bsVal) {
+        if (!bsVal || bsVal.length !== 10) return;
+        const adVal = convertBStoAD(bsVal);
+        if (adVal && startAdInput.value !== adVal) {
+            startAdInput.value = adVal;
+        }
+        refreshLiveDisplay();
+    }
+
+    function onEndADChanged(adVal) {
+        if (!adVal) return;
+        const bsVal = convertADtoBS(adVal);
+        if (bsVal && endBsInput.value !== bsVal) {
+            endBsInput.value = bsVal;
+        }
+        refreshLiveDisplay();
+    }
+
+    function onEndBSChanged(bsVal) {
+        if (!bsVal || bsVal.length !== 10) return;
+        const adVal = convertBStoAD(bsVal);
+        if (adVal && endAdInput.value !== adVal) {
+            endAdInput.value = adVal;
+        }
+        refreshLiveDisplay();
+    }
+
+    // Attach native input/change listeners to AD pickers
+    startAdInput.addEventListener('input', () => onStartADChanged(startAdInput.value));
+    startAdInput.addEventListener('change', () => onStartADChanged(startAdInput.value));
+
+    endAdInput.addEventListener('input', () => onEndADChanged(endAdInput.value));
+    endAdInput.addEventListener('change', () => onEndADChanged(endAdInput.value));
+
+    // Attach input/change listeners to BS inputs
+    startBsInput.addEventListener('input', () => onStartBSChanged(startBsInput.value.trim()));
+    startBsInput.addEventListener('change', () => onStartBSChanged(startBsInput.value.trim()));
+
+    endBsInput.addEventListener('input', () => onEndBSChanged(endBsInput.value.trim()));
+    endBsInput.addEventListener('change', () => onEndBSChanged(endBsInput.value.trim()));
+
+    // -----------------------------------------------------------------
+    // 4. Attach Nepali Visual Calendar Picker to BS Inputs
+    // -----------------------------------------------------------------
+    function bindVisualNepaliPickers() {
+        if (typeof HTMLElement.prototype.nepaliDatePicker !== 'undefined') {
+            try {
+                startBsInput.nepaliDatePicker({
+                    ndpYear: true,
+                    ndpMonth: true,
+                    ndpYearCount: 25,
+                    readOnlyInput: false,
+                    dateFormat: 'YYYY-MM-DD',
+                    language: 'english',
+                    onChange: function (e) {
+                        const picked = (e && e.bs) ? e.bs : startBsInput.value;
+                        onStartBSChanged(picked);
+                    }
+                });
+                startBsInput.dataset.ndpInitialized = 'true';
+
+                endBsInput.nepaliDatePicker({
+                    ndpYear: true,
+                    ndpMonth: true,
+                    ndpYearCount: 25,
+                    readOnlyInput: false,
+                    dateFormat: 'YYYY-MM-DD',
+                    language: 'english',
+                    onChange: function (e) {
+                        const picked = (e && e.bs) ? e.bs : endBsInput.value;
+                        onEndBSChanged(picked);
+                    }
+                });
+                endBsInput.dataset.ndpInitialized = 'true';
+            } catch (err) {
+                console.warn('[daily_sales] Nepali datepicker bind warning:', err);
+            }
+        }
+    }
+
+    bindVisualNepaliPickers();
+
+    // -----------------------------------------------------------------
+    // 5. "↺ Today" Button Handler
+    // -----------------------------------------------------------------
+    if (todayBtn) {
+        todayBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            const now = new Date();
+            const adTodayStr = now.toISOString().split('T')[0];
+            const bsTodayStr = convertADtoBS(adTodayStr) || initialTodayBS;
+
+            startAdInput.value = adTodayStr;
+            endAdInput.value = adTodayStr;
+            startBsInput.value = bsTodayStr;
+            endBsInput.value = bsTodayStr;
+
+            refreshLiveDisplay();
+        });
+    }
+
+    // Initial check: if BS is empty on load but AD has value, fill BS immediately
+    if (startAdInput.value && !startBsInput.value) {
+        startBsInput.value = convertADtoBS(startAdInput.value);
+    }
+    if (endAdInput.value && !endBsInput.value) {
+        endBsInput.value = convertADtoBS(endAdInput.value);
+    }
+
+    refreshLiveDisplay();
+});
+</script>
 {% endblock %}

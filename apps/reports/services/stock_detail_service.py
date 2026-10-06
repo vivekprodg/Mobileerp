@@ -1,6 +1,5 @@
 """
 Stock Detail Ledger (Bin Card) Service.
-File Path: D:\Mobile Shop\Inventory\apps\reports\services\stock_detail_service.py
 
 Calculates an item-specific stock movement ledger with accurate historical opening balances,
 running inventory balances, transaction rates, and Nepali BS dates matching the client's specification:

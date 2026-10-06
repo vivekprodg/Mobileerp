@@ -1,6 +1,5 @@
 """
 Category-Wise Departmental Sales Intelligence Service.
-File Path: apps/reports/services/category_sales_service.py
 
 Capabilities:
 1. Evaluates sales turnover and gross margins across store product categories:

@@ -1,6 +1,5 @@
 """
 Payment Method-Wise Collection & Bank Reconciliation Service.
-File Path: apps/reports/services/payment_method_sales_service.py
 
 Capabilities:
 1. Reconciles end-of-day register settlements across distinct payment modes:

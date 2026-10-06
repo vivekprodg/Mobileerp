@@ -30,8 +30,9 @@ Features:
    - Supplier-Wise Purchase Turnover, Net Spend & Returns Summary (CSV).
    - Product-Wise & Handset Purchase Volume, Rates & Supplier Sources (CSV).
    - Supplier Outstanding (Udhaari) & Accounts Payable Aging (CSV).
-6. Sales & Commercial Intelligence Reporting Suite (Newly Added):
-   - Sales Summary Date-Wise Rollup (CSV & Styled Excel).
+   - Cancelled & Voided Purchase Bills (GRN) Forensic Audit (CSV).
+6. Sales & Commercial Intelligence Reporting Suite:
+   - 14-Column Sales Summary Date-Wise Rollup with Handset/Accessory split, Returns & Net Collections (CSV & Styled Excel).
    - Product-Wise Sales Volume & Realized Margins (CSV).
    - Brand-Wise Sales Turnover & Share % (CSV).
    - Category-Wise Departmental Revenue & Contribution % (CSV).
@@ -1025,7 +1026,7 @@ class CSVExportEngine:
         return response
 
     # =========================================================================
-    # 4. PURCHASE DOMAIN SUITE EXPORTERS (REGISTER, SUPPLIER, PRODUCT, DEBT)
+    # 4. PURCHASE DOMAIN SUITE EXPORTERS (REGISTER, SUPPLIER, PRODUCT, DEBT, CANCELLED)
     # =========================================================================
     @staticmethod
     def export_purchase_register_csv(
@@ -1445,28 +1446,110 @@ class CSVExportEngine:
 
         return response
 
-    # =========================================================================
-    # 5. SALES & COMMERCIAL INTELLIGENCE EXPORTERS (NEWLY IMPLEMENTED)
-    # =========================================================================
+    @staticmethod
+    def export_cancelled_purchases_csv(
+        records: List[Dict[str, Any]],
+        totals: Dict[str, Any],
+        filename: str = "Cancelled_Purchases_Report.csv"
+    ) -> HttpResponse:
+        """
+        Exports forensic audit records of cancelled and voided purchase GRNs to CSV
+        with formula injection hardening and cumulative financial total rows.
+        """
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
+        writer = csv.writer(response)
+        headers = [
+            'Serial Number', 'GRN Number', 'Supplier Invoice Reference', 'Bill Date AD', 'Bill Date BS',
+            'Cancellation Timestamp', 'Branch Code', 'Branch Name', 'Supplier Company Name', 'Supplier PAN',
+            'Supplier Phone', 'Receiving User', 'Cancelling Supervisor', 'IP Address',
+            'Cancellation Justification', 'Gross Amount', 'Discount Voided',
+            'VAT Voided', 'Net Consignment Total', 'Paid Cash Reversed',
+            'Due Payable Reversed', 'Stock Reversion Verification Status'
+        ]
+        writer.writerow(headers)
+
+        for idx, r in enumerate(records, start=1):
+            reversion_status = 'Yes (Confirmed Reverted)' if r.get('is_stock_reverted') else 'Pending Verification'
+            row = [
+                idx,
+                r.get('grn_number', ''),
+                r.get('supplier_bill_no', ''),
+                str(r.get('bill_date_ad', '')),
+                str(r.get('bill_date_bs', '')),
+                r.get('cancel_date_ad_str', ''),
+                r.get('branch_code', ''),
+                r.get('branch_name', ''),
+                r.get('supplier_name', ''),
+                r.get('supplier_pan', '-'),
+                r.get('supplier_phone', '-'),
+                r.get('received_by', ''),
+                r.get('cancelled_by', ''),
+                r.get('cancel_ip', '-'),
+                r.get('cancellation_reason', ''),
+                f"{r.get('gross_amount', 0):.2f}",
+                f"{r.get('discount_amount', 0):.2f}",
+                f"{r.get('vat_amount', 0):.2f}",
+                f"{r.get('net_total_amount', 0):.2f}",
+                f"{r.get('paid_amount_reversed', 0):.2f}",
+                f"{r.get('due_amount_reversed', 0):.2f}",
+                reversion_status
+            ]
+            writer.writerow(sanitize_csv_row(row))
+
+        totals_row = [
+            'TOTALS',
+            f"{totals.get('total_cancelled_bills', len(records))} Cancelled GRNs",
+            '', '', '', '', '', '', '', '', '', '', '', '', '',
+            f"{totals.get('total_gross_amount', 0):.2f}",
+            f"{totals.get('total_discount_amount', 0):.2f}",
+            f"{totals.get('total_vat_amount', 0):.2f}",
+            f"{totals.get('total_cancelled_amount', 0):.2f}",
+            f"{totals.get('total_paid_reversed', 0):.2f}",
+            f"{totals.get('total_due_reversed', 0):.2f}",
+            ''
+        ]
+        writer.writerow(sanitize_csv_row(totals_row))
+
+        return response
+
+    # =========================================================================
+    # 5. SALES & COMMERCIAL INTELLIGENCE EXPORTERS
+    # =========================================================================
     @staticmethod
     def export_sales_summary_csv(
         records: List[Dict[str, Any]],
         totals: Dict[str, Any],
         filename: str = "Sales_Summary_Report.csv"
     ) -> HttpResponse:
+        """
+        Exports the 14-column date-wise sales summary matching the on-screen ledger (Point 4.1):
+        1. Date (AD)
+        2. Date (BS)
+        3. Bills
+        4. Mobiles Sold
+        5. Accessories Sold
+        6. Gross Sales (NPR)
+        7. Discount (NPR)
+        8. Net Sales (NPR)
+        9. Landed COGS (NPR)
+        10. Gross Profit (NPR)
+        11. Margin %
+        12. Collected (NPR)
+        13. Credit / Due (NPR)
+        14. Returns / Refunds (NPR)
+        15. Net Collection (NPR)
+        """
         response = HttpResponse(content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
         writer = csv.writer(response)
         headers = [
-            'Date (AD)', 'Date (BS)', 'Invoices', 'Units Sold', 'Gross Subtotal (NPR)',
-            'Item Discounts (NPR)', 'Bill Discounts (NPR)', 'Total Discounts (NPR)', 'Trade-In Credit (NPR)',
-            'Taxable Base (NPR)', 'Non-Taxable Base (NPR)', 'Tax / VAT (NPR)', 'Net Grand Total (NPR)',
-            'Cost of Goods Sold (COGS) (NPR)', 'Gross Profit Realized (NPR)', 'Gross Margin %',
-            'Paid Amount (NPR)', 'Due Balance (Udhaari) (NPR)', 'Cash Inflow (NPR)',
-            'FonePay QR (NPR)', 'eSewa (NPR)', 'Khalti (NPR)', 'Card Swipe (NPR)',
-            'Bank Transfer (NPR)', 'Credit Authorized (NPR)'
+            'Date (AD)', 'Date (BS)', 'Bills', 'Mobiles Sold', 'Accessories Sold',
+            'Gross Sales (NPR)', 'Discount (NPR)', 'Net Sales (NPR)', 'Landed COGS (NPR)',
+            'Gross Profit (NPR)', 'Margin %', 'Collected (NPR)', 'Credit / Due (NPR)',
+            'Returns / Refunds (NPR)', 'Net Collection (NPR)'
         ]
         writer.writerow(headers)
 
@@ -1475,56 +1558,36 @@ class CSVExportEngine:
                 r.get('date_ad_str', ''),
                 r.get('date_bs', ''),
                 r.get('invoice_count', 0),
-                f"{r.get('units_sold', 0):.3f}",
+                f"{r.get('mobiles_sold', 0):.0f}",
+                f"{r.get('accessories_sold', 0):.0f}",
                 f"{r.get('gross_subtotal', 0):.2f}",
-                f"{r.get('item_discount_sum', 0):.2f}",
-                f"{r.get('bill_discount_sum', 0):.2f}",
                 f"{r.get('total_discount_sum', 0):.2f}",
-                f"{r.get('trade_in_credit_sum', 0):.2f}",
-                f"{r.get('taxable_amount', 0):.2f}",
-                f"{r.get('non_taxable_amount', 0):.2f}",
-                f"{r.get('vat_amount', 0):.2f}",
-                f"{r.get('grand_total', 0):.2f}",
+                f"{r.get('net_sales', 0):.2f}",
                 f"{r.get('cogs_amount', 0):.2f}",
                 f"{r.get('gross_profit', 0):.2f}",
                 f"{r.get('margin_percent', 0):.1f}%",
-                f"{r.get('paid_amount', 0):.2f}",
+                f"{r.get('collected', 0):.2f}",
                 f"{r.get('due_amount', 0):.2f}",
-                f"{r.get('cash_collected', 0):.2f}",
-                f"{r.get('fonepay_collected', 0):.2f}",
-                f"{r.get('esewa_collected', 0):.2f}",
-                f"{r.get('khalti_collected', 0):.2f}",
-                f"{r.get('card_collected', 0):.2f}",
-                f"{r.get('bank_collected', 0):.2f}",
-                f"{r.get('credit_authorized', 0):.2f}"
+                f"{r.get('refund_amount', 0):.2f}",
+                f"{r.get('net_collection', 0):.2f}"
             ]
             writer.writerow(sanitize_csv_row(row))
 
         totals_row = [
             'TOTALS', '',
             totals.get('total_invoices', 0),
-            f"{totals.get('total_units_sold', 0):.3f}",
+            f"{totals.get('total_mobiles', 0):.0f}",
+            f"{totals.get('total_accessories', 0):.0f}",
             f"{totals.get('total_gross', 0):.2f}",
-            f"{totals.get('total_item_disc', 0):.2f}",
-            f"{totals.get('total_bill_disc', 0):.2f}",
-            f"{totals.get('total_sales_disc', 0):.2f}",
-            f"{totals.get('total_trade_in', 0):.2f}",
-            f"{totals.get('total_taxable', 0):.2f}",
-            f"{totals.get('total_non_taxable', 0):.2f}",
-            f"{totals.get('total_vat', 0):.2f}",
+            f"-{totals.get('total_sales_disc', 0):.2f}",
             f"{totals.get('total_net_turnover', 0):.2f}",
             f"{totals.get('total_cogs', 0):.2f}",
             f"{totals.get('total_profit', 0):.2f}",
             f"{totals.get('overall_margin_pct', 0):.1f}%",
-            f"{totals.get('total_paid', 0):.2f}",
+            f"{totals.get('total_collected', 0):.2f}",
             f"{totals.get('total_due', 0):.2f}",
-            f"{totals.get('total_cash', 0):.2f}",
-            f"{totals.get('total_fonepay', 0):.2f}",
-            f"{totals.get('total_esewa', 0):.2f}",
-            f"{totals.get('total_khalti', 0):.2f}",
-            f"{totals.get('total_card', 0):.2f}",
-            f"{totals.get('total_bank', 0):.2f}",
-            f"{totals.get('total_credit', 0):.2f}"
+            f"-{totals.get('total_returns', 0):.2f}",
+            f"{totals.get('total_net_collection', 0):.2f}"
         ]
         writer.writerow(sanitize_csv_row(totals_row))
 
@@ -1537,6 +1600,10 @@ class CSVExportEngine:
         date_range_label: str = "",
         filename: str = "Sales_Summary_Report.xlsx"
     ) -> HttpResponse:
+        """
+        Exports the 14-column date-wise sales summary to an enterprise-styled Excel workbook (Point 4.2).
+        Includes dark navy title, accounting double borders, formatted numeric cells, and auto-fit columns.
+        """
         import openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
@@ -1549,26 +1616,28 @@ class CSVExportEngine:
         config = SystemConfiguration.get_solo()
         shop_title = config.company_name_en if config else "Smart Mobile & Optical Hub"
 
-        ws.merge_cells("A1:Y1")
-        ws["A1"] = f"{shop_title.upper()} - SALES SUMMARY & REVENUE REPORT"
+        # Row 1: Merged Title Header across Columns A-O
+        ws.merge_cells("A1:O1")
+        ws["A1"] = f"{shop_title.upper()} - DATE-WISE SALES SUMMARY & REVENUE REPORT"
         ws["A1"].font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
         ws["A1"].fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
         ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
         ws.row_dimensions[1].height = 28
 
-        ws.merge_cells("A2:Y2")
+        # Row 2: Merged Metadata Strip across Columns A-O
+        ws.merge_cells("A2:O2")
         ws["A2"] = f"Period: {date_range_label} | Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M')}"
         ws["A2"].font = Font(name="Calibri", size=10, italic=True, color="334155")
         ws["A2"].fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
         ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
         ws.row_dimensions[2].height = 20
 
+        # Row 4: Column Headers (15 columns for the 14 metrics)
         headers = [
-            'Date (AD)', 'Date (BS)', 'Invoices', 'Units Sold', 'Gross Subtotal',
-            'Item Discounts', 'Bill Discounts', 'Total Discounts', 'Trade-In Credit',
-            'Taxable Base', 'Non-Taxable Base', 'Tax / VAT', 'Grand Total', 'COGS',
-            'Gross Profit', 'Margin %', 'Paid Amount', 'Due Udhaari',
-            'Cash Inflow', 'FonePay QR', 'eSewa', 'Khalti', 'Card', 'Bank', 'Credit'
+            'Date (AD)', 'Date (BS)', 'Bills', 'Mobiles Sold', 'Accessories Sold',
+            'Gross Sales (NPR)', 'Discount (NPR)', 'Net Sales (NPR)', 'Landed COGS (NPR)',
+            'Gross Profit (NPR)', 'Margin %', 'Collected (NPR)', 'Credit / Due (NPR)',
+            'Returns (NPR)', 'Net Collection (NPR)'
         ]
 
         header_font = Font(name="Calibri", size=9.5, bold=True, color="FFFFFF")
@@ -1591,6 +1660,7 @@ class CSVExportEngine:
         current_row = 5
         alt_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
 
+        # Data Rows Loop
         for r in records:
             ws.row_dimensions[current_row].height = 19
             is_alt = (current_row % 2 == 0)
@@ -1599,28 +1669,18 @@ class CSVExportEngine:
                 r.get('date_ad_str', ''),
                 r.get('date_bs', ''),
                 int(r.get('invoice_count', 0)),
-                float(r.get('units_sold', 0)),
+                float(r.get('mobiles_sold', 0)),
+                float(r.get('accessories_sold', 0)),
                 float(r.get('gross_subtotal', 0)),
-                float(r.get('item_discount_sum', 0)),
-                float(r.get('bill_discount_sum', 0)),
                 float(r.get('total_discount_sum', 0)),
-                float(r.get('trade_in_credit_sum', 0)),
-                float(r.get('taxable_amount', 0)),
-                float(r.get('non_taxable_amount', 0)),
-                float(r.get('vat_amount', 0)),
-                float(r.get('grand_total', 0)),
+                float(r.get('net_sales', 0)),
                 float(r.get('cogs_amount', 0)),
                 float(r.get('gross_profit', 0)),
                 float(r.get('margin_percent', 0)) / 100.0,
-                float(r.get('paid_amount', 0)),
+                float(r.get('collected', 0)),
                 float(r.get('due_amount', 0)),
-                float(r.get('cash_collected', 0)),
-                float(r.get('fonepay_collected', 0)),
-                float(r.get('esewa_collected', 0)),
-                float(r.get('khalti_collected', 0)),
-                float(r.get('card_collected', 0)),
-                float(r.get('bank_collected', 0)),
-                float(r.get('credit_authorized', 0))
+                float(r.get('refund_amount', 0)),
+                float(r.get('net_collection', 0))
             ]
 
             for col_idx, val in enumerate(row_values, 1):
@@ -1632,21 +1692,31 @@ class CSVExportEngine:
 
                 if col_idx in [1, 2]:
                     cell.alignment = Alignment(horizontal="center")
-                elif col_idx in [3]:
+                elif col_idx == 3:
                     cell.alignment = Alignment(horizontal="center")
                     cell.number_format = '#,##0'
-                elif col_idx == 4:
+                elif col_idx in [4, 5]:
+                    cell.alignment = Alignment(horizontal="right")
+                    cell.number_format = '#,##0'
+                elif col_idx == 7:
                     cell.alignment = Alignment(horizontal="right")
                     cell.number_format = '#,##0.00'
-                elif col_idx == 16:
+                    cell.font = Font(name="Calibri", size=9, color="B91C1C")
+                elif col_idx in [8, 10, 15]:
+                    cell.alignment = Alignment(horizontal="right")
+                    cell.number_format = '#,##0.00'
+                    cell.font = Font(name="Calibri", size=9, bold=True)
+                elif col_idx == 11:
                     cell.alignment = Alignment(horizontal="right")
                     cell.number_format = '0.0%'
+                    cell.font = Font(name="Calibri", size=9, bold=True, color="047857")
                 else:
                     cell.alignment = Alignment(horizontal="right")
                     cell.number_format = '#,##0.00'
 
             current_row += 1
 
+        # Totals Footer Row
         ws.row_dimensions[current_row].height = 24
         double_top_border = Border(
             left=Side(style='thin', color='CBD5E1'),
@@ -1659,28 +1729,18 @@ class CSVExportEngine:
         totals_values = [
             'TOTALS', '',
             int(totals.get('total_invoices', 0)),
-            float(totals.get('total_units_sold', 0)),
+            float(totals.get('total_mobiles', 0)),
+            float(totals.get('total_accessories', 0)),
             float(totals.get('total_gross', 0)),
-            float(totals.get('total_item_disc', 0)),
-            float(totals.get('total_bill_disc', 0)),
             float(totals.get('total_sales_disc', 0)),
-            float(totals.get('total_trade_in', 0)),
-            float(totals.get('total_taxable', 0)),
-            float(totals.get('total_non_taxable', 0)),
-            float(totals.get('total_vat', 0)),
             float(totals.get('total_net_turnover', 0)),
             float(totals.get('total_cogs', 0)),
             float(totals.get('total_profit', 0)),
             float(totals.get('overall_margin_pct', 0)) / 100.0,
-            float(totals.get('total_paid', 0)),
+            float(totals.get('total_collected', 0)),
             float(totals.get('total_due', 0)),
-            float(totals.get('total_cash', 0)),
-            float(totals.get('total_fonepay', 0)),
-            float(totals.get('total_esewa', 0)),
-            float(totals.get('total_khalti', 0)),
-            float(totals.get('total_card', 0)),
-            float(totals.get('total_bank', 0)),
-            float(totals.get('total_credit', 0))
+            float(totals.get('total_returns', 0)),
+            float(totals.get('total_net_collection', 0))
         ]
 
         for col_idx, val in enumerate(totals_values, 1):
@@ -1690,16 +1750,22 @@ class CSVExportEngine:
             cell.font = Font(name="Calibri", size=9.5, bold=True)
             if col_idx in [1, 2]:
                 cell.alignment = Alignment(horizontal="center", vertical="center")
-            elif col_idx in [3]:
-                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_idx in [3, 4, 5]:
+                cell.alignment = Alignment(horizontal="center" if col_idx == 3 else "right", vertical="center")
                 cell.number_format = '#,##0'
-            elif col_idx == 16:
+            elif col_idx == 7:
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+                cell.number_format = '#,##0.00'
+                cell.font = Font(name="Calibri", size=9.5, bold=True, color="B91C1C")
+            elif col_idx == 11:
                 cell.alignment = Alignment(horizontal="right", vertical="center")
                 cell.number_format = '0.0%'
+                cell.font = Font(name="Calibri", size=9.5, bold=True, color="047857")
             else:
                 cell.alignment = Alignment(horizontal="right", vertical="center")
                 cell.number_format = '#,##0.00'
 
+        # Auto-Fit Column Widths
         for col in ws.columns:
             col_letter = get_column_letter(col[0].column)
             max_len = 0

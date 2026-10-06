@@ -1,6 +1,5 @@
 """
 Cashier-Wise Collection & Settlement Audit Service.
-File Path: apps/reports/services/cashier_sales_service.py
 
 Capabilities:
 1. Audits counter cashier accountability: Total invoices billed, gross turnover,

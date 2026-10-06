@@ -18,11 +18,25 @@
 }
 .recon-table tr.total-row {
     font-weight: 800;
-    border-top: 2px solid var(--erp-slate-300);
+    border-top: 2px solid var(--erp-slate-300, #cbd5e1);
 }
+
+.tax-badge-13 {
+    background-color: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+.tax-badge-0 {
+    background-color: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+}
+
 @media print {
     .no-print { display: none !important; }
+    body { background: #ffffff !important; font-size: 11px !important; }
     .card { box-shadow: none !important; border: 1px solid #ccc !important; }
+    .table { width: 100% !important; font-size: 10px !important; }
 }
 </style>
 {% endblock %}
@@ -37,15 +51,29 @@
                 <span class="badge bg-{% if grn.status == 'RECEIVED' %}success{% elif grn.status == 'CANCELLED' %}danger{% else %}warning text-dark{% endif %} fs-xs px-3 py-1 rounded-pill">
                     {{ grn.get_status_display }}
                 </span>
-                {% if grn.is_vat_bill %}
+                
+                <!-- Tax Invoice / Bill Classification Badge -->
+                {% if grn.is_vat_bill and grn.vat_amount > 0 %}
                     <span class="badge bg-success bg-opacity-10 text-success fs-xs fw-bold px-3 py-1 rounded-pill border border-success border-opacity-25">
                         <i class="fas fa-file-invoice me-1"></i> 13% VAT Tax Invoice
                     </span>
                 {% else %}
                     <span class="badge bg-secondary bg-opacity-10 text-secondary fs-xs fw-bold px-3 py-1 rounded-pill">
-                        PAN / Non-VAT Consignment
+                        PAN / 0% Non-VAT Consignment
                     </span>
                 {% endif %}
+
+                <!-- VAT Calculation Mode Badge (Exclusive vs. Inclusive) -->
+                {% if grn.vat_handling_mode == 'INCLUSIVE' %}
+                    <span class="badge bg-purple bg-opacity-10 text-purple fs-xs fw-bold px-3 py-1 rounded-pill border border-purple border-opacity-25" style="color: #6b21a8; background-color: #faf5ff; border: 1px solid #e9d5ff;">
+                        <i class="fas fa-tag me-1"></i> VAT Included (Tax Extracted)
+                    </span>
+                {% else %}
+                    <span class="badge bg-primary bg-opacity-10 text-primary fs-xs fw-bold px-3 py-1 rounded-pill border border-primary border-opacity-25">
+                        <i class="fas fa-plus me-1"></i> VAT Excluded (Tax on Top)
+                    </span>
+                {% endif %}
+
                 {% if grn.distributor_mdms_certified %}
                     <span class="badge bg-primary bg-opacity-10 text-primary fs-xs fw-bold px-3 py-1 rounded-pill">
                         <i class="fas fa-shield-halved me-1"></i> NTA MDMS Certified
@@ -90,9 +118,9 @@
     </div>
     {% endif %}
 
-    <!-- Section 1: Executive 5-Card Financial Dashboard -->
+    <!-- Section 1: Executive 5-Card Financial Dashboard (Audited Tax Mode Visibility) -->
     <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-5 g-3 mb-4">
-        <!-- 1. Gross Merchandise Value -->
+        <!-- 1. Gross Merchandise Value & Dual Pots -->
         <div class="col">
             <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 kpi-border-primary">
                 <span class="text-muted fs-3xs text-uppercase fw-bold d-block">1. Pre-VAT Merchandise</span>
@@ -100,7 +128,7 @@
                     Rs. {{ grn.gross_amount|default:0|floatformat:2|intcomma }}
                 </h4>
                 <small class="text-muted fs-3xs d-block">
-                    Base: Rs. {{ grn.taxable_amount|default:0|floatformat:2|intcomma }} (Disc: Rs. {{ grn.discount_amount|default:0|floatformat:2|intcomma }})
+                    Taxable Base: <strong>Rs. {{ grn.taxable_amount|default:0|floatformat:2|intcomma }}</strong>
                 </small>
             </div>
         </div>
@@ -113,16 +141,18 @@
                     Rs. {{ grn.vat_amount|default:0|floatformat:2|intcomma }}
                 </h4>
                 <div>
-                    {% if grn.is_vat_bill %}
-                        <span class="badge bg-success bg-opacity-10 text-success fs-3xs">13% VAT Claimable</span>
+                    {% if grn.is_vat_bill and grn.vat_amount > 0 %}
+                        <span class="badge bg-success bg-opacity-10 text-success fs-3xs">
+                            {% if grn.vat_handling_mode == 'INCLUSIVE' %}Extracted (1.13 Divisor){% else %}Added on Top (Exclusive){% endif %}
+                        </span>
                     {% else %}
-                        <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">Non-VAT (0.00)</span>
+                        <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">PAN / 0% Non-VAT</span>
                     {% endif %}
                 </div>
             </div>
         </div>
 
-        <!-- 3. Shipping & Customs Overheads -->
+        <!-- 3. Shipping & Duty Overheads -->
         <div class="col">
             <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 kpi-border-warning">
                 <span class="text-muted fs-3xs text-uppercase fw-bold d-block">3. Shipping &amp; Duty Overheads</span>
@@ -130,7 +160,7 @@
                     +Rs. {{ grn.overhead_total|default:0|floatformat:2|intcomma }}
                 </h4>
                 <small class="text-muted fs-3xs d-block">
-                    Freight, Customs &amp; Handling
+                    Freight, Duty &amp; Handling
                 </small>
             </div>
         </div>
@@ -139,10 +169,10 @@
         <div class="col">
             <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 kpi-border-purple">
                 <span class="text-muted fs-3xs text-uppercase fw-bold d-block">4. Total Landed (COGS)</span>
-                <h4 class="fw-extrabold text-primary font-monospace my-1">
+                <h4 class="fw-extrabold text-primary font-monospace my-1" style="color: #6d28d9 !important;">
                     Rs. {{ grn.total_landed_cost|default:0|floatformat:2|intcomma }}
                 </h4>
-                <small class="text-muted fs-3xs d-block">Inventory Asset Valuation</small>
+                <small class="text-muted fs-3xs d-block">Net Merchandise + 5 Overheads</small>
             </div>
         </div>
 
@@ -154,41 +184,54 @@
                     Rs. {{ grn.due_amount|default:0|floatformat:2|intcomma }}
                 </h4>
                 <small class="text-danger fs-3xs d-block fw-semibold">
-                    Bill Total: Rs. {{ grn.net_total_amount|default:0|floatformat:2|intcomma }} | Paid: Rs. {{ grn.paid_amount|default:0|floatformat:2|intcomma }}
+                    Bill: Rs. {{ grn.net_total_amount|default:0|floatformat:2|intcomma }} | Paid: Rs. {{ grn.paid_amount|default:0|floatformat:2|intcomma }}
                 </small>
             </div>
         </div>
     </div>
 
-    <!-- Section 2: Inward Consignment Line Items Table -->
+    <!-- Section 2: Inward Consignment Line Items Table (with 13% vs. 0% Tax Badges) -->
     <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
         <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
             <h6 class="fw-bold text-dark mb-0">
                 <i class="fas fa-boxes-stacked text-primary me-2"></i> Inward Consignment Items (Pre-VAT Base &amp; Landed Breakdown)
             </h6>
-            <span class="badge bg-primary rounded-pill px-3">{{ items.count }} Line Items</span>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-light text-dark border fs-xs font-monospace">
+                    Mode: {% if grn.vat_handling_mode == 'INCLUSIVE' %}VAT Included (Extracted){% else %}VAT Excluded (Tax on Top){% endif %}
+                </span>
+                <span class="badge bg-primary rounded-pill px-3">{{ items.count }} Line Items</span>
+            </div>
         </div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 fs-sm table-bordered">
                 <thead class="bg-light text-muted text-uppercase fs-2xs">
                     <tr>
-                        <th class="ps-4" style="width: 25%;">Product / Model Description</th>
+                        <th class="ps-3 text-center" style="width: 40px;">#</th>
+                        <th style="width: 25%;">Product / Model Description</th>
                         <th class="text-center" style="width: 8%;">Purchased Qty</th>
-                        <th class="text-center" style="width: 9%;">Stock Qty</th>
-                        <th class="text-end" style="width: 11%;">Pre-VAT Rate</th>
-                        <th class="text-center" style="width: 13%;">Line Discount</th>
+                        <th class="text-center" style="width: 8%;">Stock Qty</th>
+                        <th class="text-end" style="width: 11%;">
+                            {% if grn.vat_handling_mode == 'INCLUSIVE' %}Rate (Incl-VAT){% else %}Rate (Pre-VAT){% endif %}
+                        </th>
+                        <th class="text-center" style="width: 11%;">Line Discount</th>
+                        <th class="text-center" style="width: 10%;">Tax Rate</th>
                         <th class="text-end" style="width: 11%;">Net Pre-VAT Base</th>
                         <th class="text-end" style="width: 11%;">Unit Landed Cost</th>
-                        <th class="text-end pe-4" style="width: 12%;">Target MRP</th>
+                        <th class="text-end pe-3" style="width: 11%;">Target MRP</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in items %}
                     <tr>
-                        <td class="ps-4">
+                        <td class="ps-3 text-center text-muted font-monospace fw-bold">{{ forloop.counter }}</td>
+                        <td>
                             <strong class="text-dark">{{ item.product.name }}</strong>
                             {% if item.supplier_item_code %}
                                 <small class="text-muted font-monospace d-block fs-3xs">Supplier SKU: {{ item.supplier_item_code }}</small>
+                            {% endif %}
+                            {% if item.batch_number %}
+                                <small class="text-primary font-monospace d-block fs-3xs">Batch: {{ item.batch_number }}</small>
                             {% endif %}
                             {% if item.scanned_imei_list %}
                                 <div class="mt-1 font-monospace text-primary fs-3xs text-truncate p-1 bg-light rounded border border-info border-opacity-25" style="max-width: 380px;">
@@ -211,14 +254,27 @@
                                     {% if item.discount_type == 'PERCENTAGE' %}
                                         {{ item.discount_input_value|floatformat:1 }}% Disc
                                     {% else %}
-                                        Flat Rs. Concession
+                                        Flat Rs. Disc
                                     {% endif %}
                                 </span>
                                 <small class="text-muted font-monospace d-block fs-3xs mt-1">
                                     -Rs. {{ item.item_discount_amount|floatformat:2|intcomma }} ({{ item.discount_percent|floatformat:1 }}%)
                                 </small>
                             {% else %}
-                                <span class="text-muted fs-3xs font-monospace">None (0%)</span>
+                                <span class="text-muted fs-3xs font-monospace">0.00</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Strict Tax Rate Badge (13% vs. 0%) -->
+                        <td class="text-center">
+                            {% if item.vat_rate > 0 %}
+                                <span class="badge tax-badge-13 font-mono fs-3xs px-2 py-1">
+                                    <i class="fas fa-percent me-0.5"></i> 13% (Taxable)
+                                </span>
+                            {% else %}
+                                <span class="badge tax-badge-0 font-mono fs-3xs px-2 py-1">
+                                    0% (Exempt / PAN)
+                                </span>
                             {% endif %}
                         </td>
 
@@ -227,19 +283,19 @@
                             Rs. {{ item.line_total|floatformat:2|intcomma }}
                         </td>
 
-                        <!-- Unit Landed Cost (Inventory COGS) -->
-                        <td class="text-end font-monospace fw-bold text-primary">
+                        <!-- Unit Landed Cost (Inventory COGS Asset) -->
+                        <td class="text-end font-monospace fw-bold text-primary" style="color: #6d28d9 !important;">
                             Rs. {{ item.unit_landed_cost|floatformat:2|intcomma }}
                         </td>
 
                         <!-- Target MRP -->
-                        <td class="text-end pe-4 font-monospace fw-semibold text-secondary">
+                        <td class="text-end pe-3 font-monospace fw-semibold text-secondary">
                             Rs. {{ item.new_selling_price|default:item.product.selling_price|floatformat:2|intcomma }}
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="8" class="text-center py-4 text-muted">No consignment items recorded.</td>
+                        <td colspan="10" class="text-center py-4 text-muted">No consignment items recorded.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -286,7 +342,7 @@
                     </div>
                     {% if grn.remarks %}
                     <div class="col-12 pt-2 border-top">
-                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">Consignment Remarks / Discount Justification</span>
+                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">Consignment Remarks / Observations</span>
                         <p class="text-muted mb-0 fst-italic">{{ grn.remarks }}</p>
                     </div>
                     {% endif %}
@@ -294,12 +350,17 @@
             </div>
         </div>
 
-        <!-- Right: Structured Financial Reconciliation Breakdown -->
+        <!-- Right: Structured Financial Reconciliation Breakdown (Audited Dual-Pot Separation) -->
         <div class="col-12 col-lg-6">
             <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
-                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
-                    <i class="fas fa-calculator text-primary me-2"></i> Structured Valuation &amp; Settlement Reconciliation
-                </h6>
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-calculator text-primary me-2"></i> Structured Valuation &amp; Settlement Reconciliation
+                    </h6>
+                    <span class="badge bg-light text-primary border font-mono fs-3xs">
+                        {% if grn.vat_handling_mode == 'INCLUSIVE' %}INCLUSIVE (1.13 Divisor){% else %}EXCLUSIVE (Tax on Top){% endif %}
+                    </span>
+                </div>
                 <table class="table table-sm table-borderless recon-table mb-0">
                     <tbody>
                         <tr>
@@ -327,56 +388,82 @@
                             </td>
                         </tr>
                         {% endif %}
+
+                        <!-- Taxable Pot (13% VAT Base) -->
                         <tr class="border-top">
-                            <td class="fw-bold text-dark">Net Pre-VAT Taxable Base:</td>
+                            <td class="fw-bold text-dark">
+                                Pre-VAT Taxable Base (13% Goods):
+                            </td>
                             <td class="text-end font-monospace fw-bold text-dark">
                                 Rs. {{ grn.taxable_amount|default:0|floatformat:2|intcomma }}
                             </td>
                         </tr>
+
+                        <!-- Non-Taxable Pot (0% VAT Base) -->
+                        <tr>
+                            <td class="text-muted">
+                                Non-Taxable / Exempt Base (0% Goods):
+                            </td>
+                            <td class="text-end font-monospace text-secondary fw-semibold">
+                                Rs. {{ grn.net_total_amount|default:0|floatformat:2|intcomma|slice:":0" }}{% with net_merch=grn.net_total_amount|default:0 %}{% endwith %}{{ grn.formatted_non_taxable_amount|default:"Rs. 0.00"|safe }}
+                            </td>
+                        </tr>
+
+                        <!-- Dedicated 13% Input VAT -->
                         <tr>
                             <td class="text-muted">
                                 Dedicated 13% Input VAT 
-                                {% if grn.is_vat_bill %}
-                                    <span class="badge bg-success bg-opacity-10 text-success fs-3xs">Claimable</span>
+                                {% if grn.is_vat_bill and grn.vat_amount > 0 %}
+                                    <span class="badge bg-success bg-opacity-10 text-success fs-3xs">Claimable Input Tax</span>
                                 {% else %}
-                                    <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">0% Tax Bill</span>
+                                    <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">0% Tax Consignment</span>
                                 {% endif %}:
                             </td>
                             <td class="text-end font-monospace text-success fw-bold">
                                 +Rs. {{ grn.vat_amount|default:0|floatformat:2|intcomma }}
                             </td>
                         </tr>
+
+                        <!-- Overheads -->
                         <tr>
                             <td class="text-muted">
                                 Shipping, Duty &amp; Handling Overheads:
                                 <small class="text-muted fs-3xs d-block">
-                                    Freight: {{ grn.extra_freight_charge|floatformat:2 }} | Customs: {{ grn.customs_import_charge|floatformat:2 }} | Handling: {{ grn.other_handling_charge|floatformat:2 }}
+                                    Freight: {{ grn.extra_freight_charge|default:0|floatformat:2 }} | Duty: {{ grn.customs_import_charge|default:0|floatformat:2 }} | Handl: {{ grn.other_handling_charge|default:0|floatformat:2 }} | Ins: {{ grn.insurance_charge|default:0|floatformat:2 }}
                                 </small>
                             </td>
                             <td class="text-end font-monospace text-warning-emphasis fw-bold">
                                 +Rs. {{ grn.overhead_total|default:0|floatformat:2|intcomma }}
                             </td>
                         </tr>
+
+                        <!-- Landed Cost COGS -->
                         <tr class="total-row bg-light">
-                            <td class="text-primary py-2">
-                                Total Landed Cost (COGS Asset Entering Warehouse):
+                            <td class="text-primary py-2" style="color: #6d28d9 !important;">
+                                Total Landed Cost (COGS Entering Inventory Asset):
                             </td>
-                            <td class="text-end font-monospace text-primary fw-extrabold py-2">
+                            <td class="text-end font-monospace fw-extrabold py-2" style="color: #6d28d9 !important;">
                                 Rs. {{ grn.total_landed_cost|default:0|floatformat:2|intcomma }}
                             </td>
                         </tr>
+
+                        <!-- Supplier Invoice Total -->
                         <tr>
                             <td class="fw-bold text-dark pt-2">Net Supplier Bill / Invoice Total:</td>
                             <td class="text-end font-monospace fw-bold text-dark pt-2">
                                 Rs. {{ grn.net_total_amount|default:0|floatformat:2|intcomma }}
                             </td>
                         </tr>
+
+                        <!-- Spot Paid -->
                         <tr>
                             <td class="text-muted">Spot Cash / Digital Paid on Delivery:</td>
                             <td class="text-end font-monospace text-success fw-semibold">
                                 -Rs. {{ grn.paid_amount|default:0|floatformat:2|intcomma }}
                             </td>
                         </tr>
+
+                        <!-- Net Due Added to Debt -->
                         <tr class="border-top">
                             <td class="fw-bold text-danger py-2">Net Due Balance Added to Supplier Debt (Udhaari):</td>
                             <td class="text-end font-monospace text-danger fw-extrabold py-2 fs-6">
