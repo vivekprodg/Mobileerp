@@ -1,36 +1,51 @@
 """
 Purchases, Suppliers, GRN & Commercial Purchase Return (Debit Note) Views.
 
-Key Architectural Improvements & Bug Fixes:
+Key Architectural Improvements & Capabilities:
 1. Reversal Architecture Correction (Fixes Double-Reversal Bug in cancel_grn_view):
    - Adopts the standard double-entry audit convention: the original purchase journal entry
-     remains `POSTED` (annotated with reversal cross-references) while a distinct reversing entry
-     is posted with `status='POSTED'` that inverts debits and credits.
+     remains POSTED (annotated with reversal cross-references) while a distinct reversing entry
+     is posted with status='POSTED' that inverts debits and credits.
    - Prevents balance recalculations from double-subtracting cancelled bills into negative balances.
 
 2. Settlement-Aware Supplier Debt Cancellation (Fixes Unearned Debt Deduction):
-   - Differentiates between unpaid credit balances (`due_amount > 0`) and spot payments (`paid_amount > 0`).
+   - Differentiates between unpaid credit balances (due_amount > 0) and spot payments (paid_amount > 0).
    - If a bill was an unpaid credit purchase, reverses strictly the unpaid debt added to supplier AP.
-   - If a bill was paid in full on delivery (`due_amount == 0`), does not penalize unrelated debts;
+   - If a bill was paid in full on delivery (due_amount == 0), does not penalize unrelated debts;
      records the disbursed cash as an advance due from the supplier / pending refund.
 
 3. Supplier Payout Historical Date & Calendar Ingestion (Fixes Backdating Amnesia):
-   - `SupplierPaymentRecordView` extracts and synchronizes `entry_date` (AD) and `entry_date_bs` (BS).
-   - Stamps the sub-ledger and passes `ledger_entry` and `date_ad` directly to the General Ledger
+   - SupplierPaymentRecordView extracts and synchronizes entry_date (AD) and entry_date_bs (BS).
+   - Stamps the sub-ledger and passes ledger_entry and date_ad directly to the General Ledger
      so historical payment dates are preserved in both ledgers.
 
 4. Standardized Chart of Accounts Fallback Bindings:
    - Fallback GL poster adheres to official Nepal COA codes:
-     Cash in Hand (`1110`), Bank (`1120`), and Accounts Payable (`2110`).
+     Cash in Hand (1110), Bank (1120), and Accounts Payable (2110).
 
-5. Supplier Directory & Sub-Ledger:
-   - Full accounts payable lifecycle with credit limits, settlement histories, and party confirmation letters.
+5. Optimized GRNDetailView (The Kitchen Chef):
+   - Point A: Prefetches products, brands, categories, base units, and packaging conversions
+     in one single optimized query, eliminating N+1 database round trips.
+   - Point B: Pre-packages the 5-Card Financial reconciliation dictionary directly in the view
+     (including true non-taxable merchandise base) to guarantee zero calculation discrepancies.
+   - Point C: Prepares and checks parsed_imei_pairs across all items, aggregating handset counts,
+     dual-SIM indicators, and warranty providers cleanly for the expandable drawer template.
+   - Safe Staff Preparer: Defensively handles nullable grn.received_by, resolving full name,
+     username, or a polite fallback string ('Warehouse Staff') so template rendering never crashes.
 
-6. High-Performance Multi-Token Search APIs:
+6. Dedicated Physical IMEI Scanner Controller (GRNManageIMEIsView):
+   - Displays all items on the purchase bill.
+   - Automatically enables requires_imei_tracking = True if IMEIs are added to an untracked product.
+   - Zero Stock Inflation: Does NOT touch BranchStock quantities.
+   - Zero Accounting Impact: Does NOT alter purchase costs, VAT, or supplier debt.
+
+7. High-Performance Multi-Token Search APIs:
    - Asynchronous lookup for suppliers and verified inward GRN consignments.
 
-7. Goods Received Notes (GRN) & Purchase Orders (PO):
-   - Save Draft vs. Live Verify split, proportional 5-tier landed cost distribution, and serial IMEI tracking.
+8. Comprehensive Purchase Return VAT ➔ GL Audit Linkage (PurchaseReturnDetailView):
+   - Resolves the complete accounting chain when accessed from VAT reporting drill-down:
+     Debit Note ➔ GL Journal Entry ➔ Journal Items ➔ Input VAT 1410 Reversal,
+     with the Original GRN / Bill Reference as reference.
 """
 
 import csv
@@ -49,7 +64,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
 from django.urls import reverse_lazy, reverse
 from django.db import transaction
-from django.db.models import Q, Sum, Count, F
+from django.db.models import Q, Sum, Count, F, Prefetch
 from django.utils import timezone
 from django.http import HttpResponse, JsonResponse
 from django.core.exceptions import ValidationError
@@ -450,10 +465,10 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
     """
     Processes payouts made to suppliers via Cash, Bank Transfer, or Cheque.
     Features:
-    - Ingests true historical dates (`entry_date` and `entry_date_bs`) with dual-calendar synchronization.
+    - Ingests true historical dates (entry_date and entry_date_bs) with dual-calendar synchronization.
     - Validates that retroactive dates do not fall into closed fiscal periods.
     - Acquires row-level locks on Supplier inside an atomic database transaction.
-    - Synchronizes `SupplierUdhaariLedger`, updates `supplier.last_payment_date`, and auto-posts to the General Ledger.
+    - Synchronizes SupplierUdhaariLedger, updates supplier.last_payment_date, and auto-posts to the General Ledger.
     """
 
     def post(self, request, pk, *args, **kwargs):
@@ -862,27 +877,109 @@ class GRNListView(PurchaseModuleAccessMixin, ListView):
         return context
 
 class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
+    """
+    Authoritative Procurement Goods Received Note (GRN) Detail Controller.
+    Point A: Optimized prefetching eliminates N+1 queries.
+    Point B: Pre-packages exact 5-card financial metrics and dual-pot reconciliation numbers.
+    Point C: Prepares structured IMEI pairs, dual-SIM states, and handset unit analytics.
+    Safe Staff Preparer: Defensively handles nullable grn.received_by, resolving full name,
+    username, or a polite fallback string ('Warehouse Staff') so template rendering never crashes.
+    """
     model = GoodsReceivedNote
     template_name = 'purchases/grn_detail.html'
     context_object_name = 'grn'
 
+    def get_queryset(self):
+        return GoodsReceivedNote.objects.select_related(
+            'supplier',
+            'branch',
+            'received_by',
+            'purchase_order'
+        )
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['items'] = self.object.items.select_related('product', 'product__base_unit', 'unit_conversion').all()
+        grn = self.object
+
+        # Point A: Intelligent Database Prefetching (Eliminates N+1 queries completely)
+        items = list(
+            grn.items.select_related(
+                'product',
+                'product__brand',
+                'product__category',
+                'product__base_unit',
+                'unit_conversion'
+            ).all()
+        )
+        context['items'] = items
+
+        # Safe Staff Name Preparer (Defensive against None received_by)
+        if grn.received_by:
+            full_name = grn.received_by.get_full_name()
+            if full_name and full_name.strip():
+                verified_by_name = full_name.strip()
+            elif grn.received_by.username:
+                verified_by_name = grn.received_by.username
+            else:
+                verified_by_name = "Warehouse Staff"
+        else:
+            verified_by_name = "Warehouse Staff"
+
+        context['verified_by_name'] = verified_by_name
+
+        # Point B: Supplying the 5-Card Financial Numbers Pre-Packaged
+        gross_val = grn.gross_amount or Decimal('0.00')
+        taxable_val = grn.taxable_amount or Decimal('0.00')
+        vat_val = grn.vat_amount or Decimal('0.00')
+        overhead_val = grn.overhead_total or Decimal('0.00')
+        landed_val = grn.total_landed_cost or Decimal('0.00')
+        net_invoice_val = grn.net_total_amount or Decimal('0.00')
+        paid_val = grn.paid_amount or Decimal('0.00')
+        due_val = grn.due_amount or Decimal('0.00')
+
+        # Mathematically strict calculation of Non-Taxable / Exempt merchandise base
+        net_merchandise = max(Decimal('0.00'), net_invoice_val - vat_val)
+        non_taxable_val = max(Decimal('0.00'), net_merchandise - taxable_val)
+
+        context['summary_cards'] = {
+            'gross_merchandise_value': gross_val,
+            'taxable_amount': taxable_val,
+            'non_taxable_amount': non_taxable_val,
+            'vat_amount': vat_val,
+            'total_overheads': overhead_val,
+            'total_landed_cost': landed_val,
+            'net_total_amount': net_invoice_val,
+            'paid_amount': paid_val,
+            'due_amount': due_val,
+        }
+        context['non_taxable_base'] = non_taxable_val
+
+        # Point C: Preparing Structured IMEI Sets and Handset Analytics
+        total_handsets_count = 0
+        total_imeis_tracked = 0
+        has_imei_products = False
+        has_dual_sim_products = False
+
+        for item in items:
+            p = item.product
+            if p and (p.requires_imei_tracking or p.requires_serial_tracking):
+                has_imei_products = True
+                base_qty = int(item.base_unit_quantity or item.purchased_quantity or 1)
+                total_handsets_count += base_qty
+
+                pairs = item.parsed_imei_pairs
+                total_imeis_tracked += len(pairs)
+
+                if getattr(p, 'sim_configuration', 'DUAL_SIM') in ['DUAL_SIM', 'ESIM_DUAL']:
+                    has_dual_sim_products = True
+
+        context['has_imei_products'] = has_imei_products
+        context['has_dual_sim_products'] = has_dual_sim_products
+        context['total_handsets_count'] = total_handsets_count
+        context['total_imeis_tracked'] = total_imeis_tracked
         context['is_print'] = (self.request.GET.get('print') == 'true')
         context['SYS_CONFIG'] = SystemConfiguration.get_solo()
 
-        # Section 3 Executive Summary Card Payload
-        context['summary_cards'] = {
-            'gross_merchandise_value': self.object.gross_amount or Decimal('0.00'),
-            'taxable_amount': self.object.taxable_amount or Decimal('0.00'),
-            'vat_amount': self.object.vat_amount or Decimal('0.00'),
-            'total_overheads': self.object.overhead_total or Decimal('0.00'),
-            'total_landed_cost': self.object.total_landed_cost or Decimal('0.00'),
-            'net_total_amount': self.object.net_total_amount or Decimal('0.00'),
-            'paid_amount': self.object.paid_amount or Decimal('0.00'),
-            'due_amount': self.object.due_amount or Decimal('0.00'),
-        }
         return context
 
 class GRNCreateView(PurchaseModuleAccessMixin, View):
@@ -1097,6 +1194,204 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
         return render(request, self.template_name, context)
 
 # ==============================================================================
+# DEDICATED PHYSICAL IMEI SCANNER CONTROLLER (AUTO-ENABLES SERIALIZATION ON DEMAND)
+# ==============================================================================
+class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
+    """
+    Dedicated view allowing warehouse staff and managers to scan/type physical
+    15-digit IMEI numbers for mobile phones received on a completed GRN.
+    
+    Guarantees:
+    - Displays all items on the bill. If a product (such as 'test') was created without
+      the 'Track 15-Digit IMEI' box checked, adding IMEIs to it automatically enables
+      requires_imei_tracking = True for that product.
+    - Zero Stock Inflation: Does NOT touch BranchStock quantities (units already in stock).
+    - Zero Accounting Impact: Does NOT alter purchase costs, VAT, or supplier debt.
+    - Preserves POS-Sold Phones: Detects and protects any handsets already sold under Backlog Mode.
+    - Reuses existing validation and ItemInstance creation logic.
+    """
+    template_name = 'purchases/grn_manage_imeis.html'
+
+    def get(self, request, pk, *args, **kwargs):
+        grn = get_object_or_404(
+            GoodsReceivedNote.objects.select_related('supplier', 'branch'),
+            pk=pk
+        )
+        if grn.status == 'CANCELLED':
+            messages.error(request, f"Cannot manage IMEIs: Goods Received Note {grn.grn_number} is cancelled.")
+            return redirect('purchases:grn_detail', pk=grn.pk)
+
+        # Include all line items on this bill so any product can have IMEIs added
+        grn_items = grn.items.select_related('product', 'product__base_unit').all()
+
+        if not grn_items.exists():
+            messages.info(
+                request,
+                f"Goods Received Note {grn.grn_number} has no line items."
+            )
+            return redirect('purchases:grn_detail', pk=grn.pk)
+
+        phone_items = []
+        initial_data = {}
+        total_handsets = 0
+        total_linked = 0
+
+        for grn_item in grn_items:
+            product = grn_item.product
+            base_qty = int(grn_item.base_unit_quantity or grn_item.purchased_quantity or 1)
+            total_handsets += base_qty
+
+            # Find existing ItemInstance records linked to this GRN and product
+            existing_instances = list(
+                ItemInstance.objects.filter(
+                    purchase_reference=grn.grn_number,
+                    product=product,
+                    branch=grn.branch
+                ).order_by('id')
+            )
+
+            imeis_list = []
+            seen_imei1 = set()
+
+            for inst in existing_instances:
+                im1 = inst.imei_1 or ''
+                im2 = inst.imei_2 or ''
+                if im1:
+                    seen_imei1.add(im1)
+                imeis_list.append({
+                    'imei_1': im1,
+                    'imei_2': im2,
+                    'is_already_in_db': True,
+                    'status': inst.status,
+                    'is_sold': (inst.status == 'SOLD'),
+                })
+
+            # Check if any IMEIs in scanned_imei_list were textually saved but not yet in ItemInstance
+            if grn_item.scanned_imei_list:
+                tokens = [t.strip() for t in re.split(r'[\n,;]+', grn_item.scanned_imei_list) if t.strip()]
+                for token in tokens:
+                    parts = token.split('|')
+                    im1 = parts[0].strip() if len(parts) > 0 else ''
+                    im2 = parts[1].strip() if len(parts) > 1 else ''
+                    if im1 and im1 not in seen_imei1:
+                        seen_imei1.add(im1)
+                        imeis_list.append({
+                            'imei_1': im1,
+                            'imei_2': im2,
+                            'is_already_in_db': False,
+                            'status': 'IN_STOCK',
+                            'is_sold': False,
+                        })
+
+            existing_count = len(imeis_list)
+            total_linked += existing_count
+            remaining_count = max(0, base_qty - existing_count)
+
+            is_dual_sim = getattr(product, 'sim_configuration', 'DUAL_SIM') in ['DUAL_SIM', 'ESIM_DUAL']
+
+            item_data = {
+                'item': grn_item,
+                'product': product,
+                'base_qty': base_qty,
+                'existing_instances': existing_instances,
+                'existing_imeis_count': existing_count,
+                'remaining_count': remaining_count,
+                'is_dual_sim': is_dual_sim,
+                'existing_imei_list_text': grn_item.scanned_imei_list or '',
+            }
+            phone_items.append(item_data)
+
+            initial_data[str(grn_item.id)] = {
+                'item_id': grn_item.id,
+                'product_id': product.id,
+                'product_name': product.name,
+                'sku': product.sku,
+                'base_qty': base_qty,
+                'is_dual_sim': is_dual_sim,
+                'batch': grn_item.batch_number or '',
+                'imeis': imeis_list,
+            }
+
+        total_remaining = max(0, total_handsets - total_linked)
+
+        context = {
+            'grn': grn,
+            'phone_items': phone_items,
+            'initial_data_json': initial_data,
+            'total_handsets': total_handsets,
+            'total_linked': total_linked,
+            'total_remaining': total_remaining,
+            'SYS_CONFIG': SystemConfiguration.get_solo(),
+            'config': SystemConfiguration.get_solo(),
+        }
+        return render(request, self.template_name, context)
+
+    def post(self, request, pk, *args, **kwargs):
+        grn = get_object_or_404(
+            GoodsReceivedNote.objects.select_related('supplier', 'branch'),
+            pk=pk
+        )
+        if grn.status == 'CANCELLED':
+            messages.error(request, f"Cannot update IMEIs: Goods Received Note {grn.grn_number} is cancelled.")
+            return redirect('purchases:grn_detail', pk=grn.pk)
+
+        payload_json = request.POST.get('imei_payload_json', '').strip()
+        if not payload_json:
+            if request.content_type == 'application/json':
+                try:
+                    body_data = json.loads(request.body.decode('utf-8'))
+                    payload_json = json.dumps(body_data)
+                except Exception:
+                    payload_json = ''
+
+        if not payload_json:
+            messages.error(request, "No IMEI scan data was received.")
+            return redirect('purchases:grn_manage_imeis', pk=grn.pk)
+
+        try:
+            items_payload = json.loads(payload_json)
+        except Exception as e:
+            messages.error(request, f"Invalid IMEI payload format: {e}")
+            return redirect('purchases:grn_manage_imeis', pk=grn.pk)
+
+        try:
+            with transaction.atomic():
+                # Auto-Enable: If user added IMEIs to a product that was requires_imei_tracking=False,
+                # automatically turn ON requires_imei_tracking = True!
+                for item_id_str, item_info in items_payload.items():
+                    raw_imeis = item_info.get('imeis', [])
+                    if raw_imeis:
+                        try:
+                            item_id = int(item_id_str)
+                            target_item = grn.items.select_related('product').filter(id=item_id).first()
+                            if target_item and target_item.product and not target_item.product.requires_imei_tracking:
+                                target_item.product.requires_imei_tracking = True
+                                target_item.product.save(update_fields=['requires_imei_tracking', 'updated_at'])
+                        except (ValueError, TypeError):
+                            pass
+
+                total_attached = PurchaseService.attach_imeis_to_received_grn(
+                    grn=grn,
+                    items_payload=items_payload,
+                    user=request.user
+                )
+
+            messages.success(
+                request,
+                f"Successfully linked {total_attached} physical IMEI number(s) to warehouse stock for GRN {grn.grn_number}."
+            )
+            return redirect('purchases:grn_detail', pk=grn.pk)
+
+        except ValidationError as ve:
+            err_msg = str(ve.message if hasattr(ve, 'message') else ve)
+            messages.error(request, f"Validation Error: {err_msg}")
+            return redirect('purchases:grn_manage_imeis', pk=grn.pk)
+        except Exception as err:
+            logger.error(f"[GRN Manage IMEIs Error] GRN {grn.grn_number}: {err}", exc_info=True)
+            messages.error(request, f"Error saving IMEIs: {err}")
+            return redirect('purchases:grn_manage_imeis', pk=grn.pk)
+
+# ==============================================================================
 # DEDICATED PURCHASE BILL (GRN) CANCELLATION CONTROLLER (AUDIT COMPLIANT)
 # ==============================================================================
 @login_required
@@ -1115,8 +1410,8 @@ def cancel_grn_view(request, pk):
        - If unpaid credit purchase: reverses exact due debt added to supplier AP.
        - If paid on delivery: records spot cash disbursed as an advance due from supplier / pending refund.
     8. Adopts Method 1 (Audit Standard) for General Ledger reversal:
-       - Leaves original purchase journal voucher with status `POSTED` (annotated with reversal ref).
-       - Posts a distinct reversing double-entry journal entry with status `POSTED` that inverts debits/credits.
+       - Leaves original purchase journal voucher with status POSTED (annotated with reversal ref).
+       - Posts a distinct reversing double-entry journal entry with status POSTED that inverts debits/credits.
     9. Sets GRN status to 'CANCELLED'.
     10. Records an immutable forensic event in AuditLog.
     """
@@ -1608,6 +1903,9 @@ class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
     """
     Renders detailed voucher overview and printable A4 Debit Note slip
     for a completed Purchase Return.
+    Provides complete GL and VAT audit trail when accessed from VAT reporting:
+    Debit Note ➔ GL Journal ➔ Journal Items ➔ Input VAT 1410 Reversal,
+    with Original GRN / Bill Reference as reference.
     """
     model = PurchaseReturn
     template_name = 'purchases/purchase_return_detail.html'
@@ -1615,6 +1913,140 @@ class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['items'] = self.object.items.select_related('product', 'product__base_unit', 'unit_conversion', 'item_instance').all()
-        context['config'] = SystemConfiguration.get_solo()
+        pret = self.object
+        items = list(pret.items.select_related('product', 'product__base_unit', 'unit_conversion', 'item_instance').all())
+        context['items'] = items
+        config = SystemConfiguration.get_solo()
+        context['config'] = config
+        context['SYS_CONFIG'] = config
+
+        # -------------------------------------------------------------
+        # RESOLVE GL JOURNAL & VAT 1410 DRILLDOWN DATA
+        # -------------------------------------------------------------
+        from apps.accounting.models import JournalEntry
+        from apps.taxation.services.vat_ledger_service import VATLedgerService
+
+        # Fetch authoritative VAT drill-down resolution
+        vat_drilldown = None
+        try:
+            vat_drilldown = VATLedgerService.get_purchase_return_vat_drilldown(pret.id)
+        except Exception as e:
+            logger.warning(f"[PurchaseReturnDetailView] VAT drilldown resolution error for PR #{pret.id}: {e}")
+
+        # Direct GL Journal Entry Lookup (matching AutoPostingService.post_purchase_return)
+        je_obj = None
+        # Link 1: source_module='PURCHASE_RETURN' and source_id=str(pret.id)
+        je_obj = JournalEntry.objects.filter(
+            source_module='PURCHASE_RETURN',
+            source_id=str(pret.id),
+            status='POSTED'
+        ).prefetch_related('items__account', 'items__supplier').first()
+
+        # Link 2: reference_document matching return_number with voucher_type='DEBIT_NOTE'
+        if not je_obj:
+            je_obj = JournalEntry.objects.filter(
+                reference_document__iexact=pret.return_number,
+                voucher_type='DEBIT_NOTE',
+                status='POSTED'
+            ).prefetch_related('items__account', 'items__supplier').first()
+
+        # Link 3: reference_document matching return_number (any voucher type)
+        if not je_obj:
+            je_obj = JournalEntry.objects.filter(
+                reference_document__iexact=pret.return_number,
+                status='POSTED'
+            ).prefetch_related('items__account', 'items__supplier').first()
+
+        # Link 4: voucher_number matching return_number
+        if not je_obj:
+            je_obj = JournalEntry.objects.filter(
+                voucher_number__iexact=pret.return_number,
+                status='POSTED'
+            ).prefetch_related('items__account', 'items__supplier').first()
+
+        # Extract Journal Items and locate Account 1410 (Input VAT Reversal)
+        journal_items_list = []
+        gl_account_1410_detail = None
+        if je_obj:
+            for itm in je_obj.items.select_related('account', 'supplier').all():
+                is_1410 = bool(
+                    itm.account.code == '1410' or
+                    itm.account.code.startswith('1410-') or
+                    itm.account.system_tag == 'INPUT_VAT'
+                )
+                item_dict = {
+                    'id': itm.id,
+                    'account_code': itm.account.code,
+                    'account_name': itm.account.name,
+                    'debit_amount': itm.debit_amount,
+                    'credit_amount': itm.credit_amount,
+                    'line_narration': itm.line_narration or '',
+                    'is_input_vat_1410': is_1410,
+                }
+                journal_items_list.append(item_dict)
+
+                if is_1410 and not gl_account_1410_detail:
+                    gl_account_1410_detail = item_dict
+
+        # If vat_drilldown was resolved, prefer its structured details
+        if vat_drilldown and vat_drilldown.get('status') == 'SUCCESS':
+            context['vat_drilldown'] = vat_drilldown
+            context['gl_entry'] = vat_drilldown.get('gl_entry')
+            context['gl_journal_entry'] = vat_drilldown.get('gl_journal_entry') or je_obj
+            context['journal_items'] = vat_drilldown.get('journal_items') or journal_items_list
+            context['gl_account_1410'] = vat_drilldown.get('gl_account_1410') or gl_account_1410_detail
+            context['input_vat_1410'] = vat_drilldown.get('input_vat_1410') or gl_account_1410_detail
+            context['debit_note'] = vat_drilldown.get('debit_note')
+            context['audit_chain'] = vat_drilldown.get('audit_chain')
+        else:
+            context['vat_drilldown'] = None
+            context['gl_journal_entry'] = je_obj
+            context['gl_entry'] = {
+                'id': je_obj.id,
+                'voucher_number': je_obj.voucher_number,
+                'voucher_type': je_obj.voucher_type,
+                'voucher_type_display': je_obj.get_voucher_type_display(),
+                'entry_date': je_obj.entry_date,
+                'entry_date_bs': je_obj.entry_date_bs or '',
+                'fiscal_year': je_obj.fiscal_year or '',
+                'total_debit': je_obj.total_debit,
+                'total_credit': je_obj.total_credit,
+                'narration': je_obj.narration or '',
+            } if je_obj else None
+            context['journal_items'] = journal_items_list
+            context['gl_account_1410'] = gl_account_1410_detail
+            context['input_vat_1410'] = gl_account_1410_detail
+            context['debit_note'] = {
+                'voucher_number': je_obj.voucher_number,
+                'id': je_obj.id,
+                'total_amount': je_obj.total_debit,
+            } if je_obj else None
+            context['audit_chain'] = {
+                'purchase_return_number': pret.return_number,
+                'debit_note_number': je_obj.voucher_number if je_obj else pret.return_number,
+                'gl_journal_voucher': je_obj.voucher_number if je_obj else 'N/A',
+                'gl_journal_id': je_obj.id if je_obj else None,
+                'journal_items_count': len(journal_items_list),
+                'input_vat_account': gl_account_1410_detail['account_code'] if gl_account_1410_detail else '1410',
+                'input_vat_reversal_amount': gl_account_1410_detail['credit_amount'] if gl_account_1410_detail else pret.tax_amount,
+                'original_grn_number': pret.original_grn.grn_number if pret.original_grn else (pret.original_bill_reference or 'N/A'),
+                'is_gl_linked': bool(je_obj is not None),
+                'is_vat_1410_linked': bool(gl_account_1410_detail is not None),
+            }
+
+        # Tax Summary payload matching SalesReturnDetailView structure
+        context['tax_summary'] = {
+            'total_return_amount': pret.total_return_amount or Decimal('0.00'),
+            'taxable_amount': pret.total_return_amount or Decimal('0.00'),
+            'vat_amount': pret.tax_amount or Decimal('0.00'),
+            'net_refund_amount': pret.net_refund_amount or Decimal('0.00'),
+            'has_vat': (pret.tax_amount or Decimal('0.00')) > Decimal('0.00'),
+            'original_bill_reference': pret.original_bill_reference or (pret.original_grn.supplier_bill_no if pret.original_grn else ''),
+            'original_grn': pret.original_grn,
+        }
+
+        # Check if opened specifically from VAT report drilldown
+        source = (self.request.GET.get('source') or self.request.GET.get('from') or '').lower()
+        context['is_from_vat_drilldown'] = bool(source in ['vat', 'taxation', 'report', 'audit'] or 'drilldown' in self.request.GET)
+
         return context

@@ -1,0 +1,791 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}6-Month VAT Analysis &amp; Period Comparison | {{ SYS_CONFIG.company_name_en|default:COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<!-- Google Fonts: Inter & JetBrains Mono for High-Precision Financial Numbers -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --tax-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --tax-font-mono: 'JetBrains Mono', monospace;
+
+    /* Palette: Executive Dark Slate & High-Contrast Accents */
+    --tax-slate-950: #020617;
+    --tax-slate-900: #0f172a;
+    --tax-slate-800: #1e293b;
+    --tax-slate-700: #334155;
+    --tax-slate-600: #475569;
+    --tax-slate-500: #64748b;
+    --tax-slate-400: #94a3b8;
+    --tax-slate-300: #cbd5e1;
+    --tax-slate-200: #e2e8f0;
+    --tax-slate-100: #f1f5f9;
+    --tax-slate-50:  #f8fafc;
+    --tax-white:     #ffffff;
+
+    --tax-blue-600:  #2563eb;
+    --tax-green-600: #059669;
+    --tax-red-600:   #dc2626;
+    --tax-amber-600: #d97706;
+    --tax-teal-600:  #0d9488;
+}
+
+body {
+    font-family: var(--tax-font-sans);
+    color: var(--tax-slate-900);
+}
+
+.font-mono {
+    font-family: var(--tax-font-mono) !important;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Master Widescreen Canvas */
+.six-month-shell {
+    max-width: 1820px;
+    margin: 0 auto;
+    padding: 16px 24px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Top Suite Horizontal Navigation Ribbon */
+.tax-suite-ribbon {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 9999px;
+    padding: 6px 14px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+}
+
+.tax-nav-pill {
+    padding: 7px 16px;
+    border-radius: 9999px;
+    font-size: 0.775rem;
+    font-weight: 700;
+    border: 1px solid var(--tax-slate-200);
+    background: var(--tax-white);
+    color: var(--tax-slate-600);
+    text-decoration: none !important;
+    transition: all 0.15s ease-in-out;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+}
+
+.tax-nav-pill:hover {
+    background-color: var(--tax-slate-100);
+    color: var(--tax-slate-900);
+    border-color: var(--tax-slate-300);
+}
+
+.tax-nav-pill.active {
+    background-color: var(--tax-blue-600) !important;
+    color: var(--tax-white) !important;
+    border-color: var(--tax-blue-600) !important;
+    box-shadow: 0 3px 10px rgba(37, 99, 235, 0.28);
+}
+
+/* Header & Metadata Toolbar */
+.page-hero-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.page-hero-title h3 {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--tax-slate-950);
+    letter-spacing: -0.02em;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.page-hero-subtitle {
+    font-size: 13px;
+    color: var(--tax-slate-500);
+    margin: 0;
+}
+
+.btn-hero-action {
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 8px 16px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    text-decoration: none !important;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+/* Multi-Calendar Filter Card */
+.filter-console-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 16px;
+    padding: 18px 22px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.filter-console-card label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--tax-slate-600);
+    margin-bottom: 5px;
+}
+
+.filter-console-card .form-control,
+.filter-console-card .form-select {
+    height: 38px;
+    font-size: 12.5px;
+    border-radius: 8px;
+    border: 1px solid var(--tax-slate-300);
+}
+
+.filter-console-card .form-control:focus,
+.filter-console-card .form-select:focus {
+    border-color: var(--tax-blue-600);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* ==========================================================================
+   4 EXECUTIVE SUMMARY KPI CARDS
+   ========================================================================== */
+.six-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+}
+
+.kpi-stat-box {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 140px;
+    position: relative;
+    overflow: hidden;
+}
+
+.kpi-stat-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+}
+
+.kpi-stat-box.kpi-output::before { background: var(--tax-blue-600); }
+.kpi-stat-box.kpi-input::before  { background: var(--tax-green-600); }
+.kpi-stat-box.kpi-net-payable::before { background: var(--tax-red-600); }
+.kpi-stat-box.kpi-net-credit::before  { background: var(--tax-green-600); }
+.kpi-stat-box.kpi-running::before{ background: var(--tax-slate-900); }
+
+.kpi-box-label {
+    font-size: 11.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--tax-slate-500);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.kpi-box-number {
+    font-family: var(--tax-font-mono);
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+
+.kpi-box-footnote {
+    font-size: 11.5px;
+    color: var(--tax-slate-500);
+}
+
+/* ==========================================================================
+   MASTER TABLES
+   ========================================================================== */
+.table-panel-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
+}
+
+.table-panel-header {
+    padding: 18px 24px;
+    background: var(--tax-white);
+    border-bottom: 1px solid var(--tax-slate-200);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.table-panel-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--tax-slate-900);
+    letter-spacing: -0.01em;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.table-six-month {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+    font-size: 12.5px;
+}
+
+.table-six-month thead th {
+    background-color: var(--tax-slate-900) !important;
+    color: var(--tax-white) !important;
+    font-size: 10.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 12px;
+    border: none;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.table-six-month tbody td {
+    padding: 12px 12px;
+    border-bottom: 1px solid var(--tax-slate-200);
+    vertical-align: middle;
+    color: var(--tax-slate-800);
+    white-space: nowrap;
+}
+
+.month-interactive-row {
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+.month-interactive-row:hover {
+    background-color: #f0f7ff !important;
+}
+
+.col-diff-highlight {
+    background-color: #fcfdfe;
+    border-left: 1.5px solid var(--tax-slate-200);
+    border-right: 1.5px solid var(--tax-slate-200);
+}
+
+.col-num {
+    font-family: var(--tax-font-mono);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.col-center {
+    text-align: center;
+}
+
+/* Badges & Chips */
+.badge-vat-status {
+    font-family: var(--tax-font-mono);
+    font-size: 10.5px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    text-transform: uppercase;
+    display: inline-block;
+}
+
+.status-payable {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+
+.status-credit {
+    background: #d1fae5;
+    color: #047857;
+    border: 1px solid #6ee7b7;
+}
+
+.status-balanced {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+}
+
+.trend-pill {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.trend-pill.increase { background-color: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.trend-pill.decrease { background-color: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.trend-pill.unchanged { background-color: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
+
+.table-six-month tfoot tr {
+    background-color: var(--tax-slate-900) !important;
+    color: var(--tax-white) !important;
+    font-weight: 800;
+}
+
+.table-six-month tfoot td {
+    padding: 14px 12px;
+    font-size: 13.5px;
+    border-top: 2px solid var(--tax-slate-300);
+    vertical-align: middle;
+}
+
+@media (max-width: 1200px) {
+    .six-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+    .six-kpi-grid { grid-template-columns: 1fr; }
+}
+
+@media print {
+    @page { size: A4 landscape; margin: 8mm; }
+    .no-print, header, aside, nav, .btn, .tax-suite-ribbon, .filter-console-card { display: none !important; }
+    body { background: #fff !important; font-size: 10px !important; }
+    .six-month-shell { max-width: 100% !important; padding: 0 !important; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="six-month-shell">
+
+    <!-- 1. Master Suite Navigation Ribbon -->
+    <div class="tax-suite-ribbon no-print">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap">
+            <i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:
+        </span>
+        <a href="{% url 'taxation:dashboard' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-chart-pie text-secondary"></i> VAT Overview
+        </a>
+        <a href="{% url 'taxation:daily_vat_report' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-day text-secondary"></i> Day-Wise VAT Ledger
+        </a>
+        <a href="{% url 'taxation:sales_register' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-book-open text-secondary"></i> Sales Book (Annex 5)
+        </a>
+        <a href="{% url 'taxation:purchase_register' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-truck-ramp-box text-secondary"></i> Purchase Book (Annex 7)
+        </a>
+        <a href="{% url 'taxation:six_month_report' %}" class="tax-nav-pill active text-nowrap">
+            <i class="fas fa-calendar-week text-white"></i> 6-Month VAT Report
+        </a>
+        <a href="{% url 'taxation:reconciliation' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-scale-balanced text-secondary"></i> VAT ↔ GL Reconciliation
+        </a>
+    </div>
+
+    <!-- 2. Header & Action Controls -->
+    <div class="page-hero-header">
+        <div class="page-hero-title">
+            <h3>
+                <i class="fas fa-calendar-week text-primary"></i>
+                <span>6-Month Consecutive VAT Report &amp; Period Comparison</span>
+                {% if period_label %}
+                    <span class="badge bg-dark text-white font-mono fs-2xs px-3 py-1.5 rounded-pill">
+                        {{ period_label }}
+                    </span>
+                {% endif %}
+            </h3>
+            <p class="page-hero-subtitle">
+                Comprehensive 6 Bikram Sambat months sequence comparing Gross Output VAT, Return Reversals, Input VAT, and Period-over-Period Variance.
+            </p>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 no-print flex-wrap">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn-hero-action btn-outline-success btn btn-sm shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=excel" 
+               class="btn-hero-action btn btn-sm text-white shadow-xs" style="background-color: var(--tax-green-600);">
+                <i class="fas fa-file-excel me-1"></i> Export Excel (.xlsx)
+            </a>
+            <button class="btn-hero-action btn btn-outline-dark btn-sm shadow-xs" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Sheet (A4)
+            </button>
+        </div>
+    </div>
+
+    <!-- 3. Multi-Calendar 6-Month Filter Console -->
+    <div class="filter-console-card no-print">
+        <form method="get" class="row g-2 align-items-end" id="sixMonthFilterForm">
+            <!-- 1. Fiscal Year Preset & Half Selection -->
+            <div class="col-12 col-md-3">
+                <label><i class="fas fa-landmark text-primary me-1"></i> Fiscal Year Half Preset</label>
+                <div class="d-flex gap-1">
+                    <select name="fiscal_year" class="form-select fw-bold text-dark">
+                        <option value="">-- Select FY --</option>
+                        {% for fy in available_fiscal_years %}
+                            <option value="{{ fy }}" {% if selected_fiscal_year == fy %}selected{% endif %}>
+                                FY {{ fy }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <select name="half" class="form-select fw-semibold" style="max-width: 130px;">
+                        <option value="1" {% if selected_half == 1 %}selected{% endif %}>H1 (साउन-पुस)</option>
+                        <option value="2" {% if selected_half == 2 %}selected{% endif %}>H2 (माघ-असार)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 2. Ending BS Year -->
+            <div class="col-6 col-md-2">
+                <label><i class="fas fa-calendar-alt text-primary me-1"></i> Ending B.S. Year</label>
+                <select name="end_bs_year" class="form-select font-mono fw-semibold">
+                    <option value="">-- Current --</option>
+                    {% for yr in available_bs_years %}
+                        <option value="{{ yr }}" {% if selected_end_bs_year == yr %}selected{% endif %}>{{ yr }} BS</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 3. Ending BS Month -->
+            <div class="col-6 col-md-2">
+                <label><i class="far fa-calendar text-primary me-1"></i> Ending B.S. Month</label>
+                <select name="end_bs_month" class="form-select fw-semibold text-dark">
+                    <option value="">-- Choose Month --</option>
+                    {% for m in nepali_months %}
+                        <option value="{{ m.num }}" {% if selected_end_bs_month == m.num %}selected{% endif %}>
+                            {{ m.num }}. {{ m.name_en }} ({{ m.name_np }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 4. Outlet Scope Filter -->
+            <div class="col-12 col-md-3">
+                <label><i class="fas fa-store text-primary me-1"></i> Outlet Scope</label>
+                <select name="branch" class="form-select fw-semibold">
+                    <option value="">All Outlets (Consolidated / HQ)</option>
+                    {% for b in branches %}
+                        <option value="{{ b.id }}" {% if branch.id == b.id %}selected{% endif %}>{{ b.name }} ({{ b.code }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 5. Submit Button -->
+            <div class="col-12 col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 fw-bold" style="height: 38px;">
+                    <i class="fas fa-filter me-1"></i> Recalculate 6M
+                </button>
+                {% if request.GET.fiscal_year or request.GET.end_bs_year or request.GET.end_bs_month or request.GET.branch %}
+                    <a href="{% url 'taxation:six_month_report' %}" class="btn btn-outline-secondary btn-sm d-flex align-items-center justify-content-center" style="height: 38px;" title="Reset Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-2 border-top fs-xs text-muted">
+            <div>
+                6-Month Window: <strong class="text-primary font-mono">{{ period_label }}</strong> &bull; Range: <strong>{{ start_date_bs }} to {{ end_date_bs }} BS</strong> (AD: {{ start_date|date:"Y-m-d" }} to {{ end_date|date:"Y-m-d" }})
+            </div>
+            <div>
+                Store Terminal: <strong>{{ branch.name|default:ACTIVE_BRANCH.name }}</strong> ({{ branch.code|default:ACTIVE_BRANCH.code }})
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. Executive KPI Summary Cards -->
+    <div class="six-kpi-grid">
+        <!-- 1. Net Output VAT -->
+        <div class="kpi-stat-box kpi-output">
+            <div>
+                <div class="kpi-box-label">
+                    <span>6-Month Net Output VAT</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fs-3xs">Sales Book</span>
+                </div>
+                <div class="kpi-box-number text-primary">
+                    Rs. {{ totals.net_output_vat|default:0|floatformat:2|intcomma }}
+                </div>
+            </div>
+            <div class="kpi-box-footnote font-mono">
+                Gross: Rs. {{ totals.gross_output_vat|default:0|floatformat:2|intcomma }} &bull; Ret: -Rs. {{ totals.sales_return_vat|default:0|floatformat:2|intcomma }}
+            </div>
+        </div>
+
+        <!-- 2. Net Input VAT -->
+        <div class="kpi-stat-box kpi-input">
+            <div>
+                <div class="kpi-box-label">
+                    <span>6-Month Net Input VAT</span>
+                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs">Purchase Book</span>
+                </div>
+                <div class="kpi-box-number text-success">
+                    Rs. {{ totals.net_input_vat|default:0|floatformat:2|intcomma }}
+                </div>
+            </div>
+            <div class="kpi-box-footnote font-mono">
+                Inward: Rs. {{ totals.gross_input_vat|default:0|floatformat:2|intcomma }} &bull; Debit Notes: -Rs. {{ totals.purchase_return_vat|default:0|floatformat:2|intcomma }}
+            </div>
+        </div>
+
+        <!-- 3. Net VAT Difference -->
+        <div class="kpi-stat-box {% if totals.is_net_payable %}kpi-net-payable{% else %}kpi-net-credit{% endif %}">
+            <div>
+                <div class="kpi-box-label">
+                    <span>6-Month Net VAT (The Difference)</span>
+                    <span class="badge {% if totals.is_net_payable %}status-payable{% else %}status-credit{% endif %} fs-3xs font-mono">
+                        {% if totals.is_net_payable %}PAYABLE{% else %}TAX CREDIT{% endif %}
+                    </span>
+                </div>
+                <div class="kpi-box-number {% if totals.is_net_payable %}text-danger{% else %}text-success{% endif %}">
+                    Rs. {{ totals.net_vat|default:0|floatformat:2|intcomma }}
+                </div>
+            </div>
+            <div class="kpi-box-footnote fw-bold {% if totals.is_net_payable %}text-danger{% else %}text-success{% endif %}">
+                {% if totals.is_net_payable %}
+                    <i class="fas fa-arrow-trend-up me-1"></i> Net Tax Liability Payable to Inland Revenue
+                {% elif totals.is_net_credit %}
+                    <i class="fas fa-arrow-trend-down me-1"></i> Excess Input Tax Credit Available (Carried Forward)
+                {% else %}
+                    Balanced (Rs. 0.00 Difference)
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 4. Progressive Closing Debt -->
+        <div class="kpi-stat-box kpi-running">
+            <div>
+                <div class="kpi-box-label">
+                    <span>Cumulative Running Balance</span>
+                    <span class="badge bg-light text-dark border fs-3xs font-mono">Closing Debt</span>
+                </div>
+                <div class="kpi-box-number text-dark">
+                    Rs. {{ totals.final_cumulative_balance|default:0|floatformat:2|intcomma }}
+                </div>
+            </div>
+            <div class="kpi-box-footnote">
+                Cumulative liability running balance
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. Master 6-Month Sequence Table -->
+    <div class="table-panel-card">
+        <div class="table-panel-header">
+            <div>
+                <h5 class="table-panel-title">
+                    <i class="fas fa-table-list text-primary"></i> 6-Month Consecutive Breakdown
+                </h5>
+                <small class="text-muted fs-xs">
+                    Month-by-month accounting of Output VAT, Input VAT, Return Reversals, and Net Tax Settlement
+                </small>
+            </div>
+            <span class="badge bg-dark text-white font-mono px-3 py-1.5 rounded-pill fs-xs">
+                6 Consecutive Months
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table-six-month">
+                <thead>
+                    <tr>
+                        <th class="ps-4">B.S. Month Sequence</th>
+                        <th class="col-num">Gross Output VAT</th>
+                        <th class="col-num">Sales Return VAT</th>
+                        <th class="col-num" style="color: #93c5fd;">Net Output VAT</th>
+                        <th class="col-num">Gross Input VAT</th>
+                        <th class="col-num">Purchase Return VAT</th>
+                        <th class="col-num" style="color: #86efac;">Net Input VAT</th>
+                        <th class="col-num col-diff-highlight" style="color: #fde047; background-color: #1e293b !important;">
+                            Net VAT (Difference)
+                        </th>
+                        <th class="col-center">Tax Status</th>
+                        <th class="col-center pe-4">Drill Down</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in monthly_breakdown %}
+                    <tr class="month-interactive-row" data-url="{% url 'taxation:daily_vat_report' %}?bs_year={{ row.bs_year }}&amp;bs_month={{ row.bs_month }}" title="Click to view daily transactions for {{ row.month_label }}">
+                        <td class="ps-4 font-mono fw-bold text-dark">
+                            <i class="far fa-calendar-alt text-primary me-1.5"></i>
+                            <span>{{ row.month_label }}</span>
+                            <small class="text-muted d-block font-mono fs-2xs">{{ row.start_date_bs }} to {{ row.end_date_bs }}</small>
+                        </td>
+                        <td class="col-num fw-semibold text-dark">Rs. {{ row.gross_output_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger">-Rs. {{ row.sales_return_vat_reversal|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num fw-bold text-primary font-mono">Rs. {{ row.net_output_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num fw-semibold text-dark">Rs. {{ row.gross_input_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger">-Rs. {{ row.purchase_return_vat_reversal|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num fw-bold text-success font-mono">Rs. {{ row.net_input_vat|default:0|floatformat:2|intcomma }}</td>
+                        
+                        <!-- THE DIFFERENCE COLUMN -->
+                        <td class="col-num col-diff-highlight fw-extrabold font-mono {% if row.net_vat > 0 %}text-danger{% elif row.net_vat < 0 %}text-success{% else %}text-dark{% endif %}">
+                            Rs. {{ row.net_vat|default:0|floatformat:2|intcomma }}
+                        </td>
+                        
+                        <td class="col-center">
+                            {% if row.net_vat > 0 %}
+                                <span class="badge-vat-status status-payable">Payable</span>
+                            {% elif row.net_vat < 0 %}
+                                <span class="badge-vat-status status-credit">Credit</span>
+                            {% else %}
+                                <span class="badge-vat-status status-balanced">Balanced</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-center pe-4" onclick="event.stopPropagation();">
+                            <a href="{% url 'taxation:daily_vat_report' %}?bs_year={{ row.bs_year }}&amp;bs_month={{ row.bs_month }}" class="btn btn-outline-primary btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold">
+                                Ledger &rarr;
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center py-5 text-muted">
+                            <i class="fas fa-calendar-xmark fs-2 opacity-25 d-block mb-2"></i>
+                            No transaction records found for the selected 6-month period.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if monthly_breakdown %}
+                <tfoot>
+                    <tr>
+                        <td class="ps-4 text-uppercase">6-Month Grand Totals:</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.gross_output_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger">-Rs. {{ totals.sales_return_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-info font-mono">Rs. {{ totals.net_output_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.gross_input_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger">-Rs. {{ totals.purchase_return_vat|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-success font-mono">Rs. {{ totals.net_input_vat|default:0|floatformat:2|intcomma }}</td>
+                        
+                        <!-- FOOTER DIFFERENCE CELL -->
+                        <td class="col-num col-diff-highlight font-mono fs-6 {% if totals.is_net_payable %}text-danger{% elif totals.is_net_credit %}text-success{% else %}text-white{% endif %}" style="background-color: #1e293b !important;">
+                            Rs. {{ totals.net_vat|default:0|floatformat:2|intcomma }}
+                        </td>
+                        
+                        <td class="col-center">
+                            {% if totals.is_net_payable %}
+                                <span class="badge-vat-status status-payable">Payable</span>
+                            {% elif totals.is_net_credit %}
+                                <span class="badge-vat-status status-credit">Credit</span>
+                            {% else %}
+                                <span class="badge-vat-status status-balanced">Balanced</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-center pe-4 text-white-50 fs-xs font-mono">Reconciled</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+        <!-- 6. Period-over-Period Variance Analysis -->
+        {% if comparison_rows %}
+        <div class="p-4 bg-light border-top">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <span class="fs-xs fw-bold text-dark text-uppercase tracking-wider">
+                    <i class="fas fa-chart-line text-primary me-1"></i> Period-Over-Period Variance (Current 6M vs Previous 6M)
+                </span>
+                <span class="badge bg-white text-dark border font-mono fs-3xs">
+                    {{ comparison.current_period_label }} vs. {{ comparison.previous_period_label }}
+                </span>
+            </div>
+
+            <div class="table-responsive bg-white rounded-3 border">
+                <table class="table-six-month table-sm mb-0">
+                    <thead style="background-color: var(--tax-slate-800) !important;">
+                        <tr>
+                            <th class="ps-4 py-2">Tax Dimension / Metric</th>
+                            <th class="col-num py-2">Current 6M (NPR)</th>
+                            <th class="col-num py-2">Previous 6M (NPR)</th>
+                            <th class="col-num py-2">Difference (NPR)</th>
+                            <th class="col-num py-2">% Variance</th>
+                            <th class="col-center py-2 pe-4">Trend</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for crow in comparison_rows %}
+                        <tr>
+                            <td class="ps-4 fw-bold text-dark">
+                                {{ crow.label }}
+                                {% if crow.label_np %}
+                                    <small class="text-muted d-block fs-3xs">({{ crow.label_np }})</small>
+                                {% endif %}
+                            </td>
+                            <td class="col-num fw-semibold text-dark">{{ crow.current_display }}</td>
+                            <td class="col-num text-muted">{{ crow.previous_display }}</td>
+                            <td class="col-num fw-bold {% if crow.difference > 0 %}text-primary{% elif crow.difference < 0 %}text-danger{% else %}text-muted{% endif %}">
+                                {{ crow.difference_display }}
+                            </td>
+                            <td class="col-num fw-semibold">{{ crow.percentage_difference_display|default:"0.00%" }}</td>
+                            <td class="col-center pe-4">
+                                {% if crow.trend == 'INCREASE' %}
+                                    <span class="trend-pill increase"><i class="fas fa-arrow-trend-up"></i> Increase</span>
+                                {% elif crow.trend == 'DECREASE' %}
+                                    <span class="trend-pill decrease"><i class="fas fa-arrow-trend-down"></i> Decrease</span>
+                                {% else %}
+                                    <span class="trend-pill unchanged">&bull; Unchanged</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- Interactive Clean Row Listener -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.month-interactive-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+            if (e.target.closest('a') || e.target.closest('button')) return;
+            const targetUrl = row.dataset.url;
+            if (targetUrl) {
+                window.location.href = targetUrl;
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

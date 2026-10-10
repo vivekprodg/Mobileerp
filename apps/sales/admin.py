@@ -12,6 +12,11 @@ Aligned with `apps/sales/models.py`:
      and remarks without financial total corruption.
   2. Status transitions to CANCELLED in the admin panel are intercepted to execute
      atomic inventory restock, phone IMEI release, customer debt reversal, and GL balancing.
+- Autonomous Self-Contained VAT Snapshot for Sales Returns:
+  1. Displays line-item VAT rate, taxable return amount, non-taxable return amount,
+     and VAT reversal amount in `SalesReturnItemInline`.
+  2. Displays return-level taxable base, non-taxable base, and output VAT reversals in `SalesReturnAdmin`.
+  3. Provides admin action to re-aggregate self-contained VAT snapshots from line items.
 - High-Performance Database Scoping using raw_id_fields for scalable customer and product lookups.
 """
 
@@ -297,6 +302,10 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         )
 
     # --- Formatted Column Helpers ---
+    def recipient_display_name(self, obj):
+        return obj.recipient_display_name
+    recipient_display_name.short_description = _("Customer / Recipient")
+
     def bill_type_badge(self, obj):
         if obj.is_official_vat_bill:
             return format_html(
@@ -323,22 +332,25 @@ class SalesEstimateAdmin(admin.ModelAdmin):
     customer_pan_display.short_description = _("Customer PAN")
 
     def taxable_amount_display(self, obj):
-        return format_html('Rs. {:,.2f}', obj.taxable_amount)
+        val = obj.taxable_amount or Decimal('0.00')
+        return format_html('Rs. {:,.2f}', val)
     taxable_amount_display.short_description = _("Taxable Base")
 
     def vat_amount_display(self, obj):
-        if obj.vat_amount > Decimal('0.00'):
-            return format_html('<span style="color: #1e40af; font-weight: 700;">Rs. {:,.2f}</span>', obj.vat_amount)
+        val = obj.vat_amount or Decimal('0.00')
+        if val > Decimal('0.00'):
+            return format_html('<span style="color: #1e40af; font-weight: 700;">Rs. {:,.2f}</span>', val)
         return format_html('<span style="color: #94a3b8;">Rs. 0.00</span>')
     vat_amount_display.short_description = _("13% VAT")
 
     def grand_total_display(self, obj):
-        return format_html('<span class="font-monospace fw-bold text-primary">Rs. {:,.2f}</span>', obj.grand_total)
+        val = obj.grand_total or Decimal('0.00')
+        return format_html('<span class="font-monospace fw-bold text-primary">Rs. {:,.2f}</span>', val)
     grand_total_display.short_description = _("Grand Total (Turnover)")
 
     def merchandise_discount_display(self, obj):
         tot_disc = obj.total_sales_discount
-        if tot_disc > Decimal('0.00'):
+        if tot_disc and tot_disc > Decimal('0.00'):
             type_tag = f" ({obj.get_bill_discount_type_display()})" if obj.bill_discount_amount > Decimal('0.00') else ""
             return format_html(
                 '<span style="color: #dc2626; font-weight: 700; font-family: monospace;">-Rs. {:,.2f}{}</span>',
@@ -348,7 +360,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
     merchandise_discount_display.short_description = _("Sales Discount")
 
     def trade_in_tender_display(self, obj):
-        if obj.has_trade_in_exchange and obj.trade_in_discount_amount > Decimal('0.00'):
+        if obj.has_trade_in_exchange and obj.trade_in_discount_amount and obj.trade_in_discount_amount > Decimal('0.00'):
             return format_html(
                 '<span style="color: #92400e; font-weight: 700; font-family: monospace;">-Rs. {:,.2f}</span>',
                 obj.trade_in_discount_amount
@@ -357,19 +369,23 @@ class SalesEstimateAdmin(admin.ModelAdmin):
     trade_in_tender_display.short_description = _("Trade-In Tender")
 
     def net_payable_display(self, obj):
-        return format_html('<span class="font-monospace fw-bold text-dark">Rs. {:,.2f}</span>', obj.net_customer_payable)
+        val = obj.net_customer_payable or Decimal('0.00')
+        return format_html('<span class="font-monospace fw-bold text-dark">Rs. {:,.2f}</span>', val)
     net_payable_display.short_description = _("Net Payable")
 
     def effective_trade_in_tender_display(self, obj):
-        return format_html('Rs. {:,.2f}', obj.effective_trade_in_tender)
+        val = obj.effective_trade_in_tender or Decimal('0.00')
+        return format_html('Rs. {:,.2f}', val)
     effective_trade_in_tender_display.short_description = _("Effective Tender Consumed")
 
     def excess_trade_in_credit_display(self, obj):
-        return format_html('Rs. {:,.2f}', obj.excess_trade_in_credit)
+        val = obj.excess_trade_in_credit or Decimal('0.00')
+        return format_html('Rs. {:,.2f}', val)
     excess_trade_in_credit_display.short_description = _("Surplus Trade-In Refunded/Credited")
 
     def net_customer_payable_display(self, obj):
-        return format_html('<strong class="font-monospace text-primary">Rs. {:,.2f}</strong>', obj.net_customer_payable)
+        val = obj.net_customer_payable or Decimal('0.00')
+        return format_html('<strong class="font-monospace text-primary">Rs. {:,.2f}</strong>', val)
     net_customer_payable_display.short_description = _("Net Balance Payable")
 
     def status_badge(self, obj):
@@ -424,29 +440,38 @@ class TradeInLegalUndertakingInline(admin.StackedInline):
     readonly_fields = ['preview_customer_photo', 'preview_id_front', 'preview_id_back']
 
     def preview_customer_photo(self, obj):
-        if obj.customer_live_photo:
-            return format_html(
-                '<img src="{}" style="height: 100px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
-                obj.customer_live_photo.url
-            )
+        try:
+            if obj.customer_live_photo:
+                return format_html(
+                    '<img src="{}" style="height: 100px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                    obj.customer_live_photo.url
+                )
+        except Exception:
+            pass
         return "(No live photo)"
     preview_customer_photo.short_description = _("Customer Live Snapshot")
 
     def preview_id_front(self, obj):
-        if obj.id_front_image:
-            return format_html(
-                '<img src="{}" style="height: 100px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
-                obj.id_front_image.url
-            )
+        try:
+            if obj.id_front_image:
+                return format_html(
+                    '<img src="{}" style="height: 100px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                    obj.id_front_image.url
+                )
+        except Exception:
+            pass
         return "(No ID front)"
     preview_id_front.short_description = _("ID Front Photo")
 
     def preview_id_back(self, obj):
-        if obj.id_back_image:
-            return format_html(
-                '<img src="{}" style="height: 100px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
-                obj.id_back_image.url
-            )
+        try:
+            if obj.id_back_image:
+                return format_html(
+                    '<img src="{}" style="height: 100px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                    obj.id_back_image.url
+                )
+        except Exception:
+            pass
         return "(No ID back)"
     preview_id_back.short_description = _("ID Back Photo")
 
@@ -510,7 +535,8 @@ class PhoneExchangeTradeInAdmin(admin.ModelAdmin):
     )
 
     def brand_model_display(self, obj):
-        return f"{obj.brand_name} {obj.model_name} ({obj.storage_capacity})"
+        storage = f" ({obj.storage_capacity})" if obj.storage_capacity else ""
+        return f"{obj.brand_name} {obj.model_name}{storage}"
     brand_model_display.short_description = _("Device Traded-In")
 
     def grade_badge(self, obj):
@@ -594,59 +620,125 @@ class TradeInLegalUndertakingAdmin(admin.ModelAdmin):
     )
 
     def preview_customer_photo(self, obj):
-        if obj.customer_live_photo:
-            return format_html(
-                '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
-                obj.customer_live_photo.url
-            )
+        try:
+            if obj.customer_live_photo:
+                return format_html(
+                    '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                    obj.customer_live_photo.url
+                )
+        except Exception:
+            pass
         return "(No live photo)"
     preview_customer_photo.short_description = _("Customer Live Snapshot")
 
     def preview_id_front(self, obj):
-        if obj.id_front_image:
-            return format_html(
-                '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
-                obj.id_front_image.url
-            )
+        try:
+            if obj.id_front_image:
+                return format_html(
+                    '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                    obj.id_front_image.url
+                )
+        except Exception:
+            pass
         return "(No ID front)"
     preview_id_front.short_description = _("ID Front Photo")
 
     def preview_id_back(self, obj):
-        if obj.id_back_image:
-            return format_html(
-                '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
-                obj.id_back_image.url
-            )
+        try:
+            if obj.id_back_image:
+                return format_html(
+                    '<img src="{}" style="height: 120px; border-radius: 8px; border: 1px solid #cbd5e1; object-fit: cover;" />',
+                    obj.id_back_image.url
+                )
+        except Exception:
+            pass
         return "(No ID back)"
     preview_id_back.short_description = _("ID Back Photo")
 
 # =============================================================================
-# 4. SALES RETURN & DEFECTIVE ITEMS ADMIN
+# 4. SALES RETURN & DEFECTIVE ITEMS ADMIN (AUTONOMOUS VAT SNAPSHOT AUDIT)
 # =============================================================================
 class SalesReturnItemInline(admin.TabularInline):
     model = SalesReturnItem
     extra = 0
     raw_id_fields = ['estimate_item', 'product']
     fields = [
-        'product', 'return_quantity', 'base_unit_quantity', 'refund_amount',
-        'discount_type', 'discount_input_value', 'item_discount_amount',
-        'effective_discount_percent', 'returned_imei', 'restock_to_inventory',
-        'is_defective', 'defect_reason'
+        'product', 'return_quantity', 'base_unit_quantity',
+        'vat_rate_badge', 'taxable_return_amount_display',
+        'non_taxable_return_amount_display', 'vat_reversal_amount_display',
+        'refund_amount_display', 'discount_type_badge', 'item_discount_amount',
+        'effective_discount_percent', 'returned_imei_display',
+        'restock_to_inventory', 'is_defective', 'defect_reason'
     ]
     readonly_fields = [
-        'product', 'return_quantity', 'base_unit_quantity', 'refund_amount',
-        'discount_type', 'discount_input_value', 'item_discount_amount',
-        'effective_discount_percent', 'returned_imei', 'restock_to_inventory',
-        'is_defective', 'defect_reason'
+        'product', 'return_quantity', 'base_unit_quantity',
+        'vat_rate_badge', 'taxable_return_amount_display',
+        'non_taxable_return_amount_display', 'vat_reversal_amount_display',
+        'refund_amount_display', 'discount_type_badge', 'item_discount_amount',
+        'effective_discount_percent', 'returned_imei_display',
+        'restock_to_inventory', 'is_defective', 'defect_reason'
     ]
     can_delete = False
+
+    def vat_rate_badge(self, obj):
+        if obj.vat_rate and obj.vat_rate > Decimal('0.00'):
+            return format_html(
+                '<span style="color: #059669; background-color: #ecfdf5; border: 1px solid #a7f3d0; font-weight: 700; padding: 2px 6px; border-radius: 4px; font-size: 10px;">{}% VAT</span>',
+                obj.vat_rate
+            )
+        return format_html('<span style="color: #64748b; font-size: 10px;">0% (Exempt)</span>')
+    vat_rate_badge.short_description = _("VAT Rate")
+
+    def taxable_return_amount_display(self, obj):
+        val = obj.taxable_return_amount or Decimal('0.00')
+        return format_html('<span class="font-monospace">Rs. {:,.2f}</span>', val)
+    taxable_return_amount_display.short_description = _("Taxable Base")
+
+    def non_taxable_return_amount_display(self, obj):
+        val = obj.non_taxable_return_amount or Decimal('0.00')
+        if val > Decimal('0.00'):
+            return format_html('<span class="font-monospace">Rs. {:,.2f}</span>', val)
+        return format_html('<span style="color: #94a3b8;">-</span>')
+    non_taxable_return_amount_display.short_description = _("Non-Taxable")
+
+    def vat_reversal_amount_display(self, obj):
+        val = obj.vat_reversal_amount or Decimal('0.00')
+        if val > Decimal('0.00'):
+            return format_html('<span class="font-monospace" style="color: #dc2626; font-weight: 700;">Rs. {:,.2f}</span>', val)
+        return format_html('<span style="color: #94a3b8;">Rs. 0.00</span>')
+    vat_reversal_amount_display.short_description = _("VAT Reversal")
+
+    def refund_amount_display(self, obj):
+        val = obj.refund_amount or Decimal('0.00')
+        return format_html('<span class="font-monospace fw-bold" style="color: #b91c1c;">Rs. {:,.2f}</span>', val)
+    refund_amount_display.short_description = _("Net Refund")
+
+    def discount_type_badge(self, obj):
+        if obj.discount_type in ['AMOUNT', 'FIXED']:
+            return format_html(
+                '<span style="color: #1e40af; background-color: #dbeafe; font-weight: 700; padding: 2px 6px; border-radius: 4px; font-size: 10px;">AMOUNT</span>'
+            )
+        elif obj.discount_type == 'PERCENTAGE':
+            return format_html(
+                '<span style="color: #92400e; background-color: #fef3c7; font-weight: 700; padding: 2px 6px; border-radius: 4px; font-size: 10px;">PERCENT</span>'
+            )
+        return format_html('<span style="color: #64748b; font-size: 10px;">NONE</span>')
+    discount_type_badge.short_description = _("Disc Type")
+
+    def returned_imei_display(self, obj):
+        if obj.returned_imei:
+            return format_html('<span class="font-monospace" style="font-weight: 700;">{}</span>', obj.returned_imei)
+        return format_html('<span style="color: #94a3b8;">-</span>')
+    returned_imei_display.short_description = _("Returned IMEI")
 
 @admin.register(SalesReturn)
 class SalesReturnAdmin(admin.ModelAdmin):
     list_display = [
-        'return_number', 'original_estimate', 'branch',
+        'return_number', 'original_estimate_display', 'branch',
+        'customer_display',
         'return_date_ad', 'return_date_bs', 'fiscal_year',
-        'total_refund_amount', 'refund_mode_badge', 'processed_by', 'created_at'
+        'taxable_amount_display', 'non_taxable_amount_display', 'vat_amount_display',
+        'total_refund_display', 'refund_mode_badge', 'processed_by', 'created_at'
     ]
     list_filter = ['refund_mode', 'fiscal_year', 'branch', 'return_date_ad', 'created_at']
     search_fields = [
@@ -656,10 +748,18 @@ class SalesReturnAdmin(admin.ModelAdmin):
     ]
     raw_id_fields = ['original_estimate', 'branch', 'customer', 'processed_by']
     inlines = [SalesReturnItemInline]
-    readonly_fields = ['return_number', 'fiscal_year', 'total_refund_amount', 'created_at', 'updated_at']
+    readonly_fields = [
+        'return_number', 'fiscal_year', 'taxable_amount', 'non_taxable_amount',
+        'vat_amount', 'total_refund_amount', 'created_at', 'updated_at'
+    ]
+    actions = ['recalculate_return_totals']
 
     fieldsets = (
-        (_("Voucher Header & Routing (Historical Dates Supported)"), {
+        (_("1. Voucher Header & Routing (Historical Dates Supported)"), {
+            'description': _(
+                "Updating either Return Date (BS) or Return Date (AD) will bidirectionally "
+                "recalculate the corresponding date and Nepali Fiscal Year automatically upon saving."
+            ),
             'fields': (
                 ('return_number', 'branch'),
                 ('original_estimate', 'customer'),
@@ -667,20 +767,111 @@ class SalesReturnAdmin(admin.ModelAdmin):
                 ('refund_mode', 'processed_by')
             )
         }),
-        (_("Financials & Reasons"), {
+        (_("2. Financials & Autonomous VAT Reversal Snapshot"), {
+            'description': _(
+                "Autonomous VAT Snapshot: Taxable, non-taxable, and VAT reversal amounts are permanently "
+                "recorded on this return voucher and its line items as self-contained tax transactions."
+            ),
             'fields': (
-                'total_refund_amount',
+                ('total_refund_amount', 'vat_amount'),
+                ('taxable_amount', 'non_taxable_amount'),
+            )
+        }),
+        (_("3. Reasons & Diagnostic Observations"), {
+            'fields': (
                 'reason',
                 'technician_notes'
             )
         }),
-        (_("Audit Metadata"), {
+        (_("4. Audit Metadata"), {
             'classes': ('collapse',),
             'fields': (
                 ('created_at', 'updated_at'),
             )
         }),
     )
+
+    def save_related(self, request, form, formsets, change):
+        """
+        Executes after inline return items are saved to database.
+        Re-aggregates total refund, taxable base, non-taxable base, and VAT reversal amount
+        from line items to ensure complete financial and tax synchronization.
+        """
+        super().save_related(request, form, formsets, change)
+        form.instance.recalculate_financials(save=True)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if change and form.changed_data:
+            AuditLog.objects.create(
+                user=request.user,
+                branch=obj.branch,
+                action_type='UPDATE',
+                module='Admin_SalesReturn_Override',
+                object_repr=obj.return_number,
+                details={
+                    'changed_fields': list(form.changed_data),
+                    'return_date_ad': str(obj.return_date_ad),
+                    'return_date_bs': obj.return_date_bs,
+                    'fiscal_year': obj.fiscal_year,
+                }
+            )
+
+    @admin.action(description=_("Recalculate autonomous VAT snapshot & totals from line items"))
+    def recalculate_return_totals(self, request, queryset):
+        count = 0
+        for ret in queryset:
+            ret.recalculate_financials(save=True)
+            count += 1
+        self.message_user(request, f"Successfully recalculated VAT snapshots and totals for {count} return voucher(s).")
+
+    # --- Formatted Column Helpers ---
+    def original_estimate_display(self, obj):
+        if obj.original_estimate:
+            return format_html(
+                '<a href="/admin/sales/salesestimate/{}/change/" class="font-monospace fw-bold" style="color: #2563eb;">{}</a>',
+                obj.original_estimate_id,
+                obj.original_estimate.estimate_number
+            )
+        return format_html('<span style="color: #94a3b8;">-</span>')
+    original_estimate_display.short_description = _("Original Bill")
+    original_estimate_display.admin_order_field = 'original_estimate__estimate_number'
+
+    def customer_display(self, obj):
+        if obj.customer:
+            return obj.customer.name
+        elif obj.original_estimate:
+            return obj.original_estimate.recipient_display_name
+        return "Walk-in"
+    customer_display.short_description = _("Customer")
+
+    def taxable_amount_display(self, obj):
+        val = obj.taxable_amount or Decimal('0.00')
+        return format_html('<span class="font-monospace">Rs. {:,.2f}</span>', val)
+    taxable_amount_display.short_description = _("Taxable Return Base")
+    taxable_amount_display.admin_order_field = 'taxable_amount'
+
+    def non_taxable_amount_display(self, obj):
+        val = obj.non_taxable_amount or Decimal('0.00')
+        if val > Decimal('0.00'):
+            return format_html('<span class="font-monospace">Rs. {:,.2f}</span>', val)
+        return format_html('<span style="color: #94a3b8;">-</span>')
+    non_taxable_amount_display.short_description = _("Non-Taxable")
+    non_taxable_amount_display.admin_order_field = 'non_taxable_amount'
+
+    def vat_amount_display(self, obj):
+        val = obj.vat_amount or Decimal('0.00')
+        if val > Decimal('0.00'):
+            return format_html('<span class="font-monospace fw-bold" style="color: #dc2626;">Rs. {:,.2f}</span>', val)
+        return format_html('<span style="color: #94a3b8;">Rs. 0.00</span>')
+    vat_amount_display.short_description = _("VAT Reversal")
+    vat_amount_display.admin_order_field = 'vat_amount'
+
+    def total_refund_display(self, obj):
+        val = obj.total_refund_amount or Decimal('0.00')
+        return format_html('<span class="font-monospace fw-bold text-danger">Rs. {:,.2f}</span>', val)
+    total_refund_display.short_description = _("Total Refund")
+    total_refund_display.admin_order_field = 'total_refund_amount'
 
     def refund_mode_badge(self, obj):
         colors = {
@@ -694,9 +885,16 @@ class SalesReturnAdmin(admin.ModelAdmin):
             color, obj.get_refund_mode_display()
         )
     refund_mode_badge.short_description = _("Refund Mode")
+    refund_mode_badge.admin_order_field = 'refund_mode'
 
     def has_add_permission(self, request):
         return False
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def has_change_permission(self, request, obj=None):
+        return bool(
+            request.user.is_superuser or
+            getattr(request.user, 'role', '') in ['OWNER', 'MANAGER']
+        )

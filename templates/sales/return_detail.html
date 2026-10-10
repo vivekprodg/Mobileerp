@@ -17,7 +17,7 @@
 .credit-note-table th {
     background-color: #0f172a !important;
     color: #ffffff !important;
-    font-size: 0.72rem;
+    font-size: 0.70rem;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -26,8 +26,9 @@
 }
 
 .credit-note-table td {
-    padding: 10px 8px;
+    padding: 9px 8px;
     vertical-align: middle;
+    font-size: 0.80rem;
 }
 
 .imei-print-pill {
@@ -37,7 +38,7 @@
     border-radius: 4px;
     padding: 2px 6px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.72rem;
+    font-size: 0.70rem;
     margin: 2px 2px 0 0;
 }
 
@@ -48,6 +49,13 @@
     padding-top: 6px;
     font-size: 0.78rem;
     font-weight: 700;
+}
+
+.vat-stat-box {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
+    border-radius: 12px;
+    padding: 12px 16px;
 }
 
 @media print {
@@ -83,7 +91,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1280px;">
+<div class="container-fluid px-4 py-4" style="max-width: 1320px;">
     <!-- Top Action Navigation Bar (Hidden in Print) -->
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 no-print">
         <div>
@@ -160,7 +168,7 @@
         </div>
 
         <!-- 2. Metadata Grid (Customer Details, Original Invoice, Voucher Info) -->
-        <div class="row g-3 mb-4 fs-xs">
+        <div class="row g-3 mb-3 fs-xs">
             <div class="col-6 col-md-6">
                 <div class="p-3 bg-light rounded-3 border h-100">
                     <span class="text-muted text-uppercase fw-bold fs-2xs d-block mb-1">Customer Details:</span>
@@ -214,18 +222,52 @@
             </div>
         </div>
 
-        <!-- 3. Line Items Table with Restock Routing & IMEI breakdown -->
+        <!-- 3. Stored VAT Snapshot KPI Strip (Visible on Screen & Print) -->
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3">
+                <div class="vat-stat-box border-start border-primary border-4">
+                    <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Taxable Return Base</span>
+                    <strong class="font-mono text-dark fs-6 mt-1 d-block">Rs. {{ tax_summary.taxable_return_amount|floatformat:2|intcomma }}</strong>
+                    <small class="text-muted fs-3xs">Subject to 13% tax reversal</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="vat-stat-box border-start border-danger border-4">
+                    <span class="text-danger fs-3xs text-uppercase fw-bold d-block">13% Output VAT Reversal</span>
+                    <strong class="font-mono text-danger fs-6 mt-1 d-block">Rs. {{ tax_summary.vat_reversal_amount|floatformat:2|intcomma }}</strong>
+                    <small class="text-muted fs-3xs">Deducted from sales output tax</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="vat-stat-box border-start border-secondary border-4">
+                    <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Non-Taxable Return Base</span>
+                    <strong class="font-mono text-secondary fs-6 mt-1 d-block">Rs. {{ tax_summary.non_taxable_return_amount|floatformat:2|intcomma }}</strong>
+                    <small class="text-muted fs-3xs">PAN / 0% exempt return amount</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="vat-stat-box border-start border-dark border-4 bg-light">
+                    <span class="text-dark fs-3xs text-uppercase fw-bold d-block">Total Refund Amount</span>
+                    <strong class="font-mono text-dark fs-6 mt-1 d-block">Rs. {{ sales_return.total_refund_amount|floatformat:2|intcomma }}</strong>
+                    <small class="text-muted fs-3xs">Total credit note payout</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Line Items Table with Stored VAT Snapshot Breakdown -->
         <div class="table-responsive mb-4">
             <table class="table table-bordered align-middle mb-0 credit-note-table">
                 <thead>
                     <tr>
-                        <th class="ps-3 text-center" style="width: 45px;">#</th>
+                        <th class="ps-3 text-center" style="width: 35px;">#</th>
                         <th>Product / Model Description</th>
-                        <th class="text-center" style="width: 75px;">Unit</th>
-                        <th class="text-center" style="width: 80px;">Return Qty</th>
-                        <th class="text-end" style="width: 120px;">Sold Price</th>
-                        <th class="text-center" style="width: 140px;">Inventory Status</th>
-                        <th class="text-end pe-3" style="width: 140px;">Refund Total (NPR)</th>
+                        <th class="text-center" style="width: 70px;">Return Qty</th>
+                        <th class="text-center" style="width: 75px;">VAT Rate</th>
+                        <th class="text-end" style="width: 120px;">Taxable Base</th>
+                        <th class="text-end" style="width: 110px;">VAT Reversal</th>
+                        <th class="text-end" style="width: 110px;">Non-Taxable</th>
+                        <th class="text-center" style="width: 105px;">Stock Status</th>
+                        <th class="text-end pe-3" style="width: 125px;">Refund Amount</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -255,40 +297,96 @@
                             {% endif %}
                         </td>
 
-                        <td class="text-center">{{ item.product.base_unit.code|default:"Pcs" }}</td>
-                        <td class="text-center font-monospace fw-bold">{{ item.return_quantity|floatformat:0 }}</td>
-                        <td class="text-end font-monospace">Rs. {{ item.estimate_item.unit_price|floatformat:2|intcomma }}</td>
+                        <td class="text-center font-monospace fw-bold">
+                            {{ item.return_quantity|floatformat:0 }} {{ item.product.base_unit.code|default:"Pcs" }}
+                        </td>
+
+                        <!-- Stored VAT Rate Snapshot -->
+                        <td class="text-center">
+                            {% if item.vat_rate > 0 %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs fw-bold">
+                                    {{ item.vat_rate|floatformat:1 }}%
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary border fs-3xs">
+                                    0% (Exempt)
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Stored Taxable Return Base Snapshot -->
+                        <td class="text-end font-mono">
+                            {% if item.taxable_return_amount > 0 %}
+                                Rs. {{ item.taxable_return_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Stored VAT Reversal Amount Snapshot -->
+                        <td class="text-end font-mono">
+                            {% if item.vat_reversal_amount > 0 %}
+                                <span class="text-danger fw-bold">Rs. {{ item.vat_reversal_amount|floatformat:2|intcomma }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Stored Non-Taxable Return Amount Snapshot -->
+                        <td class="text-end font-mono">
+                            {% if item.non_taxable_return_amount > 0 %}
+                                Rs. {{ item.non_taxable_return_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Stock Routing Status -->
                         <td class="text-center">
                             {% if item.is_defective %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger fs-2xs">
+                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger fs-3xs">
                                     <i class="fas fa-biohazard me-1"></i> Defective / RMA
                                 </span>
                             {% elif item.restock_to_inventory %}
-                                <span class="badge bg-success bg-opacity-10 text-success border border-success fs-2xs">
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success fs-3xs">
                                     <i class="fas fa-check-circle me-1"></i> Restocked
                                 </span>
                             {% else %}
-                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-2xs">
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">
                                     Not Restocked
                                 </span>
                             {% endif %}
                         </td>
-                        <td class="text-end pe-3 font-monospace fw-bold text-danger">Rs. {{ item.refund_amount|floatformat:2|intcomma }}</td>
+
+                        <!-- Stored Refund Amount -->
+                        <td class="text-end pe-3 font-mono fw-bold text-danger">
+                            Rs. {{ item.refund_amount|floatformat:2|intcomma }}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
 
-                <!-- Financial Totals Summary Footers -->
+                <!-- Financial Totals Summary Footers with Complete VAT Reversal Reconciliation -->
                 <tfoot class="border-top">
-                    <tr class="bg-light">
-                        <td colspan="6" class="text-end fw-extrabold text-dark text-uppercase fs-sm">Total Refund Amount Issued:</td>
-                        <td class="text-end pe-3 font-monospace fw-extrabold text-danger fs-5">Rs. {{ sales_return.total_refund_amount|floatformat:2|intcomma }}</td>
+                    <tr class="fw-bold fs-xs bg-light">
+                        <td colspan="4" class="text-end text-uppercase text-muted">Summary Totals (कर विवरण सारांश):</td>
+                        <td class="text-end font-mono">Rs. {{ tax_summary.taxable_return_amount|floatformat:2|intcomma }}</td>
+                        <td class="text-end font-mono text-danger">Rs. {{ tax_summary.vat_reversal_amount|floatformat:2|intcomma }}</td>
+                        <td class="text-end font-mono">Rs. {{ tax_summary.non_taxable_return_amount|floatformat:2|intcomma }}</td>
+                        <td></td>
+                        <td class="text-end pe-3 font-mono text-danger">Rs. {{ tax_summary.return_amount|floatformat:2|intcomma }}</td>
+                    </tr>
+                    <tr class="bg-dark text-white fw-bold" style="background-color: #0f172a !important; color: #ffffff;">
+                        <td colspan="5" class="ps-3 text-uppercase fs-xs">Total Credit Note Refund Issued (कुल फिर्ता रकम):</td>
+                        <td colspan="4" class="text-end pe-3 font-mono fs-6 text-danger" style="color: #fca5a5 !important;">
+                            Rs. {{ sales_return.total_refund_amount|floatformat:2|intcomma }}
+                        </td>
                     </tr>
                 </tfoot>
             </table>
         </div>
 
-        <!-- 4. Remarks & Diagnostic Findings -->
+        <!-- 5. Remarks & Diagnostic Findings -->
         <div class="row g-3 mb-4 fs-xs">
             <div class="col-12 col-md-6">
                 <div class="p-3 bg-light rounded-3 border h-100">
@@ -308,7 +406,7 @@
             </div>
         </div>
 
-        <!-- 5. Formal Signatures & Acknowledgement Area -->
+        <!-- 6. Formal Signatures & Acknowledgement Area -->
         <div class="d-flex justify-content-between align-items-end mt-5 pt-4">
             <div class="signature-box-print">
                 <div class="mb-5"></div>
@@ -317,7 +415,7 @@
             </div>
 
             <div class="text-center text-muted fs-2xs" style="max-width: 320px;">
-                * This Credit Note acknowledges the physical return of merchandise. Corresponding inventory, warranty certificates, and accounts have been adjusted.
+                * This Credit Note acknowledges the physical return of merchandise. Corresponding inventory, tax snapshots, and accounts have been reconciled.
             </div>
 
             <div class="signature-box-print">

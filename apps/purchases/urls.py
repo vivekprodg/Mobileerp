@@ -1,6 +1,5 @@
 """
 Purchases, Supplier Ledgers & Commercial Purchase Return URL Routes.
-File Path: apps/purchases/urls.py
 """
 
 from django.urls import path
@@ -24,6 +23,7 @@ from apps.purchases.views import (
     GRNDetailView,
     GRNCreateView,
     cancel_grn_view,
+    GRNManageIMEIsView,
     # Commercial Purchase Returns & Debit Notes
     PurchaseReturnListView,
     PurchaseReturnCreateView,
@@ -54,6 +54,7 @@ urlpatterns = [
     path('grn/', GRNListView.as_view(), name='grn_list'),
     path('grn/create/', GRNCreateView.as_view(), name='grn_create'),
     path('grn/<int:pk>/', GRNDetailView.as_view(), name='grn_detail'),
+    path('grn/<int:pk>/manage-imeis/', GRNManageIMEIsView.as_view(), name='grn_manage_imeis'),
     path('grn/<int:pk>/cancel/', cancel_grn_view, name='grn_cancel'),
 
     # Commercial Purchase Returns & Debit Notes

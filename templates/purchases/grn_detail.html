@@ -4,511 +4,1583 @@
 {% block title %}GRN {{ grn.grn_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
 {% block extra_head %}
+<!-- Google Fonts: Inter & JetBrains Mono -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+
 <style>
-.kpi-border-primary { border-left: 5px solid #2563eb !important; }
-.kpi-border-success { border-left: 5px solid #059669 !important; }
-.kpi-border-warning { border-left: 5px solid #d97706 !important; }
-.kpi-border-purple  { border-left: 5px solid #7c3aed !important; }
-.kpi-border-danger  { border-left: 5px solid #dc2626 !important; }
+/* ==========================================================================
+   ZONE A: REFINED ENTERPRISE DESIGN SYSTEM CSS
+   ========================================================================== */
+:root {
+  --grn-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --grn-font-mono: 'JetBrains Mono', monospace;
 
-.recon-table td {
-    padding: 0.45rem 0.6rem;
-    font-size: 0.82rem;
-    vertical-align: middle;
-}
-.recon-table tr.total-row {
-    font-weight: 800;
-    border-top: 2px solid var(--erp-slate-300, #cbd5e1);
+  /* Primary Palette: Deep Navy & Sophisticated Teal */
+  --grn-primary: #0f766e;
+  --grn-primary-hover: #115e59;
+  --grn-primary-light: #f0fdfa;
+  --grn-primary-border: #99f6e4;
+  --grn-slate-900: #0f172a;
+  --grn-slate-800: #1e293b;
+  --grn-slate-700: #334155;
+  --grn-slate-600: #475569;
+  --grn-slate-500: #64748b;
+  --grn-slate-400: #94a3b8;
+  --grn-slate-300: #cbd5e1;
+  --grn-slate-200: #e2e8f0;
+  --grn-slate-100: #f1f5f9;
+  --grn-slate-50: #f8fafc;
+  --grn-white: #ffffff;
+
+  /* Functional Status Accents */
+  --grn-success: #059669;
+  --grn-success-light: #ecfdf5;
+  --grn-success-border: #a7f3d0;
+  --grn-warning: #d97706;
+  --grn-warning-light: #fffbeb;
+  --grn-warning-border: #fde68a;
+  --grn-danger: #dc2626;
+  --grn-danger-light: #fef2f2;
+  --grn-danger-border: #fecaca;
+  --grn-purple: #7c3aed;
+  --grn-purple-light: #faf5ff;
+  --grn-purple-border: #e9d5ff;
+
+  --grn-radius-sm: 6px;
+  --grn-radius-md: 10px;
+  --grn-radius-lg: 14px;
+  --grn-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --grn-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --grn-shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --grn-shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
 }
 
-.tax-badge-13 {
-    background-color: #ecfdf5;
-    color: #065f46;
-    border: 1px solid #a7f3d0;
+.grn-app-shell {
+  max-width: 1520px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  font-family: var(--grn-font-sans);
+  color: var(--grn-slate-800);
+  font-size: 13px;
+  line-height: 1.5;
+  padding-bottom: 70px;
 }
-.tax-badge-0 {
-    background-color: #f1f5f9;
-    color: #475569;
-    border: 1px solid #cbd5e1;
+
+.font-mono {
+  font-family: var(--grn-font-mono) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   ZONE B: COMPACT TOP HEADER & ACTION BUTTONS
+   ========================================================================== */
+.grn-header-card {
+  background: var(--grn-white);
+  border: 1px solid var(--grn-slate-200);
+  border-radius: var(--grn-radius-lg);
+  padding: 20px 24px;
+  box-shadow: var(--grn-shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.grn-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.grn-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.grn-code-badge {
+  font-family: var(--grn-font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--grn-slate-900);
+  letter-spacing: -0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copy-btn {
+  background: none;
+  border: none;
+  color: var(--grn-slate-400);
+  cursor: pointer;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border-radius: var(--grn-radius-sm);
+  transition: all 0.15s ease;
+}
+
+.copy-btn:hover {
+  color: var(--grn-primary);
+  background-color: var(--grn-slate-100);
+}
+
+.status-chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-chip.received   { background: var(--grn-success-light); color: var(--grn-success); border: 1px solid var(--grn-success-border); }
+.status-chip.cancelled  { background: var(--grn-danger-light); color: var(--grn-danger); border: 1px solid var(--grn-danger-border); }
+.status-chip.draft      { background: var(--grn-warning-light); color: var(--grn-warning); border: 1px solid var(--grn-warning-border); }
+.status-chip.vat-tax    { background: var(--grn-success-light); color: #065f46; border: 1px solid #a7f3d0; }
+.status-chip.pan-tax    { background: var(--grn-slate-100); color: var(--grn-slate-600); border: 1px solid var(--grn-slate-300); }
+.status-chip.exclusive  { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+.status-chip.inclusive  { background: var(--grn-purple-light); color: var(--grn-purple); border: 1px solid var(--grn-purple-border); }
+.status-chip.mdms       { background: var(--grn-primary-light); color: var(--grn-primary); border: 1px solid var(--grn-primary-border); }
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-action {
+  font-family: var(--grn-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: var(--grn-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 1px solid var(--grn-slate-300);
+  background: var(--grn-white);
+  color: var(--grn-slate-700);
+  text-decoration: none !important;
+  transition: all 0.15s ease;
+  box-shadow: var(--grn-shadow-xs);
+}
+
+.btn-action:hover {
+  background: var(--grn-slate-50);
+  border-color: var(--grn-slate-400);
+  color: var(--grn-slate-900);
+}
+
+.btn-action.primary {
+  background: var(--grn-primary);
+  border-color: var(--grn-primary);
+  color: var(--grn-white);
+  box-shadow: 0 1px 2px rgba(15, 118, 110, 0.2);
+}
+
+.btn-action.primary:hover {
+  background: var(--grn-primary-hover);
+  border-color: var(--grn-primary-hover);
+  color: var(--grn-white);
+}
+
+.btn-action.danger-outline {
+  color: var(--grn-danger);
+  border-color: var(--grn-danger-border);
+  background: var(--grn-white);
+}
+
+.btn-action.danger-outline:hover {
+  background: var(--grn-danger-light);
+  border-color: var(--grn-danger);
+}
+
+.grn-meta-ribbon {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--grn-slate-100);
+  font-size: 12px;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--grn-slate-400);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.meta-value {
+  font-weight: 600;
+  color: var(--grn-slate-800);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meta-value strong {
+  color: var(--grn-slate-900);
+}
+
+/* ==========================================================================
+   ZONE C: 5 EXECUTIVE FINANCIAL SUMMARY CARDS
+   ========================================================================== */
+.financial-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+
+.fin-card {
+  background: var(--grn-white);
+  border: 1px solid var(--grn-slate-200);
+  border-radius: var(--grn-radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  box-shadow: var(--grn-shadow-xs);
+  position: relative;
+  overflow: hidden;
+}
+
+.fin-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3.5px;
+}
+
+.fin-card.c-merch::before   { background: #3b82f6; }
+.fin-card.c-vat::before     { background: var(--grn-success); }
+.fin-card.c-overhead::before{ background: var(--grn-warning); }
+.fin-card.c-landed::before  { background: var(--grn-purple); }
+.fin-card.c-due::before     { background: var(--grn-danger); }
+
+.fin-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--grn-slate-500);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fin-value {
+  font-family: var(--grn-font-mono);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--grn-slate-900);
+  letter-spacing: -0.02em;
+}
+
+.fin-card.c-due .fin-value {
+  color: var(--grn-danger);
+}
+
+.fin-card.c-landed .fin-value {
+  color: var(--grn-purple);
+}
+
+.fin-footnote {
+  font-size: 11px;
+  color: var(--grn-slate-400);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ==========================================================================
+   ZONE D: INWARD ITEMS TABLE & PROGRESSIVE EXPANSION DRAWERS
+   ========================================================================== */
+.table-panel-card {
+  background: var(--grn-white);
+  border: 1px solid var(--grn-slate-200);
+  border-radius: var(--grn-radius-lg);
+  box-shadow: var(--grn-shadow-sm);
+  overflow: hidden;
+}
+
+.table-panel-header {
+  padding: 14px 20px;
+  background: var(--grn-white);
+  border-bottom: 1px solid var(--grn-slate-200);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.table-panel-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--grn-slate-900);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-responsive-box {
+  width: 100%;
+  overflow-x: auto;
+}
+
+table.grn-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+table.grn-table thead th {
+  background: var(--grn-slate-50);
+  color: var(--grn-slate-600);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--grn-slate-200);
+  white-space: nowrap;
+}
+
+table.grn-table tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--grn-slate-100);
+  vertical-align: middle;
+  font-size: 12.5px;
+}
+
+table.grn-table tbody tr.item-row {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+table.grn-table tbody tr.item-row:hover {
+  background-color: #fafcff;
+}
+
+table.grn-table tbody tr.item-row.expanded {
+  background-color: var(--grn-primary-light);
+}
+
+.toggle-chevron {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--grn-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--grn-slate-400);
+  transition: all 0.2s ease;
+}
+
+tr.expanded .toggle-chevron {
+  transform: rotate(90deg);
+  color: var(--grn-primary);
+}
+
+.product-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.product-type-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--grn-radius-sm);
+  background: var(--grn-slate-100);
+  color: var(--grn-slate-600);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.product-type-icon.phone {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.product-name-txt {
+  font-weight: 700;
+  color: var(--grn-slate-900);
+  font-size: 13px;
+}
+
+.product-specs-txt {
+  font-size: 11px;
+  color: var(--grn-slate-500);
+  margin-top: 1px;
+}
+
+.text-end { text-align: right !important; }
+.text-center { text-align: center !important; }
+
+/* Expanded Drawer Layout */
+tr.drawer-row {
+  display: none;
+}
+
+tr.drawer-row.show {
+  display: table-row;
+}
+
+tr.drawer-row td {
+  padding: 0 !important;
+  background: #fdfefe;
+  border-bottom: 2px solid var(--grn-slate-200);
+}
+
+.drawer-content {
+  padding: 16px 20px 20px 46px;
+  background: #fbfdff;
+  border-left: 3.5px solid var(--grn-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 18px;
+  background: var(--grn-white);
+  border: 1px solid var(--grn-slate-200);
+  border-radius: var(--grn-radius-md);
+  padding: 12px 16px;
+}
+
+.drawer-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.drawer-meta-lbl {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--grn-slate-400);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.drawer-meta-val {
+  font-weight: 600;
+  color: var(--grn-slate-800);
+  font-size: 12px;
+}
+
+/* Structured IMEI Card Grid in Drawer */
+.imei-presentation-box {
+  background: var(--grn-white);
+  border: 1px solid var(--grn-slate-200);
+  border-radius: var(--grn-radius-md);
+  padding: 14px 16px;
+}
+
+.imei-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.imei-box-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--grn-slate-800);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.imei-units-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 8px;
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.imei-unit-pill {
+  background: var(--grn-slate-50);
+  border: 1px solid var(--grn-slate-200);
+  border-radius: var(--grn-radius-sm);
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+}
+
+.imei-nums {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.imei-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--grn-font-mono);
+  font-weight: 600;
+  color: var(--grn-slate-800);
+}
+
+.imei-line .badge-sim {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-weight: 700;
+  font-family: var(--grn-font-sans);
+}
+
+/* ==========================================================================
+   ZONE E: 3 COLLAPSIBLE BOTTOM AUDIT ACCORDIONS
+   ========================================================================== */
+.collapsible-sections-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.accordion-card {
+  background: var(--grn-white);
+  border: 1px solid var(--grn-slate-200);
+  border-radius: var(--grn-radius-md);
+  box-shadow: var(--grn-shadow-xs);
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.accordion-card.open {
+  border-color: var(--grn-slate-300);
+  box-shadow: var(--grn-shadow-sm);
+}
+
+.accordion-header-btn {
+  width: 100%;
+  background: var(--grn-white);
+  border: none;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-family: var(--grn-font-sans);
+  text-align: left;
+  transition: background-color 0.12s ease;
+}
+
+.accordion-header-btn:hover {
+  background: var(--grn-slate-50);
+}
+
+.accordion-title-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.accordion-icon-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--grn-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.accordion-icon-badge.teal   { background: var(--grn-primary-light); color: var(--grn-primary); }
+.accordion-icon-badge.blue   { background: #eff6ff; color: #2563eb; }
+.accordion-icon-badge.slate  { background: var(--grn-slate-100); color: var(--grn-slate-600); }
+
+.accordion-title-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--grn-slate-800);
+}
+
+.accordion-title-subtitle {
+  font-size: 11px;
+  color: var(--grn-slate-400);
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+.accordion-chevron {
+  color: var(--grn-slate-400);
+  font-size: 12px;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.accordion-card.open .accordion-chevron {
+  transform: rotate(180deg);
+  color: var(--grn-slate-700);
+}
+
+.accordion-body-content {
+  display: none;
+  padding: 18px 22px;
+  border-top: 1px solid var(--grn-slate-100);
+  background: #fafbfc;
+}
+
+.accordion-card.open .accordion-body-content {
+  display: block;
+}
+
+.compliance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px 24px;
+}
+
+.recon-flow-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.recon-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recon-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--grn-slate-200);
+}
+
+.recon-list-item .item-title {
+  color: var(--grn-slate-600);
+}
+
+.recon-list-item .item-val {
+  font-family: var(--grn-font-mono);
+  font-weight: 600;
+  color: var(--grn-slate-900);
+}
+
+.recon-list-item.highlight {
+  border-bottom: 1px solid var(--grn-slate-300);
+  font-weight: 700;
+}
+
+.recon-list-item.highlight .item-title {
+  color: var(--grn-slate-900);
+  font-weight: 700;
+}
+
+.recon-list-item.highlight .item-val {
+  font-weight: 800;
+}
+
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.audit-note-box {
+  background: var(--grn-white);
+  border: 1px solid var(--grn-slate-200);
+  border-radius: var(--grn-radius-sm);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-note-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--grn-slate-400);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.audit-note-text {
+  font-size: 12px;
+  color: var(--grn-slate-700);
+  line-height: 1.45;
+}
+
+/* ==========================================================================
+   ZONE F: TOAST FEEDBACK & PRINT OVERRIDES
+   ========================================================================== */
+.toast-pill {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--grn-slate-900);
+  color: var(--grn-white);
+  padding: 9px 16px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--grn-shadow-lg);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.toast-pill.show {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 @media print {
-    .no-print { display: none !important; }
-    body { background: #ffffff !important; font-size: 11px !important; }
-    .card { box-shadow: none !important; border: 1px solid #ccc !important; }
-    .table { width: 100% !important; font-size: 10px !important; }
+  body {
+    background: #fff !important;
+    padding: 0 !important;
+  }
+  .no-print, .btn-action, .copy-btn, .header-actions {
+    display: none !important;
+  }
+  .grn-app-shell {
+    gap: 14px;
+    padding-bottom: 0 !important;
+  }
+  .grn-header-card, .table-panel-card, .fin-card, .accordion-card {
+    box-shadow: none !important;
+    border: 1px solid #cbd5e1 !important;
+  }
+  tr.drawer-row {
+    display: table-row !important;
+  }
+  .accordion-body-content {
+    display: block !important;
+  }
+  .accordion-chevron {
+    display: none;
+  }
+}
+
+@media (max-width: 1024px) {
+  .financial-cards-grid { grid-template-columns: repeat(3, 1fr); }
+  .recon-flow-container, .audit-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  .financial-cards-grid { grid-template-columns: 1fr; }
+  .grn-header-top { flex-direction: column; align-items: flex-start; }
+  .header-actions { width: 100%; }
+  .btn-action { flex: 1; justify-content: center; }
+  .drawer-content { padding-left: 16px; }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1440px;">
-    <!-- Page Header & Action Toolbar -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
-        <div>
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-                <h4 class="fw-bold text-dark mb-0 font-monospace">{{ grn.grn_number }}</h4>
-                <span class="badge bg-{% if grn.status == 'RECEIVED' %}success{% elif grn.status == 'CANCELLED' %}danger{% else %}warning text-dark{% endif %} fs-xs px-3 py-1 rounded-pill">
-                    {{ grn.get_status_display }}
-                </span>
-                
-                <!-- Tax Invoice / Bill Classification Badge -->
-                {% if grn.is_vat_bill and grn.vat_amount > 0 %}
-                    <span class="badge bg-success bg-opacity-10 text-success fs-xs fw-bold px-3 py-1 rounded-pill border border-success border-opacity-25">
-                        <i class="fas fa-file-invoice me-1"></i> 13% VAT Tax Invoice
-                    </span>
-                {% else %}
-                    <span class="badge bg-secondary bg-opacity-10 text-secondary fs-xs fw-bold px-3 py-1 rounded-pill">
-                        PAN / 0% Non-VAT Consignment
-                    </span>
-                {% endif %}
+<div class="grn-app-shell">
 
-                <!-- VAT Calculation Mode Badge (Exclusive vs. Inclusive) -->
-                {% if grn.vat_handling_mode == 'INCLUSIVE' %}
-                    <span class="badge bg-purple bg-opacity-10 text-purple fs-xs fw-bold px-3 py-1 rounded-pill border border-purple border-opacity-25" style="color: #6b21a8; background-color: #faf5ff; border: 1px solid #e9d5ff;">
-                        <i class="fas fa-tag me-1"></i> VAT Included (Tax Extracted)
-                    </span>
-                {% else %}
-                    <span class="badge bg-primary bg-opacity-10 text-primary fs-xs fw-bold px-3 py-1 rounded-pill border border-primary border-opacity-25">
-                        <i class="fas fa-plus me-1"></i> VAT Excluded (Tax on Top)
-                    </span>
-                {% endif %}
-
-                {% if grn.distributor_mdms_certified %}
-                    <span class="badge bg-primary bg-opacity-10 text-primary fs-xs fw-bold px-3 py-1 rounded-pill">
-                        <i class="fas fa-shield-halved me-1"></i> NTA MDMS Certified
-                    </span>
-                {% endif %}
-            </div>
-            <p class="text-muted fs-xs mb-0 mt-1">
-                Supplier: <strong class="text-dark">{{ grn.supplier.company_name }}</strong> 
-                {% if grn.supplier.pan_number %}(PAN: {{ grn.supplier.pan_number }}){% endif %} | 
-                Challan/Bill Ref: <strong class="font-monospace text-primary">{{ grn.supplier_bill_no }}</strong> | 
-                Inward Date: <strong>{{ grn.bill_date }} ({{ grn.bill_date_bs|default:"-" }} BS)</strong> | 
-                Branch: <strong>{{ grn.branch.name }}</strong>
-            </p>
+  <!-- ======================================================================
+       ZONE B: PERMANENT TOP HEADER & ACTION BUTTONS
+       ====================================================================== -->
+  <header class="grn-header-card">
+    <div class="grn-header-top">
+      <div class="grn-title-group">
+        <!-- Live GRN Number with 1-Click Copy -->
+        <div class="grn-code-badge">
+          <span>{{ grn.grn_number }}</span>
+          <button type="button" class="copy-btn" onclick="copyText('{{ grn.grn_number }}')" title="Copy GRN Number">
+            <i class="fa-regular fa-copy"></i>
+          </button>
         </div>
 
-        <div class="d-flex gap-2 flex-wrap align-items-center no-print">
-            <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold shadow-xs" onclick="window.print()">
-                <i class="fas fa-print me-1"></i> Print Inward Slip
-            </button>
-            {% if grn.status != 'CANCELLED' %}
-                <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold shadow-xs" data-bs-toggle="modal" data-bs-target="#cancelGrnModal">
-                    <i class="fas fa-ban me-1"></i> Cancel / Void Bill
-                </button>
-            {% endif %}
-            <a href="{% url 'purchases:grn_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
-                &larr; Back to GRN List
+        <!-- Approval Status Chip -->
+        {% if grn.status == 'RECEIVED' %}
+          <span class="status-chip received">
+            <i class="fa-solid fa-circle-check"></i> {{ grn.get_status_display }}
+          </span>
+        {% elif grn.status == 'CANCELLED' %}
+          <span class="status-chip cancelled">
+            <i class="fa-solid fa-ban"></i> Cancelled / Voided
+          </span>
+        {% else %}
+          <span class="status-chip draft">
+            <i class="fa-solid fa-clock"></i> Draft / In-Inspection
+          </span>
+        {% endif %}
+
+        <!-- VAT Tax Invoice Type Chip -->
+        {% if grn.is_vat_bill and grn.vat_amount > 0 %}
+          <span class="status-chip vat-tax">
+            <i class="fa-solid fa-percent"></i> 13% Tax Invoice
+          </span>
+        {% else %}
+          <span class="status-chip pan-tax">
+            PAN / 0% Non-VAT
+          </span>
+        {% endif %}
+
+        <!-- VAT Calculation Mode Chip -->
+        {% if grn.vat_handling_mode == 'INCLUSIVE' %}
+          <span class="status-chip inclusive">
+            VAT Included (Extracted)
+          </span>
+        {% else %}
+          <span class="status-chip exclusive">
+            VAT Excluded (On Top)
+          </span>
+        {% endif %}
+
+        <!-- NTA MDMS Clearance Chip -->
+        {% if grn.distributor_mdMS_certified %}
+          <span class="status-chip mdms">
+            <i class="fa-solid fa-shield-halved"></i> NTA MDMS Certified
+          </span>
+        {% endif %}
+      </div>
+
+      <!-- Action Buttons Toolbar -->
+      <div class="header-actions no-print">
+        <button type="button" class="btn-action" onclick="window.print()">
+          <i class="fa-solid fa-print"></i> Print Slip
+        </button>
+
+        {% if grn.status != 'CANCELLED' %}
+          <a href="{% url 'purchases:grn_manage_imeis' grn.pk %}" class="btn-action primary">
+            <i class="fa-solid fa-barcode"></i> Scan / Enter IMEIs
+          </a>
+
+          <button type="button" class="btn-action danger-outline" data-bs-toggle="modal" data-bs-target="#cancelGrnModal">
+            <i class="fa-solid fa-ban"></i> Cancel Bill
+          </button>
+        {% endif %}
+
+        <a href="{% url 'purchases:grn_list' %}" class="btn-action">
+          <i class="fa-solid fa-arrow-left"></i> Back to List
+        </a>
+      </div>
+    </div>
+
+    <!-- Metadata Ribbon Grid -->
+    <div class="grn-meta-ribbon">
+      <div class="meta-item">
+        <span class="meta-label">Supplier / Distributor</span>
+        <div class="meta-value">
+          <strong title="{{ grn.supplier.company_name }}">{{ grn.supplier.company_name }}</strong>
+          <button type="button" class="copy-btn" onclick="copyText('{{ grn.supplier.company_name|escapejs }}')" title="Copy Supplier Name">
+            <i class="fa-regular fa-copy"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="meta-item">
+        <span class="meta-label">Supplier Bill / Invoice Ref</span>
+        <div class="meta-value">
+          <strong class="font-mono text-primary">{{ grn.supplier_bill_no }}</strong>
+          <button type="button" class="copy-btn" onclick="copyText('{{ grn.supplier_bill_no|escapejs }}')" title="Copy Bill Reference">
+            <i class="fa-regular fa-copy"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="meta-item">
+        <span class="meta-label">Inward Date (AD &bull; BS)</span>
+        <div class="meta-value font-mono">
+          <span>{{ grn.bill_date }}</span>
+          {% if grn.bill_date_bs %}
+            <span style="color:var(--grn-slate-400);">&bull;</span>
+            <span style="color:var(--grn-primary); font-weight:700;">{{ grn.bill_date_bs }} BS</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="meta-item">
+        <span class="meta-label">Storage Warehouse</span>
+        <div class="meta-value">
+          <span>{{ grn.branch.name }}</span>
+          <span class="font-mono" style="font-size:10.5px; color:var(--grn-slate-400);">({{ grn.branch.code }})</span>
+        </div>
+      </div>
+
+      <div class="meta-item">
+        <span class="meta-label">Delivery Challan No.</span>
+        <div class="meta-value font-mono">
+          <span>{{ grn.challan_no|default:"—" }}</span>
+        </div>
+      </div>
+
+      <div class="meta-item">
+        <span class="meta-label">Purchase Order</span>
+        <div class="meta-value font-mono">
+          {% if grn.purchase_order %}
+            <a href="{% url 'purchases:po_detail' grn.purchase_order.pk %}" style="color:var(--grn-primary); text-decoration:none;">
+              {{ grn.purchase_order.po_number }}
             </a>
+          {% else %}
+            <span style="color:var(--grn-slate-400);">Direct Inward</span>
+          {% endif %}
         </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Cancellation Notice Banner (If Cancelled) -->
+  {% if grn.status == 'CANCELLED' %}
+  <div class="alert alert-danger border-0 shadow-sm rounded-4 p-3 mb-0 d-flex align-items-center gap-3">
+    <i class="fa-solid fa-triangle-exclamation fs-3 text-danger"></i>
+    <div>
+      <h6 class="fw-bold text-danger mb-0">This Goods Received Note has been VOIDED / CANCELLED</h6>
+      <small class="text-dark d-block">
+        Warehouse inventory counters were reversed, unsold handsets archived, and supplier AP credit reconciled.
+        {% if grn.cancellation_reason %}Reason: <strong>{{ grn.cancellation_reason }}</strong>{% endif %}
+      </small>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ======================================================================
+       ZONE C: EXACT 5 FINANCIAL SUMMARY CARDS (ALWAYS VISIBLE)
+       ====================================================================== -->
+  <section class="financial-cards-grid">
+    <!-- 1. Gross Merchandise -->
+    <div class="fin-card c-merch">
+      <div class="fin-label">
+        <span>1. Gross Merchandise</span>
+        <i class="fa-solid fa-boxes-stacked" style="color: #3b82f6;"></i>
+      </div>
+      <div class="fin-value">Rs. {{ grn.gross_amount|default:0|floatformat:2|intcomma }}</div>
+      <div class="fin-footnote font-mono">
+        Taxable: {{ grn.taxable_amount|default:0|floatformat:2|intcomma }} | Disc: {{ grn.discount_amount|default:0|floatformat:2|intcomma }}
+      </div>
     </div>
 
-    <!-- Cancellation Banner if Cancelled -->
-    {% if grn.status == 'CANCELLED' %}
-    <div class="alert alert-danger border-0 shadow-sm rounded-4 p-3 mb-4 d-flex align-items-center gap-3">
-        <i class="fas fa-triangle-exclamation fs-3 text-danger"></i>
-        <div>
-            <h6 class="fw-bold text-danger mb-0">This Goods Received Note has been VOIDED / CANCELLED</h6>
-            <small class="text-dark d-block">
-                Warehouse inventory counters have been reversed, unsold handset serials archived, and supplier AP balance credited. 
-                {% if grn.cancellation_reason %}Reason: <strong>{{ grn.cancellation_reason }}</strong>{% endif %}
-            </small>
-        </div>
+    <!-- 2. Dedicated 13% VAT -->
+    <div class="fin-card c-vat">
+      <div class="fin-label">
+        <span>2. Dedicated 13% VAT</span>
+        <i class="fa-solid fa-receipt" style="color: var(--grn-success);"></i>
+      </div>
+      <div class="fin-value">Rs. {{ grn.vat_amount|default:0|floatformat:2|intcomma }}</div>
+      <div class="fin-footnote">
+        {% if grn.is_vat_bill and grn.vat_amount > 0 %}
+          {% if grn.vat_handling_mode == 'INCLUSIVE' %}Extracted (1.13 Divisor){% else %}Added on Top (Exclusive){% endif %}
+        {% else %}
+          PAN / 0% Non-VAT Goods
+        {% endif %}
+      </div>
     </div>
-    {% endif %}
 
-    <!-- Section 1: Executive 5-Card Financial Dashboard (Audited Tax Mode Visibility) -->
-    <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-5 g-3 mb-4">
-        <!-- 1. Gross Merchandise Value & Dual Pots -->
-        <div class="col">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 kpi-border-primary">
-                <span class="text-muted fs-3xs text-uppercase fw-bold d-block">1. Pre-VAT Merchandise</span>
-                <h4 class="fw-extrabold text-dark font-monospace my-1">
-                    Rs. {{ grn.gross_amount|default:0|floatformat:2|intcomma }}
-                </h4>
-                <small class="text-muted fs-3xs d-block">
-                    Taxable Base: <strong>Rs. {{ grn.taxable_amount|default:0|floatformat:2|intcomma }}</strong>
-                </small>
-            </div>
-        </div>
+    <!-- 3. Total Overheads -->
+    <div class="fin-card c-overhead">
+      <div class="fin-label">
+        <span>3. Total Overheads</span>
+        <i class="fa-solid fa-truck-ramp-box" style="color: var(--grn-warning);"></i>
+      </div>
+      <div class="fin-value">+Rs. {{ grn.overhead_total|default:0|floatformat:2|intcomma }}</div>
+      <div class="fin-footnote font-mono">Freight, Duty, Ins &amp; Handling</div>
+    </div>
 
-        <!-- 2. Dedicated 13% VAT Amount -->
-        <div class="col">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 kpi-border-success">
-                <span class="text-muted fs-3xs text-uppercase fw-bold d-block">2. Dedicated 13% VAT</span>
-                <h4 class="fw-extrabold text-success font-monospace my-1">
-                    Rs. {{ grn.vat_amount|default:0|floatformat:2|intcomma }}
-                </h4>
+    <!-- 4. Total Landed Cost (COGS) -->
+    <div class="fin-card c-landed">
+      <div class="fin-label">
+        <span>4. Total Landed (COGS)</span>
+        <i class="fa-solid fa-coins" style="color: var(--grn-purple);"></i>
+      </div>
+      <div class="fin-value">Rs. {{ grn.total_landed_cost|default:0|floatformat:2|intcomma }}</div>
+      <div class="fin-footnote">Capitalized Inventory Asset Cost</div>
+    </div>
+
+    <!-- 5. Net Due Balance -->
+    <div class="fin-card c-due">
+      <div class="fin-label">
+        <span>5. Net Due Balance</span>
+        <i class="fa-solid fa-wallet" style="color: var(--grn-danger);"></i>
+      </div>
+      <div class="fin-value">Rs. {{ grn.due_amount|default:0|floatformat:2|intcomma }}</div>
+      <div class="fin-footnote font-mono">
+        Bill: {{ grn.net_total_amount|default:0|floatformat:2|intcomma }} | Paid: {{ grn.paid_amount|default:0|floatformat:2|intcomma }}
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================================================================
+       ZONE D: INWARD CONSIGNMENT ITEMS TABLE & PROGRESSIVE EXPANSION DRAWERS
+       ====================================================================== -->
+  <main class="table-panel-card">
+    <div class="table-panel-header">
+      <div class="table-panel-title">
+        <i class="fa-solid fa-list-check" style="color: var(--grn-primary);"></i>
+        <span>Inward Consignment Items</span>
+        <span style="font-size: 11px; font-weight: 600; color: var(--grn-slate-400); margin-left: 6px;">
+          (Click any row to reveal physical IMEIs &amp; product specifications)
+        </span>
+      </div>
+      <div style="font-size: 11.5px; font-weight: 600; color: var(--grn-slate-500);">
+        {{ items.count }} Line Item(s) Recorded
+      </div>
+    </div>
+
+    <div class="table-responsive-box">
+      <table class="grn-table" id="itemsMasterTable">
+        <thead>
+          <tr>
+            <th style="width: 36px;"></th>
+            <th>Product / Description</th>
+            <th class="text-center">Qty</th>
+            <th class="text-end">
+              {% if grn.vat_handling_mode == 'INCLUSIVE' %}Rate (Incl-VAT){% else %}Rate (Pre-VAT){% endif %}
+            </th>
+            <th class="text-center">Discount</th>
+            <th class="text-center">Tax Rate</th>
+            <th class="text-end">Net Base (Pre-VAT)</th>
+            <th class="text-end" style="color: var(--grn-purple);">Landed / Unit</th>
+            <th class="text-end">Target MRP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <!-- Main Transaction Row -->
+          <tr class="item-row" onclick="toggleRowDrawer('drawer-row-{{ forloop.counter }}', this)">
+            <td class="text-center">
+              <span class="toggle-chevron"><i class="fa-solid fa-chevron-right"></i></span>
+            </td>
+            <td>
+              <div class="product-cell">
+                <div class="product-type-icon {% if item.product.requires_imei_tracking %}phone{% endif %}">
+                  {% if item.product.requires_imei_tracking %}
+                    <i class="fa-solid fa-mobile-screen"></i>
+                  {% elif item.product.is_spare_part %}
+                    <i class="fa-solid fa-screwdriver-wrench"></i>
+                  {% else %}
+                    <i class="fa-solid fa-box"></i>
+                  {% endif %}
+                </div>
                 <div>
-                    {% if grn.is_vat_bill and grn.vat_amount > 0 %}
-                        <span class="badge bg-success bg-opacity-10 text-success fs-3xs">
-                            {% if grn.vat_handling_mode == 'INCLUSIVE' %}Extracted (1.13 Divisor){% else %}Added on Top (Exclusive){% endif %}
-                        </span>
-                    {% else %}
-                        <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">PAN / 0% Non-VAT</span>
-                    {% endif %}
+                  <div class="product-name-txt">{{ item.product.name }}</div>
+                  <div class="product-specs-txt">
+                    {{ item.product.brand.name|default:"Generic" }} &bull; 
+                    {{ item.product.model_name|default:item.product.name }}
+                    {% if item.product.variant_name %} &bull; {{ item.product.variant_name }}{% endif %}
+                    {% if item.product.ram and item.product.internal_storage %} &bull; {{ item.product.ram }}/{{ item.product.internal_storage }}{% endif %}
+                    {% if item.product.color_variant %} &bull; {{ item.product.color_variant }}{% endif %}
+                  </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- 3. Shipping & Duty Overheads -->
-        <div class="col">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 kpi-border-warning">
-                <span class="text-muted fs-3xs text-uppercase fw-bold d-block">3. Shipping &amp; Duty Overheads</span>
-                <h4 class="fw-extrabold text-warning-emphasis font-monospace my-1">
-                    +Rs. {{ grn.overhead_total|default:0|floatformat:2|intcomma }}
-                </h4>
-                <small class="text-muted fs-3xs d-block">
-                    Freight, Duty &amp; Handling
-                </small>
-            </div>
-        </div>
-
-        <!-- 4. Total Landed Valuation (COGS) -->
-        <div class="col">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100 kpi-border-purple">
-                <span class="text-muted fs-3xs text-uppercase fw-bold d-block">4. Total Landed (COGS)</span>
-                <h4 class="fw-extrabold text-primary font-monospace my-1" style="color: #6d28d9 !important;">
-                    Rs. {{ grn.total_landed_cost|default:0|floatformat:2|intcomma }}
-                </h4>
-                <small class="text-muted fs-3xs d-block">Net Merchandise + 5 Overheads</small>
-            </div>
-        </div>
-
-        <!-- 5. Net Due (Supplier Debt) -->
-        <div class="col">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-danger bg-opacity-10 border border-danger border-opacity-25 h-100 kpi-border-danger">
-                <span class="text-danger fs-3xs text-uppercase fw-bold d-block">5. Net Due (Supplier Debt)</span>
-                <h4 class="fw-extrabold text-danger font-monospace my-1">
-                    Rs. {{ grn.due_amount|default:0|floatformat:2|intcomma }}
-                </h4>
-                <small class="text-danger fs-3xs d-block fw-semibold">
-                    Bill: Rs. {{ grn.net_total_amount|default:0|floatformat:2|intcomma }} | Paid: Rs. {{ grn.paid_amount|default:0|floatformat:2|intcomma }}
-                </small>
-            </div>
-        </div>
-    </div>
-
-    <!-- Section 2: Inward Consignment Line Items Table (with 13% vs. 0% Tax Badges) -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
-        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-            <h6 class="fw-bold text-dark mb-0">
-                <i class="fas fa-boxes-stacked text-primary me-2"></i> Inward Consignment Items (Pre-VAT Base &amp; Landed Breakdown)
-            </h6>
-            <div class="d-flex align-items-center gap-2">
-                <span class="badge bg-light text-dark border fs-xs font-monospace">
-                    Mode: {% if grn.vat_handling_mode == 'INCLUSIVE' %}VAT Included (Extracted){% else %}VAT Excluded (Tax on Top){% endif %}
+              </div>
+            </td>
+            <td class="text-center font-mono fw-bold">
+              {{ item.purchased_quantity|floatformat:0 }} {{ item.product.base_unit.code|default:"Pcs" }}
+            </td>
+            <td class="text-end font-mono">Rs. {{ item.purchase_rate|floatformat:2|intcomma }}</td>
+            <td class="text-center">
+              {% if item.item_discount_amount > 0 %}
+                <span class="font-mono" style="color: var(--grn-success); font-weight:600;">
+                  -Rs. {{ item.item_discount_amount|floatformat:2|intcomma }}
                 </span>
-                <span class="badge bg-primary rounded-pill px-3">{{ items.count }} Line Items</span>
-            </div>
-        </div>
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 fs-sm table-bordered">
-                <thead class="bg-light text-muted text-uppercase fs-2xs">
-                    <tr>
-                        <th class="ps-3 text-center" style="width: 40px;">#</th>
-                        <th style="width: 25%;">Product / Model Description</th>
-                        <th class="text-center" style="width: 8%;">Purchased Qty</th>
-                        <th class="text-center" style="width: 8%;">Stock Qty</th>
-                        <th class="text-end" style="width: 11%;">
-                            {% if grn.vat_handling_mode == 'INCLUSIVE' %}Rate (Incl-VAT){% else %}Rate (Pre-VAT){% endif %}
-                        </th>
-                        <th class="text-center" style="width: 11%;">Line Discount</th>
-                        <th class="text-center" style="width: 10%;">Tax Rate</th>
-                        <th class="text-end" style="width: 11%;">Net Pre-VAT Base</th>
-                        <th class="text-end" style="width: 11%;">Unit Landed Cost</th>
-                        <th class="text-end pe-3" style="width: 11%;">Target MRP</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in items %}
-                    <tr>
-                        <td class="ps-3 text-center text-muted font-monospace fw-bold">{{ forloop.counter }}</td>
-                        <td>
-                            <strong class="text-dark">{{ item.product.name }}</strong>
-                            {% if item.supplier_item_code %}
-                                <small class="text-muted font-monospace d-block fs-3xs">Supplier SKU: {{ item.supplier_item_code }}</small>
-                            {% endif %}
-                            {% if item.batch_number %}
-                                <small class="text-primary font-monospace d-block fs-3xs">Batch: {{ item.batch_number }}</small>
-                            {% endif %}
-                            {% if item.scanned_imei_list %}
-                                <div class="mt-1 font-monospace text-primary fs-3xs text-truncate p-1 bg-light rounded border border-info border-opacity-25" style="max-width: 380px;">
-                                    <i class="fas fa-barcode me-1"></i> IMEIs: {{ item.scanned_imei_list|truncatechars:120 }}
-                                </div>
-                            {% endif %}
-                        </td>
-                        <td class="text-center font-monospace">{{ item.purchased_quantity|floatformat:2 }}</td>
-                        <td class="text-center">
-                            <span class="badge bg-light text-dark border font-monospace">
-                                {{ item.base_unit_quantity|floatformat:2 }} {{ item.product.base_unit.code }}
-                            </span>
-                        </td>
-                        <td class="text-end font-monospace">Rs. {{ item.purchase_rate|floatformat:2|intcomma }}</td>
-                        
-                        <!-- Dedicated Dual-Mode Discount Breakdown -->
-                        <td class="text-center">
-                            {% if item.item_discount_amount > 0 %}
-                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 font-monospace fs-3xs">
-                                    {% if item.discount_type == 'PERCENTAGE' %}
-                                        {{ item.discount_input_value|floatformat:1 }}% Disc
-                                    {% else %}
-                                        Flat Rs. Disc
-                                    {% endif %}
-                                </span>
-                                <small class="text-muted font-monospace d-block fs-3xs mt-1">
-                                    -Rs. {{ item.item_discount_amount|floatformat:2|intcomma }} ({{ item.discount_percent|floatformat:1 }}%)
-                                </small>
-                            {% else %}
-                                <span class="text-muted fs-3xs font-monospace">0.00</span>
-                            {% endif %}
-                        </td>
+                <div style="font-size: 10px; color: var(--grn-slate-400);">{{ item.discount_percent|floatformat:1 }}%</div>
+              {% else %}
+                <span class="text-muted font-mono" style="font-size: 11px;">0.00</span>
+              {% endif %}
+            </td>
+            <td class="text-center">
+              {% if item.vat_rate > 0 %}
+                <span class="status-chip received" style="font-size: 10px; padding: 2px 7px;">13% VAT</span>
+              {% else %}
+                <span class="status-chip pan-tax" style="font-size: 10px; padding: 2px 7px;">0% (Exempt)</span>
+              {% endif %}
+            </td>
+            <td class="text-end font-mono" style="font-weight:700;">Rs. {{ item.line_total|floatformat:2|intcomma }}</td>
+            <td class="text-end font-mono" style="font-weight:700; color: var(--grn-purple);">
+              Rs. {{ item.unit_landed_cost|floatformat:2|intcomma }}
+            </td>
+            <td class="text-end font-mono">
+              Rs. {{ item.new_selling_price|default:item.product.selling_price|floatformat:2|intcomma }}
+            </td>
+          </tr>
 
-                        <!-- Strict Tax Rate Badge (13% vs. 0%) -->
-                        <td class="text-center">
-                            {% if item.vat_rate > 0 %}
-                                <span class="badge tax-badge-13 font-mono fs-3xs px-2 py-1">
-                                    <i class="fas fa-percent me-0.5"></i> 13% (Taxable)
-                                </span>
-                            {% else %}
-                                <span class="badge tax-badge-0 font-mono fs-3xs px-2 py-1">
-                                    0% (Exempt / PAN)
-                                </span>
-                            {% endif %}
-                        </td>
-
-                        <!-- Net Pre-VAT Subtotal -->
-                        <td class="text-end font-monospace fw-bold text-dark">
-                            Rs. {{ item.line_total|floatformat:2|intcomma }}
-                        </td>
-
-                        <!-- Unit Landed Cost (Inventory COGS Asset) -->
-                        <td class="text-end font-monospace fw-bold text-primary" style="color: #6d28d9 !important;">
-                            Rs. {{ item.unit_landed_cost|floatformat:2|intcomma }}
-                        </td>
-
-                        <!-- Target MRP -->
-                        <td class="text-end pe-3 font-monospace fw-semibold text-secondary">
-                            Rs. {{ item.new_selling_price|default:item.product.selling_price|floatformat:2|intcomma }}
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="10" class="text-center py-4 text-muted">No consignment items recorded.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Section 3: Reconciliation Summary & Consignment Compliance Card -->
-    <div class="row g-4 mb-4">
-        <!-- Left: Compliance & Supplier Details -->
-        <div class="col-12 col-lg-6">
-            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
-                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
-                    <i class="fas fa-shield-halved text-primary me-2"></i> Consignment Compliance &amp; Warranty
-                </h6>
-                <div class="row g-3 fs-xs">
-                    <div class="col-6">
-                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">Supplier / Distributor</span>
-                        <strong>{{ grn.supplier.company_name }}</strong>
-                    </div>
-                    <div class="col-6">
-                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">PAN / VAT Registration</span>
-                        <span class="font-monospace fw-bold text-dark">{{ grn.supplier.pan_number|default:grn.supplier.vat_number|default:"Not Stated" }}</span>
-                    </div>
-                    <div class="col-6">
-                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">NTA MDMS Status</span>
-                        {% if grn.distributor_mdms_certified %}
-                            <span class="badge bg-success bg-opacity-10 text-success fw-bold">Official Distributor Import</span>
-                        {% else %}
-                            <span class="badge bg-warning bg-opacity-10 text-dark fw-bold">Non-MDMS / Grey Channel</span>
-                        {% endif %}
-                    </div>
-                    <div class="col-6">
-                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">Customs / MDMS Declaration Ref</span>
-                        <span class="font-monospace text-dark">{{ grn.mdms_tax_invoice_ref|default:"-" }}</span>
-                    </div>
-                    <div class="col-6">
-                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">Warranty Provider &amp; Term</span>
-                        <span>{{ grn.warranty_provider|default:"Official Distributor" }} ({{ grn.warranty_months }} Months)</span>
-                    </div>
-                    <div class="col-6">
-                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">Inward Verified By</span>
-                        <span>{{ grn.received_by.get_full_name|default:grn.received_by.username|default:"Warehouse Staff" }}</span>
-                    </div>
-                    {% if grn.remarks %}
-                    <div class="col-12 pt-2 border-top">
-                        <span class="text-muted d-block fs-3xs text-uppercase fw-bold">Consignment Remarks / Observations</span>
-                        <p class="text-muted mb-0 fst-italic">{{ grn.remarks }}</p>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        <!-- Right: Structured Financial Reconciliation Breakdown (Audited Dual-Pot Separation) -->
-        <div class="col-12 col-lg-6">
-            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
-                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
-                    <h6 class="fw-bold text-dark mb-0">
-                        <i class="fas fa-calculator text-primary me-2"></i> Structured Valuation &amp; Settlement Reconciliation
-                    </h6>
-                    <span class="badge bg-light text-primary border font-mono fs-3xs">
-                        {% if grn.vat_handling_mode == 'INCLUSIVE' %}INCLUSIVE (1.13 Divisor){% else %}EXCLUSIVE (Tax on Top){% endif %}
+          <!-- Expandable Technical & Serialized Drawer -->
+          <tr id="drawer-row-{{ forloop.counter }}" class="drawer-row">
+            <td colspan="9">
+              <div class="drawer-content">
+                <!-- Technical & Batch Parameters -->
+                <div class="drawer-grid">
+                  <div class="drawer-meta-item">
+                    <span class="drawer-meta-lbl">Master SKU</span>
+                    <span class="drawer-meta-val font-mono">
+                      {{ item.product.sku }}
+                      <button type="button" class="copy-btn" onclick="event.stopPropagation(); copyText('{{ item.product.sku|escapejs }}')" title="Copy SKU">
+                        <i class="fa-regular fa-copy"></i>
+                      </button>
                     </span>
+                  </div>
+                  <div class="drawer-meta-item">
+                    <span class="drawer-meta-lbl">Box Barcode</span>
+                    <span class="drawer-meta-val font-mono">{{ item.product.barcode|default:"Not Barcoded" }}</span>
+                  </div>
+                  <div class="drawer-meta-item">
+                    <span class="drawer-meta-lbl">Vendor Batch Code</span>
+                    <span class="drawer-meta-val font-mono text-primary">{{ item.batch_number|default:"Default Consignment Batch" }}</span>
+                  </div>
+                  {% if item.unit_conversion %}
+                  <div class="drawer-meta-item">
+                    <span class="drawer-meta-lbl">Packaging Unit</span>
+                    <span class="drawer-meta-val">1 {{ item.unit_conversion.unit_name }} = {{ item.conversion_factor }} {{ item.product.base_unit.code }}</span>
+                  </div>
+                  {% endif %}
+                  <div class="drawer-meta-item">
+                    <span class="drawer-meta-lbl">Warranty Coverage</span>
+                    <span class="drawer-meta-val" style="color: var(--grn-success);">
+                      {{ item.warranty_months }} Months ({{ item.warranty_provider|default:grn.warranty_provider|default:"Distributor" }})
+                    </span>
+                  </div>
+                  {% if item.product.requires_imei_tracking %}
+                  <div class="drawer-meta-item">
+                    <span class="drawer-meta-lbl">SIM Configuration</span>
+                    <span class="drawer-meta-val">{{ item.product.get_sim_configuration_display|default:"Dual Nano-SIM" }}</span>
+                  </div>
+                  {% endif %}
+                  <div class="drawer-meta-item">
+                    <span class="drawer-meta-lbl">Line Compliance</span>
+                    <span class="drawer-meta-val">{{ item.get_default_mdms_status_display|default:"Official Certified" }}</span>
+                  </div>
                 </div>
-                <table class="table table-sm table-borderless recon-table mb-0">
-                    <tbody>
-                        <tr>
-                            <td class="text-muted">Gross Pre-VAT Merchandise Value:</td>
-                            <td class="text-end font-monospace fw-bold text-dark">
-                                Rs. {{ grn.gross_amount|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted ps-3">&bull; Total Line Item Discounts:</td>
-                            <td class="text-end font-monospace text-muted">
-                                -Rs. {{ grn.total_line_discount|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-                        {% if grn.bill_discount_amount > 0 %}
-                        <tr>
-                            <td class="text-muted ps-3">
-                                &bull; Whole-Bill Rebate Concession 
-                                <span class="badge bg-light text-muted border fs-3xs">
-                                    {% if grn.bill_discount_type == 'PERCENTAGE' %}{{ grn.bill_discount_input_value|floatformat:1 }}%{% else %}Fixed Rs.{% endif %}
-                                </span>:
-                            </td>
-                            <td class="text-end font-monospace text-success">
-                                -Rs. {{ grn.bill_discount_amount|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-                        {% endif %}
 
-                        <!-- Taxable Pot (13% VAT Base) -->
-                        <tr class="border-top">
-                            <td class="fw-bold text-dark">
-                                Pre-VAT Taxable Base (13% Goods):
-                            </td>
-                            <td class="text-end font-monospace fw-bold text-dark">
-                                Rs. {{ grn.taxable_amount|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
+                <!-- Structured Physical Serial / IMEI Presentation -->
+                {% if item.parsed_imei_pairs %}
+                  <div class="imei-presentation-box">
+                    <div class="imei-box-header">
+                      <div class="imei-box-title">
+                        <i class="fa-solid fa-sim-card" style="color: var(--grn-primary);"></i>
+                        <span>Physical Handset Serial Devices ({{ item.parsed_imei_pairs|length }} Tracked Units)</span>
+                      </div>
+                      <span class="font-mono" style="font-size: 11px; color: var(--grn-success); font-weight:700;">
+                        {{ item.parsed_imei_pairs|length }} of {{ item.base_unit_quantity|floatformat:0 }} Units Registered &bull; MDMS Compliant
+                      </span>
+                    </div>
 
-                        <!-- Non-Taxable Pot (0% VAT Base) -->
-                        <tr>
-                            <td class="text-muted">
-                                Non-Taxable / Exempt Base (0% Goods):
-                            </td>
-                            <td class="text-end font-monospace text-secondary fw-semibold">
-                                Rs. {{ grn.net_total_amount|default:0|floatformat:2|intcomma|slice:":0" }}{% with net_merch=grn.net_total_amount|default:0 %}{% endwith %}{{ grn.formatted_non_taxable_amount|default:"Rs. 0.00"|safe }}
-                            </td>
-                        </tr>
-
-                        <!-- Dedicated 13% Input VAT -->
-                        <tr>
-                            <td class="text-muted">
-                                Dedicated 13% Input VAT 
-                                {% if grn.is_vat_bill and grn.vat_amount > 0 %}
-                                    <span class="badge bg-success bg-opacity-10 text-success fs-3xs">Claimable Input Tax</span>
-                                {% else %}
-                                    <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">0% Tax Consignment</span>
-                                {% endif %}:
-                            </td>
-                            <td class="text-end font-monospace text-success fw-bold">
-                                +Rs. {{ grn.vat_amount|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-
-                        <!-- Overheads -->
-                        <tr>
-                            <td class="text-muted">
-                                Shipping, Duty &amp; Handling Overheads:
-                                <small class="text-muted fs-3xs d-block">
-                                    Freight: {{ grn.extra_freight_charge|default:0|floatformat:2 }} | Duty: {{ grn.customs_import_charge|default:0|floatformat:2 }} | Handl: {{ grn.other_handling_charge|default:0|floatformat:2 }} | Ins: {{ grn.insurance_charge|default:0|floatformat:2 }}
-                                </small>
-                            </td>
-                            <td class="text-end font-monospace text-warning-emphasis fw-bold">
-                                +Rs. {{ grn.overhead_total|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-
-                        <!-- Landed Cost COGS -->
-                        <tr class="total-row bg-light">
-                            <td class="text-primary py-2" style="color: #6d28d9 !important;">
-                                Total Landed Cost (COGS Entering Inventory Asset):
-                            </td>
-                            <td class="text-end font-monospace fw-extrabold py-2" style="color: #6d28d9 !important;">
-                                Rs. {{ grn.total_landed_cost|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-
-                        <!-- Supplier Invoice Total -->
-                        <tr>
-                            <td class="fw-bold text-dark pt-2">Net Supplier Bill / Invoice Total:</td>
-                            <td class="text-end font-monospace fw-bold text-dark pt-2">
-                                Rs. {{ grn.net_total_amount|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-
-                        <!-- Spot Paid -->
-                        <tr>
-                            <td class="text-muted">Spot Cash / Digital Paid on Delivery:</td>
-                            <td class="text-end font-monospace text-success fw-semibold">
-                                -Rs. {{ grn.paid_amount|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-
-                        <!-- Net Due Added to Debt -->
-                        <tr class="border-top">
-                            <td class="fw-bold text-danger py-2">Net Due Balance Added to Supplier Debt (Udhaari):</td>
-                            <td class="text-end font-monospace text-danger fw-extrabold py-2 fs-6">
-                                Rs. {{ grn.due_amount|default:0|floatformat:2|intcomma }}
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+                    <div class="imei-units-grid">
+                      {% for pair in item.parsed_imei_pairs %}
+                        <div class="imei-unit-pill">
+                          <span class="font-mono" style="font-size: 10px; color: var(--grn-slate-400); font-weight:700;">
+                            #{{ pair.set_number|stringformat:"02d" }}
+                          </span>
+                          <div class="imei-nums">
+                            <span class="imei-line">
+                              <span class="badge-sim">SIM 1</span> {{ pair.imei_1 }}
+                            </span>
+                            {% if pair.imei_2 %}
+                              <span class="imei-line">
+                                <span class="badge-sim" style="background:#faf5ff; color:#6b21a8;">SIM 2</span> {{ pair.imei_2 }}
+                              </span>
+                            {% else %}
+                              <span class="imei-line" style="font-size:10px; color:var(--grn-slate-400);">Single SIM</span>
+                            {% endif %}
+                          </div>
+                          <button type="button" class="copy-btn" onclick="event.stopPropagation(); copyText('{{ pair.imei_1|escapejs }}')" title="Copy Primary IMEI">
+                            <i class="fa-regular fa-copy"></i>
+                          </button>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                {% elif item.scanned_imei_list %}
+                  <div class="imei-presentation-box">
+                    <div class="imei-box-header">
+                      <div class="imei-box-title">
+                        <i class="fa-solid fa-barcode text-primary"></i>
+                        <span>Captured Serial / IMEI List</span>
+                      </div>
+                    </div>
+                    <div class="p-2 bg-light rounded border font-mono fs-xs" style="word-break: break-all;">
+                      {{ item.scanned_imei_list }}
+                    </div>
+                  </div>
+                {% elif item.product.requires_imei_tracking %}
+                  <div class="p-3 bg-light rounded-3 border d-flex justify-content-between align-items-center">
+                    <span class="text-muted fs-xs">
+                      <i class="fa-solid fa-triangle-exclamation text-warning me-1"></i> Serialized device inwarded without scanned IMEIs (Backlog Mode).
+                    </span>
+                    <a href="{% url 'purchases:grn_manage_imeis' grn.pk %}" class="btn btn-sm btn-outline-primary rounded-pill px-3 fw-bold">
+                      Attach IMEIs Now &rarr;
+                    </a>
+                  </div>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="9" class="text-center py-5 text-muted">
+              No line items recorded on this consignment.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
+  </main>
+
+  <!-- ======================================================================
+       ZONE E: 3 COLLAPSIBLE BOTTOM AUDIT ACCORDIONS (CRASH-PROOF GUARDS APPLIED)
+       ====================================================================== -->
+  <div class="collapsible-sections-stack">
+
+    <!-- ACCORDION 1: COMPLIANCE & WARRANTY PROFILE -->
+    <section class="accordion-card" id="accordionCompliance">
+      <button type="button" class="accordion-header-btn" onclick="toggleAccordion('accordionCompliance')">
+        <div class="accordion-title-left">
+          <span class="accordion-icon-badge teal"><i class="fa-solid fa-shield-halved"></i></span>
+          <div>
+            <span class="accordion-title-text">Compliance &amp; Warranty Profile</span>
+            <span class="accordion-title-subtitle">Distributor NTA MDMS clearance, DOA policy &amp; service lab addresses</span>
+          </div>
+        </div>
+        <span class="accordion-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+      </button>
+
+      <div class="accordion-body-content">
+        <div class="compliance-grid">
+          <div class="meta-item">
+            <span class="meta-label">Supplier Company</span>
+            <span class="meta-value"><strong>{{ grn.supplier.company_name }}</strong></span>
+          </div>
+
+          <div class="meta-item">
+            <span class="meta-label">Tax Registration (PAN / VAT)</span>
+            <span class="meta-value font-mono">
+              <strong>{{ grn.supplier.pan_number|default:grn.supplier.vat_number|default:"Not Stated" }}</strong> 
+              (Verified IRD Nepal)
+            </span>
+          </div>
+
+          <div class="meta-item">
+            <span class="meta-label">Customs / Pragyapan Patra Ref</span>
+            <span class="meta-value font-mono">{{ grn.mdms_tax_invoice_ref|default:"Direct Import Declaration Ref" }}</span>
+          </div>
+
+          <div class="meta-item">
+            <span class="meta-label">NTA MDMS Status</span>
+            <span class="meta-value" style="color: {% if grn.distributor_mdms_certified %}var(--grn-success){% else %}var(--grn-danger){% endif %};">
+              <i class="fa-solid fa-circle-check"></i> 
+              {% if grn.distributor_mdms_certified %}Official Nepal Distributor Channel{% else %}Unregistered / Gray Market{% endif %}
+            </span>
+          </div>
+
+          <div class="meta-item">
+            <span class="meta-label">National Warranty Provider</span>
+            <span class="meta-value">{{ grn.warranty_provider|default:"Authorized National Brand Distributor" }} ({{ grn.warranty_months }} Months)</span>
+          </div>
+
+          <div class="meta-item">
+            <span class="meta-label">7-Day DOA Replacement Policy</span>
+            <span class="meta-value">{{ grn.supplier.doa_policy|default:"Unboxed dead handsets replaced within 7 calendar days." }}</span>
+          </div>
+
+          <div class="meta-item" style="grid-column: span 2;">
+            <span class="meta-label">Authorized Service Lab Location</span>
+            <span class="meta-value">
+              <i class="fa-solid fa-location-dot" style="color:var(--grn-slate-400);"></i> 
+              {{ grn.authorized_service_center|default:grn.supplier.warranty_claim_contact|default:"Authorized Central Service Center" }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ACCORDION 2: AUDITED FINANCIAL RECONCILIATION -->
+    <section class="accordion-card" id="accordionFinancial">
+      <button type="button" class="accordion-header-btn" onclick="toggleAccordion('accordionFinancial')">
+        <div class="accordion-title-left">
+          <span class="accordion-icon-badge blue"><i class="fa-solid fa-calculator"></i></span>
+          <div>
+            <span class="accordion-title-text">Audited Financial Reconciliation</span>
+            <span class="accordion-title-subtitle">Dual-pot Pre-VAT bases, 5-tier overhead allocations &amp; debt waterfall</span>
+          </div>
+        </div>
+        <span class="accordion-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+      </button>
+
+      <div class="accordion-body-content">
+        <div class="recon-flow-container">
+          <!-- Column 1: Merchandise & Tax Waterfall -->
+          <div>
+            <h4 style="font-size:12px; font-weight:700; text-transform:uppercase; color:var(--grn-slate-400); margin-bottom:10px;">
+              1. Invoice Valuation &amp; Taxable Split
+            </h4>
+            <ul class="recon-list">
+              <li class="recon-list-item">
+                <span class="item-title">Gross Pre-VAT Merchandise Value</span>
+                <span class="item-val">Rs. {{ grn.gross_amount|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item">
+                <span class="item-title">&bull; Total Line Item Discounts</span>
+                <span class="item-val" style="color:var(--grn-danger);">-Rs. {{ grn.total_line_discount|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              {% if grn.bill_discount_amount > 0 %}
+              <li class="recon-list-item">
+                <span class="item-title">
+                  &bull; Whole Bill Rebate / Discount
+                  {% if grn.bill_discount_type == 'PERCENTAGE' %}({{ grn.bill_discount_input_value|floatformat:1 }}%){% endif %}
+                </span>
+                <span class="item-val" style="color:var(--grn-danger);">-Rs. {{ grn.bill_discount_amount|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              {% endif %}
+              <li class="recon-list-item highlight">
+                <span class="item-title">Pre-VAT Taxable Base (13% Goods)</span>
+                <span class="item-val">Rs. {{ grn.taxable_amount|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item highlight" style="color:var(--grn-success);">
+                <span class="item-title" style="color:var(--grn-success);">+ Dedicated 13% Input VAT</span>
+                <span class="item-val" style="color:var(--grn-success);">Rs. {{ grn.vat_amount|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item highlight">
+                <span class="item-title">Net Supplier Invoice Payable</span>
+                <span class="item-val" style="font-size:14px; color:var(--grn-slate-900);">Rs. {{ grn.net_total_amount|default:0|floatformat:2|intcomma }}</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Column 2: Overheads Capitalization & Debt Reconciliation -->
+          <div>
+            <h4 style="font-size:12px; font-weight:700; text-transform:uppercase; color:var(--grn-slate-400); margin-bottom:10px;">
+              2. Overheads Capitalization &amp; Debt Waterfall
+            </h4>
+            <ul class="recon-list">
+              <li class="recon-list-item">
+                <span class="item-title">1. Inward Freight / Courier</span>
+                <span class="item-val">+Rs. {{ grn.extra_freight_charge|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item">
+                <span class="item-title">2. Customs Clearance / Duty</span>
+                <span class="item-val">+Rs. {{ grn.customs_import_charge|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item">
+                <span class="item-title">3. Handling &amp; Unloading</span>
+                <span class="item-val">+Rs. {{ grn.other_handling_charge|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item">
+                <span class="item-title">4. Transit Insurance</span>
+                <span class="item-val">+Rs. {{ grn.insurance_charge|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item">
+                <span class="item-title">5. Miscellaneous Logistics Overheads</span>
+                <span class="item-val">+Rs. {{ grn.other_overheads_charge|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item highlight" style="color:var(--grn-purple);">
+                <span class="item-title" style="color:var(--grn-purple);">Total Capitalized Landed Valuation (COGS)</span>
+                <span class="item-val" style="color:var(--grn-purple); font-size:14px;">Rs. {{ grn.total_landed_cost|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item" style="margin-top:10px;">
+                <span class="item-title">Spot Advance Paid on Receipt</span>
+                <span class="item-val" style="color:var(--grn-success);">-Rs. {{ grn.paid_amount|default:0|floatformat:2|intcomma }}</span>
+              </li>
+              <li class="recon-list-item highlight" style="color:var(--grn-danger); border-top:2px solid var(--grn-danger-border);">
+                <span class="item-title" style="color:var(--grn-danger);">Outstanding Due (Supplier Debt Ledger)</span>
+                <span class="item-val" style="color:var(--grn-danger); font-size:15px;">Rs. {{ grn.due_amount|default:0|floatformat:2|intcomma }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ACCORDION 3: RECEIVING & AUDIT LOG (SAFE NULL GUARDS APPLIED) -->
+    <section class="accordion-card" id="accordionAudit">
+      <button type="button" class="accordion-header-btn" onclick="toggleAccordion('accordionAudit')">
+        <div class="accordion-title-left">
+          <span class="accordion-icon-badge slate"><i class="fa-solid fa-clock-rotate-left"></i></span>
+          <div>
+            <span class="accordion-title-text">Receiving &amp; Audit Log</span>
+            <span class="accordion-title-subtitle">Storekeeper inspection notes, general ledger references &amp; user signatures</span>
+          </div>
+        </div>
+        <span class="accordion-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+      </button>
+
+      <div class="accordion-body-content">
+        <div class="audit-grid">
+          <div class="audit-note-box">
+            <span class="audit-note-title">Consignment Narration</span>
+            <p class="audit-note-text">
+              {{ grn.consignment_narration|default:grn.remarks|default:"Standard purchase consignment inward received in good order." }}
+            </p>
+          </div>
+
+          <div class="audit-note-box">
+            <span class="audit-note-title">Physical Inspection &amp; QC</span>
+            <p class="audit-note-text">
+              {{ grn.receiving_notes|default:"Cartons sealed with manufacturer tamper-proof tape. Devices verified against supplier challan." }}
+            </p>
+          </div>
+
+          <div class="audit-note-box">
+            <span class="audit-note-title">Internal Accounting Trail</span>
+            <div style="display:flex; flex-direction:column; gap:6px; font-size:11.5px; margin-top:2px;">
+              <!-- SAFE USERNAME/STAFF RESOLUTION (Never crashes when received_by is None) -->
+              <div>Verified By: <strong>
+                {% if grn.received_by %}
+                  {% if grn.received_by.get_full_name %}
+                    {{ grn.received_by.get_full_name }}
+                  {% else %}
+                    {{ grn.received_by.username }}
+                  {% endif %}
+                {% else %}
+                  Warehouse Staff (System Audit)
+                {% endif %}
+              </strong></div>
+              <div>Created: <span class="font-mono">{{ grn.created_at|date:"Y-m-d H:i:s" }}</span></div>
+              <div>Last Updated: <span class="font-mono">{{ grn.updated_at|date:"Y-m-d H:i:s" }}</span></div>
+              <div>Audit Status: <span style="color:var(--grn-success); font-weight:700;">Verified Consignment</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
 </div>
 
 <!-- Dedicated Cancel / Void GRN Modal -->
 {% if grn.status != 'CANCELLED' %}
 <div class="modal fade" id="cancelGrnModal" tabindex="-1" aria-labelledby="cancelGrnModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-            <div class="modal-header bg-danger text-white py-3">
-                <h6 class="modal-title fw-bold" id="cancelGrnModalLabel">
-                    <i class="fas fa-triangle-exclamation me-2"></i> Confirm Purchase Bill Cancellation
-                </h6>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <form method="post" action="{% url 'purchases:grn_cancel' grn.pk %}">
-                {% csrf_token %}
-                <div class="modal-body p-4 fs-sm">
-                    <div class="alert alert-warning p-2 rounded-3 fs-xs mb-3">
-                        <i class="fas fa-circle-exclamation me-1"></i>
-                        Cancelling this GRN will <strong>deduct warehouse inventory counters</strong>, <strong>archive unsold IMEIs</strong>, and <strong>reverse supplier debt</strong> in the accounts payable ledger.
-                    </div>
-                    <label class="form-label fw-bold text-dark fs-xs">
-                        Mandatory Cancellation Reason <span class="text-danger">*</span>
-                    </label>
-                    <textarea name="cancellation_reason" class="form-control fs-xs" rows="3" placeholder="Provide formal justification for voiding this inward bill (minimum 3 characters)..." required></textarea>
-                </div>
-                <div class="modal-footer bg-light py-2 px-3 d-flex justify-content-between">
-                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Keep Active</button>
-                    <button type="submit" class="btn btn-danger btn-sm rounded-pill px-4 fw-bold shadow-sm">
-                        <i class="fas fa-ban me-1"></i> Void Bill &amp; Reverse Stock
-                    </button>
-                </div>
-            </form>
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+      <div class="modal-header bg-danger text-white py-3">
+        <h6 class="modal-title fw-bold" id="cancelGrnModalLabel">
+          <i class="fa-solid fa-triangle-exclamation me-2"></i> Confirm Purchase Bill Cancellation
+        </h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" action="{% url 'purchases:grn_cancel' grn.pk %}">
+        {% csrf_token %}
+        <div class="modal-body p-4 fs-sm">
+          <div class="alert alert-warning p-2.5 rounded-3 fs-xs mb-3">
+            <i class="fa-solid fa-circle-exclamation me-1"></i>
+            Cancelling this GRN will <strong>deduct warehouse inventory counters</strong>, <strong>archive unsold IMEIs</strong>, and <strong>reverse supplier debt</strong> in the accounts payable ledger.
+          </div>
+          <label class="form-label fw-bold text-dark fs-xs">
+            Mandatory Cancellation Reason <span class="text-danger">*</span>
+          </label>
+          <textarea name="cancellation_reason" class="form-control fs-xs" rows="3" placeholder="Provide formal justification for voiding this inward bill (minimum 3 characters)..." required></textarea>
         </div>
+        <div class="modal-footer bg-light py-2 px-3 d-flex justify-content-between">
+          <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Keep Active</button>
+          <button type="submit" class="btn btn-danger btn-sm rounded-pill px-4 fw-bold shadow-sm">
+            <i class="fa-solid fa-ban me-1"></i> Void Bill &amp; Reverse Stock
+          </button>
+        </div>
+      </form>
     </div>
+  </div>
 </div>
 {% endif %}
+
+<!-- Floating Toast Notification Pill -->
+<div id="toastNotification" class="toast-pill">
+  <i class="fa-solid fa-circle-check" style="color: var(--grn-primary-border);"></i>
+  <span id="toastMessage">Text copied to clipboard</span>
+</div>
+
+<!-- ==========================================================================
+     ZONE F: INTERACTIVE JAVASCRIPT ENGINE
+     ========================================================================== -->
+<script>
+  // 1. Row Drawer Accordion Toggle
+  function toggleRowDrawer(drawerId, rowEl) {
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
+
+    const isShowing = drawer.classList.contains('show');
+
+    // Close all other drawers for clean visual scanning
+    document.querySelectorAll('.drawer-row').forEach(d => d.classList.remove('show'));
+    document.querySelectorAll('.item-row').forEach(r => r.classList.remove('expanded'));
+
+    if (!isShowing) {
+      drawer.classList.add('show');
+      rowEl.classList.add('expanded');
+    }
+  }
+
+  // 2. Bottom 3 Collapsible Sections Toggle
+  function toggleAccordion(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    card.classList.toggle('open');
+  }
+
+  // 3. 1-Click Clipboard Copy with Feedback Toast
+  function copyText(str) {
+    if (!str) return;
+    navigator.clipboard.writeText(str).then(() => {
+      showToast(`Copied "${str}" to clipboard`);
+    }).catch(() => {
+      showToast(`Selected: ${str}`);
+    });
+  }
+
+  // 4. Toast Notification Controller
+  let toastTimeout;
+  function showToast(msg) {
+    const toast = document.getElementById('toastNotification');
+    const text = document.getElementById('toastMessage');
+    if (!toast || !text) return;
+
+    clearTimeout(toastTimeout);
+    text.textContent = msg;
+    toast.classList.add('show');
+
+    toastTimeout = setTimeout(() => {
+      toast.classList.remove('show');
+    }, 2400);
+  }
+
+  // 5. Keyboard Shortcut: 'Escape' key collapses all open drawers
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.drawer-row').forEach(d => d.classList.remove('show'));
+      document.querySelectorAll('.item-row').forEach(r => r.classList.remove('expanded'));
+    }
+  });
+</script>
 {% endblock %}

@@ -2,45 +2,84 @@
 POS Counter Terminal, Sales Estimation & Parked Bill Recovery Service.
 
 Core Capabilities & Architectural Safeguards:
-1. Dual Document Sequencing (Official Sales Bill vs Internal Estimate):
+1. One Clear VAT Calculation & Snapshot Chain (Front-End to Back-End Alignment):
+   POS Input
+       ↓
+   Calculate VAT (Net Line Payable × Rate / Pricing Mode)
+       ↓
+   Save Exact VAT Snapshot on SalesEstimateItem
+       (vat_rate, tax_pricing_type, is_vat_applicable, base_taxable_amount, tax_amount, line_total)
+       ↓
+   Add All Line VAT
+       (Sum of line base_taxable_amount, Sum of line tax_amount, Sum of non-taxable lines)
+       ↓
+   Save Exact VAT Snapshot on SalesEstimate
+       (taxable_amount, non_taxable_amount, vat_amount, grand_total, is_vat_applicable)
+       ↓
+   VAT Reports (Annex 5 Sales Book, Annex 7, Day-Wise VAT Ledger, TaxPeriodSummary)
+
+2. Absolute Historical Tax Immutability:
+   - All tax attributes (rate, pricing type, taxable base, VAT amount) are captured and
+     frozen onto `SalesEstimateItem` and `SalesEstimate` at the exact moment of sale.
+   - Any subsequent alteration to `Product.vat_rate`, `Product.is_vat_applicable`, or
+     `Product.tax_pricing_type` in the product master NEVER mutates historical invoices.
+   - Example: A January invoice sold at 13% VAT remains permanently locked at 13% VAT,
+     retaining identical taxable base and tax amount throughout all accounting and audit reports.
+
+3. Corrected Sales Return VAT Processing:
+   - Derives returned item VAT snapshots directly from the original invoice line item's stored
+     historical tax data (base_taxable_amount, tax_amount, line_total, vat_rate, tax_pricing_type).
+   - Prevents calculating tax again on VAT-exclusive bills where refund_amount already includes VAT.
+   - Accurately allocates returned portion based on return_quantity vs. original quantity.
+   - Caps cumulative VAT reversals across partial returns to never exceed the original item's VAT.
+   - Sets and saves SalesReturn header totals (taxable_amount, non_taxable_amount, vat_amount,
+     total_refund_amount) before General Ledger auto-posting dispatches.
+
+4. Dual Document Sequencing (Official Sales Bill vs Internal Estimate):
    - generate_estimate_number() dynamically checks bill_type:
      * If bill_type == 'SALES': Generates official Sales/Tax Invoices (e.g. INV-NR-000001)
        using document_type='SALES_INVOICE'.
      * If bill_type == 'ESTIMATE': Generates quotation estimation slips (e.g. EST-NR-000001)
        using document_type='SALES_ESTIMATE'.
-2. Standard Retail Turnover Accounting (No Revenue Distortion):
+
+5. Standard Retail Turnover Accounting (No Revenue Distortion):
    - grand_total strictly represents the full merchandise gross sales value + applicable tax.
    - trade_in_discount_amount is treated exclusively as a tender settlement offset (barter payment),
      protecting statutory revenue reporting and customer spend analytics from distortion.
-3. Robust Two-Way Historical Date & Fiscal Period Synchronization:
+
+6. Robust Two-Way Historical Date & Fiscal Period Synchronization:
    - When bill_date_bs is provided, converts immediately to Gregorian AD date and automatically
      calculates the proper Bikram Sambat fiscal year without requiring manual fiscal_year input.
    - Ensures estimate.bill_date_ad, estimate.bill_date_bs, and estimate.fiscal_year are preserved.
    - Calibrates ItemInstance sale dates, warranty start dates, and component expiration schedules
      to the historical bill date rather than the current server clock.
-4. Intelligent Customer Resolution for Credit Purchases:
+
+7. Intelligent Customer Resolution for Credit Purchases:
    - In _process_payments_and_udhaari, when a credit sale is initiated without an explicit customer_id,
      the system automatically attempts resolution via Phone number, 9-digit PAN (via Customer.resolve_or_create_by_pan),
      or business name before raising a validation error.
-5. Itemized Audit Description in CustomerUdhaariLedger:
+
+8. Itemized Audit Description in CustomerUdhaariLedger:
    - Multi-tender payments (Cash, FonePay, eSewa, Cards, Bank, Trade-In) are compiled into an itemized
      audit summary stored directly in CustomerUdhaariLedger.remarks.
-6. Prevention of Double-Accounting of Credit:
+
+9. Prevention of Double-Accounting of Credit:
    - estimate.paid_amount strictly captures genuine monetary tenders.
    - estimate.due_amount strictly equals the unpaid balance / credit tender.
    - Non-monetary credit transactions are isolated so General Ledger auto-posting does not double-debit AR (1210).
-7. Dynamic Master Switch Sensitive IMEI Allocation:
+
+10. Dynamic Master Switch Sensitive IMEI Allocation:
    - When enforce_imei_tracking is OFF (Backlog Mode): Mobile phones can be sold without IMEIs,
      deducting directly from shelf stock and depleting FIFO batches like standard accessories.
    - When enforce_imei_tracking is ON (Strict Mode): Enforces strict 15-digit IMEI verification.
    - Transition Safety Guard: Seamlessly registers and sells backlog shelf stock when scanned with
      a live physical IMEI in Strict Mode without throwing "Stock Not Found" crashes.
-8. Unified Excess Trade-In Settlement:
-   - Routed authoritatively through TradeInValuationEngine.settle_excess_trade_in_credit.
-9. Digital Tender-Aware Trade-In Cash Return Guard (Cash Refund Scam Prevention):
-   - In process_sales_return, inspects all genuine monetary tenders (Cash, FonePay, eSewa, Khalti, Card, Bank).
-   - Customers who paid via digital channels are not blocked from refunds up to their total monetary spend.
-10. Comprehensive Atomic Bill Cancellation with Payroll & Trade-In Safeguards:
+
+11. Digital Tender-Aware Trade-In Cash Return Guard (Cash Refund Scam Prevention):
+    - In process_sales_return, inspects all genuine monetary tenders (Cash, FonePay, eSewa, Khalti, Card, Bank).
+    - Customers who paid via digital channels are not blocked from refunds up to their total monetary spend.
+
+12. Comprehensive Atomic Bill Cancellation with Payroll & Trade-In Safeguards:
     - Leaves original journal entry as POSTED and posts an inverted balancing entry to eliminate double-reversal.
     - Inspects traded-in handsets; if already resold to another customer, locks voucher from reactivation.
     - Blocks voiding of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
@@ -80,10 +119,13 @@ from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# TAX CALCULATOR & SNAPSHOT ENGINE
+# =============================================================================
 class TaxCalculator:
     """
     Dedicated tax computation engine supporting Exclusive, Inclusive, and Exempt tax regimes.
-    Calculates tax strictly on the net post-discount merchandise base.
+    Calculates tax strictly on the net post-discount merchandise base and snapshots values.
     """
 
     @staticmethod
@@ -96,31 +138,48 @@ class TaxCalculator:
     ) -> Tuple[Decimal, Decimal, Decimal]:
         """
         Computes line tax figures with exact Decimal rounding.
+        
         Returns:
             Tuple[Decimal, Decimal, Decimal]: (base_taxable_amount, line_vat, final_line_total)
+            - base_taxable_amount: Pre-tax merchandise base subject to tax
+            - line_vat: Exact VAT amount generated by this line
+            - final_line_total: Final payable line total
         """
         if not is_vat_registered or not is_product_taxable or effective_vat_rate <= Decimal('0.00'):
             return Decimal('0.00'), Decimal('0.00'), net_line_payable
 
-        if tax_mode == 'EXCLUSIVE':
+        clean_tax_mode = str(tax_mode or 'INCLUSIVE').upper().strip()
+
+        if clean_tax_mode == 'EXCLUSIVE':
+            # Tax added on top of net price
             base_taxable = net_line_payable
             line_vat = (base_taxable * (effective_vat_rate / Decimal('100.00'))).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
             )
-            final_line_total = base_taxable + line_vat
+            final_line_total = (base_taxable + line_vat).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
             return base_taxable, line_vat, final_line_total
 
-        elif tax_mode == 'INCLUSIVE':
+        elif clean_tax_mode == 'INCLUSIVE':
+            # Tax extracted from gross net price using exact statutory divisor (e.g. 1.13)
             final_line_total = net_line_payable
             multiplier = Decimal('1.00') + (effective_vat_rate / Decimal('100.00'))
             base_taxable = (final_line_total / multiplier).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
             )
-            line_vat = final_line_total - base_taxable
+            # Line VAT is the exact difference: ensures base_taxable + line_vat == final_line_total
+            line_vat = (final_line_total - base_taxable).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
             return base_taxable, line_vat, final_line_total
 
+        # Default fallback: Non-taxable / Exempt
         return Decimal('0.00'), Decimal('0.00'), net_line_payable
 
+# =============================================================================
+# SALES POS SERVICE
+# =============================================================================
 class SalesPOSService:
     """
     Modular POS Engine executing instant billing, sales scoping, dual-IMEI tagging,
@@ -174,6 +233,9 @@ class SalesPOSService:
         """Convenience alias for generate_estimate_number supporting dual sequencing."""
         return cls.generate_estimate_number(branch=branch, bill_type=bill_type)
 
+    # =========================================================================
+    # PRIMARY CHECKOUT PIPELINE
+    # =========================================================================
     @classmethod
     @transaction.atomic
     def process_checkout(
@@ -204,6 +266,8 @@ class SalesPOSService:
     ) -> SalesEstimate:
         """
         Main transactional checkout coordinator supporting dual document sequencing (Sales vs Estimate).
+        Executes the authoritative VAT snapshot chain:
+            POS input -> Calculate VAT -> Save line snapshot -> Add line VATs -> Save estimate snapshot.
         """
         cls._validate_cart_items(cart_items)
 
@@ -214,7 +278,9 @@ class SalesPOSService:
         raw_bill_type = kwargs.get('bill_type') or bill_type or 'SALES'
         normalized_bill_type = 'ESTIMATE' if str(raw_bill_type).upper().strip() in ['ESTIMATE', 'EST'] else 'SALES'
 
-        # 1. Date & Fiscal Period Resolution (Two-Way Synchronization)
+        # ---------------------------------------------------------------------
+        # 1. DATE & FISCAL PERIOD RESOLUTION (TWO-WAY SYNCHRONIZATION)
+        # ---------------------------------------------------------------------
         target_date_ad: Optional[date] = None
         target_date_bs: Optional[str] = None
         target_fiscal_year: Optional[str] = None
@@ -239,7 +305,9 @@ class SalesPOSService:
             target_date_bs = target_date_bs or NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
             target_fiscal_year = fiscal_year or NepaliCalendar.get_fiscal_year(bs_y, bs_m)
 
-        # 2. Resolve Customer Profile & Tier (Safe Lookup with Fallback)
+        # ---------------------------------------------------------------------
+        # 2. RESOLVE CUSTOMER PROFILE & TIER (SAFE LOOKUP WITH FALLBACK)
+        # ---------------------------------------------------------------------
         customer_type = 'RETAIL'
         resolved_customer_id = customer_id
         if resolved_customer_id:
@@ -249,7 +317,7 @@ class SalesPOSService:
             elif not is_historical_import:
                 raise ValidationError(f"Selected customer (ID {resolved_customer_id}) is inactive or no longer exists.")
         else:
-            # Check if customer can be identified by PAN or Phone upfront
+            # Attempt early identification via PAN or Phone
             clean_pan = re.sub(r'\D', '', str(customer_pan or '').strip())
             clean_phone = str(customer_phone or '').strip()
             clean_name = str(customer_name or '').strip()
@@ -270,10 +338,14 @@ class SalesPOSService:
                     resolved_customer_id = cust_by_phone.id
                     customer_type = cust_by_phone.customer_type
 
-        # 3. Validate Trade-In Voucher (if attached)
+        # ---------------------------------------------------------------------
+        # 3. VALIDATE TRADE-IN VOUCHER (IF ATTACHED)
+        # ---------------------------------------------------------------------
         trade_in_voucher, trade_in_credit_amt = cls._validate_trade_in_voucher(branch, trade_in_voucher_id)
 
-        # 4. Parse Cart Lines (Dual-Mode Item Discounts & Price Override Audit)
+        # ---------------------------------------------------------------------
+        # 4. PARSE CART LINES (DUAL-MODE ITEM DISCOUNTS & PRICE OVERRIDE AUDIT)
+        # ---------------------------------------------------------------------
         processed_lines, subtotal, item_discount_sum = cls._parse_cart_lines(
             cart_items=cart_items,
             is_shop_vat_registered=is_shop_vat_registered,
@@ -285,7 +357,9 @@ class SalesPOSService:
             is_historical=is_historical_import
         )
 
-        # 5. Dual-Mode Bill-Level Discount Evaluation & Authorization Check
+        # ---------------------------------------------------------------------
+        # 5. DUAL-MODE BILL-LEVEL DISCOUNT EVALUATION & AUTHORIZATION CHECK
+        # ---------------------------------------------------------------------
         discountable_net_base = sum(
             line['line_after_item_disc'] for line in processed_lines if line['is_discountable']
         )
@@ -366,14 +440,18 @@ class SalesPOSService:
                 f"Manager PIN approval is required."
             )
 
-        # 6. Proportional Bill Discount Allocation with Residual Penny Reconciliation
+        # ---------------------------------------------------------------------
+        # 6. PROPORTIONAL BILL DISCOUNT ALLOCATION & RESIDUAL RECONCILIATION
+        # ---------------------------------------------------------------------
         cls._allocate_bill_discount_with_residual_reconciliation(
             processed_lines=processed_lines,
             discountable_net_base=discountable_net_base,
             bill_discount_amt=bill_discount_amt
         )
 
-        # 7. Initialize Sales Estimate / Invoice Model (With Correct Prefix & Sequencing)
+        # ---------------------------------------------------------------------
+        # 7. INITIALIZE SALES ESTIMATE / INVOICE RECORD
+        # ---------------------------------------------------------------------
         estimate_number = estimate_number_override or cls.generate_estimate_number(
             branch=branch,
             bill_type=normalized_bill_type
@@ -420,7 +498,9 @@ class SalesPOSService:
         else:
             setattr(estimate, 'bill_type', normalized_bill_type)
 
-        # 8. Process Line Items, Taxes, COGS & Inventory (Passed Exact Historical Date)
+        # ---------------------------------------------------------------------
+        # 8. PROCESS LINE ITEMS, SNAPSHOT EXACT VAT, COGS & INVENTORY
+        # ---------------------------------------------------------------------
         calc_result = cls._process_lines_and_inventory(
             estimate=estimate,
             branch=branch,
@@ -435,7 +515,9 @@ class SalesPOSService:
             is_historical=is_historical_import
         )
 
-        # 9. Finalize Totals, True Turnover Accounting & Fractional Paisa Round-Off
+        # ---------------------------------------------------------------------
+        # 9. FINALIZE ESTIMATE VAT SNAPSHOT, TOTALS & ROUND-OFF
+        # ---------------------------------------------------------------------
         excess_trade_in_credit = cls._finalize_estimate_totals(
             estimate=estimate,
             subtotal=subtotal,
@@ -450,7 +532,9 @@ class SalesPOSService:
         if trade_in_voucher and not is_historical_import:
             cls._apply_trade_in_restock(trade_in_voucher, estimate, branch, cashier)
 
-        # 10. Split Payments, Authoritative Trade-In Tender Settlement & Customer Debt (Udhaari)
+        # ---------------------------------------------------------------------
+        # 10. SPLIT PAYMENTS, TENDER SETTLEMENT & CUSTOMER DEBT (UDHAARI)
+        # ---------------------------------------------------------------------
         payment_transactions = cls._process_payments_and_udhaari(
             estimate=estimate,
             branch=branch,
@@ -467,14 +551,18 @@ class SalesPOSService:
             **kwargs
         )
 
-        # 11. Automatic General Ledger Double-Entry Posting (Stamps Target Historical Date)
+        # ---------------------------------------------------------------------
+        # 11. GENERAL LEDGER DOUBLE-ENTRY POSTING
+        # ---------------------------------------------------------------------
         cls._post_gl_sales_estimate(
             estimate=estimate,
             cashier=cashier,
             payment_transactions=payment_transactions
         )
 
-        # 12. Forensic Audit Log
+        # ---------------------------------------------------------------------
+        # 12. FORENSIC AUDIT LOG
+        # ---------------------------------------------------------------------
         AuditLog.objects.create(
             user=cashier,
             branch=branch,
@@ -493,6 +581,9 @@ class SalesPOSService:
                 'bill_discount_input': str(estimate.bill_discount_input_value),
                 'bill_discount_amount': str(estimate.bill_discount_amount),
                 'bill_discount_pct': str(estimate.bill_discount_percent),
+                'taxable_amount': str(estimate.taxable_amount),
+                'non_taxable_amount': str(estimate.non_taxable_amount),
+                'vat_amount': str(estimate.vat_amount),
                 'discount_reason': estimate.discount_reason or "",
                 'trade_in_credit': str(trade_in_credit_amt),
                 'excess_trade_in_credit': str(excess_trade_in_credit),
@@ -551,6 +642,10 @@ class SalesPOSService:
         branch: Branch = None,
         is_historical: bool = False
     ) -> Tuple[list, Decimal, Decimal]:
+        """
+        Parses cart items, verifies prices, and captures explicit tax attributes per line
+        from the POS cart input (or falls back to the current product snapshot).
+        """
         processed = []
         subtotal = Decimal('0.00')
         item_discount_sum = Decimal('0.00')
@@ -739,9 +834,40 @@ class SalesPOSService:
             imei_num = str(item_data.get('imei_number', '') or item_data.get('imei_1', '')).strip()
             secondary_imei = str(item_data.get('secondary_imei', '') or item_data.get('imei_2', '')).strip()
 
-            tax_mode = 'EXEMPT' if not is_shop_vat_registered else (
-                item_data.get('tax_pricing_type') or getattr(product, 'tax_pricing_type', 'INCLUSIVE')
-            )
+            # -------------------------------------------------------------
+            # EXACT TAX SNAPSHOT CAPTURE FROM CART / PRODUCT STATE
+            # -------------------------------------------------------------
+            if not is_shop_vat_registered:
+                line_tax_mode = 'EXEMPT'
+                line_is_vat_applicable = False
+                line_vat_rate = Decimal('0.00')
+            else:
+                raw_tax_mode = item_data.get('tax_pricing_type') or getattr(product, 'tax_pricing_type', 'INCLUSIVE')
+                line_tax_mode = str(raw_tax_mode).upper().strip()
+                if line_tax_mode not in ['INCLUSIVE', 'EXCLUSIVE', 'EXEMPT']:
+                    line_tax_mode = 'INCLUSIVE'
+
+                if item_data.get('is_vat_applicable') is not None:
+                    line_is_vat_applicable = bool(item_data.get('is_vat_applicable'))
+                else:
+                    line_is_vat_applicable = bool(getattr(product, 'is_vat_applicable', True))
+
+                if line_tax_mode == 'EXEMPT':
+                    line_is_vat_applicable = False
+
+                if not line_is_vat_applicable:
+                    line_vat_rate = Decimal('0.00')
+                else:
+                    raw_line_rate = item_data.get('vat_rate')
+                    if raw_line_rate is not None and str(raw_line_rate).strip() != '':
+                        try:
+                            line_vat_rate = Decimal(str(raw_line_rate)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        except (InvalidOperation, ValueError, TypeError):
+                            line_vat_rate = getattr(product, 'vat_rate', Decimal('13.00'))
+                    else:
+                        line_vat_rate = getattr(product, 'vat_rate', None)
+                        if line_vat_rate is None or line_vat_rate <= Decimal('0.00'):
+                            line_vat_rate = getattr(config, 'default_vat_rate', Decimal('13.00'))
 
             processed.append({
                 'product': product,
@@ -761,7 +887,9 @@ class SalesPOSService:
                 'base_units': base_units,
                 'imei_num': imei_num,
                 'secondary_imei': secondary_imei,
-                'tax_mode': tax_mode,
+                'tax_mode': line_tax_mode,
+                'is_vat_applicable': line_is_vat_applicable,
+                'effective_vat_rate': line_vat_rate,
                 'allocated_bill_discount': Decimal('0.00')
             })
 
@@ -824,6 +952,10 @@ class SalesPOSService:
         customer_phone: str,
         is_historical: bool = False
     ) -> Dict[str, Any]:
+        """
+        Calculates exact line-level VAT, builds `SalesEstimateItem` records with permanently
+        snapshotted tax values, and performs real-time stock allocation/deduction.
+        """
         saved_items = []
         taxable_total = Decimal('0.00')
         non_taxable_total = Decimal('0.00')
@@ -840,26 +972,33 @@ class SalesPOSService:
             base_units = line['base_units']
             imei_num = line['imei_num']
             secondary_imei = line['secondary_imei']
-            tax_mode = line['tax_mode']
             pure_item_disc = line['line_disc']
             allocated_bill_disc = line['allocated_bill_discount']
             line_after_item_disc = line['line_after_item_disc']
 
+            # Post-discount net payable base for this line
             net_line_payable = max(Decimal('0.00'), line_after_item_disc - allocated_bill_disc)
 
-            effective_vat_rate = (
-                product.vat_rate if (product.is_vat_applicable and product.vat_rate > Decimal('0.00')) else default_vat_rate
-            ) if is_shop_vat_registered else Decimal('0.00')
+            # Snapshotted Tax Configuration (Isolated from future product edits)
+            tax_mode = line['tax_mode']
+            is_line_taxable = line['is_vat_applicable']
+            effective_vat_rate = line['effective_vat_rate']
 
+            # -----------------------------------------------------------------
+            # 1. CALCULATE EXACT LINE-LEVEL VAT
+            # -----------------------------------------------------------------
             base_taxable, line_vat, final_line_total = TaxCalculator.compute_line_tax(
                 net_line_payable=net_line_payable,
                 is_vat_registered=is_shop_vat_registered,
-                is_product_taxable=product.is_vat_applicable,
+                is_product_taxable=is_line_taxable,
                 tax_mode=tax_mode,
                 effective_vat_rate=effective_vat_rate
             )
 
-            if is_shop_vat_registered and effective_vat_rate > Decimal('0.00'):
+            # -----------------------------------------------------------------
+            # 2. ACCUMULATE EXACT TOTALS
+            # -----------------------------------------------------------------
+            if is_shop_vat_registered and is_line_taxable and effective_vat_rate > Decimal('0.00'):
                 taxable_total += base_taxable
                 vat_sum += line_vat
                 if tax_mode == 'EXCLUSIVE':
@@ -867,6 +1006,9 @@ class SalesPOSService:
             else:
                 non_taxable_total += net_line_payable
 
+            # -----------------------------------------------------------------
+            # 3. STOCK ALLOCATION & SERIAL TRACKING
+            # -----------------------------------------------------------------
             actual_unit_cost, item_instance, batch_ref, warranty_exp, warranty_summary = cls._allocate_stock_and_cost(
                 product=product,
                 branch=branch,
@@ -886,6 +1028,9 @@ class SalesPOSService:
             total_cogs += (actual_unit_cost * base_units)
             total_line_discount_amount = pure_item_disc + allocated_bill_disc
 
+            # -----------------------------------------------------------------
+            # 4. SAVE EXACT VAT SNAPSHOT ON SALES ESTIMATE ITEM
+            # -----------------------------------------------------------------
             saved_items.append(SalesEstimateItem(
                 estimate=estimate,
                 product=product,
@@ -904,13 +1049,15 @@ class SalesPOSService:
                 allocated_bill_discount_amount=allocated_bill_disc,
                 discount_percent=line['discount_percent'],
                 discount_amount=total_line_discount_amount,
+                # Frozen Tax Snapshot:
                 tax_pricing_type=tax_mode,
-                is_vat_applicable=is_shop_vat_registered and product.is_vat_applicable,
+                is_vat_applicable=is_line_taxable,
                 vat_rate=effective_vat_rate,
                 base_taxable_amount=base_taxable,
                 taxable_line_amount=base_taxable if is_shop_vat_registered else Decimal('0.00'),
                 tax_amount=line_vat,
                 line_total=final_line_total,
+                # Serial & Warranty Info:
                 item_instance=item_instance,
                 batch_reference=batch_ref,
                 imei_number=imei_num or None,
@@ -1175,9 +1322,16 @@ class SalesPOSService:
         calc_result: dict,
         is_historical: bool = False
     ) -> Decimal:
+        """
+        Finalizes invoice financial snapshot. Sums line VAT and taxable amounts,
+        saving the exact snapshot onto the SalesEstimate header.
+        """
         gross_merchandise = (subtotal - item_discount_sum - bill_discount_amt) + calc_result['exclusive_vat_to_add']
         gross_merchandise = gross_merchandise.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+        # ---------------------------------------------------------------------
+        # EXACT AGGREGATION FROM SNAPSHOTTED LINES
+        # ---------------------------------------------------------------------
         taxable_total = calc_result['taxable_total'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         non_taxable_total = calc_result['non_taxable_total'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         vat_sum = calc_result['vat_sum'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -1201,6 +1355,7 @@ class SalesPOSService:
             Decimal('0.01'), rounding=ROUND_HALF_UP
         )
 
+        # Save Header VAT and Financial Snapshots
         estimate.subtotal = subtotal
         estimate.item_discount_total = item_discount_sum
         estimate.taxable_amount = taxable_total
@@ -1210,8 +1365,10 @@ class SalesPOSService:
         estimate.grand_total = grand_total
         estimate.total_cost_amount = total_cogs
         estimate.total_gross_profit = total_gross_profit
+        estimate.is_vat_applicable = bool(vat_sum > Decimal('0.00') or taxable_total > Decimal('0.00'))
         estimate.save()
 
+        # Save all line item snapshots
         for line_item in calc_result['saved_items']:
             line_item.save()
 
@@ -1700,10 +1857,16 @@ class SalesPOSService:
             reason=reason,
             technician_notes=technician_notes,
             processed_by=user,
-            total_refund_amount=Decimal('0.00')
+            total_refund_amount=Decimal('0.00'),
+            taxable_amount=Decimal('0.00'),
+            non_taxable_amount=Decimal('0.00'),
+            vat_amount=Decimal('0.00')
         )
 
         total_refund = Decimal('0.00')
+        total_taxable_return = Decimal('0.00')
+        total_non_taxable_return = Decimal('0.00')
+        total_vat_reversal = Decimal('0.00')
 
         for item_data in items_to_return:
             item_id = item_data.get('item_id')
@@ -1719,12 +1882,26 @@ class SalesPOSService:
             is_defective = bool(item_data.get('is_defective', False))
             defect_desc = str(item_data.get('defect_reason', '') or '').strip()
 
-            already_returned_qty = SalesReturnItem.objects.filter(
+            orig_qty = est_item.quantity if (est_item.quantity and est_item.quantity > Decimal('0.000')) else Decimal('1.000')
+
+            prior_items_qs = SalesReturnItem.objects.filter(
                 sales_return__original_estimate=original_estimate,
                 estimate_item=est_item
-            ).aggregate(sum_qty=Sum('return_quantity'))['sum_qty'] or Decimal('0.000')
+            )
+            prior_agg = prior_items_qs.aggregate(
+                tot_qty=Sum('return_quantity'),
+                tot_taxable=Sum('taxable_return_amount'),
+                tot_vat=Sum('vat_reversal_amount'),
+                tot_non_taxable=Sum('non_taxable_return_amount'),
+                tot_refund=Sum('refund_amount')
+            )
+            already_returned_qty = (prior_agg['tot_qty'] or Decimal('0.000')).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            prior_taxable = (prior_agg['tot_taxable'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            prior_vat = (prior_agg['tot_vat'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            prior_non_taxable = (prior_agg['tot_non_taxable'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            prior_refund = (prior_agg['tot_refund'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            remaining_returnable_qty = max(Decimal('0.000'), est_item.quantity - already_returned_qty)
+            remaining_returnable_qty = max(Decimal('0.000'), orig_qty - already_returned_qty)
 
             if return_qty <= Decimal('0.000') or return_qty > remaining_returnable_qty:
                 raise ValidationError(
@@ -1735,15 +1912,62 @@ class SalesPOSService:
             factor = est_item.conversion_factor if est_item.conversion_factor > Decimal('0.000') else Decimal('1.000')
             base_return_units = (return_qty * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
 
-            effective_unit_net_rate = (est_item.line_total / est_item.quantity).quantize(
-                Decimal('0.01'), rounding=ROUND_HALF_UP
-            ) if est_item.quantity > Decimal('0.000') else est_item.unit_price
+            is_final_return = bool(already_returned_qty + return_qty >= orig_qty)
+            ratio = min(Decimal('1.000000'), return_qty / orig_qty) if orig_qty > Decimal('0.000') else Decimal('1.000000')
 
-            refund_val = (effective_unit_net_rate * return_qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_total = (est_item.line_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            if is_final_return:
+                refund_val = max(Decimal('0.00'), orig_total - prior_refund)
+            else:
+                effective_unit_net_rate = (orig_total / orig_qty).quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                ) if orig_qty > Decimal('0.000') else est_item.unit_price
+                refund_val = (effective_unit_net_rate * return_qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             proportionate_item_discount = (
                 (est_item.item_discount_amount / est_item.quantity) * return_qty
             ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if est_item.quantity > Decimal('0.000') else Decimal('0.00')
+
+            # -------------------------------------------------------------
+            # STORED HISTORICAL VAT SNAPSHOT DERIVATION FROM ORIGINAL INVOICE
+            # -------------------------------------------------------------
+            orig_base_taxable = (est_item.base_taxable_amount or est_item.taxable_line_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_vat = (est_item.tax_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_vat_rate = (est_item.vat_rate or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            is_taxable = bool(
+                est_item.is_vat_applicable and 
+                orig_vat_rate > Decimal('0.00') and 
+                (orig_vat > Decimal('0.00') or orig_base_taxable > Decimal('0.00'))
+            )
+
+            # Defensive recovery for legacy invoices where VAT rate was set but base/tax were not snapshotted
+            if not is_taxable and est_item.is_vat_applicable and orig_vat_rate > Decimal('0.00') and orig_total > Decimal('0.00'):
+                divisor = Decimal('1.00') + (orig_vat_rate / Decimal('100.00'))
+                orig_base_taxable = (orig_total / divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                orig_vat = (orig_total - orig_base_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                is_taxable = (orig_vat > Decimal('0.00'))
+
+            if is_taxable:
+                line_vat_rate = orig_vat_rate
+                rem_vat = max(Decimal('0.00'), orig_vat - prior_vat)
+                rem_taxable = max(Decimal('0.00'), orig_base_taxable - prior_taxable)
+
+                if is_final_return:
+                    calc_vat = rem_vat
+                else:
+                    calc_vat = min(rem_vat, (orig_vat * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+                line_vat_reversal = calc_vat
+                # In both VAT-inclusive and VAT-exclusive items, refund_val already incorporates VAT.
+                # Taxable base reversed is the pre-tax portion of the refund: refund_val - line_vat_reversal
+                line_taxable_return = max(Decimal('0.00'), refund_val - line_vat_reversal)
+                line_non_taxable_return = Decimal('0.00')
+            else:
+                line_vat_rate = Decimal('0.00')
+                line_taxable_return = Decimal('0.00')
+                line_vat_reversal = Decimal('0.00')
+                line_non_taxable_return = refund_val
 
             SalesReturnItem.objects.create(
                 sales_return=sales_return,
@@ -1752,6 +1976,10 @@ class SalesPOSService:
                 return_quantity=return_qty,
                 base_unit_quantity=base_return_units,
                 refund_amount=refund_val,
+                vat_rate=line_vat_rate,
+                taxable_return_amount=line_taxable_return,
+                non_taxable_return_amount=line_non_taxable_return,
+                vat_reversal_amount=line_vat_reversal,
                 discount_type=est_item.discount_type,
                 discount_input_value=est_item.discount_input_value,
                 item_discount_amount=proportionate_item_discount,
@@ -1761,6 +1989,11 @@ class SalesPOSService:
                 is_defective=is_defective,
                 defect_reason=defect_desc
             )
+
+            total_refund += refund_val
+            total_taxable_return += line_taxable_return
+            total_non_taxable_return += line_non_taxable_return
+            total_vat_reversal += line_vat_reversal
 
             if not is_defective:
                 InventoryService.adjust_stock(
@@ -1867,15 +2100,12 @@ class SalesPOSService:
                     updated_at=timezone.now()
                 )
 
-            total_refund += refund_val
-
         # ANTI-SCAM REIMBURSEMENT ENGINE (EXPANDED TO ALL GENUINE MONETARY TENDERS)
         has_trade_in = original_estimate.has_trade_in_exchange and (original_estimate.trade_in_discount_amount > Decimal('0.00'))
         actual_cash_refund = total_refund
         excess_store_credit = Decimal('0.00')
 
         if refund_mode == 'CASH' and has_trade_in:
-            # Query all genuine monetary tenders (Cash, FonePay, eSewa, Khalti, Card, Bank)
             monetary_payments_qs = original_estimate.payment_transactions.exclude(
                 payment_mode__in=['CREDIT', 'UDHAARI', 'TRADE_IN', 'EXCHANGE']
             )
@@ -1904,7 +2134,14 @@ class SalesPOSService:
                         f"must be issued as Store Credit to a registered customer profile. Please select or register the customer."
                     )
 
+        # ---------------------------------------------------------------------
+        # RECALCULATE AND SAVE COMPLETE SALES RETURN HEADER TOTALS BEFORE POSTING
+        # ---------------------------------------------------------------------
         sales_return.total_refund_amount = total_refund
+        sales_return.taxable_amount = total_taxable_return
+        sales_return.non_taxable_amount = total_non_taxable_return
+        sales_return.vat_amount = total_vat_reversal
+
         if excess_store_credit > Decimal('0.00'):
             notice = (
                 f"\n[Trade-In Anti-Scam Safeguard] Capped Cash Refund: Rs. {actual_cash_refund:.2f} cash paid, "
@@ -1914,7 +2151,10 @@ class SalesPOSService:
             if actual_cash_refund == Decimal('0.00'):
                 sales_return.refund_mode = 'STORE_CREDIT'
 
-        sales_return.save(update_fields=['total_refund_amount', 'refund_mode', 'technician_notes', 'updated_at'])
+        sales_return.save(update_fields=[
+            'total_refund_amount', 'taxable_amount', 'non_taxable_amount',
+            'vat_amount', 'refund_mode', 'technician_notes', 'updated_at'
+        ])
 
         customer = None
         if original_estimate.customer_id:
@@ -1979,6 +2219,9 @@ class SalesPOSService:
             details={
                 'original_estimate': original_estimate.estimate_number,
                 'refund_amount': str(total_refund),
+                'taxable_amount': str(total_taxable_return),
+                'non_taxable_amount': str(total_non_taxable_return),
+                'vat_amount': str(total_vat_reversal),
                 'actual_cash_refund': str(actual_cash_refund),
                 'excess_store_credit': str(excess_store_credit),
                 'refund_mode': sales_return.refund_mode,

@@ -1,21 +1,21 @@
 """
 Procurement, Supplier Udhaari, Goods Received Notes (GRN) & Commercial Purchase Return Models.
 
-Key Architectural Improvements & Bug Fixes:
-1. Supplier Udhaari Balance Continuous Recalculation (Fixes Spot-Payment Debt Inflation):
+Key Architectural Improvements & Verification Hardening:
+1. Strict Line-to-Header VAT Sum Invariant (Verified & Hardened):
+   - In `GoodsReceivedNote.recalculate_financials()`, line-level VAT is computed individually per line item:
+     * Taxable Pot: Items with 13% VAT generate exact line VAT (`tax_amount` / `vat_amount`).
+     * Non-Taxable Pot: Items with 0% VAT generate exactly `0.00` VAT.
+   - The GRN header's `vat_amount` is calculated strictly as the exact sum of all line-level `tax_amount`s:
+     $$\\text{GRN.vat\\_amount} = \\sum_{i} \\text{GRNItem}_{i}.\\text{tax\\_amount}$$
+   - Guarantees front-end and back-end audit drill-down consistency between the VAT registers and invoice details.
+
+2. Supplier Udhaari Balance Continuous Recalculation (Fixes Spot-Payment Debt Inflation):
    - In `Supplier.recalculate_balance_from_ledger()`, the mathematical formula strictly balances:
      $$\\text{True Balance} = \\text{Opening Balance} + \\sum \\text{Purchase Bills} - \\sum \\text{Payments} - \\sum \\text{Returns} \\pm \\text{Adjustments}$$
-   - Includes a defensive legacy audit reconciliation: if an older purchase bill exists where cash was
+   - Includes defensive legacy audit reconciliation: if an older purchase bill exists where cash was
      paid on delivery but no explicit linked `PAYMENT` row was generated, the paid amount is deducted
      so historical data imports do not artificially inflate liabilities.
-
-2. Accurate Dual-Pot & Item-Level VAT Application (Fixes Blanket Header VAT Overwrite):
-   - In `GoodsReceivedNote.recalculate_financials()`, line-level VAT is computed individually per line item
-     strictly separating:
-     * Taxable Pot: Items with 13% VAT.
-     * Non-Taxable Pot: Items with 0% VAT (Exempt / PAN bills).
-   - Shields 0% tax-exempt or zero-rated items from tax additions, even within mixed consignments.
-   - Reconciles total consignment VAT as the exact sum of line-level VAT amounts.
 
 3. Coherent Pre-Tax Extraction for VAT-Inclusive Purchases (Fixes Inclusive Discount Math):
    - In both `GoodsReceivedNote.recalculate_financials()` and `GRNItem.save()`, when `vat_handling_mode == 'INCLUSIVE'`
@@ -35,6 +35,9 @@ Key Architectural Improvements & Bug Fixes:
 
 6. Bidirectional Date & Fiscal Year Synchronization:
    - Standardizes Bikram Sambat (BS) and Gregorian (AD) dates across POs, GRNs, Returns, and Ledger entries.
+
+7. Structured Multi-Set Vertical IMEI Parser Property (`parsed_imei_pairs` on `GRNItem`):
+   - Converts raw unstructured IMEI text into clean, structured records separating Phone Sets, SIM 1, and SIM 2.
 """
 
 import re
@@ -42,7 +45,7 @@ import uuid
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, datetime
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 
 from django.db import models
 from django.conf import settings
@@ -56,6 +59,7 @@ from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
 logger = logging.getLogger(__name__)
+
 
 def sync_nepali_and_ad_dates(
     instance,
@@ -140,6 +144,7 @@ def sync_nepali_and_ad_dates(
                 setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
         except Exception as e:
             logger.warning(f"[sync_nepali_and_ad_dates] Could not convert AD date '{current_ad}': {e}")
+
 
 # =============================================================================
 # SUPPLIER / DISTRIBUTOR MODEL
@@ -511,6 +516,7 @@ class Supplier(TimeStampedModel):
             )
         return new_balance
 
+
 # =============================================================================
 # PURCHASE ORDER (PO) MODELS
 # =============================================================================
@@ -590,6 +596,7 @@ class PurchaseOrder(TimeStampedModel):
         )
         super().save(*args, **kwargs)
 
+
 class PurchaseOrderItem(TimeStampedModel):
     purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='po_items')
@@ -610,6 +617,7 @@ class PurchaseOrderItem(TimeStampedModel):
     def __str__(self):
         return f"{self.product.name} ({self.ordered_quantity} {self.unit.code})"
 
+
 # =============================================================================
 # GOODS RECEIVED NOTE (GRN) & INWARD PROCUREMENT
 # =============================================================================
@@ -620,6 +628,10 @@ class GoodsReceivedNote(TimeStampedModel):
     flexible bill-level discounts, dual VAT handling modes (exclusive vs. inclusive),
     5-tier value-based overhead distribution (Landed Cost/COGS), NTA MDMS certification,
     independent observations, and historical purchase dates.
+    
+    Hardened VAT Invariant:
+    Header `vat_amount` is always mathematically equal to the sum of all child line items' VAT:
+    `vat_amount = sum(item.tax_amount for item in items)`
     """
     GRN_STATUS = [
         ('DRAFT', 'Draft / In-Inspection'),
@@ -737,7 +749,7 @@ class GoodsReceivedNote(TimeStampedModel):
     taxable_amount = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Pre-VAT Taxable Base (NPR)"),
-        help_text=_("Net pre-VAT merchandise value (Gross Lines - Total Discounts).")
+        help_text=_("Net pre-VAT merchandise value of 13% taxable lines after allocated discounts.")
     )
     
     # VAT Handling Mode & Calculations
@@ -749,7 +761,7 @@ class GoodsReceivedNote(TimeStampedModel):
     is_vat_bill = models.BooleanField(
         default=False,
         verbose_name=_("13% VAT Inward Tax Bill"),
-        help_text=_("Automatically checked if any items carry 13% VAT; false for 0% PAN bills.")
+        help_text=_("Automatically set to True if any line carries 13% VAT; False for 0% PAN bills.")
     )
     vat_rate = models.DecimalField(
         max_digits=5, decimal_places=2, default=Decimal('13.00'),
@@ -758,7 +770,7 @@ class GoodsReceivedNote(TimeStampedModel):
     vat_amount = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Dedicated 13% Input VAT (NPR)"),
-        help_text=_("Sum of item-level 13% VAT on Taxable Base. Strictly 0.00 for non-VAT items.")
+        help_text=_("Sum of item-level 13% VAT amounts. Always equals the sum of line items' tax_amount.")
     )
     
     # 5 Overhead Expense Fields (Distributed to Landed Cost)
@@ -900,17 +912,31 @@ class GoodsReceivedNote(TimeStampedModel):
             (self.other_overheads_charge or Decimal('0.00'))
         )
 
+    @property
+    def total_line_vat_amount(self) -> Decimal:
+        """
+        Calculates the exact sum of all line-item VAT amounts for audit verification.
+        In clean state, `self.vat_amount == self.total_line_vat_amount`.
+        """
+        return sum(
+            (getattr(item, 'tax_amount', Decimal('0.00')) or Decimal('0.00') for item in self.items.all()),
+            Decimal('0.00')
+        ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
     def recalculate_financials(self, save=True):
         """
         Calculates all procurement financials, multi-rate line VAT, and distributes overheads to line items.
-        Strict Dual-Pot Architecture:
+        
+        Hardened VAT Invariant:
         1. Segregates items into Taxable Pot (13% VAT) vs. Non-Taxable Pot (0% VAT).
         2. In INCLUSIVE mode: Extracts pre-tax base using `Rate ÷ 1.13` strictly on 13% taxable items.
            Items with 0% VAT remain untouched.
         3. Prorates whole-bill discount proportionally across pre-tax merchandise bases.
-        4. Calculates 13% VAT strictly on the net taxable pot; applies 0% on the non-taxable pot.
-        5. Sets net invoice total strictly as: `Net Taxable Pot + Non-Taxable Pot + Calculated 13% VAT`.
-        6. Allocates overheads proportionally to calculate accurate `unit_landed_cost` per item.
+        4. Calculates line VAT strictly per item: `item.tax_amount = line_vat`.
+        5. Accumulates total consignment VAT strictly as the sum of line VATs:
+           `self.vat_amount = sum(item.tax_amount)`
+        6. Sets net invoice total strictly as: `Net Taxable Pot + Non-Taxable Pot + Calculated Line VAT Sum`.
+        7. Allocates overheads proportionally to calculate accurate `unit_landed_cost` per item.
         """
         items = list(self.items.all())
         total_line_gross = Decimal('0.00')
@@ -1002,7 +1028,7 @@ class GoodsReceivedNote(TimeStampedModel):
             self.bill_discount_input_value = Decimal('0.00')
             self.bill_discount_amount = Decimal('0.00')
 
-        # Phase 3 & 4: Proportional Bill Discount Allocation, Landed Costs & Strict Line-by-Line VAT
+        # Phase 3 & 4: Proportional Bill Discount Allocation, Landed Costs & Strict Line-by-Line VAT Summation
         overheads = self.overhead_total
         item_count = len(items)
 
@@ -1040,18 +1066,21 @@ class GoodsReceivedNote(TimeStampedModel):
             if is_taxable and rate == Decimal('13.00'):
                 line_vat = (effective_net_base * Decimal('0.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 total_net_taxable_base += effective_net_base
-                total_vat_amount += line_vat
             else:
                 line_vat = Decimal('0.00')
                 total_net_non_taxable_base += effective_net_base
 
+            # Persist exact calculated VAT onto the line item
+            item.tax_amount = line_vat
+            total_vat_amount += line_vat
+
             item.save(update_fields=[
                 'gross_amount', 'discount_type', 'discount_input_value', 'item_discount_amount',
-                'discount_percent', 'line_total', 'unit_landed_cost', 'base_unit_quantity',
-                'vat_rate', 'is_vat_applicable'
+                'discount_percent', 'line_total', 'tax_amount', 'unit_landed_cost',
+                'base_unit_quantity', 'vat_rate', 'is_vat_applicable'
             ])
 
-        # Phase 5: Reconciled Consignment Financials
+        # Phase 5: Reconciled Consignment Financials (Hardened: Header VAT == Sum of Line VATs)
         total_merchandise_net = total_net_taxable_base + total_net_non_taxable_base
         total_landed_valuation = (total_merchandise_net + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         net_invoice_total = (total_merchandise_net + total_vat_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -1064,6 +1093,7 @@ class GoodsReceivedNote(TimeStampedModel):
         self.total_line_discount = total_line_discount
         self.discount_amount = total_line_discount + self.bill_discount_amount
         self.taxable_amount = total_net_taxable_base
+        # Hardened Invariant: Exactly equals sum of all line item tax_amount values
         self.vat_amount = total_vat_amount
         self.total_landed_cost = total_landed_valuation
         self.net_total_amount = net_invoice_total
@@ -1081,10 +1111,12 @@ class GoodsReceivedNote(TimeStampedModel):
                 'net_total_amount', 'paid_amount', 'due_amount', 'updated_at'
             ])
 
+
 class GRNItem(TimeStampedModel):
     """
     Line item in GRN with package unit conversion, custom batch numbers, dual-mode discounts,
-    proportional unit landed cost, target selling price, and strict 13% vs 0% tax dropdown choices.
+    persisted line-level VAT amount (`tax_amount`), proportional unit landed cost, target selling price,
+    and strict 13% vs 0% tax dropdown choices.
     """
     DISCOUNT_TYPE_CHOICES = [
         ('NONE', _('No Discount')),
@@ -1170,6 +1202,11 @@ class GRNItem(TimeStampedModel):
         verbose_name=_("Tax / VAT Rate (%)"),
         help_text=_("Locked to 13.00% (Taxable) or 0.00% (Exempt).")
     )
+    tax_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Tax / VAT Amount (NPR)"),
+        help_text=_("Exact VAT amount calculated for this line item.")
+    )
     
     unit_landed_cost = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal('0.00'),
@@ -1211,6 +1248,46 @@ class GRNItem(TimeStampedModel):
     def __str__(self):
         batch_tag = f" [Batch: {self.batch_number}]" if self.batch_number else ""
         return f"{self.product.name}{batch_tag} ({self.base_unit_quantity} {self.product.base_unit.code})"
+
+    @property
+    def vat_amount(self) -> Decimal:
+        """
+        Alias for tax_amount to provide seamless consistency across reports and templates.
+        """
+        return self.tax_amount or Decimal('0.00')
+
+    @property
+    def parsed_imei_pairs(self) -> List[Dict[str, Any]]:
+        """
+        Parses raw text from scanned_imei_list into structured phone set records.
+        Handles:
+        - Step A: Read raw text. Returns empty list if blank.
+        - Step B: Breaks input into individual phone sets across newlines, spaces, commas, or semicolons.
+        - Step C: Separates SIM 1 and SIM 2 using the pipe symbol ('|').
+        - Step D: Packages clean structured records for vertical template rendering.
+        """
+        raw_text = str(self.scanned_imei_list or '').strip()
+        if not raw_text:
+            return []
+
+        normalized_text = re.sub(r'\s*\|\s*', '|', raw_text)
+        tokens = [t.strip() for t in re.split(r'[\r\n,;\s]+', normalized_text) if t.strip()]
+
+        structured_sets: List[Dict[str, Any]] = []
+        for index, token in enumerate(tokens, start=1):
+            parts = token.split('|')
+            im1 = parts[0].strip() if len(parts) > 0 and parts[0].strip() else ''
+            im2 = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+
+            if im1:
+                structured_sets.append({
+                    'set_number': index,
+                    'imei_1': im1,
+                    'imei_2': im2,
+                    'is_dual_sim': bool(im2),
+                })
+
+        return structured_sets
 
     def save(self, *args, **kwargs):
         factor = self.conversion_factor if (self.conversion_factor and self.conversion_factor > Decimal('0.000')) else Decimal('1.000')
@@ -1262,11 +1339,16 @@ class GRNItem(TimeStampedModel):
             self.gross_amount = pre_tax_gross
             self.item_discount_amount = pre_tax_discount
             self.line_total = taxable_extracted
+            self.tax_amount = (net_line_base - taxable_extracted).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         else:
             # Mode EXCLUSIVE or 0% Exempt Rate: rate is treated as pure pre-tax cost
             self.gross_amount = raw_gross
             self.item_discount_amount = raw_item_disc
             self.line_total = net_line_base
+            if self.is_vat_applicable and current_rate > Decimal('0.00'):
+                self.tax_amount = (net_line_base * (current_rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            else:
+                self.tax_amount = Decimal('0.00')
 
         if not self.unit_landed_cost or self.unit_landed_cost <= Decimal('0.00'):
             if self.base_unit_quantity > Decimal('0.000'):
@@ -1275,6 +1357,7 @@ class GRNItem(TimeStampedModel):
                 self.unit_landed_cost = Decimal('0.00')
 
         super().save(*args, **kwargs)
+
 
 # =============================================================================
 # COMMERCIAL PURCHASE RETURN / DEBIT NOTE
@@ -1390,6 +1473,7 @@ class PurchaseReturn(TimeStampedModel):
         )
         super().save(*args, **kwargs)
 
+
 class PurchaseReturnItem(TimeStampedModel):
     purchase_return = models.ForeignKey(
         PurchaseReturn, on_delete=models.CASCADE, related_name='items',
@@ -1469,6 +1553,7 @@ class PurchaseReturnItem(TimeStampedModel):
             self.tax_amount = Decimal('0.00')
         self.line_total = gross + self.tax_amount
         super().save(*args, **kwargs)
+
 
 # =============================================================================
 # SUPPLIER UDHAARI (ACCOUNTS PAYABLE) LEDGER (HISTORICAL DATES INCLUDED)

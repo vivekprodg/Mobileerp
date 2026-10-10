@@ -1,0 +1,1393 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}VAT to General Ledger Audit Reconciliation | {{ SYS_CONFIG.company_name_en|default:COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<!-- Google Fonts: Inter & JetBrains Mono for Precise Tabular Number Alignment -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --tax-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --tax-font-mono: 'JetBrains Mono', monospace;
+
+    /* Palette: Executive Dark Slate & High-Contrast Accents */
+    --tax-slate-950: #020617;
+    --tax-slate-900: #0f172a;
+    --tax-slate-800: #1e293b;
+    --tax-slate-700: #334155;
+    --tax-slate-600: #475569;
+    --tax-slate-500: #64748b;
+    --tax-slate-400: #94a3b8;
+    --tax-slate-300: #cbd5e1;
+    --tax-slate-200: #e2e8f0;
+    --tax-slate-100: #f1f5f9;
+    --tax-slate-50:  #f8fafc;
+    --tax-white:     #ffffff;
+
+    --tax-blue-600:  #2563eb;
+    --tax-green-600: #059669;
+    --tax-red-600:   #dc2626;
+    --tax-amber-600: #d97706;
+    --tax-teal-600:  #0d9488;
+}
+
+body {
+    font-family: var(--tax-font-sans);
+    color: var(--tax-slate-900);
+}
+
+.font-mono {
+    font-family: var(--tax-font-mono) !important;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Master Widescreen Canvas: Stretches up to 1820px, eliminating side margins */
+.recon-app-shell {
+    max-width: 1820px;
+    margin: 0 auto;
+    padding: 16px 24px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Top Suite Horizontal Navigation Ribbon */
+.tax-suite-ribbon {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 9999px;
+    padding: 6px 14px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+}
+
+.tax-nav-pill {
+    padding: 7px 16px;
+    border-radius: 9999px;
+    font-size: 0.775rem;
+    font-weight: 700;
+    border: 1px solid var(--tax-slate-200);
+    background: var(--tax-white);
+    color: var(--tax-slate-600);
+    text-decoration: none !important;
+    transition: all 0.15s ease-in-out;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+}
+
+.tax-nav-pill:hover {
+    background-color: var(--tax-slate-100);
+    color: var(--tax-slate-900);
+    border-color: var(--tax-slate-300);
+}
+
+.tax-nav-pill.active {
+    background-color: var(--tax-blue-600) !important;
+    color: var(--tax-white) !important;
+    border-color: var(--tax-blue-600) !important;
+    box-shadow: 0 3px 10px rgba(37, 99, 235, 0.28);
+}
+
+/* Page Hero Header */
+.page-hero-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.page-hero-title h3 {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--tax-slate-950);
+    letter-spacing: -0.02em;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.page-hero-subtitle {
+    font-size: 13px;
+    color: var(--tax-slate-500);
+    margin: 0;
+}
+
+.btn-hero-action {
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 8px 16px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    text-decoration: none !important;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+/* High-Contrast Forensic Audit Status Banner */
+.recon-status-banner {
+    border-radius: 18px;
+    padding: 20px 24px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.recon-status-banner.balanced {
+    background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+    border: 1.5px solid #a7f3d0;
+    color: #065f46;
+}
+
+.recon-status-banner.discrepancy {
+    background: linear-gradient(135deg, #fff1f2 0%, #fef2f2 100%);
+    border: 1.5px solid #fecaca;
+    color: #991b1b;
+}
+
+.banner-icon-bubble {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.recon-status-banner.balanced .banner-icon-bubble {
+    background: #059669;
+    color: #ffffff;
+}
+
+.recon-status-banner.discrepancy .banner-icon-bubble {
+    background: #dc2626;
+    color: #ffffff;
+}
+
+.banner-metric-pill {
+    background: #ffffff;
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 12px;
+    padding: 8px 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Multi-Calendar Filter Console Card */
+.filter-console-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 16px;
+    padding: 18px 22px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.filter-console-card label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--tax-slate-600);
+    margin-bottom: 5px;
+}
+
+.filter-console-card .form-control,
+.filter-console-card .form-select {
+    height: 38px;
+    font-size: 12.5px;
+    border-radius: 8px;
+    border: 1px solid var(--tax-slate-300);
+}
+
+.filter-console-card .form-control:focus,
+.filter-console-card .form-select:focus {
+    border-color: var(--tax-blue-600);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* ==========================================================================
+   4 EXECUTIVE KPI COMPARISON CARDS
+   ========================================================================== */
+.recon-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+}
+
+.recon-kpi-box {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 170px;
+    position: relative;
+    overflow: hidden;
+}
+
+.recon-kpi-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+}
+
+.recon-kpi-box.card-output::before { background: var(--tax-blue-600); }
+.recon-kpi-box.card-input::before  { background: var(--tax-green-600); }
+.recon-kpi-box.card-net::before    { background: var(--tax-teal-600); }
+.recon-kpi-box.card-audit::before  { background: var(--tax-slate-900); }
+
+.kpi-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.kpi-label-text {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--tax-slate-500);
+}
+
+.kpi-stat-badge {
+    font-family: var(--tax-font-mono);
+    font-size: 10px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    text-transform: uppercase;
+}
+
+.kpi-stat-badge.matched {
+    background: #d1fae5;
+    color: #047857;
+    border: 1px solid #6ee7b7;
+}
+
+.kpi-stat-badge.variance {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+
+.kpi-compare-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 8px 0;
+}
+
+.kpi-compare-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 12.5px;
+}
+
+.kpi-compare-row .lbl {
+    color: var(--tax-slate-500);
+    font-size: 11.5px;
+}
+
+.kpi-compare-row .val {
+    font-family: var(--tax-font-mono);
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.kpi-footer-variance {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 10px;
+    margin-top: 6px;
+    border-top: 1px dashed var(--tax-slate-200);
+    font-size: 11.5px;
+}
+
+/* ==========================================================================
+   CONSTANT-WIDTH AUDIT TABLES (ZERO OVERFLOW, RIGID PERCENTAGE COLUMNS)
+   ========================================================================== */
+.table-panel-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
+}
+
+.table-panel-header {
+    padding: 16px 24px;
+    background: var(--tax-white);
+    border-bottom: 1px solid var(--tax-slate-200);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.table-panel-title {
+    font-size: 14.5px;
+    font-weight: 800;
+    color: var(--tax-slate-900);
+    letter-spacing: -0.01em;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Constant Table Layout Rule */
+.table-recon-master {
+    width: 100%;
+    table-layout: fixed !important;
+    border-collapse: collapse;
+    margin: 0;
+    font-size: 12.5px;
+}
+
+.table-recon-master thead th {
+    background-color: var(--tax-slate-900) !important;
+    color: var(--tax-white) !important;
+    font-size: 10.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 14px;
+    border: none;
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.table-recon-master tbody td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--tax-slate-200);
+    vertical-align: middle;
+    color: var(--tax-slate-800);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.table-recon-master tbody tr:hover {
+    background-color: #f8fafc;
+}
+
+/* Column Width Percentages for Total-Level Table */
+.col-flow-desc  { width: 34%; }
+.col-reg-total  { width: 16%; }
+.col-gl-total   { width: 16%; }
+.col-var-total  { width: 13%; }
+.col-status-tag { width: 9%;  }
+.col-gl-account { width: 12%; }
+
+/* Column Widths for Audit Discrepancies Table */
+.col-disc-type  { width: 180px; }
+.col-disc-sev   { width: 85px;  }
+.col-disc-doc   { width: 130px; }
+.col-disc-ref   { width: 170px; }
+.col-disc-date  { width: 105px; }
+.col-disc-exp   { width: 125px; }
+.col-disc-act   { width: 125px; }
+.col-disc-diff  { width: 125px; }
+.col-disc-msg   { width: auto;  white-space: normal !important; line-height: 1.4; }
+
+.col-num {
+    font-family: var(--tax-font-mono);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.col-center {
+    text-align: center;
+}
+
+/* Status Badges, Severity & Type Chips */
+.badge-recon-status {
+    font-family: var(--tax-font-mono);
+    font-size: 10.5px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    text-transform: uppercase;
+    display: inline-block;
+}
+
+.badge-status-balanced {
+    background: #d1fae5;
+    color: #047857;
+    border: 1px solid #6ee7b7;
+}
+
+.badge-status-discrepancy {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+
+.severity-chip {
+    font-family: var(--tax-font-mono);
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2.5px 8px;
+    border-radius: 9999px;
+    text-transform: uppercase;
+    display: inline-block;
+}
+
+.severity-chip.high {
+    background-color: #fee2e2;
+    color: #dc2626;
+    border: 1px solid #fca5a5;
+}
+
+.severity-chip.medium {
+    background-color: #fef3c7;
+    color: #d97706;
+    border: 1px solid #fde68a;
+}
+
+.type-pill {
+    font-family: var(--tax-font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--tax-slate-100);
+    color: var(--tax-slate-800);
+    border: 1px solid var(--tax-slate-300);
+    display: inline-block;
+}
+
+.doc-link-pill {
+    font-family: var(--tax-font-mono);
+    font-weight: 700;
+    color: var(--tax-blue-600);
+    text-decoration: none !important;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: color 0.15s ease;
+}
+
+.doc-link-pill:hover {
+    color: #1d4ed8;
+    text-decoration: underline !important;
+}
+
+/* ==========================================================================
+   CAPSULE INVESTIGATION TABS (BOTTOM SECTION)
+   ========================================================================== */
+.recon-tab-pill {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 7px 16px;
+    border-radius: 9999px;
+    color: var(--tax-slate-600);
+    background: transparent;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.recon-tab-pill:hover {
+    background-color: var(--tax-slate-100);
+    color: var(--tax-slate-900);
+}
+
+.recon-tab-pill.active {
+    background-color: var(--tax-blue-600) !important;
+    color: var(--tax-white) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.recon-tab-pill .badge-count {
+    font-family: var(--tax-font-mono);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 9999px;
+    background: rgba(0, 0, 0, 0.08);
+}
+
+.recon-tab-pill.active .badge-count {
+    background: rgba(255, 255, 255, 0.25);
+    color: var(--tax-white);
+}
+
+@media (max-width: 1200px) {
+    .recon-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+    .recon-kpi-grid { grid-template-columns: 1fr; }
+}
+
+@media print {
+    .no-print, nav, header, .btn, .tax-suite-ribbon, .filter-console-card { display: none !important; }
+    body { background: #fff !important; }
+    .recon-app-shell { padding: 0 !important; max-width: 100% !important; }
+    .table-recon-master thead th { background-color: #1e293b !important; color: #fff !important; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="recon-app-shell">
+
+    <!-- 1. Master Suite Navigation Ribbon -->
+    <div class="tax-suite-ribbon no-print">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap">
+            <i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:
+        </span>
+        <a href="{% url 'taxation:dashboard' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-chart-pie text-secondary"></i> VAT Overview
+        </a>
+        <a href="{% url 'taxation:daily_vat_report' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-day text-secondary"></i> Day-Wise VAT Ledger
+        </a>
+        <a href="{% url 'taxation:sales_register' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-book-open text-secondary"></i> Sales Book (Annex 5)
+        </a>
+        <a href="{% url 'taxation:purchase_register' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-truck-ramp-box text-secondary"></i> Purchase Book (Annex 7)
+        </a>
+        <a href="{% url 'taxation:six_month_report' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-week text-secondary"></i> 6-Month VAT Report
+        </a>
+        <a href="{% url 'taxation:reconciliation' %}" class="tax-nav-pill active text-nowrap">
+            <i class="fas fa-scale-balanced text-white"></i> VAT ↔ GL Reconciliation
+        </a>
+    </div>
+
+    <!-- 2. Header & Action Controls -->
+    <div class="page-hero-header">
+        <div class="page-hero-title">
+            <h3>
+                <i class="fas fa-scale-balanced text-primary"></i>
+                <span>VAT Registers to General Ledger Audit Reconciliation</span>
+                {% if fiscal_year %}
+                    <span class="badge bg-dark text-white font-mono fs-2xs px-3 py-1.5 rounded-pill">
+                        FY {{ fiscal_year }}
+                    </span>
+                {% endif %}
+            </h3>
+            <p class="page-hero-subtitle">
+                Forensic double-entry audit comparing statutory VAT registers directly against GL control accounts (Account 2210 Output VAT &amp; Account 1410 Input VAT).
+            </p>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 no-print flex-wrap">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn-hero-action btn-outline-success btn btn-sm shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export Audit CSV
+            </a>
+            <button class="btn-hero-action btn btn-outline-dark btn-sm shadow-xs" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Audit Sheet
+            </button>
+            <a href="{% url 'accounting:coa' %}" class="btn-hero-action btn btn-outline-secondary btn-sm shadow-xs">
+                <i class="fas fa-sitemap me-1"></i> Chart of Accounts
+            </a>
+        </div>
+    </div>
+
+    <!-- 3. Overall Reconciliation Parity Status Banner -->
+    <div class="recon-status-banner {% if is_reconciled %}balanced{% else %}discrepancy{% endif %}">
+        <div class="d-flex align-items-center gap-3">
+            <div class="banner-icon-bubble">
+                <i class="fas {% if is_reconciled %}fa-check-double{% else %}fa-triangle-exclamation{% endif %}"></i>
+            </div>
+            <div>
+                <h5 class="fw-bold mb-1">
+                    {% if is_reconciled %}
+                        PERFECT PARITY: VAT REGISTERS AND GENERAL LEDGER MATCH WITH 0.00 VARIANCE
+                    {% else %}
+                        AUDIT DISCREPANCIES DETECTED: REGISTERS AND GENERAL LEDGER DO NOT MATCH
+                    {% endif %}
+                </h5>
+                <p class="mb-0 fs-xs opacity-85">
+                    {% if is_reconciled %}
+                        Every single transaction in the sales and purchase registers is accounted for in posted double-entry journal vouchers.
+                    {% else %}
+                        {{ discrepancies|length }} transaction discrepancy(ies) detected. Net difference requires review to align tax books.
+                    </p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            {% if not is_reconciled %}
+            <div class="banner-metric-pill">
+                <span class="fs-2xs fw-bold text-muted text-uppercase">Exceptions:</span>
+                <strong class="font-mono fs-sm text-danger">{{ discrepancies|length }} Items</strong>
+            </div>
+            <div class="banner-metric-pill">
+                <span class="fs-2xs fw-bold text-muted text-uppercase">Net Variance:</span>
+                <strong class="font-mono fs-sm text-danger">Rs. {{ net_variance|default:0|floatformat:2|intcomma }}</strong>
+            </div>
+            {% endif %}
+            <div class="banner-metric-pill font-mono fs-xs">
+                <span class="text-muted">Scope:</span>
+                <strong class="text-dark">{{ period_label }}</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. Multi-Calendar Filter Console -->
+    <div class="filter-console-card no-print">
+        <form method="get" class="row g-2 align-items-end" id="reconFilterForm">
+            <!-- 1. Fiscal Year -->
+            <div class="col-12 col-md-3">
+                <label><i class="fas fa-landmark text-primary me-1"></i> Nepali Fiscal Year (आर्थिक वर्ष)</label>
+                <select name="fiscal_year" id="reconFySelect" class="form-select fw-bold text-dark">
+                    <option value="">-- All / Filter by Month --</option>
+                    {% for fy in available_fiscal_years %}
+                        <option value="{{ fy }}" {% if request.GET.fiscal_year == fy or fiscal_year == fy and is_fiscal_year_mode %}selected{% endif %}>
+                            Fiscal Year {{ fy }} (आ.व. {{ fy }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 2. BS Month -->
+            <div class="col-6 col-md-2">
+                <label><i class="far fa-calendar text-primary me-1"></i> B.S. Month (महिना)</label>
+                <select name="bs_month" id="reconBsMonthSelect" class="form-select fw-semibold text-dark">
+                    <option value="">Full Year / All Months</option>
+                    {% for m in nepali_months %}
+                        <option value="{{ m.num }}" {% if bs_month == m.num and is_month_mode %}selected{% endif %}>
+                            {{ m.num }}. {{ m.name_en }} ({{ m.name_np }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 3. BS Year -->
+            <div class="col-6 col-md-2">
+                <label><i class="fas fa-calendar-alt text-primary me-1"></i> B.S. Year (वर्ष)</label>
+                <select name="bs_year" id="reconBsYearSelect" class="form-select font-mono fw-semibold">
+                    {% for yr in available_bs_years %}
+                        <option value="{{ yr }}" {% if bs_year == yr %}selected{% endif %}>{{ yr }} BS</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 4. Start Date BS -->
+            <div class="col-6 col-md-2">
+                <label>Start Date (B.S.)</label>
+                <input type="text" name="start_date_bs" id="reconStartDateBs" value="{{ start_date_bs }}" class="form-control font-mono nepali-datepicker text-center fw-bold" placeholder="YYYY-MM-DD" autocomplete="off">
+            </div>
+
+            <!-- 5. End Date BS -->
+            <div class="col-6 col-md-2">
+                <label>End Date (B.S.)</label>
+                <input type="text" name="end_date_bs" id="reconEndDateBs" value="{{ end_date_bs }}" class="form-control font-mono nepali-datepicker text-center fw-bold" placeholder="YYYY-MM-DD" autocomplete="off">
+            </div>
+
+            <!-- 6. Action Button -->
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 fw-bold" style="height: 38px;">
+                    <i class="fas fa-filter me-1"></i> Filter
+                </button>
+                {% if request.GET.fiscal_year or request.GET.bs_month or request.GET.start_date_bs or request.GET.end_date_bs %}
+                    <a href="{% url 'taxation:reconciliation' %}" class="btn btn-outline-secondary btn-sm d-flex align-items-center justify-content-center" style="height: 38px;" title="Reset Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-2 border-top fs-xs text-muted">
+            <div>
+                Period: <strong class="text-primary font-mono">{{ period_label }}</strong> &bull; AD Range: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong>
+            </div>
+            <div>
+                Store Terminal: <strong>{{ branch.name|default:ACTIVE_BRANCH.name }}</strong> ({{ branch.code|default:ACTIVE_BRANCH.code }})
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. Four Core Reconciliation Comparison KPI Cards -->
+    <div class="recon-kpi-grid">
+        <!-- Card 1: Output VAT Comparison -->
+        <div class="recon-kpi-box card-output">
+            <div>
+                <div class="kpi-header-row">
+                    <span class="kpi-label-text">1. Output VAT Comparison</span>
+                    <span class="kpi-stat-badge {% if output_vat.is_matched %}matched{% else %}variance{% endif %}">
+                        {% if output_vat.is_matched %}Matched (0.00){% else %}Variance{% endif %}
+                    </span>
+                </div>
+
+                <div class="kpi-compare-stack">
+                    <div class="kpi-compare-row">
+                        <span class="lbl">Sales Book (Annex 5 Net):</span>
+                        <span class="val text-dark">Rs. {{ output_vat.register_amount|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                    <div class="kpi-compare-row">
+                        <span class="lbl">GL Control Account 2210:</span>
+                        <span class="val text-primary">Rs. {{ output_vat.gl_amount|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="kpi-footer-variance">
+                <span class="text-muted">Output VAT Discrepancy:</span>
+                <strong class="font-mono fs-xs {% if output_vat.is_matched %}text-success{% else %}text-danger{% endif %}">
+                    Rs. {{ output_vat.variance|default:0|floatformat:2|intcomma }}
+                </strong>
+            </div>
+        </div>
+
+        <!-- Card 2: Input VAT Comparison -->
+        <div class="recon-kpi-box card-input">
+            <div>
+                <div class="kpi-header-row">
+                    <span class="kpi-label-text">2. Input VAT Comparison</span>
+                    <span class="kpi-stat-badge {% if input_vat.is_matched %}matched{% else %}variance{% endif %}">
+                        {% if input_vat.is_matched %}Matched (0.00){% else %}Variance{% endif %}
+                    </span>
+                </div>
+
+                <div class="kpi-compare-stack">
+                    <div class="kpi-compare-row">
+                        <span class="lbl">Purchase Book (Annex 7 Net):</span>
+                        <span class="val text-dark">Rs. {{ input_vat.register_amount|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                    <div class="kpi-compare-row">
+                        <span class="lbl">GL Control Account 1410:</span>
+                        <span class="val text-success">Rs. {{ input_vat.gl_amount|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="kpi-footer-variance">
+                <span class="text-muted">Input VAT Discrepancy:</span>
+                <strong class="font-mono fs-xs {% if input_vat.is_matched %}text-success{% else %}text-danger{% endif %}">
+                    Rs. {{ input_vat.variance|default:0|floatformat:2|intcomma }}
+                </strong>
+            </div>
+        </div>
+
+        <!-- Card 3: Net VAT Assessment Comparison -->
+        <div class="recon-kpi-box card-net">
+            <div>
+                <div class="kpi-header-row">
+                    <span class="kpi-label-text">3. Net VAT (The Difference)</span>
+                    <span class="kpi-stat-badge {% if net_variance == 0 %}matched{% else %}variance{% endif %}">
+                        {% if net_variance == 0 %}Balanced{% else %}Diff Detected{% endif %}
+                    </span>
+                </div>
+
+                <div class="kpi-compare-stack">
+                    <div class="kpi-compare-row">
+                        <span class="lbl">Registers Net Assessment:</span>
+                        <span class="val text-dark">Rs. {{ net_vat.register_net|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                    <div class="kpi-compare-row">
+                        <span class="lbl">GL Books Net Balance:</span>
+                        <span class="val text-primary">Rs. {{ net_vat.gl_net|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="kpi-footer-variance">
+                <span class="text-muted">Net Assessment Variance:</span>
+                <strong class="font-mono fs-xs {% if net_variance == 0 %}text-success{% else %}text-danger{% endif %}">
+                    Rs. {{ net_variance|default:0|floatformat:2|intcomma }}
+                </strong>
+            </div>
+        </div>
+
+        <!-- Card 4: Transaction Integrity Audit -->
+        <div class="recon-kpi-box card-audit">
+            <div>
+                <div class="kpi-header-row">
+                    <span class="kpi-label-text">4. Transaction Integrity</span>
+                    <span class="badge bg-dark text-white font-mono fs-3xs">{{ summary.total_transactions_checked|default:0 }} Checked</span>
+                </div>
+
+                <div class="kpi-compare-stack">
+                    <div class="kpi-compare-row">
+                        <span class="lbl">Matched Vouchers:</span>
+                        <span class="val text-success">{{ summary.total_matched|default:0 }}</span>
+                    </div>
+                    <div class="kpi-compare-row">
+                        <span class="lbl">Unmatched / Exceptions:</span>
+                        <span class="val {% if summary.total_unmatched > 0 %}text-danger{% else %}text-muted{% endif %}">
+                            {{ summary.total_unmatched|default:0 }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="kpi-footer-variance">
+                <span class="text-muted">Unlinked / Orphan Entries:</span>
+                <strong class="font-mono fs-xs {% if summary.orphan_gl_entries_count > 0 %}text-danger{% else %}text-muted{% endif %}">
+                    {{ summary.orphan_gl_entries_count|default:0 }} Entries
+                </strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- 6. Total-Level Comparison Summary Table (Rigid Constant Widths) -->
+    <div class="table-panel-card">
+        <div class="table-panel-header">
+            <h5 class="table-panel-title">
+                <i class="fas fa-table-columns text-primary"></i> Total-Level Statutory Registers vs. General Ledger Control Ledgers
+            </h5>
+            <span class="badge bg-dark text-white font-mono px-3 py-1.5 rounded-pill fs-2xs">
+                Control Accounts 2210 &amp; 1410
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table-recon-master">
+                <thead>
+                    <tr>
+                        <th class="ps-4 col-flow-desc">Tax Dimension / Movement Flow</th>
+                        <th class="col-num col-reg-total">Statutory Register Total</th>
+                        <th class="col-num col-gl-total">GL Control Account Balance</th>
+                        <th class="col-num col-var-total">Difference (Variance)</th>
+                        <th class="col-center col-status-tag">Status</th>
+                        <th class="pe-4 col-gl-account">Associated GL Account</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Output VAT Row -->
+                    <tr>
+                        <td class="ps-4 fw-bold text-dark">
+                            <i class="fas fa-arrow-up-right-from-square text-primary me-2"></i>
+                            Output VAT (Sales Invoices minus Sales Returns)
+                        </td>
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ output_vat.register_amount|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-bold text-primary font-mono">
+                            Rs. {{ output_vat.gl_amount|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-extrabold font-mono {% if output_vat.is_matched %}text-success{% else %}text-danger{% endif %}">
+                            Rs. {{ output_vat.variance|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-center">
+                            {% if output_vat.is_matched %}
+                                <span class="badge-recon-status badge-status-balanced">Balanced (0.00)</span>
+                            {% else %}
+                                <span class="badge-recon-status badge-status-discrepancy">Discrepancy</span>
+                            {% endif %}
+                        </td>
+                        <td class="pe-4 font-mono text-dark fs-xs">
+                            <strong>2210</strong> &bull; Output VAT 13%
+                        </td>
+                    </tr>
+
+                    <!-- Input VAT Row -->
+                    <tr>
+                        <td class="ps-4 fw-bold text-dark">
+                            <i class="fas fa-arrow-down-left-and-up-right-to-center text-success me-2"></i>
+                            Input VAT (Inward GRNs minus Debit Notes)
+                        </td>
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ input_vat.register_amount|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-bold text-success font-mono">
+                            Rs. {{ input_vat.gl_amount|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-extrabold font-mono {% if input_vat.is_matched %}text-success{% else %}text-danger{% endif %}">
+                            Rs. {{ input_vat.variance|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-center">
+                            {% if input_vat.is_matched %}
+                                <span class="badge-recon-status badge-status-balanced">Balanced (0.00)</span>
+                            {% else %}
+                                <span class="badge-recon-status badge-status-discrepancy">Discrepancy</span>
+                            {% endif %}
+                        </td>
+                        <td class="pe-4 font-mono text-dark fs-xs">
+                            <strong>1410</strong> &bull; Input VAT 13%
+                        </td>
+                    </tr>
+
+                    <!-- Net Tax Settlement Row -->
+                    <tr style="background-color: #f8fafc; font-weight: 800;">
+                        <td class="ps-4 text-uppercase text-dark fs-xs">
+                            Net Tax Liability / (Credit Assessment):
+                        </td>
+                        <td class="col-num fs-6 font-mono text-dark">
+                            Rs. {{ net_vat.register_net|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fs-6 font-mono text-primary">
+                            Rs. {{ net_vat.gl_net|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fs-6 font-mono {% if net_variance == 0 %}text-success{% else %}text-danger{% endif %}">
+                            Rs. {{ net_variance|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-center">
+                            {% if net_variance == 0 %}
+                                <span class="badge-recon-status badge-status-balanced">100% Reconciled</span>
+                            {% else %}
+                                <span class="badge-recon-status badge-status-discrepancy">Net Variance</span>
+                            {% endif %}
+                        </td>
+                        <td class="pe-4 text-muted fs-2xs font-mono">
+                            Net Difference (Output - Input)
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 7. Itemized Discrepancies Investigation Table (Rigid Column Budgeting) -->
+    <div class="table-panel-card">
+        <div class="table-panel-header">
+            <div>
+                <h5 class="table-panel-title text-danger">
+                    <i class="fas fa-triangle-exclamation"></i> Audit Exceptions &amp; Transaction Discrepancies
+                </h5>
+                <small class="text-muted fs-xs">
+                    Root cause investigation of mismatched vouchers, missing GL postings, or header vs line-item differences
+                </small>
+            </div>
+            <span class="badge {% if discrepancies %}bg-danger{% else %}bg-success{% endif %} font-mono text-white px-3 py-1.5 rounded-pill fs-xs">
+                {{ discrepancies|length }} Exception(s)
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table-recon-master">
+                <thead>
+                    <tr>
+                        <th class="ps-4 col-disc-type">Discrepancy Type</th>
+                        <th class="col-center col-disc-sev">Severity</th>
+                        <th class="col-disc-doc">Document Type</th>
+                        <th class="col-disc-ref">Document Ref</th>
+                        <th class="col-disc-date">Date</th>
+                        <th class="col-num col-disc-exp">Expected VAT</th>
+                        <th class="col-num col-disc-act">GL Entry VAT</th>
+                        <th class="col-num col-disc-diff">Variance</th>
+                        <th class="pe-4 col-disc-msg">Audit Findings &amp; Root Cause</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in discrepancies %}
+                    <tr>
+                        <td class="ps-4 col-disc-type">
+                            <span class="type-pill" title="{{ d.type }}">{{ d.type }}</span>
+                        </td>
+                        <td class="col-center col-disc-sev">
+                            <span class="severity-chip {{ d.severity|lower }}">{{ d.severity }}</span>
+                        </td>
+                        <td class="col-disc-doc fw-semibold text-dark fs-2xs">{{ d.document_type }}</td>
+                        <td class="col-disc-ref font-mono fw-bold">
+                            {% if d.document_type == 'SALES_INVOICE' %}
+                                <a href="{% url 'sales:estimate_list' %}?q={{ d.document_number }}" target="_blank" class="doc-link-pill">
+                                    {{ d.document_number }} &rarr;
+                                </a>
+                            {% elif d.document_type == 'GOODS_RECEIVED_NOTE' %}
+                                <a href="{% url 'purchases:grn_list' %}?q={{ d.document_number }}" target="_blank" class="doc-link-pill text-success">
+                                    {{ d.document_number }} &rarr;
+                                </a>
+                            {% elif d.document_type == 'SALES_RETURN' %}
+                                <a href="{% url 'sales:return_list' %}?q={{ d.document_number }}" target="_blank" class="doc-link-pill text-danger">
+                                    {{ d.document_number }} &rarr;
+                                </a>
+                            {% elif d.document_type == 'PURCHASE_RETURN' %}
+                                <a href="{% url 'purchases:purchase_return_list' %}?q={{ d.document_number }}" target="_blank" class="doc-link-pill text-warning">
+                                    {{ d.document_number }} &rarr;
+                                </a>
+                            {% else %}
+                                <a href="/accounting/journals/?q={{ d.document_number }}" target="_blank" class="doc-link-pill text-dark">
+                                    {{ d.document_number }} &rarr;
+                                </a>
+                            {% endif %}
+                        </td>
+                        <td class="col-disc-date font-mono fs-2xs text-muted">{{ d.document_date }}</td>
+                        <td class="col-num col-disc-exp">
+                            {% if d.expected != None %}
+                                Rs. {{ d.expected|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="col-num col-disc-act">
+                            {% if d.actual != None %}
+                                Rs. {{ d.actual|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="col-num col-disc-diff fw-bold text-danger">
+                            {% if d.difference != None %}
+                                Rs. {{ d.difference|floatformat:2|intcomma }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="pe-4 col-disc-msg fs-xs text-dark">{{ d.message }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center py-5 text-success">
+                            <i class="fas fa-circle-check fs-1 opacity-25 d-block mb-2"></i>
+                            <h6 class="fw-bold mb-1">Zero Discrepancies Detected!</h6>
+                            <p class="fs-xs text-muted mb-0">Every sales invoice, inward GRN, credit note, and debit note aligns with posted General Ledger entries.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 8. Multi-Category Detailed Audit Breakdown Tabs (Capsule Pills) -->
+    <div class="table-panel-card">
+        <div class="p-3 border-bottom bg-light">
+            <ul class="nav nav-pills card-header-pills gap-1" id="reconAuditTabs" role="tablist">
+                <li class="nav-item">
+                    <button class="recon-tab-pill active" id="tabSalesInvoicesBtn" data-bs-toggle="pill" data-bs-target="#tabSalesInvoices" type="button">
+                        <i class="fas fa-file-invoice text-primary"></i>
+                        <span>Sales Invoices</span>
+                        <span class="badge-count">{{ sales_invoices|length }}</span>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="recon-tab-pill" id="tabSalesReturnsBtn" data-bs-toggle="pill" data-bs-target="#tabSalesReturns" type="button">
+                        <i class="fas fa-rotate-left text-danger"></i>
+                        <span>Sales Returns</span>
+                        <span class="badge-count">{{ sales_returns|length }}</span>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="recon-tab-pill" id="tabGrnBtn" data-bs-toggle="pill" data-bs-target="#tabGrn" type="button">
+                        <i class="fas fa-truck-ramp-box text-success"></i>
+                        <span>Inward GRNs</span>
+                        <span class="badge-count">{{ grn_purchases|length }}</span>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="recon-tab-pill" id="tabPurchaseReturnsBtn" data-bs-toggle="pill" data-bs-target="#tabPurchaseReturns" type="button">
+                        <i class="fas fa-truck-moving text-warning"></i>
+                        <span>Purchase Returns</span>
+                        <span class="badge-count">{{ purchase_returns|length }}</span>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="recon-tab-pill" id="tabOrphanGlBtn" data-bs-toggle="pill" data-bs-target="#tabOrphanGl" type="button">
+                        <i class="fas fa-circle-question text-secondary"></i>
+                        <span>Orphan / Manual GL</span>
+                        <span class="badge-count">{{ orphan_gl_entries|length }}</span>
+                    </button>
+                </li>
+            </ul>
+        </div>
+
+        <div class="tab-content p-3" id="reconAuditTabsContent">
+            <!-- TAB 1: SALES INVOICES -->
+            <div class="tab-pane fade show active" id="tabSalesInvoices" role="tabpanel">
+                <div class="table-responsive">
+                    <table class="table-recon-master table-hover">
+                        <thead>
+                            <tr>
+                                <th class="ps-3" style="width: 170px;">Invoice No</th>
+                                <th style="width: 140px;">Date (BS / AD)</th>
+                                <th>Customer Name</th>
+                                <th class="col-num" style="width: 130px;">Expected VAT</th>
+                                <th class="col-num" style="width: 130px;">GL Output VAT</th>
+                                <th class="col-num" style="width: 130px;">Difference</th>
+                                <th class="col-center" style="width: 110px;">Status</th>
+                                <th class="pe-3" style="width: 180px;">GL Journal Entry</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for inv in sales_invoices %}
+                            <tr>
+                                <td class="ps-3 font-mono fw-bold">
+                                    <a href="/sales/estimates/{{ inv.document_id }}/" target="_blank" class="doc-link-pill">
+                                        {{ inv.document_number }} &rarr;
+                                    </a>
+                                </td>
+                                <td class="font-mono text-muted fs-xs">{{ inv.document_date_bs }} <small>({{ inv.document_date|date:"Y-m-d" }})</small></td>
+                                <td class="text-dark fw-semibold">{{ inv.party_name }}</td>
+                                <td class="col-num">Rs. {{ inv.expected_vat|floatformat:2|intcomma }}</td>
+                                <td class="col-num text-primary">Rs. {{ inv.gl_vat|floatformat:2|intcomma }}</td>
+                                <td class="col-num fw-bold {% if inv.difference > 0 %}text-danger{% else %}text-success{% endif %}">
+                                    Rs. {{ inv.difference|floatformat:2|intcomma }}
+                                </td>
+                                <td class="col-center">
+                                    {% if inv.is_matched %}
+                                        <span class="badge-recon-status badge-status-balanced">MATCHED</span>
+                                    {% else %}
+                                        <span class="badge-recon-status badge-status-discrepancy">EXCEPTION</span>
+                                    {% endif %}
+                                </td>
+                                <td class="pe-3 font-mono fs-xs">
+                                    {% if inv.gl_voucher_number %}
+                                        <a href="/accounting/journals/?q={{ inv.gl_voucher_number }}" target="_blank" class="text-secondary text-decoration-none">
+                                            {{ inv.gl_voucher_number }}
+                                        </a>
+                                    {% else %}
+                                        <span class="text-danger fw-bold">Missing GL Voucher</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="8" class="text-center py-4 text-muted">No sales invoices in this period.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 2: SALES RETURNS -->
+            <div class="tab-pane fade" id="tabSalesReturns" role="tabpanel">
+                <div class="table-responsive">
+                    <table class="table-recon-master table-hover">
+                        <thead>
+                            <tr>
+                                <th class="ps-3" style="width: 170px;">Credit Note No</th>
+                                <th style="width: 140px;">Date (BS / AD)</th>
+                                <th>Customer Name</th>
+                                <th style="width: 150px;">Orig Invoice</th>
+                                <th class="col-num" style="width: 130px;">Expected VAT Rev</th>
+                                <th class="col-num" style="width: 130px;">GL VAT Rev</th>
+                                <th class="col-num" style="width: 130px;">Difference</th>
+                                <th class="col-center" style="width: 110px;">Status</th>
+                                <th class="pe-3" style="width: 180px;">GL Credit Note</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ret in sales_returns %}
+                            <tr>
+                                <td class="ps-3 font-mono fw-bold">
+                                    <a href="/sales/returns/{{ ret.document_id }}/" target="_blank" class="doc-link-pill text-danger">
+                                        {{ ret.document_number }} &rarr;
+                                    </a>
+                                </td>
+                                <td class="font-mono text-muted fs-xs">{{ ret.document_date_bs }} <small>({{ ret.document_date|date:"Y-m-d" }})</small></td>
+                                <td class="text-dark fw-semibold">{{ ret.party_name }}</td>
+                                <td class="font-mono">{{ ret.original_invoice_number }}</td>
+                                <td class="col-num">Rs. {{ ret.expected_vat|floatformat:2|intcomma }}</td>
+                                <td class="col-num text-danger">Rs. {{ ret.gl_vat|floatformat:2|intcomma }}</td>
+                                <td class="col-num fw-bold {% if ret.difference > 0 %}text-danger{% else %}text-success{% endif %}">
+                                    Rs. {{ ret.difference|floatformat:2|intcomma }}
+                                </td>
+                                <td class="col-center">
+                                    {% if ret.is_matched %}
+                                        <span class="badge-recon-status badge-status-balanced">MATCHED</span>
+                                    {% else %}
+                                        <span class="badge-recon-status badge-status-discrepancy">EXCEPTION</span>
+                                    {% endif %}
+                                </td>
+                                <td class="pe-3 font-mono fs-xs">
+                                    {% if ret.gl_voucher_number %}
+                                        <a href="/accounting/journals/?q={{ ret.gl_voucher_number }}" target="_blank" class="text-secondary text-decoration-none">
+                                            {{ ret.gl_voucher_number }}
+                                        </a>
+                                    {% else %}
+                                        <span class="text-danger fw-bold">Missing GL Credit Note</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="9" class="text-center py-4 text-muted">No sales returns in this period.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 3: INWARD GRNS -->
+            <div class="tab-pane fade" id="tabGrn" role="tabpanel">
+                <div class="table-responsive">
+                    <table class="table-recon-master table-hover">
+                        <thead>
+                            <tr>
+                                <th class="ps-3" style="width: 170px;">GRN No</th>
+                                <th style="width: 140px;">Supplier Bill No</th>
+                                <th style="width: 130px;">Date (BS / AD)</th>
+                                <th>Supplier Name</th>
+                                <th class="col-num" style="width: 130px;">Expected Input VAT</th>
+                                <th class="col-num" style="width: 130px;">GL Input VAT</th>
+                                <th class="col-num" style="width: 130px;">Difference</th>
+                                <th class="col-center" style="width: 110px;">Status</th>
+                                <th class="pe-3" style="width: 180px;">GL Journal Entry</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for grn in grn_purchases %}
+                            <tr>
+                                <td class="ps-3 font-mono fw-bold">
+                                    <a href="/purchases/grn/{{ grn.document_id }}/" target="_blank" class="doc-link-pill text-success">
+                                        {{ grn.document_number }} &rarr;
+                                    </a>
+                                </td>
+                                <td class="font-mono text-dark">{{ grn.supplier_bill_no }}</td>
+                                <td class="font-mono text-muted fs-xs">{{ grn.document_date_bs }} <small>({{ grn.document_date|date:"Y-m-d" }})</small></td>
+                                <td class="text-dark fw-semibold">{{ grn.party_name }}</td>
+                                <td class="col-num">Rs. {{ grn.expected_vat|floatformat:2|intcomma }}</td>
+                                <td class="col-num text-success">Rs. {{ grn.gl_vat|floatformat:2|intcomma }}</td>
+                                <td class="col-num fw-bold {% if grn.difference > 0 %}text-danger{% else %}text-success{% endif %}">
+                                    Rs. {{ grn.difference|floatformat:2|intcomma }}
+                                </td>
+                                <td class="col-center">
+                                    {% if grn.is_matched %}
+                                        <span class="badge-recon-status badge-status-balanced">MATCHED</span>
+                                    {% else %}
+                                        <span class="badge-recon-status badge-status-discrepancy">EXCEPTION</span>
+                                    {% endif %}
+                                </td>
+                                <td class="pe-3 font-mono fs-xs">
+                                    {% if grn.gl_voucher_number %}
+                                        <a href="/accounting/journals/?q={{ grn.gl_voucher_number }}" target="_blank" class="text-secondary text-decoration-none">
+                                            {{ grn.gl_voucher_number }}
+                                        </a>
+                                    {% else %}
+                                        <span class="text-danger fw-bold">Missing GL Journal</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="9" class="text-center py-4 text-muted">No inward purchase GRNs in this period.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 4: PURCHASE RETURNS -->
+            <div class="tab-pane fade" id="tabPurchaseReturns" role="tabpanel">
+                <div class="table-responsive">
+                    <table class="table-recon-master table-hover">
+                        <thead>
+                            <tr>
+                                <th class="ps-3" style="width: 170px;">Debit Note No</th>
+                                <th style="width: 130px;">Date (BS / AD)</th>
+                                <th>Supplier Name</th>
+                                <th style="width: 140px;">Orig Bill Ref</th>
+                                <th class="col-num" style="width: 130px;">Expected VAT Rev</th>
+                                <th class="col-num" style="width: 130px;">GL VAT Rev</th>
+                                <th class="col-num" style="width: 130px;">Difference</th>
+                                <th class="col-center" style="width: 110px;">Status</th>
+                                <th class="pe-3" style="width: 180px;">GL Debit Note</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for pret in purchase_returns %}
+                            <tr>
+                                <td class="ps-3 font-mono fw-bold">
+                                    <a href="/purchases/returns/{{ pret.document_id }}/" target="_blank" class="doc-link-pill text-warning">
+                                        {{ pret.document_number }} &rarr;
+                                    </a>
+                                </td>
+                                <td class="font-mono text-muted fs-xs">{{ pret.document_date_bs }} <small>({{ pret.document_date|date:"Y-m-d" }})</small></td>
+                                <td class="text-dark fw-semibold">{{ pret.party_name }}</td>
+                                <td class="font-mono">{{ pret.original_bill_reference|default:"-" }}</td>
+                                <td class="col-num">Rs. {{ pret.expected_vat|floatformat:2|intcomma }}</td>
+                                <td class="col-num text-danger">Rs. {{ pret.gl_vat|floatformat:2|intcomma }}</td>
+                                <td class="col-num fw-bold {% if pret.difference > 0 %}text-danger{% else %}text-success{% endif %}">
+                                    Rs. {{ pret.difference|floatformat:2|intcomma }}
+                                </td>
+                                <td class="col-center">
+                                    {% if pret.is_matched %}
+                                        <span class="badge-recon-status badge-status-balanced">MATCHED</span>
+                                    {% else %}
+                                        <span class="badge-recon-status badge-status-discrepancy">EXCEPTION</span>
+                                    {% endif %}
+                                </td>
+                                <td class="pe-3 font-mono fs-xs">
+                                    {% if pret.gl_voucher_number %}
+                                        <a href="/accounting/journals/?q={{ pret.gl_voucher_number }}" target="_blank" class="text-secondary text-decoration-none">
+                                            {{ pret.gl_voucher_number }}
+                                        </a>
+                                    {% else %}
+                                        <span class="text-danger fw-bold">Missing GL Debit Note</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="9" class="text-center py-4 text-muted">No purchase returns in this period.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 5: ORPHAN GL ENTRIES -->
+            <div class="tab-pane fade" id="tabOrphanGl" role="tabpanel">
+                <div class="table-responsive">
+                    <table class="table-recon-master table-hover">
+                        <thead>
+                            <tr>
+                                <th class="ps-3" style="width: 170px;">GL Voucher No</th>
+                                <th style="width: 120px;">Type</th>
+                                <th style="width: 130px;">Date (BS / AD)</th>
+                                <th style="width: 140px;">Source Module</th>
+                                <th style="width: 140px;">Reference Doc</th>
+                                <th class="col-num" style="width: 130px;">Output VAT Impact</th>
+                                <th class="col-num" style="width: 130px;">Input VAT Impact</th>
+                                <th class="pe-3">Operational Narration</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for orph in orphan_gl_entries %}
+                            <tr>
+                                <td class="ps-3 font-mono fw-bold">
+                                    <a href="/accounting/journals/?q={{ orph.voucher_number }}" target="_blank" class="doc-link-pill text-primary">
+                                        {{ orph.voucher_number }} &rarr;
+                                    </a>
+                                </td>
+                                <td>{{ orph.voucher_type_display }}</td>
+                                <td class="font-mono text-muted fs-xs">{{ orph.entry_date_bs }} <small>({{ orph.entry_date }})</small></td>
+                                <td><span class="badge bg-light text-dark border font-mono fs-3xs">{{ orph.source_module }}</span></td>
+                                <td class="font-mono">{{ orph.reference_document|default:"-" }}</td>
+                                <td class="col-num font-mono text-primary">Rs. {{ orph.output_vat_impact|floatformat:2|intcomma }}</td>
+                                <td class="col-num font-mono text-success">Rs. {{ orph.input_vat_impact|floatformat:2|intcomma }}</td>
+                                <td class="pe-3 fs-xs text-muted">{{ orph.narration }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="8" class="text-center py-5 text-success">
+                                    <i class="fas fa-check-circle fs-2 opacity-25 d-block mb-2"></i>
+                                    No orphan or manual journal entries found affecting VAT control accounts.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,793 @@
+{% extends "core/base.html" %}
+{% load humanize static %}
+
+{% block title %}Scan &amp; Enter IMEIs - GRN {{ grn.grn_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+:root {
+    --imei-primary: #175cd3;
+    --imei-success: #079455;
+    --imei-warning: #dc6803;
+    --imei-danger: #d92d20;
+    --imei-border: #e4e7ec;
+    --imei-surface: #ffffff;
+    --imei-bg: #f8fafc;
+}
+
+.imei-scan-wrapper {
+    max-width: 1440px;
+    margin: 0 auto;
+}
+
+.imei-kpi-card {
+    background: #ffffff;
+    border: 1px solid var(--imei-border);
+    border-radius: 14px;
+    padding: 16px 20px;
+    height: 100%;
+    box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+}
+
+.imei-scanner-hero {
+    background: #ffffff;
+    border: 2px dashed #b2ccff;
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.2s ease;
+}
+
+.imei-scanner-hero.scan-active {
+    border-color: var(--imei-primary);
+    background: #eff8ff;
+    box-shadow: 0 0 0 4px rgba(23, 92, 211, 0.1);
+}
+
+.scanner-input-giant {
+    height: 52px !important;
+    font-size: 1.25rem !important;
+    letter-spacing: 0.08em;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace) !important;
+    font-weight: 700;
+    text-align: center;
+    border-radius: 10px;
+    border: 1.5px solid #cbd5e1;
+    background-color: #ffffff;
+}
+
+.scanner-input-giant:focus {
+    border-color: var(--imei-primary) !important;
+    box-shadow: 0 0 0 3px rgba(23, 92, 211, 0.2) !important;
+}
+
+.model-tab-btn {
+    border: 1px solid var(--imei-border);
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 14px 18px;
+    text-align: left;
+    width: 100%;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.model-tab-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+}
+
+.model-tab-btn.active {
+    border-color: var(--imei-primary);
+    background: #eff8ff;
+    box-shadow: 0 2px 8px rgba(23, 92, 211, 0.08);
+}
+
+.imei-badge-pill {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
+}
+
+.flash-success-row {
+    animation: flashRow 1.2s ease-out;
+}
+
+@keyframes flashRow {
+    0% { background-color: rgba(7, 148, 85, 0.25); }
+    100% { background-color: transparent; }
+}
+
+.imei-trash-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid #fecaca;
+    background: #fef2f2;
+    color: #dc2626;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.imei-trash-btn:hover {
+    background: #dc2626;
+    color: #ffffff;
+    border-color: #dc2626;
+}
+
+.sticky-save-dock {
+    position: sticky;
+    bottom: 12px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--imei-border);
+    border-radius: 14px;
+    padding: 14px 24px;
+    box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.12);
+    z-index: 1020;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="imei-scan-wrapper py-3 px-2 px-md-4">
+
+    <!-- Breadcrumb Navigation -->
+    <nav aria-label="breadcrumb" class="mb-2">
+        <ol class="breadcrumb fs-xs mb-1">
+            <li class="breadcrumb-item"><a href="{% url 'purchases:grn_list' %}" class="text-decoration-none">Purchases</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'purchases:grn_detail' grn.pk %}" class="text-decoration-none font-monospace">{{ grn.grn_number }}</a></li>
+            <li class="breadcrumb-item active text-primary fw-bold" aria-current="page">Scan &amp; Enter IMEIs</li>
+        </ol>
+    </nav>
+
+    <!-- Page Header & Metadata Toolbar -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 bg-white p-3 rounded-4 border shadow-xs">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-primary text-white font-monospace fs-xs px-2.5 py-1 rounded-pill">{{ grn.grn_number }}</span>
+                <h4 class="fw-bold text-dark mb-0">Scan &amp; Enter Physical IMEIs</h4>
+                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 rounded-pill px-2.5 py-1 fs-2xs fw-bold">
+                    Hardware Serial Allocation
+                </span>
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Supplier: <strong class="text-dark">{{ grn.supplier.company_name }}</strong> &bull; 
+                Bill Ref: <strong class="font-monospace text-primary">{{ grn.supplier_bill_no }}</strong> &bull; 
+                Inward Date: <strong>{{ grn.bill_date }} ({{ grn.bill_date_bs|default:"-" }} BS)</strong> &bull; 
+                Warehouse: <strong>{{ grn.branch.name }} ({{ grn.branch.code }})</strong>
+            </p>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <a href="{% url 'purchases:grn_detail' grn.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-bold">
+                &larr; Back to GRN Slip
+            </a>
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold text-dark">
+                <i class="fas fa-cash-register me-1"></i> Open POS Terminal
+            </a>
+        </div>
+    </div>
+
+    <!-- Safety & Accounting Protection Alert Banner -->
+    <div class="alert alert-success bg-success bg-opacity-10 border-success border-opacity-25 rounded-4 p-3 mb-4 d-flex align-items-center gap-3">
+        <i class="fas fa-shield-halved text-success fs-3 flex-shrink-0"></i>
+        <div>
+            <strong class="text-success d-block mb-0.5">Strict Inventory &amp; Ledger Protection Active:</strong>
+            <span class="text-dark fs-xs">
+                This screen only tags physical 15-digit IMEI serials to the mobile phones already received on this bill. 
+                It strictly <strong>does not add duplicate stock quantity</strong>, does not alter purchase rates, 
+                does not change supplier debt, and does not post extra accounting journals.
+            </span>
+        </div>
+    </div>
+
+    <!-- Live Counter Dashboard (3 Progress KPI Cards) -->
+    <div class="row g-3 mb-4">
+        <!-- 1. Total Handsets on Bill -->
+        <div class="col-12 col-md-4">
+            <div class="imei-kpi-card border-start border-primary border-4">
+                <span class="text-muted fs-2xs text-uppercase fw-bold d-block">1. Total Handsets on this Bill</span>
+                <h3 class="fw-extrabold text-primary font-monospace mt-1 mb-0" id="dispTotalHandsetsCount">
+                    {{ total_handsets|default:0 }} Units
+                </h3>
+                <small class="text-muted fs-3xs">Sum of serialized mobile quantities</small>
+            </div>
+        </div>
+
+        <!-- 2. IMEIs Already Linked -->
+        <div class="col-12 col-md-4">
+            <div class="imei-kpi-card border-start border-success border-4">
+                <span class="text-muted fs-2xs text-uppercase fw-bold d-block">2. Total IMEIs Linked / In Stock</span>
+                <h3 class="fw-extrabold text-success font-monospace mt-1 mb-0" id="dispTotalLinkedCount">
+                    {{ total_linked|default:0 }} Scanned
+                </h3>
+                <small class="text-muted fs-3xs">Tracked physical phone units in warehouse</small>
+            </div>
+        </div>
+
+        <!-- 3. Remaining to Scan -->
+        <div class="col-12 col-md-4">
+            <div class="imei-kpi-card border-start border-warning border-4" style="background:#fffdfa;">
+                <span class="text-warning-emphasis fs-2xs text-uppercase fw-bold d-block">3. Remaining to Scan</span>
+                <h3 class="fw-extrabold text-warning-emphasis font-monospace mt-1 mb-0" id="dispTotalRemainingCount">
+                    {{ total_remaining|default:0 }} Pending
+                </h3>
+                <small class="text-muted fs-3xs">Phones awaiting physical barcode scanning</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Workspace Form -->
+    <form method="post" id="manageImeisMasterForm" novalidate>
+        {% csrf_token %}
+        <!-- Hidden input storing all serialized JSON data upon save -->
+        <input type="hidden" name="imei_payload_json" id="imeiPayloadJson" value="">
+
+        <div class="row g-4 mb-4">
+            <!-- Left Column: Handset Models Tabs / Selection (5 Cols) -->
+            <div class="col-12 col-lg-5">
+                <div class="card border-0 shadow-sm rounded-4 p-3 bg-white h-100">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                        <h6 class="fw-bold text-dark mb-0">
+                            <i class="fas fa-layer-group text-primary me-2"></i> Handset Models on this Bill
+                        </h6>
+                        <span class="badge bg-primary rounded-pill px-2.5 py-1 fs-3xs">{{ phone_items|length }} Model(s)</span>
+                    </div>
+
+                    <div class="d-flex flex-column gap-2" id="modelSelectionContainer">
+                        {% for entry in phone_items %}
+                        <div class="model-tab-btn {% if forloop.first %}active{% endif %}" 
+                             data-item-id="{{ entry.item.id }}" 
+                             data-product-name="{{ entry.product.name }}"
+                             data-sku="{{ entry.product.sku }}"
+                             data-base-qty="{{ entry.base_qty }}"
+                             data-is-dual-sim="{{ entry.is_dual_sim|yesno:'true,false' }}"
+                             data-batch="{{ entry.item.batch_number|default:'' }}"
+                             tabindex="0"
+                             role="button">
+                            <div class="d-flex justify-content-between align-items-start mb-1">
+                                <strong class="text-dark fs-xs d-block text-truncate" style="max-width: 240px;">{{ entry.product.name }}</strong>
+                                <span class="badge {% if entry.remaining_count == 0 %}bg-success text-white{% else %}bg-warning text-dark{% endif %} font-mono fs-3xs" id="badgeItem_{{ entry.item.id }}">
+                                    {% if entry.remaining_count == 0 %}Complete{% else %}{{ entry.remaining_count }} Pending{% endif %}
+                                </span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center fs-2xs text-muted">
+                                <span>Total Bought: <strong class="text-dark font-mono">{{ entry.base_qty }} Pcs</strong></span>
+                                <span class="font-mono" id="ratioItem_{{ entry.item.id }}">Linked: {{ entry.existing_imeis_count }} / {{ entry.base_qty }}</span>
+                            </div>
+                            {% if entry.is_dual_sim %}
+                            <div class="mt-1">
+                                <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 fs-3xs font-mono">Dual-SIM (IMEI 1 + IMEI 2)</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% empty %}
+                        <div class="p-4 text-center text-muted fs-xs">
+                            <i class="fas fa-boxes-stacked fs-2 text-secondary opacity-25 d-block mb-2"></i>
+                            No serialized mobile phones were found on this purchase bill.
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Barcode Scanner Gun Station & Live Scanned Table (7 Cols) -->
+            <div class="col-12 col-lg-7">
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
+                    
+                    <!-- Scanner Station Hero Card -->
+                    <div class="imei-scanner-hero scan-active mb-3" id="scannerStationBox">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <i class="fas fa-barcode text-primary fs-5"></i>
+                                <div>
+                                    <strong class="text-dark fs-xs d-block" id="activeModelTitleText">Select a Phone Model</strong>
+                                    <small class="text-muted fs-3xs" id="activeModelSubText">Aim your USB / Bluetooth scanner gun at the phone box barcode</small>
+                                </div>
+                            </div>
+                            <!-- Mode indicator badge -->
+                            <span class="badge bg-dark font-mono text-white fs-3xs" id="activeScanModeBadge">IMEI 1 (SIM 1)</span>
+                        </div>
+
+                        <!-- Barcode Gun Scanner Input Box -->
+                        <div class="mb-2">
+                            <input type="text" 
+                                   id="barcodeScannerInput" 
+                                   class="form-control scanner-input-giant" 
+                                   placeholder="Scan barcode with gun or type 15 digits..." 
+                                   autocomplete="off" 
+                                   autofocus>
+                        </div>
+
+                        <!-- Dual-SIM Helper Controls -->
+                        <div class="d-flex justify-content-between align-items-center pt-1 fs-3xs text-muted">
+                            <span id="scannerInstructionText">
+                                <i class="fas fa-bolt text-warning me-1"></i> Pull trigger on phone box: Pressing Enter captures the IMEI automatically.
+                            </span>
+                            <button type="button" class="btn btn-link p-0 text-primary fs-3xs text-decoration-none fw-bold" id="btnManualAddModal">
+                                + Manual Multi-Paste
+                            </button>
+                        </div>
+
+                        <!-- Duplicate / Warning Toast Notification Strip -->
+                        <div id="scannerAlertBanner" class="alert alert-danger p-2 fs-xs rounded-3 mb-0 mt-2 d-none"></div>
+                    </div>
+
+                    <!-- Live Scanned List for the Active Model -->
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-2">
+                        <h6 class="fw-bold text-dark fs-xs mb-0">
+                            <i class="fas fa-list-check text-secondary me-1"></i> Physical IMEIs for Current Model
+                        </h6>
+                        <span class="badge bg-light text-dark border font-mono fs-3xs" id="currentModelCounterBadge">0 of 0 Added</span>
+                    </div>
+
+                    <div class="table-responsive flex-grow-1" style="max-height: 380px; overflow-y: auto;">
+                        <table class="table table-hover align-middle mb-0 fs-xs" id="scannedImeisTable">
+                            <thead class="bg-light text-muted fs-3xs text-uppercase">
+                                <tr>
+                                    <th style="width: 35px;" class="text-center">#</th>
+                                    <th>Primary IMEI 1</th>
+                                    <th id="thImei2Header">Secondary IMEI 2</th>
+                                    <th style="width: 110px;" class="text-center">Status</th>
+                                    <th style="width: 45px;" class="text-center">Del</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scannedImeisTableBody">
+                                <!-- Populated dynamically by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Sticky Bottom Action Dock -->
+        <div class="sticky-save-dock d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-3">
+            <div class="d-flex align-items-center gap-2 text-muted fs-xs">
+                <i class="fas fa-circle-check text-success fs-5"></i>
+                <div>
+                    <strong class="text-dark d-block">Ready to Save &amp; Link to Stock</strong>
+                    <span class="fs-3xs">Only sets serial cards in database. No warehouse stock duplicates created.</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <a href="{% url 'purchases:grn_detail' grn.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                    Discard
+                </a>
+                <button type="submit" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm" id="btnSubmitImeis">
+                    <i class="fas fa-save me-1"></i> Save &amp; Link IMEIs to Stock
+                </button>
+            </div>
+        </div>
+    </form>
+
+</div>
+
+<!-- Modal: Multi-IMEI Bulk Paste Window -->
+<div class="modal fade" id="bulkPasteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-dark text-white border-0 py-2.5 px-3">
+                <h6 class="modal-title fw-bold fs-xs text-white mb-0"><i class="fas fa-paste me-1"></i> Paste Multiple IMEIs</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-3 bg-white">
+                <p class="fs-xs text-muted mb-2">
+                    Paste 15-digit IMEIs below. One per line, or separated by commas. For Dual-SIM, use <code class="font-mono">IMEI1|IMEI2</code> format:
+                </p>
+                <textarea id="bulkPasteTextarea" class="form-control font-mono fs-xs" rows="8" placeholder="351234567890123&#10;351234567890124|351234567890125"></textarea>
+            </div>
+            <div class="modal-footer bg-light border-0 py-2 px-3 d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold" id="btnApplyBulkPaste">Apply to Current Model</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Raw Initial Data Passed from Backend View -->
+{{ initial_data_json|json_script:"initialImeisDataScript" }}
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // -------------------------------------------------------------------------
+    // 1. DATA STATE INITIALIZATION
+    // -------------------------------------------------------------------------
+    const rawDataEl = document.getElementById('initialImeisDataScript');
+    let itemsState = {};
+
+    if (rawDataEl) {
+        try {
+            itemsState = JSON.parse(rawDataEl.textContent);
+        } catch (e) {
+            console.error('Error parsing initial IMEIs data:', e);
+            itemsState = {};
+        }
+    }
+
+    let activeItemId = null;
+    let pendingImei1 = null; // Used for sequential Dual-SIM scanning (IMEI 1 -> IMEI 2)
+
+    // DOM Elements
+    const scannerInput = document.getElementById('barcodeScannerInput');
+    const alertBanner = document.getElementById('scannerAlertBanner');
+    const scannedTableBody = document.getElementById('scannedImeisTableBody');
+    const activeTitle = document.getElementById('activeModelTitleText');
+    const activeSub = document.getElementById('activeModelSubText');
+    const activeBadge = document.getElementById('activeScanModeBadge');
+    const currentModelCounter = document.getElementById('currentModelCounterBadge');
+    const thImei2 = document.getElementById('thImei2Header');
+    const formEl = document.getElementById('manageImeisMasterForm');
+    const payloadJsonInput = document.getElementById('imeiPayloadJson');
+    const btnSubmit = document.getElementById('btnSubmitImeis');
+
+    // -------------------------------------------------------------------------
+    // 2. SYNTHESIZED WEB AUDIO BEEP (No external audio files required)
+    // -------------------------------------------------------------------------
+    function playAudioTone(type = 'success') {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            if (type === 'success') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, ctx.currentTime); // High pleasant beep
+                gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.08);
+            } else {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, ctx.currentTime); // Low warning buzz
+                gain.gain.setValueAtTime(0.25, ctx.currentTime);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.18);
+            }
+        } catch (e) {
+            // Ignore audio context permission issues quietly
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. UI NOTIFICATIONS & BANNER
+    // -------------------------------------------------------------------------
+    function showAlert(msg, isError = true) {
+        if (!alertBanner) return;
+        alertBanner.innerText = msg;
+        alertBanner.className = `alert ${isError ? 'alert-danger' : 'alert-success'} p-2 fs-xs rounded-3 mb-0 mt-2`;
+        alertBanner.classList.remove('d-none');
+        if (isError) playAudioTone('error');
+        setTimeout(() => {
+            alertBanner.classList.add('d-none');
+        }, 3200);
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. MODEL SELECTION & TAB SWITCHING
+    // -------------------------------------------------------------------------
+    function selectModelTab(itemId) {
+        activeItemId = String(itemId);
+        pendingImei1 = null;
+
+        document.querySelectorAll('.model-tab-btn').forEach(btn => {
+            if (btn.dataset.itemId === activeItemId) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+
+        const currentEntry = itemsState[activeItemId];
+        if (!currentEntry) return;
+
+        activeTitle.innerText = `${currentEntry.product_name}`;
+        activeSub.innerText = `SKU: ${currentEntry.sku} | Inward Batch: ${currentEntry.batch || 'Standard'}`;
+        
+        if (currentEntry.is_dual_sim) {
+            activeBadge.innerText = 'DUAL-SIM MODE (IMEI 1 & 2)';
+            activeBadge.className = 'badge bg-info text-dark font-mono fs-3xs';
+            if (thImei2) thImei2.style.display = '';
+        } else {
+            activeBadge.innerText = 'SINGLE-SIM MODE (IMEI 1)';
+            activeBadge.className = 'badge bg-dark text-white font-mono fs-3xs';
+            if (thImei2) thImei2.style.display = 'none';
+        }
+
+        renderTableForActiveModel();
+        focusScanner();
+    }
+
+    function focusScanner() {
+        if (scannerInput) {
+            scannerInput.value = '';
+            scannerInput.focus();
+        }
+    }
+
+    document.querySelectorAll('.model-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectModelTab(btn.dataset.itemId);
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // 5. RENDER ACTIVE MODEL'S SCANNED TABLE & COUNTERS
+    // -------------------------------------------------------------------------
+    function renderTableForActiveModel() {
+        if (!activeItemId || !itemsState[activeItemId]) return;
+        const entry = itemsState[activeItemId];
+        const imeis = entry.imeis || [];
+
+        currentModelCounter.innerText = `${imeis.length} of ${entry.base_qty} Added`;
+
+        if (imeis.length === 0) {
+            scannedTableBody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center py-4 text-muted fs-xs">
+                        <i class="fas fa-barcode opacity-25 d-block fs-3 mb-1"></i>
+                        No IMEIs recorded for this model yet. Pull the scanner trigger to begin.
+                    </td>
+                </tr>
+            `;
+            updateGlobalKpis();
+            return;
+        }
+
+        let html = '';
+        imeis.forEach((item, idx) => {
+            const isSaved = item.is_already_in_db;
+            const statusBadge = isSaved 
+                ? '<span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs">In Database</span>'
+                : '<span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fs-3xs">Ready to Save</span>';
+
+            html += `
+                <tr class="${idx === imeis.length - 1 ? 'flash-success-row' : ''}">
+                    <td class="text-center font-mono text-muted fw-bold">${idx + 1}</td>
+                    <td class="font-mono fw-bold text-dark">
+                        <span class="imei-badge-pill">${escapeHtml(item.imei_1)}</span>
+                    </td>
+                    <td class="font-mono text-secondary" style="${entry.is_dual_sim ? '' : 'display:none;'}">
+                        ${item.imei_2 ? `<span class="imei-badge-pill">${escapeHtml(item.imei_2)}</span>` : '<span class="text-muted fs-3xs font-mono">-</span>'}
+                    </td>
+                    <td class="text-center">${statusBadge}</td>
+                    <td class="text-center">
+                        <button type="button" class="imei-trash-btn" onclick="removeImeiAtIndex(${idx})" title="Remove IMEI">&times;</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        scannedTableBody.innerHTML = html;
+        updateGlobalKpis();
+    }
+
+    window.removeImeiAtIndex = function(idx) {
+        if (!activeItemId || !itemsState[activeItemId]) return;
+        itemsState[activeItemId].imeis.splice(idx, 1);
+        renderTableForActiveModel();
+        focusScanner();
+    };
+
+    function updateGlobalKpis() {
+        let grandTotal = 0;
+        let grandLinked = 0;
+
+        Object.keys(itemsState).forEach(k => {
+            const e = itemsState[k];
+            const qty = e.base_qty || 0;
+            const linked = (e.imeis || []).length;
+            const rem = Math.max(0, qty - linked);
+
+            grandTotal += qty;
+            grandLinked += linked;
+
+            // Update tab badge & ratio
+            const badgeEl = document.getElementById(`badgeItem_${k}`);
+            const ratioEl = document.getElementById(`ratioItem_${k}`);
+            if (badgeEl) {
+                if (rem === 0) {
+                    badgeEl.innerText = 'Complete';
+                    badgeEl.className = 'badge bg-success text-white font-mono fs-3xs';
+                } else {
+                    badgeEl.innerText = `${rem} Pending`;
+                    badgeEl.className = 'badge bg-warning text-dark font-mono fs-3xs';
+                }
+            }
+            if (ratioEl) {
+                ratioEl.innerText = `Linked: ${linked} / ${qty}`;
+            }
+        });
+
+        const grandRemaining = Math.max(0, grandTotal - grandLinked);
+        const kpiTotal = document.getElementById('dispTotalHandsetsCount');
+        const kpiLinked = document.getElementById('dispTotalLinkedCount');
+        const kpiRem = document.getElementById('dispTotalRemainingCount');
+
+        if (kpiTotal) kpiTotal.innerText = `${grandTotal} Units`;
+        if (kpiLinked) kpiLinked.innerText = `${grandLinked} Scanned`;
+        if (kpiRem) kpiRem.innerText = `${grandRemaining} Pending`;
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. PROCESS SCANNER INPUT (ENTER KEY & FAST SCANNER GUN CATCHER)
+    // -------------------------------------------------------------------------
+    function processScannedCode(rawCode) {
+        const clean = String(rawCode || '').trim();
+        if (!clean) return;
+
+        if (!activeItemId || !itemsState[activeItemId]) {
+            showAlert('Please select a phone model from the left column first.', true);
+            return;
+        }
+
+        const entry = itemsState[activeItemId];
+        const imeis = entry.imeis || [];
+
+        // Check if all needed units are already scanned for this model
+        if (imeis.length >= entry.base_qty && !pendingImei1) {
+            showAlert(`Quantity reached: All ${entry.base_qty} units for '${entry.product_name}' already scanned!`, true);
+            return;
+        }
+
+        // Handle pipe format in a single scan (e.g., 351234567890123|351234567890124)
+        if (clean.includes('|')) {
+            const parts = clean.split('|');
+            const im1 = parts[0].trim();
+            const im2 = parts[1] ? parts[1].trim() : '';
+
+            if (checkGlobalDuplicate(im1)) return;
+            if (im2 && checkGlobalDuplicate(im2)) return;
+
+            imeis.push({ imei_1: im1, imei_2: im2, is_already_in_db: false });
+            pendingImei1 = null;
+            playAudioTone('success');
+            renderTableForActiveModel();
+            focusScanner();
+            return;
+        }
+
+        // Validate basic digits
+        const digitsOnly = clean.replace(/\D/g, '');
+        if (digitsOnly.length < 14) {
+            showAlert(`Invalid IMEI: '${clean}'. IMEIs must contain at least 14-15 numeric digits.`, true);
+            return;
+        }
+
+        // Check global duplicates across all models
+        if (checkGlobalDuplicate(digitsOnly)) return;
+
+        // DUAL-SIM SEQUENTIAL SCAN MODE
+        if (entry.is_dual_sim) {
+            if (!pendingImei1) {
+                // Step A: Captured IMEI 1, prompt for IMEI 2
+                pendingImei1 = digitsOnly;
+                playAudioTone('success');
+                scannerInput.value = '';
+                scannerInput.placeholder = 'IMEI 1 Captured! Now scan IMEI 2...';
+                if (scannerStationBox) scannerStationBox.style.borderColor = '#0284c7';
+                return;
+            } else {
+                // Step B: Captured IMEI 2, pair them together
+                const imei1 = pendingImei1;
+                const imei2 = digitsOnly;
+                pendingImei1 = null;
+
+                if (imei1 === imei2) {
+                    showAlert(`Duplicate: IMEI 1 and IMEI 2 cannot be identical (${imei1}).`, true);
+                    scannerInput.value = '';
+                    scannerInput.placeholder = 'Scan IMEI 2...';
+                    return;
+                }
+
+                imeis.push({ imei_1: imei1, imei_2: imei2, is_already_in_db: false });
+                playAudioTone('success');
+                if (scannerStationBox) scannerStationBox.style.borderColor = '';
+                renderTableForActiveModel();
+                focusScanner();
+                return;
+            }
+        } else {
+            // SINGLE-SIM MODE
+            imeis.push({ imei_1: digitsOnly, imei_2: '', is_already_in_db: false });
+            playAudioTone('success');
+            renderTableForActiveModel();
+            focusScanner();
+        }
+    }
+
+    function checkGlobalDuplicate(imei) {
+        for (const k in itemsState) {
+            const list = itemsState[k].imeis || [];
+            for (let i = 0; i < list.length; i++) {
+                if (list[i].imei_1 === imei || list[i].imei_2 === imei) {
+                    showAlert(`Duplicate: IMEI '${imei}' already scanned for '${itemsState[k].product_name}'.`, true);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    if (scannerInput) {
+        scannerInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                processScannedCode(scannerInput.value);
+            }
+        });
+    }
+
+    // -------------------------------------------------------------
+    // 7. BULK MULTI-PASTE MODAL HANDLER
+    // -------------------------------------------------------------
+    const bulkModalEl = document.getElementById('bulkPasteModal');
+    const btnOpenBulk = document.getElementById('btnManualAddModal');
+    const btnApplyBulk = document.getElementById('btnApplyBulkPaste');
+    const bulkTextarea = document.getElementById('bulkPasteTextarea');
+
+    if (btnOpenBulk && bulkModalEl) {
+        btnOpenBulk.addEventListener('click', () => {
+            if (bulkTextarea) bulkTextarea.value = '';
+            bootstrap.Modal.getOrCreateInstance(bulkModalEl).show();
+        });
+    }
+
+    if (btnApplyBulk && bulkTextarea) {
+        btnApplyBulk.addEventListener('click', () => {
+            const text = bulkTextarea.value.trim();
+            if (!text) return;
+
+            const lines = text.split(/[\n,;]+/);
+            let addedCount = 0;
+
+            lines.forEach(line => {
+                const cleanLine = line.trim();
+                if (cleanLine) {
+                    processScannedCode(cleanLine);
+                    addedCount++;
+                }
+            });
+
+            bootstrap.Modal.getInstance(bulkModalEl)?.hide();
+            showAlert(`Processed ${addedCount} pasted line(s).`, false);
+        });
+    }
+
+    // -------------------------------------------------------------
+    // 8. FORM SUBMISSION: SERIALIZE PAYLOAD INTO HIDDEN JSON INPUT
+    // -------------------------------------------------------------
+    if (formEl) {
+        formEl.addEventListener('submit', (e) => {
+            if (payloadJsonInput) {
+                payloadJsonInput.value = JSON.stringify(itemsState);
+            }
+            if (btnSubmit) {
+                btnSubmit.disabled = true;
+                btnSubmit.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Linking IMEIs...';
+            }
+        });
+    }
+
+    // Initialize first model on load
+    const firstTab = document.querySelector('.model-tab-btn');
+    if (firstTab) {
+        selectModelTab(firstTab.dataset.itemId);
+    }
+});
+</script>
+{% endblock %}

@@ -2,7 +2,28 @@
 Purchase GRN & Commercial Purchase Return (Debit Note) Services.
 
 Key Architectural Improvements & Mathematical Integrity:
-1. Spot-Payment Udhaari Ledger Continuity (Fixes Spot-Payment Amnesia):
+1. Hardened Line-to-Header VAT Snapshot Chain:
+   For every GRN:
+       GRNItem.tax_amount (Item-level VAT)
+             ↓
+       GoodsReceivedNote.vat_amount (Header VAT = Exact sum of line item VATs)
+             ↓
+       Input VAT Report (Annex 7 Purchase Register / Day-Wise VAT Ledger)
+             ↓
+       Input VAT GL (Account 1410 Inward Tax Claim)
+   
+   For every Purchase Return:
+       PurchaseReturnItem.tax_amount (Return Item-level VAT)
+             ↓
+       PurchaseReturn.tax_amount (Return Header VAT = Exact sum of line tax amounts)
+             ↓
+       Input VAT Reversal (Annex 7 deduction from claimable input tax)
+             ↓
+       VAT Report Reconciliation
+             ↓
+       GL Reversal (Account 1410 Credited)
+
+2. Spot-Payment Udhaari Ledger Continuity (Fixes Spot-Payment Debt Inflation):
    - When a GRN is inwarded with partial or full cash/bank payment on delivery (`paid_amount > 0`),
      `_post_supplier_ledger` generates two linked, sequential entries in `SupplierUdhaariLedger`:
      * Entry 1 (`PURCHASE_BILL`): Records the full net invoice amount (`net_total_amount`),
@@ -12,40 +33,46 @@ Key Architectural Improvements & Mathematical Integrity:
    - Guarantees that automated sub-ledger audits and `Supplier.recalculate_balance_from_ledger()`
      preserve cash disbursements permanently without resetting debt to the gross invoice total.
 
-2. Accurate Dual-Pot & Item-Level VAT Application (Fixes Blanket Header VAT Overwrite):
+3. Accurate Dual-Pot & Item-Level VAT Application:
    - Segregates line items into two distinct pots:
      * Taxable Pot: Items with locked 13.00% VAT.
      * Non-Taxable Pot: Items with locked 0.00% VAT (Exempt / PAN bills).
    - Shields 0% tax-exempt or zero-rated items from tax additions, even within mixed consignments.
    - Reconciles total consignment VAT as the exact sum of line-level VAT amounts.
 
-3. Coherent VAT-Inclusive Line Pre-Tax Extraction:
+4. Coherent VAT-Inclusive Line Pre-Tax Extraction:
    - When `vat_handling_mode == 'INCLUSIVE'` and the item is 13% taxable, extracts the pre-tax base
      using the exact statutory divisor `1.13` (`Rate ÷ 1.13` and `Discount ÷ 1.13`).
    - Items with 0% VAT remain untouched (divisor 1.00).
    - Reconstitutes `gross_amount` on an identical pre-tax basis (`taxable_extracted + pre_tax_discount`),
      eliminating mathematical distortion of pre-tax gross values and effective discount percentages.
 
-4. 5-Tier Proportional Landed Cost Overhead Allocation:
+5. 5-Tier Proportional Landed Cost Overhead Allocation:
    - Distributes all 5 overhead categories (Freight, Customs Duty, Handling & Unloading,
      Transit Insurance, and Other Overheads) proportionally across lines based on net pre-tax merchandise value.
    - Accurately establishes the unit landed cost for inventory COGS asset valuation, insulating
      recoverable 13% input VAT from physical stock valuation.
 
-5. Custom Physical Batch Number Persistence:
+6. Custom Physical Batch Number Persistence:
    - Preserves user-entered batch identifiers (`item.batch_number`, e.g. BT-2026-A1) on `ProductBatch`
      and links them to individual `ItemInstance` records instead of falling back to computer-generated hashes.
 
-6. Save Draft vs. Final Verify Split:
+7. Save Draft vs. Final Verify Split:
    - `save_grn_draft()`: Calculates line financials, taxes, and landed costs without adjusting stock,
      without creating serial instances, and without touching accounting ledgers.
    - `process_grn_approval_and_stock_in()`: Performs strict validation, updates physical warehouse stock,
      registers IMEI instances, creates FIFO batches, updates supplier debt, and posts double-entry GL journals.
 
-7. Master-Switch Sensitive Serialized & Dual-IMEI Enforcement:
+8. Master-Switch Sensitive Serialized & Dual-IMEI Enforcement:
    - In Strict Mode (`enforce_imei_tracking=True`): Mandates exact 1-to-1 match between handset quantities and scanned IMEIs on approval.
    - In Backlog Mode (`enforce_imei_tracking=False`): Allows phone inward entry without IMEIs, creating FIFO ProductBatches.
    - Non-serialized accessories always bypass serial checks.
+
+9. Dedicated Post-Receipt IMEI Linker (`attach_imeis_to_received_grn`):
+   - Safely links physical 15-digit IMEIs to already-received GRNs.
+   - Strictly enforces zero stock inflation (does not touch BranchStock quantity).
+   - Strictly preserves accounting journals and supplier balances.
+   - Enforces system-wide IMEI uniqueness and captures Dual-SIM statuses.
 """
 
 import re
@@ -82,7 +109,7 @@ def _post_purchase_return_direct(purchase_return: PurchaseReturn, user=None):
     Direct General Ledger poster for commercial purchase returns (Debit Notes).
     - Debit: Accounts Payable (Supplier Ledger) OR Cash in Hand (if cash refund)
     - Credit: Merchandise Inventory Asset (at purchase return value)
-    - Credit: Input VAT 13% (reversing input tax if tax invoice)
+    - Credit: Input VAT 13% (reversing input tax if tax invoice by purchase_return.tax_amount)
     """
     from apps.accounting.models import JournalEntry
     from apps.accounting.services.auto_posting import JournalEngine, AutoPostingService
@@ -140,7 +167,7 @@ def _post_purchase_return_direct(purchase_return: PurchaseReturn, user=None):
         'narration': f"Merchandise inventory returned to vendor {purchase_return.supplier.company_name}"
     })
 
-    # 3. Credit: Input VAT 13% (reversing input tax if applicable)
+    # 3. Credit: Input VAT 13% (reversing exact input tax claimed on return items)
     if purchase_return.tax_amount > Decimal('0.00'):
         lines.append({
             'account': input_vat_acc,
@@ -197,6 +224,7 @@ class PurchaseService:
         Saves an in-progress GRN voucher as a draft.
         - Synchronizes dates and derives the Nepali Fiscal Year.
         - Executes financial valuation and prorates 5-tier overheads on line items.
+        - Saves line tax_amount snapshots.
         - Leaves stock counters untouched, skips serial creation, and skips GL journals.
         """
         if grn.status == 'RECEIVED':
@@ -213,7 +241,7 @@ class PurchaseService:
         grn.status = 'DRAFT'
         grn.save()
 
-        # Save line item projections
+        # Save line item projections with tax_amount persisted
         for item in items:
             item.grn = grn
             item.save()
@@ -230,6 +258,8 @@ class PurchaseService:
                 'bill_no': grn.supplier_bill_no,
                 'challan_no': grn.challan_no or '',
                 'gross_amount': str(grn.gross_amount),
+                'taxable_amount': str(grn.taxable_amount),
+                'vat_amount': str(grn.vat_amount),
                 'total_landed_cost': str(grn.total_landed_cost),
                 'net_total_amount': str(grn.net_total_amount),
                 'status': 'DRAFT'
@@ -249,10 +279,14 @@ class PurchaseService:
         user=None
     ) -> GoodsReceivedNote:
         """
-        Main transactional entry point coordinating complete GRN verification,
-        dual VAT handling (exclusive vs inclusive), 5-tier proportional overhead distribution,
-        custom batch numbers, stock inward, historical dates, supplier debt updates,
-        and fail-closed General Ledger posting.
+        Main transactional entry point coordinating complete GRN verification:
+        1. Dates & Fiscal Year check.
+        2. Serialized / Dual-IMEI validation.
+        3. Item-by-item VAT snapshot & header VAT summation invariant:
+           GRNItem.tax_amount -> GRN.vat_amount.
+        4. Inward stock counters and FIFO batch creation.
+        5. Supplier debt ledger reconciliation with spot-payment continuity.
+        6. General Ledger Input VAT (1410) journal posting.
         """
         if grn.status == 'RECEIVED':
             raise ValidationError("This GRN voucher has already been verified and received.")
@@ -267,7 +301,7 @@ class PurchaseService:
         # Step 1: Pre-Validation of Serialized / Dual-IMEI Quantities & Master Setting Sensitivity
         cls._validate_grn_lines(grn, items)
 
-        # Step 2: Full Mathematical Valuation, Proportional Overhead Allocation & Stock Inward
+        # Step 2: Full Mathematical Valuation, Line VAT Snapshotting, Landed Proration & Stock Inward
         cls._calculate_and_apply_financials_and_stock(
             grn=grn,
             items=items,
@@ -277,7 +311,7 @@ class PurchaseService:
         # Step 3: Post to Supplier Ledger with Row-Level Locking & Historical Dates (Includes Spot Payment Entry)
         cls._post_supplier_ledger(grn=grn, user=user)
 
-        # Step 4: Post General Ledger Double-Entry Journal
+        # Step 4: Post General Ledger Double-Entry Journal (Debits Input VAT 1410 by grn.vat_amount)
         cls._post_gl_journal(grn=grn, user=user)
 
         return grn
@@ -450,7 +484,7 @@ class PurchaseService:
                             )
 
     # =========================================================================
-    # STEP 2: MATHEMATICAL VALUATION & DUAL-POT OVERHEAD ALLOCATION (FINANCIALS ONLY)
+    # STEP 2: MATHEMATICAL VALUATION, DUAL-POT OVERHEAD & HARDENED VAT INVARIANT
     # =========================================================================
     @classmethod
     def _calculate_financials_only(
@@ -464,8 +498,9 @@ class PurchaseService:
         - In INCLUSIVE mode: Extracts pre-tax base using `Rate ÷ 1.13` strictly on 13% taxable items.
           Items with 0% VAT remain untouched.
         - Prorates whole-bill discount proportionally across pre-tax merchandise bases.
-        - Calculates 13% VAT strictly on the net taxable pot; applies 0% on the non-taxable pot.
-        - Reconciles total consignment VAT as the exact sum of line-level VAT amounts.
+        - Calculates line VAT strictly per item: `item.tax_amount = line_vat`.
+        - Sums all line-level `tax_amount` values into `grn.vat_amount`:
+          GRN VAT = Item 1 VAT + Item 2 VAT + Item 3 VAT + ...
         - Total Landed Cost = Net Taxable Base + Non-Taxable Base + 5 Overheads.
         - Net Total Payable = Net Taxable Base + Non-Taxable Base + 13% VAT Amount.
         - Distributes bill discounts and overhead expenses across items to compute exact unit landed cost.
@@ -560,7 +595,7 @@ class PurchaseService:
             grn.bill_discount_input_value = Decimal('0.00')
             grn.bill_discount_amount = Decimal('0.00')
 
-        # Phase 3 & 4: Proportional Bill Discount Allocation, Landed Costs & Strict Line-by-Line VAT
+        # Phase 3 & 4: Proportional Bill Discount Allocation, Landed Costs & Strict Line-by-Line VAT Summation
         overheads = grn.overhead_total
         item_count = len(items)
 
@@ -598,12 +633,15 @@ class PurchaseService:
             if is_taxable and rate == Decimal('13.00'):
                 line_vat = (effective_net_base * Decimal('0.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 total_net_taxable_base += effective_net_base
-                total_vat_amount += line_vat
             else:
                 line_vat = Decimal('0.00')
                 total_net_non_taxable_base += effective_net_base
 
-        # Phase 5: Reconciled Consignment Financials
+            # Persist exact calculated line VAT snapshot onto the line item
+            item.tax_amount = line_vat
+            total_vat_amount += line_vat
+
+        # Phase 5: Reconciled Consignment Financials (Hardened Invariant: Header VAT == Sum of Line VATs)
         total_merchandise_net = total_net_taxable_base + total_net_non_taxable_base
         total_landed_valuation = (total_merchandise_net + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         net_invoice_total = (total_merchandise_net + total_vat_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -616,6 +654,7 @@ class PurchaseService:
         grn.total_line_discount = total_line_discount
         grn.discount_amount = total_line_discount + grn.bill_discount_amount
         grn.taxable_amount = total_net_taxable_base
+        # HARDENED INVARIANT: Exactly equals the sum of all child line items' tax_amount
         grn.vat_amount = total_vat_amount
         grn.total_landed_cost = total_landed_valuation
         grn.net_total_amount = net_invoice_total
@@ -638,9 +677,10 @@ class PurchaseService:
         """
         Executes complete mathematical valuation and commits physical stock counters,
         FIFO batches, and ItemInstance records.
+        Saves line item tax_amount snapshots.
         Ensures inventory records always receive true Pre-Tax Landed Cost.
         """
-        # Execute unified valuation across all items
+        # Execute unified valuation across all items (populates item.tax_amount and grn.vat_amount)
         cls._calculate_financials_only(grn=grn, items=items)
 
         grn.status = 'RECEIVED'
@@ -923,6 +963,7 @@ class PurchaseService:
     def _post_gl_journal(grn: GoodsReceivedNote, user=None) -> None:
         """
         Dispatches double-entry voucher to General Ledger fail-closed.
+        Debits Account 1410 (Input VAT 13%) strictly by `grn.vat_amount`.
         """
         import apps.accounting.services.auto_posting as auto_posting_module
         if hasattr(auto_posting_module, 'post_grn_journal'):
@@ -938,6 +979,204 @@ class PurchaseService:
         else:
             raise ValidationError("Accounting auto_posting module is unavailable for GRN journal posting.")
 
+    # =========================================================================
+    # SPECIALIZED ACTION: ATTACH / LINK PHYSICAL IMEIS TO ALREADY-RECEIVED GRN
+    # =========================================================================
+    @classmethod
+    @transaction.atomic
+    def attach_imeis_to_received_grn(
+        cls,
+        grn: GoodsReceivedNote,
+        items_payload: Dict[str, Any],
+        user=None
+    ) -> int:
+        """
+        Attaches / links physical 15-digit IMEI serial numbers to an already-received GRN:
+        1. Row-level locking on GRN and phone items.
+        2. Validates that GRN is not CANCELLED.
+        3. Strict Quantity Check: Count of IMEIs per line cannot exceed base_unit_quantity.
+        4. CRITICAL RULE - ZERO STOCK INFLATION: Does NOT call adjust_stock(). Does NOT touch BranchStock.quantity.
+        5. CRITICAL RULE - ZERO ACCOUNTING IMPACT: Does NOT alter purchase financials, supplier debt, or GL entries.
+        6. System-Wide IMEI Uniqueness: Verifies no active duplicate IMEIs exist across the company.
+        7. Creates active ItemInstance records in 'IN_STOCK' status linked to this GRN.
+        8. Handles Dual-SIM (imei_2_pending_scan flag).
+        9. Rebuilds and updates GRNItem.scanned_imei_list for invoice printing.
+        10. Writes an immutable record to AuditLog.
+        """
+        locked_grn = GoodsReceivedNote.objects.select_for_update().get(pk=grn.pk)
+        if locked_grn.status == 'CANCELLED':
+            raise ValidationError(f"Cannot link IMEIs: Goods Received Note {locked_grn.grn_number} is CANCELLED.")
+
+        seen_imeis_in_batch = set()
+        total_created = 0
+
+        for item_id_str, item_info in items_payload.items():
+            try:
+                item_id = int(item_id_str)
+            except (ValueError, TypeError):
+                continue
+
+            grn_item = locked_grn.items.select_for_update().select_related('product').filter(id=item_id).first()
+            if not grn_item:
+                continue
+
+            product = grn_item.product
+            if not product.requires_imei_tracking:
+                continue
+
+            base_qty = int(grn_item.base_unit_quantity or grn_item.purchased_quantity or 1)
+            raw_imeis = item_info.get('imeis', [])
+
+            if len(raw_imeis) > base_qty:
+                raise ValidationError(
+                    f"Quantity Exceeded on '{product.name}': You submitted {len(raw_imeis)} IMEIs, "
+                    f"but only {base_qty} units were purchased on this bill line item."
+                )
+
+            # Query existing instances already linked to this GRN and product
+            existing_instances_qs = ItemInstance.objects.select_for_update().filter(
+                purchase_reference=locked_grn.grn_number,
+                product=product,
+                branch=locked_grn.branch
+            )
+            existing_im1_map = {inst.imei_1: inst for inst in existing_instances_qs if inst.imei_1}
+            existing_im2_map = {inst.imei_2: inst for inst in existing_instances_qs if inst.imei_2}
+
+            is_dual_sim = getattr(product, 'sim_configuration', 'DUAL_SIM') in ['DUAL_SIM', 'ESIM_DUAL']
+            batch_id = grn_item.batch_number or f"BATCH-{locked_grn.grn_number}-{product.id}"
+            warranty_m = grn_item.warranty_months or locked_grn.warranty_months or product.warranty_months or 12
+            w_start = locked_grn.bill_date
+            w_end = w_start + timedelta(days=warranty_m * 30) if warranty_m > 0 else None
+            line_mdms = grn_item.default_mdms_status if not locked_grn.distributor_mdms_certified else 'REGISTERED_OFFICIAL'
+
+            formatted_imei_lines = []
+
+            for entry in raw_imeis:
+                if isinstance(entry, dict):
+                    im1 = str(entry.get('imei_1') or '').strip()
+                    im2 = str(entry.get('imei_2') or '').strip()
+                elif isinstance(entry, str):
+                    parts = entry.split('|')
+                    im1 = parts[0].strip() if len(parts) > 0 else ''
+                    im2 = parts[1].strip() if len(parts) > 1 else ''
+                else:
+                    continue
+
+                im1 = im1 if im1 else None
+                im2 = im2 if im2 else None
+
+                if not im1:
+                    continue
+
+                # Basic Digits and Length Validation
+                if not im1.isdigit():
+                    raise ValidationError(f"Invalid IMEI 1 '{im1}' on '{product.name}'. IMEIs must be numeric digits.")
+                if len(im1) < 14:
+                    raise ValidationError(f"IMEI 1 '{im1}' on '{product.name}' is too short (must be at least 14-15 digits).")
+
+                if im2:
+                    if not im2.isdigit():
+                        raise ValidationError(f"Invalid IMEI 2 '{im2}' on '{product.name}'. IMEIs must be numeric digits.")
+                    if len(im2) < 14:
+                        raise ValidationError(f"IMEI 2 '{im2}' on '{product.name}' is too short (must be at least 14-15 digits).")
+                    if im1 == im2:
+                        raise ValidationError(f"Duplicate dual-SIM pair: IMEI 1 and IMEI 2 cannot be identical ('{im1}') on '{product.name}'.")
+
+                # Check Internal Duplicates within the same submitted batch
+                if im1 in seen_imeis_in_batch:
+                    raise ValidationError(f"Duplicate IMEI 1 '{im1}' entered multiple times in this batch for '{product.name}'.")
+                seen_imeis_in_batch.add(im1)
+
+                if im2:
+                    if im2 in seen_imeis_in_batch:
+                        raise ValidationError(f"Duplicate IMEI 2 '{im2}' entered multiple times in this batch for '{product.name}'.")
+                    seen_imeis_in_batch.add(im2)
+
+                # Check if this physical unit was already registered under this GRN
+                existing_instance = existing_im1_map.get(im1) or (existing_im2_map.get(im2) if im2 else None)
+
+                if existing_instance:
+                    # Already registered for this bill: update missing secondary IMEI if now provided
+                    if im2 and not existing_instance.imei_2:
+                        existing_instance.imei_2 = im2
+                        existing_instance.imei_2_pending_scan = False
+                        existing_instance.save(update_fields=['imei_2', 'imei_2_pending_scan', 'updated_at'])
+                else:
+                    # Check System-Wide Uniqueness across active stock in other branches
+                    collision_q = Q(imei_1=im1) | Q(imei_2=im1)
+                    if im2:
+                        collision_q |= Q(imei_1=im2) | Q(imei_2=im2)
+
+                    existing_in_other = ItemInstance.objects.filter(
+                        collision_q,
+                        status='IN_STOCK'
+                    ).select_related('product', 'branch').first()
+
+                    if existing_in_other:
+                        raise ValidationError(
+                            f"IMEI '{im1}' on '{product.name}' is ALREADY registered as active stock in warehouse "
+                            f"'{existing_in_other.branch.name}' (Product: {existing_in_other.product.name}). "
+                            f"Duplicate active inventory is strictly prohibited."
+                        )
+
+                    # Create New Active Physical ItemInstance (Strictly IN_STOCK)
+                    pending_scan = is_dual_sim and (im2 is None)
+                    ItemInstance.objects.create(
+                        product=product,
+                        branch=locked_grn.branch,
+                        device_uid=f"DEV-{uuid.uuid4().hex[:12].upper()}",
+                        imei_1=im1,
+                        imei_2=im2,
+                        imei_2_pending_scan=pending_scan,
+                        serial_number=None,
+                        device_barcode=im1 or product.barcode,
+                        status='IN_STOCK',
+                        condition='BRAND_NEW',
+                        activation_status='SEALED_INACTIVE',
+                        source_type='NEW_PURCHASE_GRN',
+                        mdms_status=line_mdms,
+                        mdms_verification_date=locked_grn.bill_date,
+                        mdms_remarks=f"Post-Inward IMEI scan: {locked_grn.grn_number} | Invoice: {locked_grn.supplier_bill_no}",
+                        purchase_reference=locked_grn.grn_number,
+                        batch_reference=batch_id,
+                        supplier_name=locked_grn.supplier.company_name,
+                        landed_cost=grn_item.unit_landed_cost,
+                        purchase_date=locked_grn.bill_date,
+                        warranty_start_date=w_start,
+                        warranty_end_date=w_end,
+                        warranty_remarks=f"Supplier Warranty: {grn_item.warranty_provider or locked_grn.warranty_provider or 'Distributor'}"
+                    )
+                    total_created += 1
+
+                # Append to permanent text representation
+                if im2:
+                    formatted_imei_lines.append(f"{im1}|{im2}")
+                else:
+                    formatted_imei_lines.append(f"{im1}")
+
+            # Update permanent text log on GRNItem
+            grn_item.scanned_imei_list = "\n".join(formatted_imei_lines)
+            grn_item.save(update_fields=['scanned_imei_list', 'updated_at'])
+
+        # Record System-Wide Forensic Audit Trail
+        AuditLog.objects.create(
+            user=user,
+            branch=locked_grn.branch,
+            action_type='UPDATE',
+            module='PurchaseGRN_IMEIScan',
+            object_repr=locked_grn.grn_number,
+            details={
+                'grn_number': locked_grn.grn_number,
+                'bill_no': locked_grn.supplier_bill_no,
+                'supplier': locked_grn.supplier.company_name,
+                'new_imeis_created': total_created,
+                'total_imeis_linked': len(seen_imeis_in_batch),
+                'message': f"Linked {total_created} new physical IMEI(s) to existing warehouse stock without altering quantities or accounting."
+            }
+        )
+
+        return total_created
+
 # =============================================================================
 # COMMERCIAL PURCHASE RETURN / DEBIT NOTE SERVICE
 # =============================================================================
@@ -951,7 +1190,8 @@ class PurchaseReturnService:
     4. Locks serialized ItemInstances as 'RETURNED_TO_SUPPLIER' if present.
     5. Deducts from FIFO batches for non-serialized items or backlog units.
     6. Reconciles supplier debt balance with explicit historical dates.
-    7. Automatically posts double-entry General Ledger reversal vouchers fail-closed.
+    7. Automatically posts double-entry General Ledger reversal vouchers fail-closed
+       (Credits Input VAT 1410 by purchase_return.tax_amount).
     """
 
     @staticmethod
@@ -973,6 +1213,10 @@ class PurchaseReturnService:
         purchase_return: PurchaseReturn,
         user=None
     ) -> PurchaseReturn:
+        """
+        Coordinates full purchase return lifecycle:
+        Item VAT calculated -> Return Header VAT updated -> Supplier ledger adjusted -> GL reversal posted.
+        """
         items = list(purchase_return.items.select_related('product', 'product__base_unit', 'unit_conversion').all())
         if not items:
             raise ValidationError("Cannot process a purchase return without line items. Please add at least one product.")
@@ -984,6 +1228,7 @@ class PurchaseReturnService:
         cls._validate_return_items(purchase_return, items)
 
         # Step 2: Deduct Stock, Batches & Update Serialized IMEI Units
+        # (Returns total merchandise gross and exact sum of line tax_amount values)
         total_return_val, total_tax_val = cls._deduct_stock_and_update_imeis(
             purchase_return=purchase_return,
             items=items,
@@ -992,6 +1237,7 @@ class PurchaseReturnService:
 
         net_refund_val = (total_return_val + total_tax_val).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         purchase_return.total_return_amount = total_return_val
+        # Hardened Invariant: Exactly equals the sum of all return line item tax_amount values
         purchase_return.tax_amount = total_tax_val
         purchase_return.net_refund_amount = net_refund_val
         purchase_return.status = 'CONFIRMED'
@@ -1006,6 +1252,7 @@ class PurchaseReturnService:
         cls._reconcile_supplier_ledger(purchase_return, net_refund_val, user)
 
         # Step 4: Post Double-Entry Journal to General Ledger
+        # (Reverses Input VAT Account 1410 strictly by purchase_return.tax_amount)
         import apps.accounting.services.auto_posting as auto_posting_module
         if hasattr(auto_posting_module, 'post_purchase_return_journal'):
             auto_posting_module.post_purchase_return_journal(purchase_return, user=user)
@@ -1032,6 +1279,8 @@ class PurchaseReturnService:
                 'return_date_ad': str(purchase_return.return_date),
                 'return_date_bs': purchase_return.return_date_bs or '',
                 'fiscal_year': purchase_return.fiscal_year or '',
+                'total_return_amount': str(total_return_val),
+                'tax_amount_reversed': str(total_tax_val),
                 'net_refund_amount': str(net_refund_val),
                 'refund_mode': purchase_return.refund_mode,
                 'items_count': len(items),
@@ -1130,6 +1379,10 @@ class PurchaseReturnService:
         items: List[PurchaseReturnItem],
         user=None
     ) -> Tuple[Decimal, Decimal]:
+        """
+        Calculates item-by-item VAT on returned items, persists `tax_amount` on each line,
+        deducts warehouse inventory, and updates serialized item instances.
+        """
         total_return_val = Decimal('0.00')
         total_tax_val = Decimal('0.00')
 
@@ -1145,6 +1398,7 @@ class PurchaseReturnService:
             tax = (gross * (tax_rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if tax_rate > Decimal('0.00') else Decimal('0.00')
             line_tot = gross + tax
 
+            # Snapshot exact tax amount and line total onto the return item
             item.tax_amount = tax
             item.line_total = line_tot
             item.save(update_fields=['base_unit_quantity', 'tax_amount', 'line_total', 'updated_at'])

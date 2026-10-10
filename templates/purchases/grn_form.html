@@ -283,7 +283,7 @@ textarea.form-control-grn {
   color: #ffffff;
 }
 
-/* TABLE CONTAINER */
+/* TABLE CONTAINER & EXPANDED RESPONSIVE LAYOUT */
 .table-container {
   overflow-x: auto;
   border: 1px solid var(--slate-200);
@@ -296,7 +296,7 @@ textarea.form-control-grn {
 
 table.items-table {
   width: 100%;
-  min-width: 1540px;
+  min-width: 1820px;
   border-collapse: collapse;
   text-align: left;
 }
@@ -308,14 +308,14 @@ table.items-table th {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  padding: 8px 6px;
+  padding: 10px 8px;
   border-bottom: 1px solid var(--slate-300);
   border-right: 1px solid var(--slate-200);
   white-space: nowrap;
 }
 
 table.items-table td {
-  padding: 5px 6px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--slate-200);
   border-right: 1px solid var(--slate-200);
   vertical-align: middle;
@@ -328,9 +328,38 @@ table.items-table tr:hover td {
 
 table.items-table input,
 table.items-table select {
-  height: 30px;
+  height: 32px;
   font-size: 12px;
   padding: 4px 6px;
+}
+
+/* ==========================================================================
+   TARGET ENHANCEMENTS: CLEAN, CLEAR, BIG & REGULAR (NON-BOLD) FIELDS
+   Applied directly to: Qty, UOM, Rate, MRP, Taxable Amt, VAT Amt, Net Amount
+   ========================================================================== */
+.table-container .item-qty,
+.table-container .item-uom,
+.table-container .item-rate,
+.table-container .item-mrp,
+.table-container .item-taxable-amount,
+.table-container .item-vat-amount,
+.table-container .item-net-amount {
+  font-size: 14.5px !important;
+  font-weight: 400 !important;
+  height: 36px !important;
+  line-height: 1.4 !important;
+  padding: 6px 10px !important;
+  color: var(--slate-800) !important;
+}
+
+/* Ensure read-only amount inputs look crisp, clean, with strictly regular weight (NO BOLD) */
+.table-container input.item-taxable-amount.readonly-display,
+.table-container input.item-vat-amount.readonly-display,
+.table-container input.item-net-amount.readonly-display {
+  font-weight: 400 !important;
+  color: var(--slate-800) !important;
+  background-color: #f8fafc !important;
+  border-color: var(--slate-300) !important;
 }
 
 .select-tax-rate {
@@ -816,7 +845,7 @@ table.items-table select {
       </div>
     </section>
 
-    <!-- SECTION 2: DISCOUNT & ADDITIONAL CHARGES (CLEANED UP & SIMPLIFIED) -->
+    <!-- SECTION 2: DISCOUNT & ADDITIONAL CHARGES -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>2. Discount &amp; Additional Landed Charges</span>
@@ -913,25 +942,26 @@ table.items-table select {
               <th style="width: 270px;">Product / Item Description <span class="required-star">*</span></th>
               <th style="width: 120px;">Batch No.</th>
               <th style="width: 170px;">Serial / IMEI Refs</th>
-              <th style="width: 85px;" class="text-right">Qty <span class="required-star">*</span></th>
-              <th style="width: 80px;">UOM</th>
-              <th style="width: 110px;" class="text-right" id="thRateLabel">Rate <span class="required-star">*</span></th>
-              <th style="width: 110px;" class="text-right">MRP / Retail</th>
+              <!-- WIDENED COLUMNS FOR HIGH VISIBILITY -->
+              <th style="width: 105px;" class="text-right">Qty <span class="required-star">*</span></th>
+              <th style="width: 95px;">UOM</th>
+              <th style="width: 135px;" class="text-right" id="thRateLabel">Rate <span class="required-star">*</span></th>
+              <th style="width: 135px;" class="text-right">MRP / Retail</th>
               <th style="width: 90px;">Disc. Type</th>
               <th style="width: 85px;" class="text-right">Disc. Val</th>
               <th style="width: 110px;" class="text-center">Tax Rate <span class="required-star">*</span></th>
-              <th style="width: 110px;" class="text-right">Taxable Amt</th>
-              <th style="width: 95px;" class="text-right">VAT Amt</th>
-              <th style="width: 115px;" class="text-right">Net Amount</th>
+              <th style="width: 135px;" class="text-right">Taxable Amt</th>
+              <th style="width: 120px;" class="text-right">VAT Amt</th>
+              <th style="width: 140px;" class="text-right">Net Amount</th>
               <th style="width: 105px;" class="text-right">Alloc. Ovh</th>
-              <th style="width: 115px; background:#f5f3ff; color:#6b21a8;" class="text-right">Landed Unit Cost</th>
+              <th style="width: 120px; background:#f5f3ff; color:#6b21a8;" class="text-right">Landed Unit Cost</th>
               <th style="width: 44px;" class="text-center">Del</th>
             </tr>
           </thead>
           <tbody id="itemsTableBody">
             {% for item_form in formset %}
             <tr class="item-row" data-row-idx="{{ forloop.counter0 }}">
-              <td class="text-center row-sn font-mono" style="font-weight:600; color:var(--slate-500);">{{ forloop.counter }}</td>
+              <td class="text-center row-sn font-mono" style="font-weight:400; color:var(--slate-500);">{{ forloop.counter }}</td>
               
               <!-- Product Search Column -->
               <td>
@@ -952,12 +982,12 @@ table.items-table select {
                 <input type="text" name="items-{{ forloop.counter0 }}-scanned_imei_list" class="item-serial font-mono" placeholder="IMEI / Serials" value="{{ item_form.scanned_imei_list.value|default:'' }}">
               </td>
 
-              <!-- Qty -->
+              <!-- Qty (Big, Clean, Regular Font) -->
               <td>
                 <input type="number" name="items-{{ forloop.counter0 }}-purchased_quantity" class="item-qty text-right font-mono" value="{{ item_form.purchased_quantity.value|default:'1.000' }}" min="0.001" step="any" required>
               </td>
 
-              <!-- UOM -->
+              <!-- UOM (Clean, Clear) -->
               <td>
                 <select class="item-uom">
                   <option value="Pcs" selected>Pcs</option>
@@ -968,12 +998,12 @@ table.items-table select {
                 </select>
               </td>
 
-              <!-- Purchase Rate -->
+              <!-- Purchase Rate (Big, Clean, Regular Font) -->
               <td>
                 <input type="number" name="items-{{ forloop.counter0 }}-purchase_rate" class="item-rate text-right font-mono" value="{{ item_form.purchase_rate.value|default:'0.00' }}" min="0" step="0.01" required>
               </td>
 
-              <!-- MRP -->
+              <!-- MRP (Big, Clean, Regular Font) -->
               <td>
                 <input type="number" name="items-{{ forloop.counter0 }}-new_selling_price" class="item-mrp text-right font-mono" value="{{ item_form.new_selling_price.value|default:'0.00' }}" min="0" step="0.01">
               </td>
@@ -1000,29 +1030,29 @@ table.items-table select {
                 </select>
               </td>
 
-              <!-- Taxable Amount (Readonly) -->
+              <!-- Taxable Amount (Big, Clean, Readonly, Regular Font) -->
               <td>
                 <input type="text" class="item-taxable-amount text-right readonly-display font-mono" readonly value="0.00">
               </td>
 
-              <!-- VAT Amount (Readonly) -->
+              <!-- VAT Amount (Big, Clean, Readonly, Regular Font) -->
               <td>
                 <input type="text" class="item-vat-amount text-right readonly-display font-mono" readonly value="0.00">
               </td>
 
-              <!-- Net Amount (Readonly) -->
+              <!-- Net Amount (Big, Clean, Readonly, Regular Font - No Bold) -->
               <td>
-                <input type="text" class="item-net-amount text-right readonly-display font-mono" readonly value="0.00" style="font-weight:600;">
+                <input type="text" class="item-net-amount text-right readonly-display font-mono" readonly value="0.00">
               </td>
 
               <!-- Alloc Overhead (Readonly) -->
               <td>
-                <input type="text" class="item-alloc-overhead text-right readonly-display font-mono" readonly value="0.00" style="color:#b45309;">
+                <input type="text" class="item-alloc-overhead text-right readonly-display font-mono" readonly value="0.00" style="color:#b45309; font-weight:400;">
               </td>
 
               <!-- Landed Unit Cost (Readonly) -->
               <td>
-                <input type="text" class="item-landed-unit-cost text-right readonly-display font-mono" readonly value="0.00" style="font-weight:700; color:#6b21a8; background:#f5f3ff;">
+                <input type="text" class="item-landed-unit-cost text-right readonly-display font-mono" readonly value="0.00" style="color:#6b21a8; background:#f5f3ff; font-weight:400;">
               </td>
 
               <!-- Del Row -->
@@ -1166,7 +1196,7 @@ table.items-table select {
 
       </div>
 
-      <!-- SECTION 4: PURCHASE SUMMARY (RIGHT COLUMN WITH RELOCATED VAT TOGGLE) -->
+      <!-- SECTION 4: PURCHASE SUMMARY -->
       <div class="summary-card-grn">
         <div class="card-title-grn">
           <span>4. Purchase Summary</span>
@@ -1179,7 +1209,6 @@ table.items-table select {
             <span>VAT Calculation Mode</span>
             <span id="vatModeLabelBadge" style="color: var(--primary); font-size: 10px;">EXCLUSIVE</span>
           </div>
-          <!-- Hidden inputs to submit to server -->
           <input type="hidden" name="vat_handling_mode" id="id_vat_handling_mode" value="{{ form.vat_handling_mode.value|default:'EXCLUSIVE' }}">
           <input type="hidden" name="is_vat_bill" id="id_is_vat_bill" value="{% if form.is_vat_bill.value %}true{% else %}true{% endif %}">
           <input type="hidden" name="vat_rate" id="defaultVatRate" value="13.00">
@@ -1267,10 +1296,10 @@ table.items-table select {
 <!-- TOAST NOTIFICATION CONTAINER -->
 <div id="toast-notification">Notification Message</div>
 
-<!-- TEMPLATE FOR DYNAMIC ROWS (STRICT 13% OR 0% DROPDOWN) -->
+<!-- TEMPLATE FOR DYNAMIC ROWS -->
 <template id="rowTemplate">
   <tr class="item-row" data-row-idx="__prefix__">
-    <td class="text-center row-sn font-mono" style="font-weight:600; color:var(--slate-500);">1</td>
+    <td class="text-center row-sn font-mono" style="font-weight:400; color:var(--slate-500);">1</td>
     <td>
       <div class="search-wrapper-relative">
         <input type="hidden" name="items-__prefix__-product" class="item-product-id" value="" required>
@@ -1284,9 +1313,11 @@ table.items-table select {
     <td>
       <input type="text" name="items-__prefix__-scanned_imei_list" class="item-serial font-mono" placeholder="IMEI / Serials" value="">
     </td>
+    <!-- Qty (Big, Clean, Regular Font) -->
     <td>
       <input type="number" name="items-__prefix__-purchased_quantity" class="item-qty text-right font-mono" value="1.000" min="0.001" step="any" required>
     </td>
+    <!-- UOM (Clean, Clear) -->
     <td>
       <select class="item-uom">
         <option value="Pcs" selected>Pcs</option>
@@ -1296,12 +1327,15 @@ table.items-table select {
         <option value="Unit">Unit</option>
       </select>
     </td>
+    <!-- Purchase Rate (Big, Clean, Regular Font) -->
     <td>
       <input type="number" name="items-__prefix__-purchase_rate" class="item-rate text-right font-mono" value="0.00" min="0" step="0.01" required>
     </td>
+    <!-- MRP (Big, Clean, Regular Font) -->
     <td>
       <input type="number" name="items-__prefix__-new_selling_price" class="item-mrp text-right font-mono" value="0.00" min="0" step="0.01">
     </td>
+    <!-- Disc Type -->
     <td>
       <select name="items-__prefix__-discount_type" class="item-disc-type">
         <option value="NONE" selected>None</option>
@@ -1309,29 +1343,36 @@ table.items-table select {
         <option value="AMOUNT">Flat</option>
       </select>
     </td>
+    <!-- Disc Val -->
     <td>
       <input type="number" name="items-__prefix__-discount_input_value" class="item-disc-val text-right font-mono" value="0.00" min="0" step="0.01">
     </td>
+    <!-- Tax Rate -->
     <td>
       <select name="items-__prefix__-vat_rate" class="item-tax-percent select-tax-rate text-center">
         <option value="13.00" selected>13%</option>
         <option value="0.00">0% (Exempt)</option>
       </select>
     </td>
+    <!-- Taxable Amount (Big, Clean, Readonly, Regular Font) -->
     <td>
       <input type="text" class="item-taxable-amount text-right readonly-display font-mono" readonly value="0.00">
     </td>
+    <!-- VAT Amount (Big, Clean, Readonly, Regular Font) -->
     <td>
       <input type="text" class="item-vat-amount text-right readonly-display font-mono" readonly value="0.00">
     </td>
+    <!-- Net Amount (Big, Clean, Readonly, Regular Font - No Bold) -->
     <td>
-      <input type="text" class="item-net-amount text-right readonly-display font-mono" readonly value="0.00" style="font-weight:600;">
+      <input type="text" class="item-net-amount text-right readonly-display font-mono" readonly value="0.00">
     </td>
+    <!-- Alloc Overhead -->
     <td>
-      <input type="text" class="item-alloc-overhead text-right readonly-display font-mono" readonly value="0.00" style="color:#b45309;">
+      <input type="text" class="item-alloc-overhead text-right readonly-display font-mono" readonly value="0.00" style="color:#b45309; font-weight:400;">
     </td>
+    <!-- Landed Unit Cost -->
     <td>
-      <input type="text" class="item-landed-unit-cost text-right readonly-display font-mono" readonly value="0.00" style="font-weight:700; color:#6b21a8; background:#f5f3ff;">
+      <input type="text" class="item-landed-unit-cost text-right readonly-display font-mono" readonly value="0.00" style="color:#6b21a8; background:#f5f3ff; font-weight:400;">
     </td>
     <td class="text-center">
       <div style="display: none;"><input type="checkbox" name="items-__prefix__-DELETE"></div>
@@ -1539,7 +1580,7 @@ table.items-table select {
       const rate = parseNum(row.querySelector('.item-rate')?.value);
       const discType = row.querySelector('.item-disc-type')?.value || 'NONE';
       const discVal = parseNum(row.querySelector('.item-disc-val')?.value);
-      const taxPercent = parseNum(row.querySelector('.item-tax-percent')?.value); // Strict: 13 or 0
+      const taxPercent = parseNum(row.querySelector('.item-tax-percent')?.value);
 
       totalItemUnits += qty;
       const rawGross = qty * rate;
@@ -1556,9 +1597,8 @@ table.items-table select {
       let preTaxBase = netLineBase;
       let effectiveGross = rawGross;
 
-      // Extract pre-VAT base if VAT Included and line item is 13% taxable
       if (vatMode === 'INCLUSIVE' && taxPercent > 0) {
-        const divisor = 1 + (taxPercent / 100); // 1.13
+        const divisor = 1 + (taxPercent / 100);
         preTaxBase = netLineBase / divisor;
         effectiveGross = (netLineBase / divisor) + (lineDisc / divisor);
       }
@@ -1587,7 +1627,6 @@ table.items-table select {
     let hasTaxableItem = false;
 
     rowCalculations.forEach(item => {
-      // Prorate whole bill discount proportionally across pre-tax merchandise base
       let lineBillDiscountShare = 0;
       if (netMerchandiseTotal > 0 && wholeBillDiscount > 0) {
         lineBillDiscountShare = (item.preTaxBase / netMerchandiseTotal) * wholeBillDiscount;
@@ -1597,19 +1636,16 @@ table.items-table select {
 
       let vatAmt = 0;
       if (item.taxPercent > 0) {
-        // 13% TAXABLE ITEM: Accumulate strictly into taxable base and compute 13% VAT
         hasTaxableItem = true;
         vatAmt = effectiveBase * (item.taxPercent / 100);
         netTaxableSum += effectiveBase;
         totalVatAmount += vatAmt;
       } else {
-        // 0% NON-TAXABLE ITEM: Accumulate strictly into non-taxable base
         netNonTaxableSum += effectiveBase;
       }
 
       const netLineAmount = effectiveBase + vatAmt;
 
-      // Overhead allocation proportional to pre-VAT merchandise base
       let rowAllocOverhead = 0;
       if (netMerchandiseTotal > 0) {
         rowAllocOverhead = (item.preTaxBase / netMerchandiseTotal) * totalOverheads;
@@ -1617,13 +1653,11 @@ table.items-table select {
         rowAllocOverhead = (item.qty / totalItemUnits) * totalOverheads;
       }
 
-      // Landed Cost per Unit = (Effective Pre-tax Base + Prorated Overhead) / Qty
       let landedUnitCost = 0;
       if (item.qty > 0) {
         landedUnitCost = (effectiveBase + rowAllocOverhead) / item.qty;
       }
 
-      // Update DOM values safely
       const elTaxable = item.row.querySelector('.item-taxable-amount');
       const elVat = item.row.querySelector('.item-vat-amount');
       const elNet = item.row.querySelector('.item-net-amount');
@@ -1668,7 +1702,6 @@ table.items-table select {
     if (sGrand) sGrand.textContent = formatCurrency(grandTotalPurchase);
     if (sLanded) sLanded.textContent = formatCurrency(totalLandedCost);
 
-    // Synchronize VAT % display in Summary Card (Shows 13% if any item is taxable, else 0%)
     if (vatPctBadge) {
       vatPctBadge.textContent = hasTaxableItem ? "13" : "0";
     }
@@ -1804,23 +1837,19 @@ table.items-table select {
       const cost = parseFloat(p.purchase_price || p.cost_price || (p.extra_data && p.extra_data.cost_price) || 0);
       const price = parseFloat(p.selling_price || p.price || 0);
 
-      // 1. Identification
       hiddenId.value = p.id || p.product_id;
       input.value = p.name;
 
-      // 2. Rate
       const rateInput = row.querySelector('.item-rate');
       if (rateInput && cost > 0) {
         rateInput.value = cost.toFixed(2);
       }
 
-      // 3. Retail MRP
       const mrpInput = row.querySelector('.item-mrp');
       if (mrpInput && price > 0) {
         mrpInput.value = price.toFixed(2);
       }
 
-      // 4. UOM (Unit of Measurement)
       const unitCode = p.unit_code || (p.extra_data && p.extra_data.unit_code) || 'Pcs';
       const uomSelect = row.querySelector('.item-uom');
       if (uomSelect && unitCode) {
@@ -1838,7 +1867,6 @@ table.items-table select {
         }
       }
 
-      // 5. Strict Tax Rate Dropdown (13% or 0%)
       const taxSelect = row.querySelector('.item-tax-percent');
       if (taxSelect) {
         if (p.is_vat_applicable === false || p.tax_pricing_type === 'EXEMPT' || p.vat_rate === 0 || p.vat_rate === '0.00') {
@@ -1848,7 +1876,6 @@ table.items-table select {
         }
       }
 
-      // 6. Serial / IMEI Notification Cue
       const isPhone = Boolean(p.requires_imei || p.requires_imei_tracking || (p.extra_data && (p.extra_data.requires_imei || p.extra_data.requires_imei_tracking)));
       const serialInput = row.querySelector('.item-serial');
       if (serialInput) {
@@ -1868,12 +1895,10 @@ table.items-table select {
       closeDropdown();
       calculateAll();
 
-      // Shift focus to Qty field
       const qtyInput = row.querySelector('.item-qty');
       if (qtyInput) qtyInput.focus();
     }
 
-    // Zero-query click & focus trigger
     input.addEventListener('focus', () => {
       const q = input.value.trim();
       fetchProducts(q, true);
@@ -1887,10 +1912,9 @@ table.items-table select {
       }
     });
 
-    // Progressive real-time typing with debouncing
     input.addEventListener('input', () => {
       clearTimeout(timer);
-      hiddenId.value = ''; // Reset product ID while typing
+      hiddenId.value = '';
       const q = input.value;
 
       timer = setTimeout(() => {
@@ -1898,7 +1922,6 @@ table.items-table select {
       }, 160);
     });
 
-    // Keyboard navigation (ArrowDown, ArrowUp, Enter, Escape)
     input.addEventListener('keydown', (e) => {
       if (!dropdown.classList.contains('show')) return;
       const items = dropdown.querySelectorAll('.dropdown-item-grn');

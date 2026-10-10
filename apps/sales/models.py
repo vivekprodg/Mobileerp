@@ -25,6 +25,21 @@ Key Capabilities & Forensic Architecture:
 7. Decoupled KYC Document Storage:
    - TradeInLegalUndertaking upload fields use safe settings fallbacks, preventing module import
      and server startup crashes if custom directory variables are omitted.
+8. Autonomous Self-Contained VAT Snapshot for Sales Returns:
+   - Both SalesReturn (header) and SalesReturnItem (lines) permanently record:
+     * return_quantity
+     * refund_amount
+     * vat_rate (at return)
+     * taxable_return_amount (pre-tax base reversed)
+     * non_taxable_return_amount (exempt base reversed)
+     * vat_reversal_amount (output VAT reversed)
+   - Every returned item is a self-contained VAT transaction that accurately derives its VAT
+     reversal from the original SalesEstimateItem's stored historical VAT (tax_amount and
+     base_taxable_amount), preventing double taxation on VAT-exclusive bills and capping total
+     reversed tax across multiple partial returns.
+   - Preserves explicitly supplied VAT snapshot values without destructive overwriting.
+   - Enforces parent SalesReturn header totals to strictly match the sum of its items and raises
+     exceptions if synchronization fails.
 """
 
 import re
@@ -32,7 +47,7 @@ import uuid
 import logging
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import date, datetime, timedelta
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any, List
 
 from django.db import models
 from django.conf import settings
@@ -364,9 +379,7 @@ class SalesEstimate(TimeStampedModel):
         return f"{self.estimate_number} - Rs. {self.grand_total} ({self.status})"
 
     def get_absolute_url(self) -> str:
-        """
-        Standard Django model canonical URL: resolves directly to the bill details view.
-        """
+        """Standard Django model canonical URL: resolves directly to the bill details view."""
         return reverse('sales:estimate_detail', kwargs={'pk': self.pk})
 
     def clean(self):
@@ -790,6 +803,11 @@ class SalesEstimateItem(TimeStampedModel):
         qty = self.quantity if self.quantity and self.quantity > Decimal('0.000') else Decimal('1.000')
         return (self.item_discount_amount / qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+    @property
+    def vat_amount(self) -> Decimal:
+        """Convenience property returning line tax amount."""
+        return self.tax_amount
+
 # =============================================================================
 # 3. SPLIT PAYMENT TRANSACTIONS
 # =============================================================================
@@ -1142,7 +1160,10 @@ class TradeInLegalUndertaking(TimeStampedModel):
 # =============================================================================
 class SalesReturn(TimeStampedModel):
     """
-    Customer sales return or warranty replacement voucher.
+    Customer sales return or warranty replacement voucher (Credit Note).
+    Maintains autonomous, self-contained VAT snapshot fields so historical
+    reporting never relies on reverse-engineering original invoices.
+    Header totals strictly equal the sum of its items.
     """
     return_number = models.CharField(max_length=50, unique=True, db_index=True, verbose_name=_("Return Voucher No."))
     original_estimate = models.ForeignKey(
@@ -1173,7 +1194,27 @@ class SalesReturn(TimeStampedModel):
         verbose_name=_("Fiscal Year (BS)")
     )
 
-    total_refund_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Total Refund Amount"))
+    total_refund_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Total Refund Amount")
+    )
+
+    # Autonomous Self-Contained VAT Snapshot Fields on Return Header
+    taxable_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Taxable Return Amount (NPR)"),
+        help_text=_("Total net taxable base reversed across line items.")
+    )
+    non_taxable_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Non-Taxable Return Amount (NPR)"),
+        help_text=_("Total non-taxable / exempt merchandise amount reversed across line items.")
+    )
+    vat_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("VAT Reversal Amount (NPR)"),
+        help_text=_("Total output VAT reversed across all returned lines in this voucher.")
+    )
+
     refund_mode = models.CharField(
         max_length=30,
         choices=[
@@ -1200,6 +1241,7 @@ class SalesReturn(TimeStampedModel):
             models.Index(fields=['fiscal_year', 'branch'], name='idx_ret_fy_branch'),
             models.Index(fields=['branch', 'created_at'], name='idx_return_branch_date'),
             models.Index(fields=['return_number'], name='idx_return_num'),
+            models.Index(fields=['branch', 'return_date_ad'], name='idx_ret_br_date_ad'),
         ]
 
     def __str__(self):
@@ -1212,20 +1254,116 @@ class SalesReturn(TimeStampedModel):
             bs_field_name='return_date_bs',
             fy_field_name='fiscal_year'
         )
+        if self.pk and self.items.exists():
+            update_fields = kwargs.get('update_fields')
+            if update_fields is None:
+                self.recalculate_financials(save=False)
+            elif 'total_refund_amount' in update_fields:
+                self.recalculate_financials(save=False)
+                new_update_fields = set(update_fields)
+                new_update_fields.update(['total_refund_amount', 'taxable_amount', 'non_taxable_amount', 'vat_amount'])
+                kwargs['update_fields'] = list(new_update_fields)
         super().save(*args, **kwargs)
+
+    def recalculate_financials(self, save=True):
+        """
+        Aggregates line items to update total_refund_amount, taxable_amount,
+        non_taxable_amount, and vat_amount.
+        Ensures the parent SalesReturn header totals strictly equal the sum of its return items.
+        """
+        if not self.pk:
+            return
+        agg = self.items.aggregate(
+            tot_refund=models.Sum('refund_amount'),
+            tot_taxable=models.Sum('taxable_return_amount'),
+            tot_non_taxable=models.Sum('non_taxable_return_amount'),
+            tot_vat=models.Sum('vat_reversal_amount')
+        )
+        self.total_refund_amount = (agg['tot_refund'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        self.taxable_amount = (agg['tot_taxable'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        self.non_taxable_amount = (agg['tot_non_taxable'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        self.vat_amount = (agg['tot_vat'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if save:
+            SalesReturn.objects.filter(pk=self.pk).update(
+                total_refund_amount=self.total_refund_amount,
+                taxable_amount=self.taxable_amount,
+                non_taxable_amount=self.non_taxable_amount,
+                vat_amount=self.vat_amount,
+                updated_at=timezone.now()
+            )
+
+    @property
+    def total_taxable_amount(self) -> Decimal:
+        """Returns the total taxable return base recorded on this return."""
+        if self.taxable_amount and self.taxable_amount > Decimal('0.00'):
+            return self.taxable_amount
+        if hasattr(self, '_prefetched_objects_cache') and 'items' in self._prefetched_objects_cache:
+            return sum((item.taxable_return_amount for item in self.items.all()), Decimal('0.00'))
+        val = self.items.aggregate(tot=models.Sum('taxable_return_amount'))['tot']
+        return val or Decimal('0.00')
+
+    @property
+    def total_non_taxable_amount(self) -> Decimal:
+        """Returns the total non-taxable / exempt return amount recorded on this return."""
+        if self.non_taxable_amount and self.non_taxable_amount > Decimal('0.00'):
+            return self.non_taxable_amount
+        if hasattr(self, '_prefetched_objects_cache') and 'items' in self._prefetched_objects_cache:
+            return sum((item.non_taxable_return_amount for item in self.items.all()), Decimal('0.00'))
+        val = self.items.aggregate(tot=models.Sum('non_taxable_return_amount'))['tot']
+        return val or Decimal('0.00')
+
+    @property
+    def total_vat_amount(self) -> Decimal:
+        """Returns the total output VAT reversed across all returned lines."""
+        if self.vat_amount and self.vat_amount > Decimal('0.00'):
+            return self.vat_amount
+        if hasattr(self, '_prefetched_objects_cache') and 'items' in self._prefetched_objects_cache:
+            return sum((item.vat_reversal_amount for item in self.items.all()), Decimal('0.00'))
+        val = self.items.aggregate(tot=models.Sum('vat_reversal_amount'))['tot']
+        return val or Decimal('0.00')
+
+    @property
+    def total_vat_reversal_amount(self) -> Decimal:
+        """Convenience alias for total_vat_amount."""
+        return self.total_vat_amount
 
 class SalesReturnItem(TimeStampedModel):
     """
     Line item within a customer sales return voucher.
+    Permanently remembers return quantity, refund amount, VAT rate at return,
+    taxable return amount, non-taxable return amount, and VAT reversal amount
+    as an autonomous, self-contained VAT transaction.
     """
     DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
 
     sales_return = models.ForeignKey(SalesReturn, on_delete=models.CASCADE, related_name='items')
     estimate_item = models.ForeignKey(SalesEstimateItem, on_delete=models.PROTECT, verbose_name=_("Original Sales Line"))
     product = models.ForeignKey(Product, on_delete=models.PROTECT, verbose_name=_("Returned Product"))
-    return_quantity = models.DecimalField(max_digits=10, decimal_places=3, verbose_name=_("Return Quantity"))
-    base_unit_quantity = models.DecimalField(max_digits=12, decimal_places=3, verbose_name=_("Base Unit Quantity"))
-    refund_amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name=_("Net Refund Amount"))
+    return_quantity = models.DecimalField(max_digits=10, decimal_places=3, default=Decimal('1.000'), verbose_name=_("Return Quantity"))
+    base_unit_quantity = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('1.000'), verbose_name=_("Base Unit Quantity"))
+    refund_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), verbose_name=_("Net Refund Amount"))
+
+    # Autonomous VAT snapshot fields permanently remembered on line item
+    vat_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("VAT Rate at Return (%)"),
+        help_text=_("VAT percentage applicable to the returned item at the time of return (e.g. 13.00% or 0.00%).")
+    )
+    taxable_return_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Taxable Return Amount (NPR)"),
+        help_text=_("Pre-tax taxable base reversed for this line item.")
+    )
+    non_taxable_return_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Non-Taxable Return Amount (NPR)"),
+        help_text=_("Exempt or non-taxable amount reversed for this line item.")
+    )
+    vat_reversal_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("VAT Reversal Amount (NPR)"),
+        help_text=_("Output VAT amount reversed for this line item.")
+    )
 
     discount_type = models.CharField(
         max_length=15,
@@ -1269,12 +1407,178 @@ class SalesReturnItem(TimeStampedModel):
         indexes = [
             models.Index(fields=['sales_return', 'product'], name='idx_retitem_ret_prod'),
             models.Index(fields=['discount_type'], name='idx_retitem_disc_type'),
+            models.Index(fields=['vat_rate'], name='idx_retitem_vat_rate'),
+            models.Index(fields=['sales_return', 'vat_reversal_amount'], name='idx_retitem_ret_vat'),
         ]
 
     def __str__(self):
-        return f"{self.product.name} x {self.return_quantity} (Refund: Rs. {self.refund_amount})"
+        vat_info = f" (VAT Rev: Rs. {self.vat_reversal_amount})" if self.vat_reversal_amount > Decimal('0.00') else ""
+        return f"{self.product.name} x {self.return_quantity} (Refund: Rs. {self.refund_amount}{vat_info})"
+
+    def clean(self):
+        super().clean()
+        if self.discount_type == 'FIXED':
+            self.discount_type = 'AMOUNT'
+        if self.return_quantity is not None and self.return_quantity <= Decimal('0.000'):
+            raise ValidationError(_("Return quantity must be greater than zero."))
 
     def save(self, *args, **kwargs):
         if self.discount_type == 'FIXED':
             self.discount_type = 'AMOUNT'
+
+        # Ensure base_unit_quantity is populated
+        if (not self.base_unit_quantity or self.base_unit_quantity <= Decimal('0.000')) and self.return_quantity:
+            factor = Decimal('1.000')
+            if self.estimate_item_id and self.estimate_item.conversion_factor:
+                factor = self.estimate_item.conversion_factor
+            self.base_unit_quantity = (self.return_quantity * factor).quantize(
+                Decimal('0.001'), rounding=ROUND_HALF_UP
+            )
+
+        # ---------------------------------------------------------------------
+        # AUTONOMOUS VAT SNAPSHOT POPULATION
+        # ---------------------------------------------------------------------
+        # Requirement 8: Preserve explicitly supplied VAT snapshot values instead of overwriting them
+        has_explicit_snapshot = (
+            (self.taxable_return_amount is not None and self.taxable_return_amount > Decimal('0.00')) or
+            (self.non_taxable_return_amount is not None and self.non_taxable_return_amount > Decimal('0.00')) or
+            (self.vat_reversal_amount is not None and self.vat_reversal_amount > Decimal('0.00'))
+        )
+
+        if not has_explicit_snapshot and self.estimate_item_id:
+            est_item = self.estimate_item
+            orig_qty = est_item.quantity if (est_item.quantity and est_item.quantity > Decimal('0.000')) else Decimal('1.000')
+            return_qty = self.return_quantity if (self.return_quantity and self.return_quantity > Decimal('0.000')) else Decimal('1.000')
+
+            orig_base_taxable = (est_item.base_taxable_amount or est_item.taxable_line_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_vat = (est_item.tax_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_total = (est_item.line_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_vat_rate = (est_item.vat_rate or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            # Determine whether original line was taxable
+            is_taxable = bool(
+                est_item.is_vat_applicable and 
+                orig_vat_rate > Decimal('0.00') and 
+                (orig_vat > Decimal('0.00') or orig_base_taxable > Decimal('0.00'))
+            )
+
+            # Defensive recovery for legacy invoices where VAT rate was recorded but tax was not snapshotted
+            if not is_taxable and est_item.is_vat_applicable and orig_vat_rate > Decimal('0.00') and orig_total > Decimal('0.00'):
+                divisor = Decimal('1.00') + (orig_vat_rate / Decimal('100.00'))
+                orig_base_taxable = (orig_total / divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                orig_vat = (orig_total - orig_base_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                is_taxable = (orig_vat > Decimal('0.00'))
+
+            # Query prior returns on this estimate_item to accurately handle partial return rounding
+            prior_items_qs = SalesReturnItem.objects.filter(estimate_item=est_item)
+            if self.pk:
+                prior_items_qs = prior_items_qs.exclude(pk=self.pk)
+
+            prior_agg = prior_items_qs.aggregate(
+                tot_qty=models.Sum('return_quantity'),
+                tot_taxable=models.Sum('taxable_return_amount'),
+                tot_vat=models.Sum('vat_reversal_amount'),
+                tot_non_taxable=models.Sum('non_taxable_return_amount'),
+                tot_refund=models.Sum('refund_amount')
+            )
+            prior_qty = (prior_agg['tot_qty'] or Decimal('0.000')).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            prior_taxable = (prior_agg['tot_taxable'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            prior_vat = (prior_agg['tot_vat'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            prior_non_taxable = (prior_agg['tot_non_taxable'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            prior_refund = (prior_agg['tot_refund'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            is_final_return = bool(prior_qty + return_qty >= orig_qty)
+            ratio = min(Decimal('1.000000'), return_qty / orig_qty) if orig_qty > Decimal('0.000') else Decimal('1.000000')
+
+            # Populate refund_amount if not already set
+            if not self.refund_amount or self.refund_amount <= Decimal('0.00'):
+                if is_final_return:
+                    self.refund_amount = max(Decimal('0.00'), orig_total - prior_refund)
+                else:
+                    self.refund_amount = (orig_total * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            if is_taxable:
+                self.vat_rate = orig_vat_rate
+                rem_vat = max(Decimal('0.00'), orig_vat - prior_vat)
+                rem_taxable = max(Decimal('0.00'), orig_base_taxable - prior_taxable)
+
+                if is_final_return:
+                    calc_vat = rem_vat
+                else:
+                    calc_vat = min(rem_vat, (orig_vat * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+                self.vat_reversal_amount = calc_vat
+                # In both VAT-inclusive and VAT-exclusive items, refund_amount includes VAT.
+                # Taxable base reversed is the pre-tax portion of the refund: refund_amount - vat_reversal_amount
+                self.taxable_return_amount = max(Decimal('0.00'), self.refund_amount - self.vat_reversal_amount)
+                self.non_taxable_return_amount = Decimal('0.00')
+
+            else:
+                self.vat_rate = Decimal('0.00')
+                self.taxable_return_amount = Decimal('0.00')
+                self.vat_reversal_amount = Decimal('0.00')
+                self.non_taxable_return_amount = self.refund_amount
+
+        elif has_explicit_snapshot and self.estimate_item_id:
+            # If snapshot was explicitly supplied but vat_rate was omitted, inherit original rate
+            if (not self.vat_rate or self.vat_rate <= Decimal('0.00')) and self.estimate_item.vat_rate:
+                if self.vat_reversal_amount and self.vat_reversal_amount > Decimal('0.00'):
+                    self.vat_rate = self.estimate_item.vat_rate
+
         super().save(*args, **kwargs)
+
+        # ---------------------------------------------------------------------
+        # PARENT SALES RETURN TOTALS SYNCHRONIZATION
+        # ---------------------------------------------------------------------
+        if self.sales_return_id:
+            try:
+                self.sales_return.recalculate_financials(save=True)
+            except Exception as e:
+                logger.error(
+                    f"Failed to synchronize parent SalesReturn #{self.sales_return_id} header totals from return items: {e}",
+                    exc_info=True
+                )
+                raise
+
+    def delete(self, *args, **kwargs):
+        parent_return = self.sales_return if self.sales_return_id else None
+        super().delete(*args, **kwargs)
+        if parent_return and parent_return.pk:
+            try:
+                parent_return.recalculate_financials(save=True)
+            except Exception as e:
+                logger.error(
+                    f"Failed to recalculate financial totals after deleting SalesReturnItem: {e}",
+                    exc_info=True
+                )
+                raise
+
+    @property
+    def is_vat_applicable(self) -> bool:
+        """Returns True if this returned line item was subject to VAT."""
+        return bool(self.vat_rate and self.vat_rate > Decimal('0.00'))
+
+    @property
+    def tax_rate(self) -> Decimal:
+        """Convenience alias for vat_rate."""
+        return self.vat_rate
+
+    @property
+    def taxable_amount(self) -> Decimal:
+        """Convenience alias for taxable_return_amount."""
+        return self.taxable_return_amount
+
+    @property
+    def non_taxable_amount(self) -> Decimal:
+        """Convenience alias for non_taxable_return_amount."""
+        return self.non_taxable_return_amount
+
+    @property
+    def vat_amount(self) -> Decimal:
+        """Convenience alias for vat_reversal_amount."""
+        return self.vat_reversal_amount
+
+    @property
+    def tax_amount(self) -> Decimal:
+        """Convenience alias for vat_reversal_amount."""
+        return self.vat_reversal_amount

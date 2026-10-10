@@ -50,6 +50,72 @@
     font-weight: 700;
 }
 
+/* VAT & General Ledger Audit Drill-Down Cards */
+.gl-audit-panel {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: var(--erp-shadow-xs);
+    margin-bottom: 20px;
+}
+
+.gl-audit-panel.highlighted-drilldown {
+    border-color: #f59e0b;
+    background: #fffdfa;
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.12);
+}
+
+.gl-chain-stepper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.gl-chain-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    color: #1e293b;
+}
+
+.gl-chain-node.active {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #dc2626;
+    font-weight: 700;
+}
+
+.gl-chain-node.active-vat {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+    color: #059669;
+    font-weight: 700;
+}
+
+.gl-chain-arrow {
+    color: #94a3b8;
+    font-size: 0.72rem;
+}
+
+.vat-stat-box {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 12px;
+    padding: 12px 16px;
+}
+
 @media print {
     @page {
         size: A4 portrait;
@@ -62,7 +128,7 @@
         font-size: 11px;
     }
 
-    .no-print, header, aside, footer, nav, .btn, #sidebarOffcanvas {
+    .no-print, header, aside, footer, nav, .btn, #sidebarOffcanvas, .gl-audit-panel {
         display: none !important;
     }
 
@@ -93,9 +159,17 @@
                 <span class="badge bg-{% if purchase_return.status == 'CONFIRMED' %}success{% else %}secondary{% endif %} fs-xs px-3 py-1 rounded-pill">
                     {{ purchase_return.get_status_display }}
                 </span>
+                {% if gl_journal_entry %}
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fs-2xs px-2.5 py-1 rounded-pill fw-bold font-monospace">
+                        <i class="fas fa-link me-1"></i> GL Linked: {{ gl_journal_entry.voucher_number }}
+                    </span>
+                {% endif %}
             </div>
             <p class="text-muted fs-xs mb-0 mt-1">
                 Issued to: <strong>{{ purchase_return.supplier.company_name }}</strong> &bull; Date: <strong>{{ purchase_return.return_date }} ({{ purchase_return.return_date_bs }} BS)</strong>
+                {% if purchase_return.original_bill_reference or purchase_return.original_grn %}
+                    &bull; Original Inward Ref: <strong class="text-dark font-monospace">{{ purchase_return.original_bill_reference|default:purchase_return.original_grn.grn_number }}</strong>
+                {% endif %}
             </p>
         </div>
 
@@ -110,6 +184,156 @@
                 &larr; Back to Returns List
             </a>
         </div>
+    </div>
+
+    <!-- =========================================================================
+         VAT DRILL-DOWN AUDIT TRAIL CHAIN & GL LINKAGE (SCREEN ONLY)
+         Debit Note ➔ GL Journal ➔ Journal Items ➔ Input VAT 1410
+         ========================================================================= -->
+    <div class="gl-audit-panel {% if is_from_vat_drilldown %}highlighted-drilldown{% endif %} no-print">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-primary p-2 rounded-circle fs-6"><i class="fas fa-sitemap"></i></span>
+                <div>
+                    <h6 class="fw-bold text-dark mb-0">
+                        <i class="fas fa-shield-halved text-success me-1"></i>
+                        VAT Audit Chain &amp; Double-Entry GL Traceability
+                    </h6>
+                    <small class="text-muted fs-2xs">
+                        Audit verification connecting this return voucher to the posted debit note, general ledger reversal, and Input VAT Account 1410.
+                    </small>
+                </div>
+            </div>
+            {% if is_from_vat_drilldown %}
+                <span class="badge bg-warning text-dark fw-bold font-monospace fs-2xs px-2.5 py-1 rounded-pill">
+                    <i class="fas fa-eye me-1"></i> VAT Report Drilldown Active
+                </span>
+            {% endif %}
+        </div>
+
+        <!-- Four-Node Audit Stepper -->
+        <div class="gl-chain-stepper mb-3">
+            <span class="text-muted fs-2xs text-uppercase fw-bold"><i class="fas fa-diagram-project text-primary me-1"></i> Audit Flow:</span>
+            
+            <!-- Node 1: Debit Note -->
+            <div class="gl-chain-node active">
+                <i class="fas fa-file-invoice text-danger"></i>
+                <span>1. Debit Note: <strong class="font-mono">{{ purchase_return.return_number }}</strong></span>
+            </div>
+
+            <span class="gl-chain-arrow">&rarr;</span>
+
+            <!-- Node 2: GL Journal Entry -->
+            <div class="gl-chain-node">
+                <i class="fas fa-book text-primary"></i>
+                <span>2. GL Journal: 
+                    {% if gl_journal_entry %}
+                        <strong class="font-mono text-primary">{{ gl_journal_entry.voucher_number }}</strong>
+                    {% else %}
+                        <strong class="text-muted font-mono">Posted</strong>
+                    {% endif %}
+                </span>
+            </div>
+
+            <span class="gl-chain-arrow">&rarr;</span>
+
+            <!-- Node 3: Journal Items -->
+            <div class="gl-chain-node">
+                <i class="fas fa-list-check text-secondary"></i>
+                <span>3. Journal Items: <strong class="font-mono">{{ journal_items|length }} Lines</strong></span>
+            </div>
+
+            <span class="gl-chain-arrow">&rarr;</span>
+
+            <!-- Node 4: Input VAT 1410 Reversal -->
+            <div class="gl-chain-node active-vat">
+                <i class="fas fa-percent text-success"></i>
+                <span>4. Input VAT 1410: 
+                    <strong class="font-mono text-success">
+                        {% if purchase_return.tax_amount > 0 %}
+                            -Rs. {{ purchase_return.tax_amount|floatformat:2|intcomma }} (Cr)
+                        {% else %}
+                            Rs. 0.00 (Exempt)
+                        {% endif %}
+                    </strong>
+                </span>
+            </div>
+
+            {% if purchase_return.original_bill_reference or purchase_return.original_grn %}
+                <span class="gl-chain-arrow">&bull;</span>
+                <div class="gl-chain-node">
+                    <i class="fas fa-truck-ramp-box text-muted"></i>
+                    <span>Ref Inward: <strong class="font-mono">{{ purchase_return.original_bill_reference|default:purchase_return.original_grn.grn_number }}</strong></span>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Itemized Journal Items Table (Collapsible / Visible for Audits) -->
+        {% if journal_items %}
+        <div class="card border rounded-3 overflow-hidden bg-white mt-2">
+            <div class="p-2.5 bg-light d-flex justify-content-between align-items-center border-bottom">
+                <strong class="fs-xs text-dark">
+                    <i class="fas fa-table-list text-primary me-1"></i> Posted Double-Entry Journal Lines (Debit Note Voucher)
+                </strong>
+                {% if gl_journal_entry %}
+                    <span class="font-mono fs-2xs text-muted">
+                        Voucher: <strong>{{ gl_journal_entry.voucher_number }}</strong> &bull; Total Dr/Cr: <strong>Rs. {{ gl_journal_entry.total_debit|floatformat:2|intcomma }}</strong>
+                    </span>
+                {% endif %}
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0 fs-xs">
+                    <thead class="bg-light text-muted fs-3xs text-uppercase">
+                        <tr>
+                            <th class="ps-3" style="width: 140px;">Account Code</th>
+                            <th>Ledger Account Name</th>
+                            <th class="text-end" style="width: 140px;">Debit (Dr)</th>
+                            <th class="text-end" style="width: 140px;">Credit (Cr)</th>
+                            <th>Audit Tag / Narration</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for j_item in journal_items %}
+                        <tr class="{% if j_item.is_input_vat_1410 %}table-success bg-opacity-25{% endif %}">
+                            <td class="ps-3 font-mono fw-bold">
+                                {{ j_item.account_code }}
+                                {% if j_item.is_input_vat_1410 %}
+                                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs ms-1">INPUT VAT</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <strong>{{ j_item.account_name }}</strong>
+                            </td>
+                            <td class="text-end font-mono">
+                                {% if j_item.debit_amount > 0 %}
+                                    <strong class="text-dark">Rs. {{ j_item.debit_amount|floatformat:2|intcomma }}</strong>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end font-mono">
+                                {% if j_item.credit_amount > 0 %}
+                                    <strong class="{% if j_item.is_input_vat_1410 %}text-success fw-extrabold{% else %}text-dark{% endif %}">
+                                        Rs. {{ j_item.credit_amount|floatformat:2|intcomma }}
+                                    </strong>
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-muted fs-2xs">
+                                {% if j_item.is_input_vat_1410 %}
+                                    <strong class="text-success"><i class="fas fa-check-circle me-1"></i>Input Tax Claim Reversal (Annex 7 Deduction)</strong>
+                                {% else %}
+                                    {{ j_item.line_narration|default:"Journal settlement line" }}
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Official Printable A4 Debit Note Sheet Container -->
@@ -184,7 +408,41 @@
             </div>
         </div>
 
-        <!-- 3. Line Items Table with Scanned IMEIs & Returns Breakdown -->
+        <!-- 3. Stored VAT Snapshot KPI Strip (Visible on Screen & Print) -->
+        <div class="row g-2 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="vat-stat-box border-start border-primary border-4">
+                    <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Taxable Return Base</span>
+                    <strong class="font-mono text-dark fs-6 mt-1 d-block">Rs. {{ purchase_return.total_return_amount|floatformat:2|intcomma }}</strong>
+                    <small class="text-muted fs-3xs">Subject to 13% tax reversal</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="vat-stat-box border-start border-success border-4">
+                    <span class="text-success fs-3xs text-uppercase fw-bold d-block">13% Input VAT Reversal</span>
+                    <strong class="font-mono text-success fs-6 mt-1 d-block">Rs. {{ purchase_return.tax_amount|floatformat:2|intcomma }}</strong>
+                    <small class="text-muted fs-3xs">Reverses claim in GL Account 1410</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="vat-stat-box border-start border-danger border-4">
+                    <span class="text-danger fs-3xs text-uppercase fw-bold d-block">Total Debit Note Claim</span>
+                    <strong class="font-mono text-danger fs-6 mt-1 d-block">Rs. {{ purchase_return.net_refund_amount|floatformat:2|intcomma }}</strong>
+                    <small class="text-muted fs-3xs">Pre-Tax Base + 13% Tax</small>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="vat-stat-box border-start border-secondary border-4 bg-light">
+                    <span class="text-muted fs-3xs text-uppercase fw-bold d-block">Original Consignment Ref</span>
+                    <strong class="font-mono text-primary fs-6 mt-1 d-block text-truncate">
+                        {{ purchase_return.original_bill_reference|default:purchase_return.original_grn.grn_number|default:"Direct Inward" }}
+                    </strong>
+                    <small class="text-muted fs-3xs">Reference document</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. Line Items Table with Scanned IMEIs & Returns Breakdown -->
         <div class="table-responsive mb-4">
             <table class="table table-bordered align-middle mb-0 debit-note-table">
                 <thead>
@@ -194,7 +452,8 @@
                         <th class="text-center" style="width: 75px;">Unit</th>
                         <th class="text-center" style="width: 80px;">Qty</th>
                         <th class="text-end" style="width: 120px;">Purchase Rate</th>
-                        <th class="text-end" style="width: 85px;">VAT %</th>
+                        <th class="text-center" style="width: 85px;">VAT %</th>
+                        <th class="text-end" style="width: 110px;">VAT Reversal</th>
                         <th class="text-end pe-3" style="width: 140px;">Line Debit (NPR)</th>
                     </tr>
                 </thead>
@@ -229,7 +488,24 @@
                         <td class="text-center">{{ item.product.base_unit.code }}</td>
                         <td class="text-center font-monospace fw-bold">{{ item.returned_quantity|floatformat:0 }}</td>
                         <td class="text-end font-monospace">Rs. {{ item.purchase_rate|floatformat:2|intcomma }}</td>
-                        <td class="text-end font-monospace">{{ item.tax_rate|floatformat:1 }}%</td>
+                        <td class="text-center font-monospace">
+                            {% if item.tax_rate > 0 %}
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs fw-bold">
+                                    {{ item.tax_rate|floatformat:1 }}%
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">
+                                    0% (Exempt)
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end font-monospace text-success fw-bold">
+                            {% if item.tax_amount > 0 %}
+                                Rs. {{ item.tax_amount|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
                         <td class="text-end pe-3 font-monospace fw-bold text-danger">Rs. {{ item.line_total|floatformat:2|intcomma }}</td>
                     </tr>
                     {% endfor %}
@@ -238,24 +514,24 @@
                 <!-- Financial Totals Summary Footers -->
                 <tfoot class="border-top">
                     <tr>
-                        <td colspan="6" class="text-end fw-bold text-muted text-uppercase fs-xs">Gross Merchandise Value:</td>
+                        <td colspan="7" class="text-end fw-bold text-muted text-uppercase fs-xs">Gross Merchandise Base (Taxable Return):</td>
                         <td class="text-end pe-3 font-monospace fw-bold fs-xs">Rs. {{ purchase_return.total_return_amount|floatformat:2|intcomma }}</td>
                     </tr>
                     {% if purchase_return.tax_amount > 0 %}
                     <tr>
-                        <td colspan="6" class="text-end fw-bold text-muted text-uppercase fs-xs">Tax / VAT Adjustment:</td>
-                        <td class="text-end pe-3 font-monospace fw-bold text-warning-emphasis fs-xs">+Rs. {{ purchase_return.tax_amount|floatformat:2|intcomma }}</td>
+                        <td colspan="7" class="text-end fw-bold text-success text-uppercase fs-xs">13% Input VAT Reversal (GL Account 1410 Credited):</td>
+                        <td class="text-end pe-3 font-monospace fw-bold text-success fs-xs">+Rs. {{ purchase_return.tax_amount|floatformat:2|intcomma }}</td>
                     </tr>
                     {% endif %}
                     <tr class="bg-light">
-                        <td colspan="6" class="text-end fw-extrabold text-dark text-uppercase fs-sm">Total Debit Note Credit Claim:</td>
+                        <td colspan="7" class="text-end fw-extrabold text-dark text-uppercase fs-sm">Total Debit Note Credit Claim:</td>
                         <td class="text-end pe-3 font-monospace fw-extrabold text-danger fs-5">Rs. {{ purchase_return.net_refund_amount|floatformat:2|intcomma }}</td>
                     </tr>
                 </tfoot>
             </table>
         </div>
 
-        <!-- 4. Remarks & Commercial Notes -->
+        <!-- 5. Remarks & Commercial Notes -->
         {% if purchase_return.remarks %}
         <div class="p-3 bg-light rounded-3 border mb-4 fs-xs">
             <strong class="text-dark d-block mb-1"><i class="fas fa-note-sticky text-primary me-1"></i> Return Remarks &amp; Agreement Terms:</strong>
@@ -263,7 +539,7 @@
         </div>
         {% endif %}
 
-        <!-- 5. Formal Legal Signatures Area -->
+        <!-- 6. Formal Legal Signatures Area -->
         <div class="d-flex justify-content-between align-items-end mt-5 pt-4">
             <div class="signature-box-print">
                 <div class="mb-5"></div>
@@ -272,7 +548,7 @@
             </div>
 
             <div class="text-center text-muted fs-2xs" style="max-width: 320px;">
-                * This commercial debit note is an official statement of stock returned to the distributor. Please adjust the credit against our running ledger or issue a refund.
+                * This commercial debit note is an official statement of stock returned to the distributor. Corresponding stock counters, Input VAT claims, and ledger debt have been reconciled.
             </div>
 
             <div class="signature-box-print">

@@ -1,228 +1,940 @@
 {% extends "core/base.html" %}
 {% load humanize static %}
 
-{% block title %}Taxation &amp; Estimation Overview | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+{% block title %}VAT &amp; Tax Assessment Overview | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
 {% block extra_head %}
+<!-- Google Fonts: Inter & JetBrains Mono for Ultra-Crisp Number Alignment -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
-.tax-nav-pill {
+:root {
+    --tax-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --tax-font-mono: 'JetBrains Mono', monospace;
+
+    /* Palette: Executive Dark Navy, Vibrant Accents */
+    --tax-slate-950: #020617;
+    --tax-slate-900: #0f172a;
+    --tax-slate-800: #1e293b;
+    --tax-slate-700: #334155;
+    --tax-slate-600: #475569;
+    --tax-slate-500: #64748b;
+    --tax-slate-400: #94a3b8;
+    --tax-slate-300: #cbd5e1;
+    --tax-slate-200: #e2e8f0;
+    --tax-slate-100: #f1f5f9;
+    --tax-slate-50:  #f8fafc;
+    --tax-white:     #ffffff;
+
+    --tax-blue-600:  #2563eb;
+    --tax-blue-50:   #eff6ff;
+    --tax-blue-border: #bfdbfe;
+
+    --tax-green-600: #059669;
+    --tax-green-50:  #ecfdf5;
+    --tax-green-border: #a7f3d0;
+
+    --tax-red-600:   #dc2626;
+    --tax-red-50:    #fef2f2;
+    --tax-red-border: #fecaca;
+
+    --tax-amber-600: #d97706;
+    --tax-amber-50:  #fffbeb;
+
+    --tax-teal-600:  #0d9488;
+    --tax-teal-50:   #f0fdfa;
+}
+
+body {
+    font-family: var(--tax-font-sans);
+    color: var(--tax-slate-900);
+}
+
+.font-mono {
+    font-family: var(--tax-font-mono) !important;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Master Widescreen Canvas: Expands cleanly across large monitors */
+.vat-overview-shell {
+    max-width: 1820px;
+    margin: 0 auto;
+    padding: 16px 24px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Top Suite Horizontal Navigation Bar */
+.tax-suite-ribbon {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 9999px;
     padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 0.75rem;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+}
+
+.tax-nav-pill {
+    padding: 7px 16px;
+    border-radius: 9999px;
+    font-size: 0.775rem;
     font-weight: 700;
-    border: 1px solid var(--erp-slate-200);
-    background: #ffffff;
-    color: var(--erp-slate-600);
-    text-decoration: none;
-    transition: all 0.15s ease;
+    border: 1px solid var(--tax-slate-200);
+    background: var(--tax-white);
+    color: var(--tax-slate-600);
+    text-decoration: none !important;
+    transition: all 0.15s ease-in-out;
     display: inline-flex;
     align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+}
+
+.tax-nav-pill:hover {
+    background-color: var(--tax-slate-100);
+    color: var(--tax-slate-900);
+    border-color: var(--tax-slate-300);
+}
+
+.tax-nav-pill.active {
+    background-color: var(--tax-blue-600) !important;
+    color: var(--tax-white) !important;
+    border-color: var(--tax-blue-600) !important;
+    box-shadow: 0 3px 10px rgba(37, 99, 235, 0.28);
+}
+
+/* Header & Metadata Toolbar */
+.page-hero-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.page-hero-title h3 {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--tax-slate-950);
+    letter-spacing: -0.02em;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.page-hero-subtitle {
+    font-size: 13px;
+    color: var(--tax-slate-500);
+    margin: 0;
+}
+
+.btn-hero-action {
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 8px 16px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    text-decoration: none !important;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+/* Multi-Calendar Filter Card */
+.filter-console-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 16px;
+    padding: 18px 22px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.filter-console-card label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--tax-slate-600);
+    margin-bottom: 5px;
+}
+
+.filter-console-card .form-control,
+.filter-console-card .form-select {
+    height: 38px;
+    font-size: 12.5px;
+    border-radius: 8px;
+    border: 1px solid var(--tax-slate-300);
+}
+
+.filter-console-card .form-control:focus,
+.filter-console-card .form-select:focus {
+    border-color: var(--tax-blue-600);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* ==========================================================================
+   HERO 3D EXECUTIVE KPI CARDS (THE 3 CORE VAT METRICS)
+   ========================================================================== */
+.vat-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.kpi-master-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 20px;
+    padding: 24px 26px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 200px;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    text-decoration: none !important;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kpi-master-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 28px -4px rgba(15, 23, 42, 0.12);
+}
+
+.kpi-master-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4.5px;
+}
+
+/* Card 1: Output VAT (Sales) */
+.kpi-master-card.card-output {
+    border-color: #dbeafe;
+}
+.kpi-master-card.card-output::before { background: var(--tax-blue-600); }
+.kpi-master-card.card-output:hover { border-color: var(--tax-blue-600); }
+
+/* Card 2: Input VAT (Purchases) */
+.kpi-master-card.card-input {
+    border-color: #d1fae5;
+}
+.kpi-master-card.card-input::before { background: var(--tax-green-600); }
+.kpi-master-card.card-input:hover { border-color: var(--tax-green-600); }
+
+/* Card 3: Net VAT Assessment (Payable vs Credit) */
+.kpi-master-card.card-net-payable {
+    border-color: #fecaca;
+    background: linear-gradient(180deg, #ffffff 0%, #fffbfb 100%);
+}
+.kpi-master-card.card-net-payable::before { background: var(--tax-red-600); }
+.kpi-master-card.card-net-payable:hover { border-color: var(--tax-red-600); }
+
+.kpi-master-card.card-net-credit {
+    border-color: #a7f3d0;
+    background: linear-gradient(180deg, #ffffff 0%, #f7fefb 100%);
+}
+.kpi-master-card.card-net-credit::before { background: var(--tax-green-600); }
+.kpi-master-card.card-net-credit:hover { border-color: var(--tax-green-600); }
+
+.kpi-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.kpi-header-label {
+    font-size: 11.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--tax-slate-500);
+}
+
+.kpi-stat-badge {
+    font-family: var(--tax-font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    text-transform: uppercase;
+}
+
+.kpi-main-number {
+    font-family: var(--tax-font-mono);
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-bottom: 8px;
+    white-space: nowrap;
+}
+
+.kpi-breakdown-subtext {
+    font-size: 12px;
+    color: var(--tax-slate-500);
+    display: flex;
+    align-items: center;
     gap: 6px;
+    flex-wrap: wrap;
 }
-.tax-nav-pill:hover, .tax-nav-pill.active {
-    background-color: var(--erp-primary) !important;
-    color: #ffffff !important;
-    border-color: var(--erp-primary) !important;
-    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+
+.kpi-drilldown-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--tax-slate-200);
+    font-size: 12px;
+    font-weight: 700;
 }
-.preview-mini-table td, .preview-mini-table th {
-    padding: 8px 10px;
-    font-size: 0.78rem;
+
+/* ==========================================================================
+   AUDITED TABLES (6-MONTH BREAKDOWN, COMPARISON, DAILY PREVIEW)
+   ========================================================================== */
+.dashboard-section-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
+}
+
+.dashboard-section-header {
+    padding: 18px 24px;
+    background: var(--tax-white);
+    border-bottom: 1px solid var(--tax-slate-200);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.section-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.section-icon-box {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+}
+
+.section-title-text {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--tax-slate-900);
+    letter-spacing: -0.01em;
+    margin: 0;
+}
+
+.section-subtitle-text {
+    font-size: 11.5px;
+    color: var(--tax-slate-500);
+    margin: 0;
+}
+
+/* Scroll Container for 6-Month Table (Sticky Header & Sticky Totals) */
+.table-sixmonth-viewport {
+    max-height: 520px;
+    overflow-y: auto;
+    overflow-x: auto;
+    position: relative;
+}
+
+/* High-Contrast Tables */
+.table-vat-dashboard {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 0;
+    font-size: 12.5px;
+}
+
+.table-vat-dashboard thead th {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    background-color: var(--tax-slate-900) !important;
+    color: var(--tax-white) !important;
+    font-size: 10.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--tax-slate-700);
     vertical-align: middle;
+    white-space: nowrap !important;
+}
+
+.table-vat-dashboard tbody td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--tax-slate-200);
+    vertical-align: middle;
+    color: var(--tax-slate-800);
+    white-space: nowrap !important;
+}
+
+.table-vat-dashboard tbody tr:hover {
+    background-color: var(--tax-slate-50);
+}
+
+/* ==========================================================================
+   STICKY & CLEAN ACCOUNTING-GRADE 6-MONTH TOTALS FOOTER
+   ========================================================================== */
+.table-vat-dashboard tfoot {
+    position: sticky;
+    bottom: 0;
+    z-index: 9;
+}
+
+.table-vat-dashboard tfoot tr {
+    box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.table-vat-dashboard tfoot td {
+    position: sticky;
+    bottom: 0;
+    z-index: 9;
+    background-color: #f1f5f9 !important; /* Soft Slate-Gray for clean accounting aesthetics */
+    color: var(--tax-slate-900) !important;
+    padding: 13px 14px;
+    border-top: 2px solid var(--tax-slate-400) !important;
+    border-bottom: 2px solid var(--tax-slate-300) !important;
+    font-size: 12.5px;
+    font-weight: 800;
+    vertical-align: middle;
+    white-space: nowrap !important;
+}
+
+.col-num {
+    font-family: var(--tax-font-mono);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap !important;
+}
+
+.col-center {
+    text-align: center;
+}
+
+/* Interactive Rows */
+.month-interactive-row,
+.day-preview-row {
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+.month-interactive-row:hover,
+.day-preview-row:hover {
+    background-color: #f0f7ff !important;
+}
+
+/* Status Badges */
+.badge-vat-status {
+    font-family: var(--tax-font-mono);
+    font-size: 10.5px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    text-transform: uppercase;
+    display: inline-block;
+    white-space: nowrap;
+}
+
+.badge-status-payable {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+
+.badge-status-credit {
+    background: #d1fae5;
+    color: #047857;
+    border: 1px solid #6ee7b7;
+}
+
+.badge-status-balanced {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+}
+
+.trend-pill {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+.trend-pill.increase { background-color: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.trend-pill.decrease { background-color: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.trend-pill.unchanged { background-color: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
+
+@media (max-width: 1200px) {
+    .vat-kpi-grid { grid-template-columns: 1fr; }
+}
+
+@media print {
+    .no-print, nav, header, .btn, .filter-console-card { display: none !important; }
+    body { background: #fff !important; }
+    .vat-overview-shell { padding: 0 !important; max-width: 100% !important; }
+    .table-sixmonth-viewport { max-height: none !important; overflow: visible !important; }
+    .table-vat-dashboard thead th { position: static !important; }
+    .table-vat-dashboard tfoot td { position: static !important; }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
+<div class="vat-overview-shell">
 
-    <!-- Suite Navigation Ribbon -->
-    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap">
-        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:</span>
+    <!-- 1. Master Suite Navigation Ribbon -->
+    <div class="tax-suite-ribbon no-print">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap">
+            <i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:
+        </span>
         <a href="{% url 'taxation:dashboard' %}" class="tax-nav-pill active text-nowrap">
-            <i class="fas fa-chart-pie text-white"></i> VAT Overview
+            <i class="fas fa-chart-pie"></i> VAT Overview
         </a>
-        <a href="{% url 'taxation:daily_vat_report' %}" class="tax-nav-pill text-nowrap">
-            <i class="fas fa-calendar-day text-secondary"></i> Day-Wise VAT Ledger
+        <a href="{% url 'taxation:daily_vat_report' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-day"></i> Day-Wise VAT Ledger
         </a>
-        <a href="{% url 'taxation:sales_register' %}" class="tax-nav-pill text-nowrap">
-            <i class="fas fa-book-open text-secondary"></i> Sales Book (Annex 5)
+        <a href="{% url 'taxation:sales_register' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-book-open"></i> Sales Book (Annex 5)
         </a>
-        <a href="{% url 'taxation:purchase_register' %}" class="tax-nav-pill text-nowrap">
-            <i class="fas fa-truck-ramp-box text-secondary"></i> Purchase Book (Annex 7)
+        <a href="{% url 'taxation:purchase_register' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-truck-ramp-box"></i> Purchase Book (Annex 7)
+        </a>
+        <a href="{% url 'taxation:six_month_report' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-week"></i> 6-Month VAT Report
+        </a>
+        <a href="{% url 'taxation:reconciliation' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-scale-balanced text-secondary"></i> VAT ↔ GL Reconciliation
         </a>
     </div>
 
-    <!-- Collapsible Non-IRD Disclaimer Banner -->
-    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 shadow-sm">
-        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
-            <div class="d-flex align-items-center gap-2">
-                <span class="badge bg-warning text-dark p-2 rounded-circle fs-6"><i class="fas fa-file-invoice"></i></span>
-                <div>
-                    <h6 class="fw-bold text-dark mb-0">{{ NON_IRD_NOTICE }}</h6>
-                    <small class="text-muted">
-                        Master Mode: <strong>{{ SHOP_TAX_MODE }}</strong> ({% if IS_VAT_MODE %}VAT Mode Active{% else %}PAN / Non-VAT Proforma{% endif %})
-                    </small>
-                </div>
-            </div>
-            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 py-1 fs-2xs fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#disclaimerDetails" aria-expanded="false">
-                <i class="fas fa-circle-info me-1"></i> Compliance Notice Details
-            </button>
-        </div>
-        <div class="collapse mt-2 pt-2 border-top border-warning border-opacity-25" id="disclaimerDetails">
-            <p class="fs-xs text-muted mb-0">
-                {{ SYS_CONFIG.bill_estimate_disclaimer }} Printed for internal accounting, quotation audit, and stock valuation only.
+    <!-- 2. Page Hero Header & Quick Actions -->
+    <div class="page-hero-header">
+        <div class="page-hero-title">
+            <h3>
+                <i class="fas fa-calculator text-primary"></i>
+                <span>VAT &amp; Tax Assessment Overview</span>
+                {% if fiscal_year %}
+                    <span class="badge bg-dark text-white font-mono fs-2xs px-3 py-1.5 rounded-pill">
+                        FY {{ fiscal_year }}
+                    </span>
+                {% endif %}
+            </h3>
+            <p class="page-hero-subtitle">
+                Authoritative tax intelligence cockpit reconciling Output VAT against Input VAT, 6-Month trends, and General Ledger parity.
             </p>
         </div>
-    </div>
 
-    <!-- Page Header & Quick Export Actions -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
-        <div>
-            <h4 class="fw-bold text-dark mb-0">
-                <i class="fas fa-calculator text-primary me-2"></i> Taxation &amp; Proforma Register Overview
-            </h4>
-            <p class="text-muted fs-xs mb-0">
-                Monthly Bikram Sambat tax estimation summaries, Annex 5 sales book, Annex 7 purchase registers, and Day-Wise VAT ledgers
-            </p>
-        </div>
-        <div class="d-flex flex-wrap gap-2">
-            <!-- Dedicated Day-Wise VAT Ledger Action Pill -->
-            <a href="{% url 'taxation:daily_vat_report' %}" class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-xs">
-                <i class="fas fa-calendar-days me-1"></i> Day-Wise VAT Ledger &rarr;
+        <div class="d-flex align-items-center gap-2 no-print flex-wrap">
+            <a href="{% url 'taxation:reconciliation' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="btn-hero-action btn-outline-danger btn btn-sm shadow-xs">
+                <i class="fas fa-scale-balanced me-1"></i> Audit GL Parity
             </a>
-            <a href="{% url 'taxation:sales_register' %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
-                <i class="fas fa-book-open me-1"></i> Sales Book (Annex 5)
+            <a href="{% url 'taxation:six_month_report' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="btn-hero-action btn btn-sm text-white shadow-xs" style="background-color: var(--tax-teal-600);">
+                <i class="fas fa-calendar-week me-1"></i> Full 6-Month Report &rarr;
             </a>
-            <a href="{% url 'taxation:purchase_register' %}" class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold">
-                <i class="fas fa-truck-ramp-box me-1"></i> Purchase Book (Annex 7)
-            </a>
-            <a href="{% url 'reports:export_csv' 'sales' %}" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold shadow-xs">
-                <i class="fas fa-file-csv me-1"></i> Export Sales CSV
+            <a href="{% url 'taxation:daily_vat_report' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="btn-hero-action btn btn-warning btn-sm text-dark shadow-xs">
+                <i class="fas fa-calendar-days me-1"></i> Day-Wise Ledger &rarr;
             </a>
         </div>
     </div>
 
-    <!-- 3 Context-Rich Metric Cards with Detailed Explanatory Tooltips -->
-    <div class="row g-3 mb-4">
-        <!-- 1. Output VAT / Sales Turnover -->
-        <div class="col-12 col-md-4">
-            <div class="card p-4 border-0 shadow-sm rounded-4 bg-white border-start border-primary border-4 h-100">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="text-muted fs-xs text-uppercase fw-bold">
-                        {% if IS_VAT_MODE %}Output Tax / VAT (Sales){% else %}Sales Turnover (Non-Taxable){% endif %}
-                    </span>
-                    <i class="fas fa-circle-question text-muted fs-xs" 
-                       data-bs-toggle="tooltip" 
-                       data-bs-placement="top" 
-                       title="{% if IS_VAT_MODE %}Total 13% tax collected on customer sales slips this month.{% else %}Gross sales revenue billed in non-taxable / PAN mode.{% endif %}"></i>
-                </div>
-                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
-                    {% if IS_VAT_MODE %}Rs. {{ sales_summary.vat|floatformat:2|intcomma }}{% else %}Rs. {{ sales_summary.grand_total|floatformat:2|intcomma }}{% endif %}
-                </h3>
-                <small class="text-muted fs-xs mt-1 d-block">Outward sales volume for current period</small>
+    <!-- 3. Multi-Calendar Filter Console -->
+    <div class="filter-console-card no-print">
+        <form method="get" class="row g-2 align-items-end" id="vatOverviewFilterForm">
+            <!-- 1. Fiscal Year -->
+            <div class="col-12 col-md-3">
+                <label><i class="fas fa-landmark text-primary me-1"></i> Nepali Fiscal Year (आर्थिक वर्ष)</label>
+                <select name="fiscal_year" id="fySelect" class="form-select fw-bold text-dark">
+                    <option value="">-- All / Filter by Month --</option>
+                    {% for fy in available_fiscal_years %}
+                        <option value="{{ fy }}" {% if request.GET.fiscal_year == fy or fiscal_year == fy and is_fiscal_year_mode %}selected{% endif %}>
+                            Fiscal Year {{ fy }} (आ.व. {{ fy }})
+                        </option>
+                    {% endfor %}
+                </select>
             </div>
-        </div>
 
-        <!-- 2. Input VAT / Inward Purchases -->
-        <div class="col-12 col-md-4">
-            <div class="card p-4 border-0 shadow-sm rounded-4 bg-white border-start border-success border-4 h-100">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="text-muted fs-xs text-uppercase fw-bold">
-                        {% if IS_VAT_MODE %}Input Tax / VAT (Purchases){% else %}Purchase Inward Total{% endif %}
-                    </span>
-                    <i class="fas fa-circle-question text-muted fs-xs" 
-                       data-bs-toggle="tooltip" 
-                       data-bs-placement="top" 
-                       title="{% if IS_VAT_MODE %}Total input tax claimed from supplier VAT purchase invoices this month.{% else %}Total landed expenditure on inward inventory receipts.{% endif %}"></i>
-                </div>
-                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
-                    {% if IS_VAT_MODE %}Rs. {{ purchase_summary.vat|floatformat:2|intcomma }}{% else %}Rs. {{ purchase_summary.net|floatformat:2|intcomma }}{% endif %}
-                </h3>
-                <small class="text-muted fs-xs mt-1 d-block">Inward GRN stock receipts for current period</small>
+            <!-- 2. BS Month -->
+            <div class="col-6 col-md-2">
+                <label><i class="far fa-calendar text-primary me-1"></i> B.S. Month (महिना)</label>
+                <select name="bs_month" id="bsMonthSelect" class="form-select fw-semibold text-dark">
+                    <option value="">Full Year / All Months</option>
+                    {% for m in nepali_months %}
+                        <option value="{{ m.num }}" {% if bs_month == m.num and is_month_mode %}selected{% endif %}>
+                            {{ m.num }}. {{ m.name_en }} ({{ m.name_np }})
+                        </option>
+                    {% endfor %}
+                </select>
             </div>
-        </div>
 
-        <!-- 3. Net Tax Assessment -->
-        <div class="col-12 col-md-4">
-            <div class="card p-4 border-0 shadow-sm rounded-4 bg-white border-start {% if net_vat > 0 %}border-danger{% elif net_vat < 0 %}border-success{% else %}border-dark{% endif %} border-4 h-100">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="text-muted fs-xs text-uppercase fw-bold">
-                        {% if IS_VAT_MODE %}Net VAT Assessment (Payable){% else %}Net Operating Turnover{% endif %}
-                    </span>
-                    <i class="fas fa-circle-question text-muted fs-xs" 
-                       data-bs-toggle="tooltip" 
-                       data-bs-placement="top" 
-                       title="{% if IS_VAT_MODE %}Calculated as (Output VAT from Sales minus Input VAT from Purchases).{% else %}PAN stores operate with 0% VAT.{% endif %}"></i>
-                </div>
-                <h3 class="fw-extrabold {% if net_vat > 0 %}text-danger{% elif net_vat < 0 %}text-success{% else %}text-dark{% endif %} font-monospace mt-2 mb-0">
-                    {% if IS_VAT_MODE %}Rs. {{ net_vat|floatformat:2|intcomma }}{% else %}Rs. 0.00 (Exempt / PAN){% endif %}
-                </h3>
-                <small class="fs-xs mt-1 d-block fw-bold {% if net_vat > 0 %}text-danger{% elif net_vat < 0 %}text-success{% else %}text-muted{% endif %}">
-                    {% if IS_VAT_MODE %}
-                        {% if net_vat > 0 %}
-                            <i class="fas fa-arrow-up me-1"></i> Net Tax Liability Payable to Government
-                        {% elif net_vat < 0 %}
-                            <i class="fas fa-arrow-down me-1"></i> Input Tax Credit Claimable
-                        {% else %}
-                            Balanced (Rs. 0.00)
-                        {% endif %}
-                    {% else %}
-                        PAN store does not calculate VAT
-                    {% endif %}
-                </small>
+            <!-- 3. BS Year -->
+            <div class="col-6 col-md-2">
+                <label><i class="fas fa-calendar-alt text-primary me-1"></i> B.S. Year (वर्ष)</label>
+                <select name="bs_year" id="bsYearSelect" class="form-select font-mono fw-semibold">
+                    {% for yr in available_bs_years %}
+                        <option value="{{ yr }}" {% if bs_year == yr %}selected{% endif %}>{{ yr }} BS</option>
+                    {% endfor %}
+                </select>
             </div>
-        </div>
-    </div>
 
-    <!-- Recent Day-Wise VAT Movements Preview Section -->
-    {% if recent_daily_preview %}
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
-        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
+            <!-- 4. Start Date BS -->
+            <div class="col-6 col-md-2">
+                <label>Start Date (B.S.)</label>
+                <input type="text" name="start_date_bs" id="startDateBs" value="{{ start_date_bs }}" class="form-control font-mono nepali-datepicker text-center fw-bold" placeholder="YYYY-MM-DD" autocomplete="off">
+            </div>
+
+            <!-- 5. End Date BS -->
+            <div class="col-6 col-md-2">
+                <label>End Date (B.S.)</label>
+                <input type="text" name="end_date_bs" id="endDateBs" value="{{ end_date_bs }}" class="form-control font-mono nepali-datepicker text-center fw-bold" placeholder="YYYY-MM-DD" autocomplete="off">
+            </div>
+
+            <!-- 6. Filter Button -->
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 fw-bold" style="height: 38px;">
+                    <i class="fas fa-filter me-1"></i> Apply
+                </button>
+                {% if request.GET.fiscal_year or request.GET.bs_month or request.GET.start_date_bs or request.GET.end_date_bs %}
+                    <a href="{% url 'taxation:dashboard' %}" class="btn btn-outline-secondary btn-sm d-flex align-items-center justify-content-center" style="height: 38px;" title="Reset Filters">↺</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-2 border-top fs-xs text-muted">
             <div>
-                <h6 class="fw-bold text-dark mb-0">
-                    <i class="fas fa-calendar-days text-primary me-2"></i> Recent Daily VAT Movements &amp; Running Liability Preview
-                </h6>
-                <small class="text-muted fs-2xs">Latest chronological tax movements for the current period</small>
+                Selected Scope: <strong class="text-primary font-mono">{{ period_label }}</strong> &bull; AD Range: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong>
             </div>
-            <a href="{% url 'taxation:daily_vat_report' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
-                View Full Day-Wise Ledger &rarr;
-            </a>
+            <div>
+                Terminal / Outlet: <strong>{{ branch.name|default:ACTIVE_BRANCH.name }}</strong> ({{ branch.code|default:ACTIVE_BRANCH.code }})
+            </div>
         </div>
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 preview-mini-table">
-                <thead class="bg-light text-muted text-uppercase fs-2xs">
+    </div>
+
+    <!-- =========================================================================
+         4. THE 3 CORE HERO VAT KPI CARDS (OUTPUT, INPUT & NET DIFFERENCE)
+         ========================================================================= -->
+    <div class="vat-kpi-grid">
+        
+        <!-- CARD 1: OUTPUT VAT (SALES BOOK) -->
+        <a href="{{ drilldown_urls.sales_register|default:'/taxation/sales-register/' }}" class="kpi-master-card card-output">
+            <div>
+                <div class="kpi-top-row">
+                    <span class="kpi-header-label">1. Output VAT (Sales &amp; Outward)</span>
+                    <span class="kpi-stat-badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">Annex 5</span>
+                </div>
+                
+                <div class="kpi-main-number text-primary">
+                    {% if IS_VAT_MODE %}
+                        Rs. {{ sales_summary.vat|default:0|floatformat:2|intcomma }}
+                    {% else %}
+                        Rs. {{ sales_summary.grand_total|default:0|floatformat:2|intcomma }}
+                    {% endif %}
+                </div>
+
+                <div class="kpi-breakdown-subtext">
+                    <span>Taxable Base:</span>
+                    <strong class="font-mono text-dark">Rs. {{ sales_summary.taxable|default:0|floatformat:2|intcomma }}</strong>
+                    {% if sales_summary.total_refunds > 0 %}
+                        <span class="text-danger">&bull; Returns: -Rs. {{ sales_summary.total_refunds|floatformat:2|intcomma }}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="kpi-drilldown-footer text-primary">
+                <span><i class="fas fa-arrow-turn-down me-1"></i> Drill down to Sales Register &amp; Invoices</span>
+                <i class="fas fa-chevron-right"></i>
+            </div>
+        </a>
+
+        <!-- CARD 2: INPUT VAT (PURCHASE BOOK) -->
+        <a href="{{ drilldown_urls.purchase_register|default:'/taxation/purchase-register/' }}" class="kpi-master-card card-input">
+            <div>
+                <div class="kpi-top-row">
+                    <span class="kpi-header-label">2. Input VAT (Purchases &amp; Inward)</span>
+                    <span class="kpi-stat-badge bg-success bg-opacity-10 text-success border border-success border-opacity-25">Annex 7</span>
+                </div>
+
+                <div class="kpi-main-number text-success">
+                    {% if IS_VAT_MODE %}
+                        Rs. {{ purchase_summary.vat|default:0|floatformat:2|intcomma }}
+                    {% else %}
+                        Rs. {{ purchase_summary.net|default:0|floatformat:2|intcomma }}
+                    {% endif %}
+                </div>
+
+                <div class="kpi-breakdown-subtext">
+                    <span>Taxable Base:</span>
+                    <strong class="font-mono text-dark">Rs. {{ purchase_summary.taxable|default:0|floatformat:2|intcomma }}</strong>
+                    <span>&bull; Net Inward: <strong class="font-mono text-dark">Rs. {{ purchase_summary.net|default:0|floatformat:2|intcomma }}</strong></span>
+                </div>
+            </div>
+
+            <div class="kpi-drilldown-footer text-success">
+                <span><i class="fas fa-arrow-turn-down me-1"></i> Drill down to GRNs &amp; Inward Bills</span>
+                <i class="fas fa-chevron-right"></i>
+            </div>
+        </a>
+
+        <!-- CARD 3: THE VAT DIFFERENCE (OUTPUT VAT - INPUT VAT) -->
+        <a href="{{ drilldown_urls.daily_vat_report|default:'/taxation/daily-report/' }}" 
+           class="kpi-master-card {% if net_vat > 0 %}card-net-payable{% elif net_vat < 0 %}card-net-credit{% else %}card-output{% endif %}">
+            <div>
+                <div class="kpi-top-row">
+                    <span class="kpi-header-label">3. Net VAT Assessment (The Difference)</span>
+                    <span class="kpi-stat-badge {% if net_vat > 0 %}badge-status-payable{% elif net_vat < 0 %}badge-status-credit{% else %}badge-status-balanced{% endif %}">
+                        {% if net_vat > 0 %}PAYABLE{% elif net_vat < 0 %}TAX CREDIT{% else %}BALANCED{% endif %}
+                    </span>
+                </div>
+
+                <div class="kpi-main-number {% if net_vat > 0 %}text-danger{% elif net_vat < 0 %}text-success{% else %}text-dark{% endif %}">
+                    Rs. {{ net_vat|default:0|floatformat:2|intcomma }}
+                </div>
+
+                <div class="kpi-breakdown-subtext fw-bold {% if net_vat > 0 %}text-danger{% elif net_vat < 0 %}text-success{% else %}text-muted{% endif %}">
+                    {% if net_vat > 0 %}
+                        <i class="fas fa-arrow-trend-up me-1"></i> Net Tax Liability Payable to Inland Revenue
+                    {% elif net_vat < 0 %}
+                        <i class="fas fa-arrow-trend-down me-1"></i> Excess Input Tax Credit Available (Carried Forward)
+                    {% else %}
+                        <i class="fas fa-check-double me-1"></i> Output VAT equals Input VAT (Rs. 0.00 Variance)
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="kpi-drilldown-footer {% if net_vat > 0 %}text-danger{% elif net_vat < 0 %}text-success{% else %}text-dark{% endif %}">
+                <span><i class="fas fa-scale-balanced me-1"></i> View Daily Net Settlement &amp; Running Ledger</span>
+                <i class="fas fa-chevron-right"></i>
+            </div>
+        </a>
+
+    </div>
+
+    <!-- =========================================================================
+         5. 6-MONTH VAT BREAKDOWN & CONSECUTIVE PERIOD-OVER-PERIOD COMPARISON
+         ========================================================================= -->
+    <div class="dashboard-section-card" id="sixMonthVatAnalysisSection">
+        <div class="dashboard-section-header">
+            <div class="section-title-wrap">
+                <div class="section-icon-box bg-primary bg-opacity-10 text-primary">
+                    <i class="fas fa-calendar-week"></i>
+                </div>
+                <div>
+                    <h5 class="section-title-text">6-Month Consecutive VAT Analysis &amp; Period-over-Period Variance</h5>
+                    <p class="section-subtitle-text" id="sixMonthPeriodSubtitle">
+                        Monthly sequence comparing Output VAT, Input VAT, Return Reversals, and Net Difference
+                    </p>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 no-print">
+                <a href="{% url 'taxation:reconciliation' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold">
+                    <i class="fas fa-scale-balanced me-1"></i> Reconcile with GL
+                </a>
+                <a href="{% url 'taxation:six_month_report' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                    Full 6-Month Ledger &rarr;
+                </a>
+            </div>
+        </div>
+
+        <!-- 6-Month Breakdown Table with Sticky Header and Sticky Grand Totals -->
+        <div class="table-sixmonth-viewport">
+            <table class="table-vat-dashboard table-hover">
+                <thead>
                     <tr>
-                        <th class="ps-3">Nepali Date (B.S.)</th>
-                        <th>Date (A.D.)</th>
-                        <th class="text-end">Sales Output VAT</th>
-                        <th class="text-end">Purchases Input VAT</th>
-                        <th class="text-end">Daily Net Tax</th>
-                        <th class="text-center">Daily Status</th>
-                        <th class="text-end pe-3">Running Balance</th>
+                        <th class="ps-4">B.S. Month</th>
+                        <th class="col-num">Gross Output VAT</th>
+                        <th class="col-num">Sales Return VAT</th>
+                        <th class="col-num" style="color: #60a5fa;">Net Output VAT</th>
+                        <th class="col-num">Gross Input VAT</th>
+                        <th class="col-num">Purchase Return VAT</th>
+                        <th class="col-num" style="color: #34d399;">Net Input VAT</th>
+                        <th class="col-num" style="color: #fde047;">Net VAT (Difference)</th>
+                        <th class="col-center">Tax Status</th>
+                        <th class="col-center pe-4">Drilldown</th>
+                    </tr>
+                </thead>
+                <tbody id="sixMonthBreakdownBody">
+                    <tr>
+                        <td colspan="10" class="text-center py-5 text-muted">
+                            <i class="fas fa-circle-notch fa-spin me-2 text-primary"></i> Loading 6-Month VAT sequence...
+                        </td>
+                    </tr>
+                </tbody>
+                <!-- Sticky & Soft-Tone 6-Month Totals Footer -->
+                <tfoot id="sixMonthBreakdownFoot" style="display: none;">
+                    <tr>
+                        <td class="ps-4 text-uppercase fw-extrabold text-slate-800">
+                            <i class="fas fa-calculator text-primary me-1.5"></i> 6-Month Totals:
+                        </td>
+                        <td class="col-num fw-bold text-dark" id="footSixOutVat">Rs. 0.00</td>
+                        <td class="col-num fw-bold text-danger" id="footSixSalesRetVat">-Rs. 0.00</td>
+                        <td class="col-num fw-extrabold text-primary font-mono" id="footSixNetOutVat">Rs. 0.00</td>
+                        <td class="col-num fw-bold text-dark" id="footSixInVat">Rs. 0.00</td>
+                        <td class="col-num fw-bold text-danger" id="footSixPurchRetVat">-Rs. 0.00</td>
+                        <td class="col-num fw-extrabold text-success font-mono" id="footSixNetInVat">Rs. 0.00</td>
+                        <td class="col-num font-mono fs-6 fw-extrabold" id="footSixNetVat">Rs. 0.00</td>
+                        <td class="col-center" id="footSixStatus"></td>
+                        <td class="col-center pe-4">
+                            <span class="badge bg-light text-dark border px-2 py-1 font-mono fs-3xs">Reconciled</span>
+                        </td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <!-- Period-over-Period Variance Table -->
+        <div class="p-3 bg-light border-top">
+            <div class="d-flex justify-content-between align-items-center mb-2 px-1">
+                <span class="fs-xs fw-bold text-dark text-uppercase tracking-wider">
+                    <i class="fas fa-chart-line text-primary me-1"></i> Period-over-Period Variance (Current 6 Months vs Previous 6 Months)
+                </span>
+                <span class="badge bg-white text-dark border font-mono fs-3xs" id="compPeriodRangeBadge">Consecutive Periods</span>
+            </div>
+
+            <div class="table-responsive bg-white rounded-3 border">
+                <table class="table-vat-dashboard table-sm mb-0">
+                    <thead style="background-color: var(--tax-slate-800);">
+                        <tr>
+                            <th class="ps-3 py-2">Tax Dimension / Metric</th>
+                            <th class="col-num py-2">Current 6M (NPR)</th>
+                            <th class="col-num py-2">Previous 6M (NPR)</th>
+                            <th class="col-num py-2">Difference (NPR)</th>
+                            <th class="col-num py-2">% Variance</th>
+                            <th class="col-center py-2 pe-3">Trend</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sixMonthComparisonBody">
+                        <tr>
+                            <td colspan="6" class="text-center py-3 text-muted fs-xs">
+                                Loading comparison metrics...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         6. RECENT DAILY ACTIVITY PREVIEW (WITH DAY INSPECTION MODAL)
+         ========================================================================= -->
+    <div class="dashboard-section-card">
+        <div class="dashboard-section-header">
+            <div class="section-title-wrap">
+                <div class="section-icon-box bg-warning bg-opacity-10 text-dark">
+                    <i class="fas fa-calendar-day"></i>
+                </div>
+                <div>
+                    <h5 class="section-title-text">Daily Chronological VAT Activity &amp; Running Settlement</h5>
+                    <p class="section-subtitle-text">Click any day to view its complete itemized invoice, GRN, and return transactions</p>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2">
+                <a href="{% url 'taxation:reconciliation' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold">
+                    <i class="fas fa-scale-balanced me-1"></i> Audit GL Parity
+                </a>
+                <a href="{% url 'taxation:daily_vat_report' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                    View Full Day-Wise Ledger &rarr;
+                </a>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table-vat-dashboard table-hover">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Nepali Date (B.S.)</th>
+                        <th>Gregorian Date (A.D.)</th>
+                        <th class="col-num">Output VAT (Sales)</th>
+                        <th class="col-num">Input VAT (Purchases)</th>
+                        <th class="col-num">Daily Difference (Net)</th>
+                        <th class="col-center">Status</th>
+                        <th class="col-num">Progressive Balance</th>
+                        <th class="col-center pe-4">Inspection</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in recent_daily_preview %}
-                    <tr>
-                        <td class="ps-3 font-monospace fw-bold text-primary">{{ row.date_bs }} BS</td>
-                        <td class="text-muted font-monospace fs-2xs">{{ row.date_ad_str }} ({{ row.day_name }})</td>
-                        <td class="text-end font-monospace fw-bold text-dark">Rs. {{ row.sales_vat|floatformat:2|intcomma }}</td>
-                        <td class="text-end font-monospace fw-bold text-success">Rs. {{ row.purchase_vat|floatformat:2|intcomma }}</td>
-                        <td class="text-end font-monospace fw-extrabold {% if row.is_daily_payable %}text-danger{% elif row.is_daily_credit %}text-success{% else %}text-muted{% endif %}">
-                            Rs. {{ row.daily_net_vat|floatformat:2|intcomma }}
+                    <tr class="day-preview-row" data-date-ad="{{ row.date_ad_str }}" data-date-bs="{{ row.date_bs }}">
+                        <td class="ps-4 font-mono fw-bold text-primary">
+                            <i class="far fa-calendar-check me-1"></i> {{ row.date_bs }} BS
                         </td>
-                        <td class="text-center">
-                            {% if row.is_daily_payable %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-3xs">Payable</span>
-                            {% elif row.is_daily_credit %}
-                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs">Credit</span>
+                        <td class="font-mono text-muted fs-xs">
+                            {{ row.date_ad_str }} <span class="badge bg-light text-dark border px-1.5 ms-1">{{ row.day_name }}</span>
+                        </td>
+                        <td class="col-num fw-bold text-dark">
+                            {% if row.sales_vat > 0 %}
+                                Rs. {{ row.sales_vat|floatformat:2|intcomma }}
                             {% else %}
-                                <span class="badge bg-light text-muted border fs-3xs">Balanced</span>
+                                <span class="text-muted opacity-50">-</span>
                             {% endif %}
                         </td>
-                        <td class="text-end pe-3 font-monospace fw-bold {% if row.is_cumulative_payable %}text-danger{% elif row.is_cumulative_credit %}text-success{% else %}text-dark{% endif %}">
+                        <td class="col-num fw-bold text-success">
+                            {% if row.purchase_vat > 0 %}
+                                Rs. {{ row.purchase_vat|floatformat:2|intcomma }}
+                            {% else %}
+                                <span class="text-muted opacity-50">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-num fw-extrabold {% if row.is_daily_payable %}text-danger{% elif row.is_daily_credit %}text-success{% else %}text-muted{% endif %}">
+                            Rs. {{ row.daily_net_vat|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-center">
+                            {% if row.is_daily_payable %}
+                                <span class="badge-vat-status badge-status-payable">Payable</span>
+                            {% elif row.is_daily_credit %}
+                                <span class="badge-vat-status badge-status-credit">Credit</span>
+                            {% else %}
+                                <span class="badge-vat-status badge-status-balanced">Balanced</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-num fw-bold {% if row.is_cumulative_payable %}text-danger{% elif row.is_cumulative_credit %}text-success{% else %}text-dark{% endif %}">
                             Rs. {{ row.cumulative_balance|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-center pe-4">
+                            <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold btn-inspect-day" 
+                                    data-date-ad="{{ row.date_ad_str }}" data-date-bs="{{ row.date_bs }}">
+                                Inspect Day &rarr;
+                            </button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            <i class="fas fa-calendar-xmark fs-2 opacity-25 d-block mb-2"></i>
+                            No recent tax movements found for the selected scope.
                         </td>
                     </tr>
                     {% endfor %}
@@ -230,7 +942,379 @@
             </table>
         </div>
     </div>
-    {% endif %}
 
 </div>
+
+<!-- =========================================================================
+     DAY DRILLDOWN MODAL
+     ========================================================================= -->
+<div class="modal fade" id="dayInspectionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-dark text-white py-3 px-4">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-primary p-2 rounded-circle fs-6"><i class="fas fa-calendar-day"></i></span>
+                    <div>
+                        <h6 class="modal-title fs-sm fw-bold mb-0 text-white" id="modalDayTitle">
+                            Day Audit Inspection
+                        </h6>
+                        <small class="text-white-50 fs-2xs">Itemized sales invoices and inward purchase consignments for this date</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            
+            <div class="modal-body p-4 bg-light">
+                <div class="row g-2 mb-3 text-center">
+                    <div class="col-4">
+                        <div class="p-2.5 bg-white rounded-3 border">
+                            <span class="fs-3xs text-uppercase text-muted fw-bold d-block">Output VAT (Sales)</span>
+                            <strong class="fs-6 text-primary font-mono" id="modalDaySalesVat">Rs. 0.00</strong>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="p-2.5 bg-white rounded-3 border">
+                            <span class="fs-3xs text-uppercase text-muted fw-bold d-block">Input VAT (Purchases)</span>
+                            <strong class="fs-6 text-success font-mono" id="modalDayPurchaseVat">Rs. 0.00</strong>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="p-2.5 bg-white rounded-3 border">
+                            <span class="fs-3xs text-uppercase text-muted fw-bold d-block">Daily Net VAT (Difference)</span>
+                            <strong class="fs-6 font-mono" id="modalDayNetVat">Rs. 0.00</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <ul class="nav nav-pills nav-fill mb-3 bg-white p-1.5 rounded-3 border" id="modalDayTabs" role="tablist">
+                    <li class="nav-item">
+                        <button class="nav-link active py-1.5 fs-xs fw-bold" id="modalTabInvoicesBtn" data-bs-toggle="pill" data-bs-target="#modalTabInvoices" type="button">
+                            <i class="fas fa-file-invoice text-primary me-1"></i> Sales Invoices (<span id="modalInvoicesCount">0</span>)
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link py-1.5 fs-xs fw-bold" id="modalTabGrnBtn" data-bs-toggle="pill" data-bs-target="#modalTabGrn" type="button">
+                            <i class="fas fa-truck-ramp-box text-success me-1"></i> Purchase GRNs (<span id="modalGrnCount">0</span>)
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="modalDayTabContent">
+                    <div class="tab-pane fade show active" id="modalTabInvoices" role="tabpanel">
+                        <div class="card border-0 shadow-xs rounded-3 overflow-hidden bg-white">
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle mb-0 fs-xs">
+                                    <thead class="bg-light text-muted text-uppercase fs-3xs">
+                                        <tr>
+                                            <th class="ps-3">Invoice No</th>
+                                            <th>Recipient / Customer</th>
+                                            <th>PAN</th>
+                                            <th class="text-end">Taxable Base</th>
+                                            <th class="text-end">Output VAT</th>
+                                            <th class="text-end">Grand Total</th>
+                                            <th class="text-end pe-3">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="modalInvoicesTableBody">
+                                        <tr><td colspan="7" class="text-center py-4 text-muted">Loading transactions...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="modalTabGrn" role="tabpanel">
+                        <div class="card border-0 shadow-xs rounded-3 overflow-hidden bg-white">
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle mb-0 fs-xs">
+                                    <thead class="bg-light text-muted text-uppercase fs-3xs">
+                                        <tr>
+                                            <th class="ps-3">GRN No</th>
+                                            <th>Supplier / Distributor</th>
+                                            <th>Bill Ref</th>
+                                            <th class="text-end">Taxable Base</th>
+                                            <th class="text-end">Input VAT</th>
+                                            <th class="text-end">Net Total</th>
+                                            <th class="text-end pe-3">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="modalGrnTableBody">
+                                        <tr><td colspan="7" class="text-center py-4 text-muted">Loading consignments...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer bg-white border-top py-2 px-4 d-flex justify-content-between">
+                <span class="fs-2xs text-muted">
+                    <i class="fas fa-shield-halved text-success me-1"></i> Linked to double-entry general ledger records.
+                </span>
+                <button type="button" class="btn btn-outline-secondary btn-sm px-4 rounded-pill" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function formatRs(num) {
+    const n = parseFloat(num) || 0;
+    return "Rs. " + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function loadSixMonthVatAnalysis() {
+    const tableBody = document.getElementById('sixMonthBreakdownBody');
+    const tableFoot = document.getElementById('sixMonthBreakdownFoot');
+    const compBody = document.getElementById('sixMonthComparisonBody');
+    const subtitle = document.getElementById('sixMonthPeriodSubtitle');
+    const compBadge = document.getElementById('compPeriodRangeBadge');
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const queryString = searchParams.toString();
+    const endpoint = `/taxation/six-month-report/?format=json${queryString ? '&' + queryString : ''}`;
+
+    try {
+        const resp = await fetch(endpoint, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        if (!resp.ok) throw new Error('API request failed');
+
+        const json = await resp.json();
+        const data = json.data || {};
+        const breakdown = data.monthly_breakdown || [];
+        const comparison = data.comparison || {};
+        const compRows = comparison.comparison_rows || [];
+
+        if (subtitle && data.period_label) {
+            subtitle.innerText = `${data.period_label} (${data.start_date_bs} to ${data.end_date_bs} BS)`;
+        }
+        if (compBadge && comparison.current_period_label) {
+            compBadge.innerText = `${comparison.current_period_label} vs. ${comparison.previous_period_label}`;
+        }
+
+        // Render Monthly Rows
+        if (tableBody) {
+            if (!breakdown.length) {
+                tableBody.innerHTML = '<tr><td colspan="10" class="text-center py-4 text-muted">No 6-month transaction records available.</td></tr>';
+            } else {
+                let html = '';
+                breakdown.forEach(row => {
+                    const isPayable = (parseFloat(row.net_vat) > 0);
+                    const isCredit = (parseFloat(row.net_vat) < 0);
+                    const statusClass = isPayable ? 'badge-status-payable' : (isCredit ? 'badge-status-credit' : 'badge-status-balanced');
+                    const statusText = isPayable ? 'Payable' : (isCredit ? 'Credit' : 'Balanced');
+
+                    const dailyUrl = (row.drilldown_urls && row.drilldown_urls.daily_report) 
+                        ? row.drilldown_urls.daily_report 
+                        : `/taxation/daily-report/?bs_year=${row.bs_year}&bs_month=${row.bs_month}`;
+
+                    html += `
+                        <tr class="month-interactive-row" onclick="window.location.href='${dailyUrl}'" title="Click to view daily transactions for ${row.month_label}">
+                            <td class="ps-4 font-mono fw-bold text-dark">
+                                <i class="far fa-calendar-alt text-primary me-1.5"></i>
+                                <span>${row.month_label}</span>
+                                <small class="text-muted d-block font-mono fs-2xs">${row.start_date_bs} - ${row.end_date_bs}</small>
+                            </td>
+                            <td class="col-num fw-semibold text-dark">${formatRs(row.gross_output_vat || row.output_vat)}</td>
+                            <td class="col-num text-danger">${formatRs(row.sales_return_vat_reversal || row.sales_return_vat)}</td>
+                            <td class="col-num fw-bold text-primary font-mono">${formatRs(row.net_output_vat || row.net_output)}</td>
+                            <td class="col-num fw-semibold text-dark">${formatRs(row.gross_input_vat || row.input_vat)}</td>
+                            <td class="col-num text-danger">${formatRs(row.purchase_return_vat_reversal || row.purchase_return_vat)}</td>
+                            <td class="col-num fw-bold text-success font-mono">${formatRs(row.net_input_vat || row.net_input)}</td>
+                            <td class="col-num fw-extrabold font-mono ${isPayable ? 'text-danger' : (isCredit ? 'text-success' : 'text-dark')}">
+                                ${formatRs(row.net_vat)}
+                            </td>
+                            <td class="col-center">
+                                <span class="badge-vat-status ${statusClass}">${statusText}</span>
+                            </td>
+                            <td class="col-center pe-4" onclick="event.stopPropagation();">
+                                <a href="${dailyUrl}" class="btn btn-outline-primary btn-sm rounded-pill px-3 py-1 fs-2xs fw-bold">
+                                    Ledger &rarr;
+                                </a>
+                            </td>
+                        </tr>
+                    `;
+                });
+                tableBody.innerHTML = html;
+
+                // Render Footer Totals with High-Contrast Accounting Styling
+                if (tableFoot) {
+                    tableFoot.style.display = 'table-footer-group';
+                    document.getElementById('footSixOutVat').innerText = formatRs(data.gross_output_vat || data.output_vat);
+                    document.getElementById('footSixSalesRetVat').innerText = `-` + formatRs(data.sales_return_vat || data.sales_return_vat_reversal);
+                    document.getElementById('footSixNetOutVat').innerText = formatRs(data.net_output_vat || data.net_output);
+                    document.getElementById('footSixInVat').innerText = formatRs(data.gross_input_vat || data.input_vat);
+                    document.getElementById('footSixPurchRetVat').innerText = `-` + formatRs(data.purchase_return_vat || data.purchase_return_vat_reversal);
+                    document.getElementById('footSixNetInVat').innerText = formatRs(data.net_input_vat || data.net_input);
+                    
+                    const netTaxVal = parseFloat(data.net_vat || 0);
+                    const netFootEl = document.getElementById('footSixNetVat');
+                    netFootEl.innerText = formatRs(netTaxVal);
+                    netFootEl.className = `col-num font-mono fs-6 fw-extrabold ${netTaxVal > 0 ? 'text-danger' : (netTaxVal < 0 ? 'text-success' : 'text-dark')}`;
+
+                    const statusFoot = document.getElementById('footSixStatus');
+                    statusFoot.innerHTML = `<span class="badge-vat-status ${netTaxVal > 0 ? 'badge-status-payable' : (netTaxVal < 0 ? 'badge-status-credit' : 'badge-status-balanced')}">${netTaxVal > 0 ? 'Payable' : (netTaxVal < 0 ? 'Credit' : 'Balanced')}</span>`;
+                }
+            }
+        }
+
+        // Render Period Comparison Rows
+        if (compBody) {
+            if (!compRows.length) {
+                compBody.innerHTML = '<tr><td colspan="6" class="text-center py-3 text-muted fs-xs">No prior period comparison data available.</td></tr>';
+            } else {
+                let compHtml = '';
+                compRows.forEach(row => {
+                    const trend = (row.trend || '').toUpperCase();
+                    let trendBadge = '<span class="trend-pill unchanged">&bull; Unchanged</span>';
+                    if (trend === 'INCREASE') {
+                        trendBadge = '<span class="trend-pill increase"><i class="fas fa-arrow-trend-up"></i> Increase</span>';
+                    } else if (trend === 'DECREASE') {
+                        trendBadge = '<span class="trend-pill decrease"><i class="fas fa-arrow-trend-down"></i> Decrease</span>';
+                    }
+
+                    compHtml += `
+                        <tr>
+                            <td class="ps-3 fw-bold text-dark">
+                                ${row.label}
+                                ${row.label_np ? `<small class="text-muted d-block fs-3xs">(${row.label_np})</small>` : ''}
+                            </td>
+                            <td class="col-num fw-semibold text-dark">${row.current_display}</td>
+                            <td class="col-num text-muted">${row.previous_display}</td>
+                            <td class="col-num fw-bold ${parseFloat(row.difference) > 0 ? 'text-primary' : (parseFloat(row.difference) < 0 ? 'text-danger' : 'text-muted')}">
+                                ${row.difference_display}
+                            </td>
+                            <td class="col-num fw-semibold">${row.percentage_difference_display || '0.00%'}</td>
+                            <td class="col-center pe-3">${trendBadge}</td>
+                        </tr>
+                    `;
+                });
+                compBody.innerHTML = compHtml;
+            }
+        }
+
+    } catch (e) {
+        console.warn('[6-Month VAT Analysis Error]:', e);
+        if (tableBody) {
+            tableBody.innerHTML = '<tr><td colspan="10" class="text-center py-3 text-danger fs-xs"><i class="fas fa-triangle-exclamation me-1"></i> Error loading 6-month analysis.</td></tr>';
+        }
+    }
+}
+
+async function openDayDrilldown(dateAd, dateBs) {
+    const modalEl = document.getElementById('dayInspectionModal');
+    if (!modalEl) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+    document.getElementById('modalDayTitle').innerText = `Day Audit Inspection: ${dateBs} BS (${dateAd} AD)`;
+    document.getElementById('modalInvoicesTableBody').innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2 text-primary"></i>Loading transactions...</td></tr>';
+    document.getElementById('modalGrnTableBody').innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2 text-success"></i>Loading consignments...</td></tr>';
+    
+    modal.show();
+
+    try {
+        const resp = await fetch(`/taxation/drilldown/?target=day&date=${encodeURIComponent(dateAd)}`);
+        if (!resp.ok) throw new Error('API offline');
+        const payload = await resp.json();
+        const d = payload.data || {};
+
+        document.getElementById('modalDaySalesVat').innerText = formatRs(d.sales_vat || 0);
+        document.getElementById('modalDayPurchaseVat').innerText = formatRs(d.purchase_vat || 0);
+        const netVal = Number(d.daily_net_vat || 0);
+        const netEl = document.getElementById('modalDayNetVat');
+        netEl.innerText = formatRs(netVal);
+        netEl.className = netVal > 0 ? 'fs-6 font-mono text-danger' : (netVal < 0 ? 'fs-6 font-mono text-success' : 'fs-6 font-mono text-muted');
+
+        // Invoices Tab
+        const invoices = d.sales_invoices || [];
+        document.getElementById('modalInvoicesCount').innerText = invoices.length;
+        if (invoices.length === 0) {
+            document.getElementById('modalInvoicesTableBody').innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No sales invoices recorded for this date.</td></tr>';
+        } else {
+            let invHtml = '';
+            invoices.forEach(inv => {
+                invHtml += `
+                    <tr>
+                        <td class="ps-3 font-mono fw-bold">
+                            <a href="/sales/estimates/${inv.id}/" class="text-primary text-decoration-none" target="_blank">
+                                ${inv.estimate_number} &rarr;
+                            </a>
+                        </td>
+                        <td><strong>${inv.customer_name || 'Walk-in Customer'}</strong></td>
+                        <td class="font-mono text-muted">${inv.customer_pan || '-'}</td>
+                        <td class="col-num">${formatRs(inv.taxable_amount || 0)}</td>
+                        <td class="col-num fw-bold text-primary">${formatRs(inv.vat_amount || 0)}</td>
+                        <td class="col-num fw-bold">${formatRs(inv.grand_total || 0)}</td>
+                        <td class="text-end pe-3">
+                            <a href="/sales/estimates/${inv.id}/" class="btn btn-outline-primary btn-sm py-0 px-2 rounded-pill fs-3xs" target="_blank">
+                                View &rarr;
+                            </a>
+                        </td>
+                    </tr>
+                `;
+            });
+            document.getElementById('modalInvoicesTableBody').innerHTML = invHtml;
+        }
+
+        // Purchase GRNs Tab
+        const grns = d.purchase_grns || [];
+        document.getElementById('modalGrnCount').innerText = grns.length;
+        if (grns.length === 0) {
+            document.getElementById('modalGrnTableBody').innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No inward purchase GRNs recorded for this date.</td></tr>';
+        } else {
+            let grnHtml = '';
+            grns.forEach(g => {
+                grnHtml += `
+                    <tr>
+                        <td class="ps-3 font-mono fw-bold">
+                            <a href="/purchases/grn/${g.id}/" class="text-success text-decoration-none" target="_blank">
+                                ${g.grn_number} &rarr;
+                            </a>
+                        </td>
+                        <td><strong>${g.supplier_name}</strong></td>
+                        <td class="font-mono">${g.supplier_bill_no || '-'}</td>
+                        <td class="col-num">${formatRs(g.taxable_amount || 0)}</td>
+                        <td class="col-num fw-bold text-success">${formatRs(g.vat_amount || 0)}</td>
+                        <td class="col-num fw-bold">${formatRs(g.net_total_amount || 0)}</td>
+                        <td class="text-end pe-3">
+                            <a href="/purchases/grn/${g.id}/" class="btn btn-outline-success btn-sm py-0 px-2 rounded-pill fs-3xs" target="_blank">
+                                View &rarr;
+                            </a>
+                        </td>
+                    </tr>
+                `;
+            });
+            document.getElementById('modalGrnTableBody').innerHTML = grnHtml;
+        }
+
+    } catch (e) {
+        document.getElementById('modalInvoicesTableBody').innerHTML = '<tr><td colspan="7" class="text-center py-4 text-danger fs-xs">Error loading transactions for this day.</td></tr>';
+        document.getElementById('modalGrnTableBody').innerHTML = '<tr><td colspan="7" class="text-center py-4 text-danger fs-xs">Error loading consignments for this day.</td></tr>';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadSixMonthVatAnalysis();
+
+    document.querySelectorAll('.day-preview-row').forEach(row => {
+        row.addEventListener('click', function(e) {
+            if (e.target.closest('a') || e.target.closest('button')) return;
+            const dateAd = this.dataset.dateAd;
+            const dateBs = this.dataset.dateBs;
+            if (dateAd) openDayDrilldown(dateAd, dateBs);
+        });
+    });
+
+    document.querySelectorAll('.btn-inspect-day').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const dateAd = this.dataset.dateAd;
+            const dateBs = this.dataset.dateBs;
+            if (dateAd) openDayDrilldown(dateAd, dateBs);
+        });
+    });
+});
+</script>
 {% endblock %}

@@ -1,88 +1,822 @@
 {% extends "core/base.html" %}
+{% load humanize static %}
 
-{% block title %}Sales Register (Annex 5 Format) | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+{% block title %}Sales Register (बिक्री खाता - Annex 5) | {{ SYS_CONFIG.company_name_en }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.table-sales-register th,
+.table-returns-register th {
+    font-size: 0.70rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 8px;
+    white-space: nowrap;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    vertical-align: middle;
+}
+
+.table-sales-register td,
+.table-returns-register td {
+    font-size: 0.79rem;
+    padding: 9px 8px;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.col-num {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace) !important;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.font-mono {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace) !important;
+    font-variant-numeric: tabular-nums;
+}
+
+.tax-nav-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border: 1px solid var(--erp-slate-200);
+    background: #ffffff;
+    color: var(--erp-slate-600);
+    text-decoration: none;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tax-nav-pill:hover, .tax-nav-pill.active {
+    background-color: var(--erp-primary) !important;
+    color: #ffffff !important;
+    border-color: var(--erp-primary) !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.nepali-date-chip {
+    background-color: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+    font-weight: 800;
+    font-size: 0.76rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
+    letter-spacing: 0.02em;
+    display: inline-flex;
+    align-items: center;
+}
+
+.sales-row-clickable,
+.return-row-clickable {
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+.sales-row-clickable:hover,
+.return-row-clickable:hover {
+    background-color: #f1f5f9 !important;
+}
+
+.invoice-drawer-row,
+.return-drawer-row {
+    display: none;
+    background-color: #f8fafc;
+}
+
+.invoice-drawer-row.show,
+.return-drawer-row.show {
+    display: table-row;
+}
+
+.invoice-drawer-box {
+    padding: 16px 20px;
+    border-left: 4px solid #2563eb;
+    background: #ffffff;
+    margin: 8px 12px;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.return-drawer-box {
+    padding: 16px 20px;
+    border-left: 4px solid #dc2626;
+    background: #ffffff;
+    margin: 8px 12px;
+    border-radius: 12px;
+    border: 1px solid #fecaca;
+    box-shadow: 0 4px 12px rgba(220, 38, 38, 0.06);
+}
+
+.section-audit-title {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--erp-slate-900, #0f172a);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+@media print {
+    @page { size: A4 landscape; margin: 8mm; }
+    .no-print, header, aside, nav, .btn, .tax-nav-pill { display: none !important; }
+    body { background: #fff !important; font-size: 10px !important; }
+    .card { box-shadow: none !important; border: 1px solid #ccc !important; }
+    .table-sales-register th, .table-returns-register th { background-color: #1e293b !important; color: #fff !important; }
+    .invoice-drawer-row, .return-drawer-row { display: table-row !important; }
+}
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4">
-    <!-- Header -->
+<div class="container-fluid px-3 px-md-4 py-4" style="max-width: 1720px;">
+
+    <!-- Suite Navigation Ribbon -->
+    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap no-print">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:</span>
+        <a href="{% url 'taxation:dashboard' %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-chart-pie text-secondary"></i> VAT Overview
+        </a>
+        <a href="{% url 'taxation:daily_vat_report' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-day text-secondary"></i> Day-Wise VAT Ledger
+        </a>
+        <a href="{% url 'taxation:sales_register' %}" class="tax-nav-pill active text-nowrap">
+            <i class="fas fa-book-open text-white"></i> Sales Book (Annex 5)
+        </a>
+        <a href="{% url 'taxation:purchase_register' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-truck-ramp-box text-secondary"></i> Purchase Book (Annex 7)
+        </a>
+        <a href="{% url 'taxation:six_month_report' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-week text-secondary"></i> 6-Month VAT Report
+        </a>
+    </div>
+
+    <!-- Header & Action Toolbar -->
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-            <h4 class="fw-bold text-dark mb-0">
-                <i class="fas fa-book-open text-primary me-2"></i> Internal Sales Register (बिक्री खाता - Annex 5)
-            </h4>
-            <p class="text-muted fs-xs mb-0">
-                Annex 5 proforma breakdown for monthly assessment and accountant review
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <h4 class="fw-bold text-dark mb-0">
+                    <i class="fas fa-book-open text-primary me-2"></i> Internal Sales Register (बिक्री खाता - Annex 5 Format)
+                </h4>
+                {% if fiscal_year %}
+                    <span class="badge bg-dark text-white font-mono px-2.5 py-1 rounded-pill fs-2xs">
+                        FY {{ fiscal_year }}
+                    </span>
+                {% endif %}
+            </div>
+            <p class="text-muted fs-xs mb-0 mt-1">
+                Audited itemized sales book reconciling taxable turnover, exempt sales, 13% Output VAT, customer returns, credit notes, and line items.
             </p>
         </div>
-        <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
-            <i class="fas fa-print me-1"></i> Print Register
-        </button>
+        <div class="d-flex flex-wrap gap-2 align-items-center no-print">
+            <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
+               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+                <i class="fas fa-file-csv me-1"></i> Export CSV
+            </a>
+            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+                <i class="fas fa-print me-1"></i> Print Register
+            </button>
+            <a href="{% url 'sales:pos_terminal' %}" class="btn btn-warning btn-sm rounded-pill px-4 fw-bold shadow-sm text-dark">
+                <i class="fas fa-cash-register me-1"></i> Open POS Terminal
+            </a>
+        </div>
     </div>
 
-    <!-- Date Range Filter -->
-    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4">
-        <form method="get" class="row g-2 align-items-end">
-            <div class="col-12 col-md-4">
-                <label class="form-label fs-xs fw-bold text-muted mb-1">Start Date (AD)</label>
-                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm bg-light border-0">
+    <!-- Multi-Calendar Filter Bar (Fiscal Year, BS Month & Date Pickers) -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 no-print">
+        <form method="get" class="row g-2 align-items-end" id="salesRegisterFilterForm">
+            <!-- Fiscal Year Dropdown -->
+            <div class="col-12 col-md-3">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="fas fa-landmark text-primary me-1"></i> Nepali Fiscal Year (आर्थिक वर्ष)
+                </label>
+                <select name="fiscal_year" id="salesFySelect" class="form-select form-select-sm bg-light border-0 fw-bold text-dark">
+                    <option value="">-- All / Filter by Month --</option>
+                    {% for fy in available_fiscal_years %}
+                        <option value="{{ fy }}" {% if request.GET.fiscal_year == fy or fiscal_year == fy and is_fiscal_year_mode %}selected{% endif %}>
+                            Fiscal Year {{ fy }} (आ.व. {{ fy }})
+                        </option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="col-12 col-md-4">
-                <label class="form-label fs-xs fw-bold text-muted mb-1">End Date (AD)</label>
-                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm bg-light border-0">
+
+            <!-- BS Month Dropdown -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="far fa-calendar text-primary me-1"></i> B.S. Month (महिना)
+                </label>
+                <select name="bs_month" id="salesBsMonthSelect" class="form-select form-select-sm bg-light border-0 fw-semibold text-dark">
+                    <option value="">Full Year / All Months</option>
+                    {% for m in nepali_months %}
+                        <option value="{{ m.num }}" {% if bs_month == m.num and is_month_mode %}selected{% endif %}>
+                            {{ m.num }}. {{ m.name_en }} ({{ m.name_np }})
+                        </option>
+                    {% endfor %}
+                </select>
             </div>
-            <div class="col-12 col-md-4">
-                <button type="submit" class="btn btn-primary btn-sm w-100 rounded-3 fw-bold">Filter Range</button>
+
+            <!-- BS Year Dropdown -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">
+                    <i class="fas fa-calendar-year text-primary me-1"></i> B.S. Year (वर्ष)
+                </label>
+                <select name="bs_year" id="salesBsYearSelect" class="form-select form-select-sm bg-light border-0 font-monospace fw-semibold">
+                    {% for yr in available_bs_years %}
+                        <option value="{{ yr }}" {% if bs_year == yr %}selected{% endif %}>{{ yr }} BS</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Start Date BS Input -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">Start Date (B.S.)</label>
+                <input type="text" 
+                       name="start_date_bs" 
+                       id="salesStartDateBs" 
+                       value="{{ start_date_bs }}" 
+                       class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
+                       placeholder="YYYY-MM-DD" 
+                       autocomplete="off">
+            </div>
+
+            <!-- End Date BS Input -->
+            <div class="col-6 col-md-2">
+                <label class="form-label fs-2xs fw-bold text-muted mb-1">End Date (B.S.)</label>
+                <input type="text" 
+                       name="end_date_bs" 
+                       id="salesEndDateBs" 
+                       value="{{ end_date_bs }}" 
+                       class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
+                       placeholder="YYYY-MM-DD" 
+                       autocomplete="off">
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="col-12 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                {% if request.GET.fiscal_year or request.GET.bs_month or request.GET.start_date_bs or request.GET.end_date_bs %}
+                    <a href="{% url 'taxation:sales_register' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Reset Filters">↺</a>
+                {% endif %}
             </div>
         </form>
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 pt-2 border-top fs-2xs text-muted">
+            <div>
+                Scope: <strong class="text-primary font-mono">{{ period_label }}</strong> &bull; AD: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong>
+            </div>
+            <div>
+                Store Terminal: <strong>{{ branch.name|default:ACTIVE_BRANCH.name }}</strong> ({{ branch.code|default:ACTIVE_BRANCH.code }})
+            </div>
+        </div>
     </div>
 
-    <!-- Register Table -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+    <!-- 4 Key Sales Register KPI Summary Cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Net Taxable Base</span>
+                <h3 class="fw-extrabold text-primary font-mono mt-2 mb-0">
+                    Rs. {{ totals.taxable|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Gross: Rs. {{ totals.gross_taxable_before_returns|default:0|floatformat:2|intcomma }} &bull; Ret: -Rs. {{ totals.return_taxable_deduct|default:0|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-success border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">13% Output VAT (Net)</span>
+                <h3 class="fw-extrabold text-success font-mono mt-2 mb-0">
+                    Rs. {{ totals.vat|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Output: Rs. {{ totals.sales_output_vat|default:0|floatformat:2|intcomma }} &bull; Reversal: -Rs. {{ totals.sales_return_vat_reversal|default:0|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-secondary border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Non-Taxable / Exempt Sales</span>
+                <h3 class="fw-extrabold text-secondary font-mono mt-2 mb-0">
+                    Rs. {{ totals.non_taxable|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">PAN and 0% non-taxable turnover</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-danger border-4 h-100">
+                <span class="text-muted text-uppercase fw-bold fs-2xs">Customer Returns Deducted</span>
+                <h3 class="fw-extrabold text-danger font-mono mt-2 mb-0">
+                    -Rs. {{ totals.total_refunds|default:0|floatformat:2|intcomma }}
+                </h3>
+                <small class="text-muted fs-2xs">Reversed Output VAT: -Rs. {{ totals.return_vat_deduct|default:0|floatformat:2|intcomma }}</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         SECTION 1: BILLED SALES INVOICES (ANNEX 5 FORMAT)
+         ========================================================================= -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h6 class="section-audit-title mb-0">
+                    <i class="fas fa-table-list text-primary"></i> 1. Billed Sales Invoices &amp; Estimations (Gross Output VAT)
+                </h6>
+                <small class="text-muted fs-2xs">Click any row to reveal line items, exact VAT breakdown, and source links</small>
+            </div>
+            <span class="badge bg-secondary rounded-pill px-3">{{ document_breakdown|length }} Vouchers Recorded</span>
+        </div>
+
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 fs-sm">
-                <thead class="bg-light text-muted text-uppercase fs-xs">
+            <table class="table align-middle mb-0 table-sales-register table-bordered">
+                <thead>
                     <tr>
-                        <th class="ps-4">Date</th>
-                        <th>Estimate Slip</th>
-                        <th>Customer Name</th>
-                        <th>Cust PAN</th>
-                        <th>Taxable Base</th>
-                        <th>Non-Taxable Base</th>
-                        <th>Tax / VAT</th>
-                        <th class="text-end pe-4">Grand Total</th>
+                        <th class="ps-3" style="width: 140px;">Nepali Date (B.S.)</th>
+                        <th style="width: 105px;">Date (A.D.)</th>
+                        <th style="width: 150px;">Invoice / Slip No</th>
+                        <th>Customer / Business</th>
+                        <th>Cust. PAN</th>
+                        <th class="text-end" style="width: 130px;">Taxable Base</th>
+                        <th class="text-end" style="width: 130px;">Non-Taxable</th>
+                        <th class="text-end" style="width: 120px;">13% Output VAT</th>
+                        <th class="text-end" style="width: 140px;">Grand Total</th>
+                        <th class="text-center" style="width: 90px;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for row in report.records %}
-                    <tr>
-                        <td class="ps-4">{{ row.bill_date_ad }}</td>
-                        <td class="font-monospace fw-bold">{{ row.estimate_number }}</td>
-                        <td>{{ row.recipient_display_name }}</td>
-                        <td><code>{{ row.customer_pan|default:"-" }}</code></td>
-                        <td>Rs. {{ row.taxable_amount|floatformat:2 }}</td>
-                        <td>Rs. {{ row.non_taxable_amount|floatformat:2 }}</td>
-                        <td class="text-warning-emphasis">Rs. {{ row.vat_amount|floatformat:2 }}</td>
-                        <td class="text-end pe-4 fw-bold text-primary">Rs. {{ row.grand_total|floatformat:2 }}</td>
+                    {% for doc in document_breakdown %}
+                    <!-- Main Invoice Row (Clickable) -->
+                    <tr class="sales-row-clickable" onclick="toggleInvoiceDrawer('inv-drawer-{{ forloop.counter }}')">
+                        <td class="ps-3 font-mono">
+                            <span class="nepali-date-chip">
+                                {{ doc.bill_date_bs }} BS
+                            </span>
+                        </td>
+                        <td class="font-mono text-muted fs-2xs">{{ doc.bill_date_ad|date:"Y-m-d" }}</td>
+                        
+                        <td class="font-mono fw-bold">
+                            <a href="{% url 'sales:estimate_detail' doc.id %}" target="_blank" class="text-primary text-decoration-none" onclick="event.stopPropagation();">
+                                {{ doc.estimate_number }}
+                            </a>
+                            <div class="fs-3xs text-muted">{{ doc.bill_type_display }}</div>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ doc.customer_name }}</strong>
+                            {% if doc.customer_phone %}
+                                <small class="text-muted d-block font-mono fs-3xs">{{ doc.customer_phone }}</small>
+                            {% endif %}
+                        </td>
+
+                        <td class="font-mono">{{ doc.customer_pan|default:"-" }}</td>
+                        <td class="col-num font-mono">Rs. {{ doc.taxable_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num font-mono text-muted">Rs. {{ doc.non_taxable_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num font-mono fw-bold text-primary">Rs. {{ doc.vat_amount|floatformat:2|intcomma }}</td>
+                        <td class="col-num font-mono fw-extrabold text-dark">Rs. {{ doc.grand_total|floatformat:2|intcomma }}</td>
+                        
+                        <td class="text-center" onclick="event.stopPropagation();">
+                            <a href="{% url 'sales:estimate_detail' doc.id %}" target="_blank" class="btn btn-outline-primary btn-sm py-0 px-2 rounded-pill fs-3xs fw-bold">
+                                Details &rarr;
+                            </a>
+                        </td>
+                    </tr>
+
+                    <!-- Expandable Item Drawer Row -->
+                    <tr id="inv-drawer-{{ forloop.counter }}" class="invoice-drawer-row">
+                        <td colspan="10" class="p-0 border-0">
+                            <div class="invoice-drawer-box">
+                                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                                    <div>
+                                        <strong class="text-dark fs-xs">
+                                            <i class="fas fa-boxes-stacked text-primary me-1"></i>
+                                            Itemized Products in {{ doc.estimate_number }}
+                                        </strong>
+                                        {% if doc.gl_entry %}
+                                            <span class="badge bg-light text-dark border font-mono ms-2 fs-3xs">
+                                                GL Voucher: {{ doc.gl_entry.voucher_number }}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <a href="{% url 'sales:estimate_detail' doc.id %}" target="_blank" class="btn btn-primary btn-sm py-0 px-2.5 rounded-pill fs-3xs fw-bold">
+                                            Open Sales Detail Page &rarr;
+                                        </a>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 rounded-pill fs-3xs" 
+                                                onclick="toggleInvoiceDrawer('inv-drawer-{{ forloop.counter }}')">
+                                            &times; Close
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered align-middle mb-0 fs-xs bg-white">
+                                        <thead class="bg-light text-muted fs-3xs">
+                                            <tr>
+                                                <th style="width: 35px;" class="text-center">#</th>
+                                                <th>Product Description</th>
+                                                <th class="text-center" style="width: 70px;">Qty</th>
+                                                <th class="text-end" style="width: 110px;">Unit Rate</th>
+                                                <th class="text-end" style="width: 90px;">Discount</th>
+                                                <th class="text-center" style="width: 90px;">Tax Mode</th>
+                                                <th class="text-end" style="width: 110px;">Taxable Base</th>
+                                                <th class="text-end" style="width: 100px;">13% VAT</th>
+                                                <th class="text-end" style="width: 120px;">Line Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for item in doc.items %}
+                                            <tr>
+                                                <td class="text-center text-muted fw-bold">{{ forloop.counter }}</td>
+                                                <td>
+                                                    <strong>{{ item.product_name }}</strong>
+                                                    {% if item.imei_number %}
+                                                        <div class="font-mono text-primary fs-3xs">IMEI: {{ item.imei_number }}</div>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-center font-mono">{{ item.quantity|floatformat:0 }}</td>
+                                                <td class="text-end font-mono">Rs. {{ item.unit_price|floatformat:2|intcomma }}</td>
+                                                <td class="text-end font-mono text-danger">-Rs. {{ item.discount_amount|floatformat:2|intcomma }}</td>
+                                                <td class="text-center">
+                                                    {% if item.is_vat_applicable %}
+                                                        <span class="badge bg-success bg-opacity-10 text-success fs-3xs">{{ item.vat_rate }}% Tax</span>
+                                                    {% else %}
+                                                        <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">Exempt</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-end font-mono">Rs. {{ item.taxable_amount|floatformat:2|intcomma }}</td>
+                                                <td class="text-end font-mono fw-bold text-primary">Rs. {{ item.vat_amount|floatformat:2|intcomma }}</td>
+                                                <td class="text-end font-mono fw-bold">Rs. {{ item.line_total|floatformat:2|intcomma }}</td>
+                                            </tr>
+                                            {% empty %}
+                                            <tr><td colspan="9" class="text-center py-2 text-muted">No items recorded.</td></tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="8" class="text-center py-5 text-muted">No sales records in selected period.</td>
+                        <td colspan="10" class="text-center py-5 text-muted">
+                            <i class="fas fa-book-open fs-1 text-secondary opacity-25 d-block mb-3"></i>
+                            <h6 class="fw-bold text-dark mb-1">No Sales Records Found in this Period</h6>
+                            <p class="text-muted fs-xs mb-0">No completed sales invoices match your filter parameters.</p>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
-                {% if report.records %}
-                <tfoot class="bg-light fw-bold fs-xs">
+
+                {% if document_breakdown %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
                     <tr>
-                        <td colspan="4" class="ps-4 text-end">TOTALS:</td>
-                        <td>Rs. {{ report.totals.taxable|floatformat:2 }}</td>
-                        <td>Rs. {{ report.totals.non_taxable|floatformat:2 }}</td>
-                        <td class="text-warning-emphasis">Rs. {{ report.totals.vat|floatformat:2 }}</td>
-                        <td class="text-end pe-4 text-primary fs-6">Rs. {{ report.totals.grand_total|floatformat:2 }}</td>
+                        <td colspan="5" class="ps-3 text-end text-uppercase text-white-50">Gross Sales Subtotals:</td>
+                        <td class="col-num text-info">Rs. {{ totals.gross_taxable_before_returns|default:totals.taxable|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-white-50">Rs. {{ totals.non_taxable|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-primary bg-white bg-opacity-10">Rs. {{ totals.sales_output_vat|default:totals.vat|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning fs-6">Rs. {{ totals.grand_total|default:0|floatformat:2|intcomma }}</td>
+                        <td></td>
                     </tr>
                 </tfoot>
                 {% endif %}
             </table>
         </div>
     </div>
+
+    <!-- =========================================================================
+         SECTION 2: SEPARATE SALES RETURNS / CREDIT NOTES SECTION (REAL VAT EVENTS)
+         ========================================================================= -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4" id="salesReturnsAuditSection">
+        <div class="p-3 border-bottom bg-danger bg-opacity-10 d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h6 class="section-audit-title text-danger mb-0">
+                    <i class="fas fa-rotate-left"></i> 2. Sales Returns / Credit Notes (बिक्री फिर्ता तथा क्रेडिट नोट)
+                </h6>
+                <small class="text-muted fs-2xs">
+                    Statutory VAT credit note events reversing output tax liability. Directly inspectable with original invoice cross-references and GL links.
+                </small>
+            </div>
+            <span class="badge bg-danger rounded-pill px-3">{{ returns_breakdown|length }} Credit Note(s) Issued</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table align-middle mb-0 table-returns-register table-bordered">
+                <thead>
+                    <tr>
+                        <th class="ps-3" style="width: 140px;">Return Date (B.S.)</th>
+                        <th style="width: 105px;">Date (A.D.)</th>
+                        <th style="width: 150px;">Return / CN No.</th>
+                        <th style="width: 150px;">Original Invoice</th>
+                        <th>Customer / Recipient</th>
+                        <th class="text-end" style="width: 130px;">Taxable Reversal</th>
+                        <th class="text-end" style="width: 120px;">VAT Reversal</th>
+                        <th class="text-end" style="width: 130px;">Refund Amount</th>
+                        <th class="text-center" style="width: 130px;">GL Journal Voucher</th>
+                        <th class="text-center" style="width: 90px;">Detail Link</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ret in returns_breakdown %}
+                    <!-- Main Return Row (Clickable) -->
+                    <tr class="return-row-clickable" onclick="toggleReturnDrawer('ret-drawer-{{ forloop.counter }}')">
+                        <td class="ps-3 font-mono">
+                            <span class="nepali-date-chip bg-danger bg-opacity-10 text-danger border-danger border-opacity-25">
+                                {{ ret.return_date_bs }} BS
+                            </span>
+                        </td>
+                        <td class="font-mono text-muted fs-2xs">{{ ret.return_date_ad|date:"Y-m-d" }}</td>
+
+                        <!-- Return No. -->
+                        <td class="font-mono fw-bold">
+                            <a href="{% url 'sales:return_detail' ret.id %}" target="_blank" class="text-danger text-decoration-none" onclick="event.stopPropagation();">
+                                {{ ret.return_number }}
+                            </a>
+                            <div class="fs-3xs text-muted">{{ ret.refund_mode }}</div>
+                        </td>
+
+                        <!-- Original Invoice Link -->
+                        <td class="font-mono" onclick="event.stopPropagation();">
+                            {% if ret.original_estimate_id %}
+                                <a href="{% url 'sales:estimate_detail' ret.original_estimate_id %}" target="_blank" class="text-primary text-decoration-none fw-semibold">
+                                    {{ ret.original_estimate_number }} &rarr;
+                                </a>
+                            {% else %}
+                                <span class="text-muted">{{ ret.original_estimate_number|default:"-" }}</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Customer -->
+                        <td>
+                            <strong class="text-dark">{{ ret.customer_name }}</strong>
+                            {% if ret.reason %}
+                                <small class="text-muted d-block fs-3xs text-truncate" style="max-width: 180px;" title="{{ ret.reason }}">
+                                    Reason: {{ ret.reason }}
+                                </small>
+                            {% endif %}
+                        </td>
+
+                        <!-- Taxable Reversal -->
+                        <td class="col-num font-mono text-danger fw-semibold">
+                            -Rs. {{ ret.taxable_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- VAT Reversal -->
+                        <td class="col-num font-mono fw-bold text-danger">
+                            -Rs. {{ ret.vat_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- Refund Amount -->
+                        <td class="col-num font-mono fw-bold text-dark">
+                            Rs. {{ ret.total_refund_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- GL Link -->
+                        <td class="text-center font-mono fs-2xs" onclick="event.stopPropagation();">
+                            {% if ret.gl_entry and ret.gl_entry.voucher_number %}
+                                <a href="/accounting/journals/?q={{ ret.gl_entry.voucher_number }}" target="_blank" class="badge bg-light text-dark border text-decoration-none py-1 px-2" title="View Posted GL Voucher">
+                                    <i class="fas fa-link text-primary me-1"></i>{{ ret.gl_entry.voucher_number }}
+                                </a>
+                            {% elif ret.credit_note_number %}
+                                <span class="badge bg-light text-dark border font-mono fs-3xs">{{ ret.credit_note_number }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- Detail Link -->
+                        <td class="text-center" onclick="event.stopPropagation();">
+                            <a href="{% url 'sales:return_detail' ret.id %}" target="_blank" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-3xs fw-bold">
+                                Details &rarr;
+                            </a>
+                        </td>
+                    </tr>
+
+                    <!-- Expandable Return Item Drawer Row -->
+                    <tr id="ret-drawer-{{ forloop.counter }}" class="return-drawer-row">
+                        <td colspan="10" class="p-0 border-0">
+                            <div class="return-drawer-box">
+                                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                                    <div>
+                                        <strong class="text-danger fs-xs">
+                                            <i class="fas fa-rotate-left me-1"></i>
+                                            Returned Items in Credit Note {{ ret.return_number }} (Orig Bill: {{ ret.original_estimate_number }})
+                                        </strong>
+                                        {% if ret.gl_entry %}
+                                            <span class="badge bg-light text-dark border font-mono ms-2 fs-3xs">
+                                                GL Voucher: {{ ret.gl_entry.voucher_number }}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <a href="{% url 'sales:return_detail' ret.id %}" target="_blank" class="btn btn-danger btn-sm py-0 px-2.5 rounded-pill fs-3xs fw-bold">
+                                            Open Credit Note Sheet &rarr;
+                                        </a>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2 rounded-pill fs-3xs" 
+                                                onclick="toggleReturnDrawer('ret-drawer-{{ forloop.counter }}')">
+                                            &times; Close
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered align-middle mb-0 fs-xs bg-white">
+                                        <thead class="bg-light text-muted fs-3xs">
+                                            <tr>
+                                                <th style="width: 35px;" class="text-center">#</th>
+                                                <th>Product Description</th>
+                                                <th class="text-center" style="width: 75px;">Return Qty</th>
+                                                <th class="text-center" style="width: 80px;">VAT Rate</th>
+                                                <th class="text-end" style="width: 120px;">Taxable Reversal</th>
+                                                <th class="text-end" style="width: 110px;">VAT Reversal</th>
+                                                <th class="text-end" style="width: 120px;">Refund Amount</th>
+                                                <th class="text-center" style="width: 110px;">Condition</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for item in ret.items %}
+                                            <tr>
+                                                <td class="text-center text-muted fw-bold">{{ forloop.counter }}</td>
+                                                <td>
+                                                    <strong>{{ item.product_name }}</strong>
+                                                    {% if item.returned_imei %}
+                                                        <div class="font-mono text-danger fs-3xs">IMEI: {{ item.returned_imei }}</div>
+                                                    {% endif %}
+                                                    {% if item.defect_reason %}
+                                                        <div class="text-muted fs-3xs">Defect: {{ item.defect_reason }}</div>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-center font-mono">{{ item.return_quantity|floatformat:0 }}</td>
+                                                <td class="text-center">
+                                                    {% if item.vat_rate > 0 %}
+                                                        <span class="badge bg-success bg-opacity-10 text-success fs-3xs">{{ item.vat_rate }}% VAT</span>
+                                                    {% else %}
+                                                        <span class="badge bg-secondary bg-opacity-10 text-secondary fs-3xs">0% Exempt</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-end font-mono text-danger">-Rs. {{ item.taxable_amount|floatformat:2|intcomma }}</td>
+                                                <td class="text-end font-mono fw-bold text-danger">-Rs. {{ item.vat_amount|floatformat:2|intcomma }}</td>
+                                                <td class="text-end font-mono fw-bold">Rs. {{ item.refund_amount|floatformat:2|intcomma }}</td>
+                                                <td class="text-center">
+                                                    {% if item.is_defective %}
+                                                        <span class="badge bg-danger bg-opacity-10 text-danger fs-3xs">Defective (RMA)</span>
+                                                    {% else %}
+                                                        <span class="badge bg-success bg-opacity-10 text-success fs-3xs">Restocked</span>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% empty %}
+                                            <tr><td colspan="8" class="text-center py-2 text-muted">No items recorded in this credit note.</td></tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="text-center py-4 text-muted">
+                            <i class="fas fa-rotate-left fs-2 opacity-25 d-block mb-2"></i>
+                            No sales returns or credit notes recorded during this period.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+
+                {% if returns_breakdown %}
+                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                    <tr>
+                        <td colspan="5" class="ps-3 text-end text-uppercase text-white-50">Total Return Reversals:</td>
+                        <td class="col-num text-danger fs-xs">-Rs. {{ totals.return_taxable_deduct|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-danger bg-white bg-opacity-10 fs-xs">-Rs. {{ totals.return_vat_deduct|default:0|floatformat:2|intcomma }}</td>
+                        <td class="col-num text-warning fs-6">Rs. {{ totals.total_refunds|default:0|floatformat:2|intcomma }}</td>
+                        <td colspan="2" class="text-center text-white-50 fs-3xs">Credit Notes Reconciled</td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+
+    <!-- =========================================================================
+         SECTION 3: STATUTORY ANNEX 5 FINAL RECONCILIATION SUMMARY CARD
+         ========================================================================= -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
+        <h6 class="section-audit-title mb-3">
+            <i class="fas fa-calculator text-primary"></i>
+            Annex 5 Statutory Sales Book Tax Reconciliation Summary (कर सन्तुलन विवरण)
+        </h6>
+
+        <div class="row g-3 fs-xs">
+            <div class="col-12 col-md-4">
+                <div class="p-3 rounded-3 border bg-light">
+                    <span class="text-muted d-block fs-3xs text-uppercase fw-bold mb-1">Taxable Base Turnover</span>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span>Gross Billed Taxable Sales:</span>
+                        <strong class="font-mono text-dark">Rs. {{ totals.gross_taxable_before_returns|default:totals.taxable|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1 text-danger">
+                        <span>Less: Sales Returns Taxable Reversal:</span>
+                        <strong class="font-mono">-Rs. {{ totals.return_taxable_deduct|default:0|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <hr class="my-1">
+                    <div class="d-flex justify-content-between fw-bold text-primary">
+                        <span>Net Statutory Taxable Base:</span>
+                        <span class="font-mono fs-sm">Rs. {{ totals.taxable|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-4">
+                <div class="p-3 rounded-3 border bg-light">
+                    <span class="text-muted d-block fs-3xs text-uppercase fw-bold mb-1">13% Output VAT Accountability</span>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span>Gross Output VAT on Invoices:</span>
+                        <strong class="font-mono text-dark">Rs. {{ totals.sales_output_vat|default:totals.vat|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1 text-danger">
+                        <span>Less: Output VAT Reversal on Returns:</span>
+                        <strong class="font-mono">-Rs. {{ totals.return_vat_deduct|default:0|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <hr class="my-1">
+                    <div class="d-flex justify-content-between fw-bold text-success">
+                        <span>Net Output VAT Payable (GL 2210):</span>
+                        <span class="font-mono fs-sm">Rs. {{ totals.vat|default:0|floatformat:2|intcomma }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-4">
+                <div class="p-3 rounded-3 border bg-light">
+                    <span class="text-muted d-block fs-3xs text-uppercase fw-bold mb-1">Total Commercial Turnover</span>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span>Gross Invoiced Sales:</span>
+                        <strong class="font-mono text-dark">Rs. {{ totals.grand_total|default:0|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1 text-danger">
+                        <span>Less: Customer Payouts &amp; Store Credit:</span>
+                        <strong class="font-mono">-Rs. {{ totals.total_refunds|default:0|floatformat:2|intcomma }}</strong>
+                    </div>
+                    <hr class="my-1">
+                    <div class="d-flex justify-content-between fw-bold text-dark">
+                        <span>Net Sales Revenue Realized:</span>
+                        <span class="font-mono fs-sm">Rs. {{ totals.taxable|add:totals.non_taxable|floatformat:2|intcomma }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </div>
+
+<script>
+// Toggle Invoice Item Drawer
+function toggleInvoiceDrawer(drawerId) {
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
+    drawer.classList.toggle('show');
+}
+
+// Toggle Return Item Drawer
+function toggleReturnDrawer(drawerId) {
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
+    drawer.classList.toggle('show');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const fySelect = document.getElementById('salesFySelect');
+    const monthSelect = document.getElementById('salesBsMonthSelect');
+    const yearSelect = document.getElementById('salesBsYearSelect');
+    const startDateBs = document.getElementById('salesStartDateBs');
+    const endDateBs = document.getElementById('salesEndDateBs');
+
+    if (fySelect) {
+        fySelect.addEventListener('change', () => {
+            if (fySelect.value) {
+                if (monthSelect) monthSelect.value = '';
+                if (startDateBs) startDateBs.value = '';
+                if (endDateBs) endDateBs.value = '';
+            }
+        });
+    }
+
+    if (monthSelect) {
+        monthSelect.addEventListener('change', () => {
+            if (monthSelect.value) {
+                if (fySelect) fySelect.value = '';
+                if (startDateBs) startDateBs.value = '';
+                if (endDateBs) endDateBs.value = '';
+            }
+        });
+    }
+});
+</script>
 {% endblock %}

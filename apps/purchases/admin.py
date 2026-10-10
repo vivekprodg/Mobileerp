@@ -5,24 +5,25 @@ Commercial Purchase Returns (Debit Notes) & Supplier Udhaari Ledgers.
 Synchronized with `apps/purchases/models.py`:
 - Inward GRN features 5-Section Financial Summary Cards:
     1. Gross Merchandise Value & Pre-VAT Bases (Dual-pot split: Taxable vs. Non-Taxable)
-    2. Dedicated 13% VAT Amount (Calculated strictly on the Taxable Base; 0% on Exempt)
+    2. Dedicated 13% VAT Amount (Hardened Invariant: Exactly equals sum of line-level item VATs)
     3. Total Overheads (Freight + Customs + Handling + Transit Insurance + Other Overheads)
     4. Total Landed Valuation / Inventory COGS (Net Merchandise + 5-tier Overheads)
     5. Net Due / Supplier Debt (Total Invoice - Paid Amount)
-- Inline item support for dual discount types: Flat Amount (रू) vs Percentage (%).
+- Line-item VAT persistence & visibility: Displays `tax_amount` on `GRNItemInline` and `GRNItemAdmin`.
+- Dual discount types supported per line item: Flat Amount (रू) vs Percentage (%).
 - Line-item physical Batch Number (`batch_number`) tracking.
 - Distinct delivery challan reference fields (`challan_no`, `challan_date`, `challan_date_bs`).
 - Dual VAT Handling Modes (`vat_handling_mode`: 'EXCLUSIVE' vs 'INCLUSIVE').
 - Strict Tax Rate Choices (`vat_rate`: 13.00% vs 0.00%).
-- Multi-field audit observations: `consignment_narration`, `receiving_notes`, and `internal_notes`.
-- Automatic overhead landed cost allocation across line items upon save.
+- Multi-field audit observations: `consignment_narration`, `receiving_notes`, `internal_notes`, and `remarks`.
+- Automatic overhead landed cost allocation and financial recalculation upon save.
 - Comprehensive date synchronization between Gregorian (AD) and Bikram Sambat (BS).
-- Explicit entry_date and entry_date_bs visibility in SupplierUdhaariLedger.
-- Supplier subledger double-entry recalculation actions with spot-payment continuity safeguards.
+- Explicit `entry_date` and `entry_date_bs` visibility in SupplierUdhaariLedger.
+- Supplier sub-ledger double-entry recalculation actions with spot-payment continuity safeguards.
 """
 
 from decimal import Decimal
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
@@ -71,13 +72,13 @@ class GRNItemInline(admin.TabularInline):
         'product', 'supplier_item_code', 'batch_number', 'purchased_quantity', 'conversion_factor',
         'base_unit_quantity', 'purchase_rate', 'gross_amount',
         'discount_type', 'discount_input_value', 'item_discount_amount', 'discount_percent',
-        'line_total', 'unit_landed_cost', 'is_vat_applicable', 'vat_rate',
+        'line_total', 'is_vat_applicable', 'vat_rate', 'tax_amount', 'unit_landed_cost',
         'new_selling_price', 'default_mdms_status', 'scanned_imei_list',
         'warranty_months', 'warranty_provider'
     ]
     readonly_fields = [
         'gross_amount', 'base_unit_quantity', 'item_discount_amount',
-        'discount_percent', 'line_total', 'unit_landed_cost'
+        'discount_percent', 'line_total', 'tax_amount', 'unit_landed_cost'
     ]
 
 class PurchaseOrderItemInline(admin.TabularInline):
@@ -95,7 +96,7 @@ class PurchaseReturnItemInline(admin.TabularInline):
     extra = 0
     autocomplete_fields = ['product', 'unit_conversion', 'item_instance']
     fields = [
-        'product', 'returned_quantity', 'conversion_factor', 'base_unit_quantity',
+        'product', 'unit_conversion', 'returned_quantity', 'conversion_factor', 'base_unit_quantity',
         'purchase_rate', 'tax_rate', 'tax_amount', 'line_total',
         'returned_imei_list', 'item_instance', 'return_reason'
     ]
@@ -351,7 +352,10 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
             )
         }),
         (_("3. Procurement Financial Valuation & Landed COGS Summary"), {
-            'description': _("Audited breakdown of Pre-VAT Gross, Taxable vs Non-Taxable Merchandise Pots, Line & Bill Discounts, Multi-Rate Line VAT, 5-tier Overheads, and Net Payable."),
+            'description': _(
+                "Audited breakdown of Pre-VAT Gross, Taxable vs Non-Taxable Merchandise Pots, "
+                "Line & Bill Discounts, Multi-Rate Line VAT, 5-tier Overheads, and Net Payable."
+            ),
             'fields': (
                 'financial_summary_card',
                 ('gross_amount', 'total_line_discount'),
@@ -406,6 +410,11 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         net_merchandise = max(Decimal('0.00'), net_total - vat)
         non_taxable = max(Decimal('0.00'), net_merchandise - taxable)
 
+        # Audit Line Invariant Verification: Header VAT == Sum(GRNItem.tax_amount)
+        line_vat_sum = obj.total_line_vat_amount
+        vat_matches = (abs(vat - line_vat_sum) < Decimal('0.01'))
+        vat_audit_note = "Line Sum Verified: Rs. {:,.2f}".format(line_vat_sum) if vat_matches else "Discrepancy vs Lines: Rs. {:,.2f}".format(line_vat_sum)
+
         vat_mode_label = " (Mode: Incl)" if obj.vat_handling_mode == 'INCLUSIVE' else " (Mode: Excl)"
         vat_status = ("13% VAT Active" + vat_mode_label) if (obj.is_vat_bill and vat > Decimal('0.00')) else "PAN / 0% Exempt"
         vat_color = "#059669" if (obj.is_vat_bill and vat > Decimal('0.00')) else "#64748b"
@@ -422,11 +431,12 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
                     </div>
                 </div>
 
-                <!-- 2. Dedicated 13% VAT Amount -->
+                <!-- 2. Dedicated 13% VAT Amount (Line-Verified) -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid {}; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">2. Dedicated 13% VAT</div>
                     <div style="font-size: 18px; font-weight: 800; color: {}; margin-top: 4px;">Rs. {:,.2f}</div>
                     <div style="font-size: 11px; color: {}; font-weight: 600; margin-top: 2px;">{}</div>
+                    <div style="font-size: 10px; color: #64748b; margin-top: 2px;">&bull; {}</div>
                 </div>
 
                 <!-- 3. Total Overheads (5-Tier Sum) -->
@@ -459,6 +469,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
             vat,
             vat_color,
             vat_status,
+            vat_audit_note,
             overheads,
             landed,
             due
@@ -566,7 +577,7 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         super().save_related(request, form, formsets, change)
         form.instance.recalculate_financials(save=True)
 
-    @admin.action(description=_("Recalculate Pre-VAT, Multi-Rate VAT, Overheads & Landed Costs for selected GRNs"))
+    @admin.action(description=_("Recalculate Pre-VAT, Line VAT, Overheads & Landed Costs for selected GRNs"))
     def recalculate_all_grn_totals(self, request, queryset):
         count = 0
         for grn in queryset:
@@ -582,7 +593,8 @@ class GRNItemAdmin(admin.ModelAdmin):
     list_display = [
         'grn', 'product', 'batch_number', 'purchased_quantity', 'base_unit_quantity',
         'purchase_rate', 'gross_amount', 'discount_type', 'item_discount_amount',
-        'line_total', 'unit_landed_cost', 'vat_rate', 'is_vat_applicable', 'default_mdms_status'
+        'line_total', 'is_vat_applicable', 'vat_rate', 'formatted_tax_amount',
+        'unit_landed_cost', 'default_mdms_status'
     ]
     list_filter = ['discount_type', 'vat_rate', 'is_vat_applicable', 'default_mdms_status', 'grn__branch']
     search_fields = [
@@ -592,8 +604,16 @@ class GRNItemAdmin(admin.ModelAdmin):
     autocomplete_fields = ['grn', 'product', 'unit_conversion']
     readonly_fields = [
         'gross_amount', 'base_unit_quantity', 'item_discount_amount',
-        'discount_percent', 'line_total', 'unit_landed_cost', 'created_at', 'updated_at'
+        'discount_percent', 'line_total', 'tax_amount', 'unit_landed_cost',
+        'created_at', 'updated_at'
     ]
+
+    def formatted_tax_amount(self, obj):
+        val = obj.tax_amount or Decimal('0.00')
+        color = '#059669' if val > Decimal('0.00') else '#64748b'
+        return format_html('<span style="color: {}; font-weight: 600;">Rs. {:,.2f}</span>', color, val)
+    formatted_tax_amount.short_description = _("VAT Amount")
+    formatted_tax_amount.admin_order_field = 'tax_amount'
 
 # =============================================================================
 # PURCHASE RETURN (DEBIT NOTE) ADMIN
@@ -674,7 +694,8 @@ class PurchaseReturnAdmin(admin.ModelAdmin):
 class PurchaseReturnItemAdmin(admin.ModelAdmin):
     list_display = [
         'purchase_return', 'product', 'returned_quantity',
-        'purchase_rate', 'tax_rate', 'line_total', 'returned_imei_list', 'return_reason'
+        'purchase_rate', 'tax_rate', 'tax_amount', 'line_total',
+        'returned_imei_list', 'return_reason'
     ]
     list_filter = ['purchase_return__branch', 'purchase_return__supplier', 'purchase_return__return_date']
     search_fields = [

@@ -1,182 +1,540 @@
 {% extends "core/base.html" %}
 {% load humanize static %}
 
-{% block title %}Day-Wise VAT &amp; Tax Assessment Ledger | {{ COMPANY_NAME }}{% endblock %}
+{% block title %}Day-Wise VAT &amp; Tax Assessment Ledger | {{ SYS_CONFIG.company_name_en|default:COMPANY_NAME }}{% endblock %}
 
 {% block extra_head %}
+<!-- Google Fonts: Inter & JetBrains Mono for High-Precision Financial Numbers -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+
 <style>
-.kpi-tax-box {
-    background: #ffffff;
-    border: 1px solid var(--erp-slate-200);
-    border-radius: 16px;
-    padding: 18px 20px;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+:root {
+    --tax-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --tax-font-mono: 'JetBrains Mono', monospace;
+
+    /* Palette: Executive Dark Slate & High-Contrast Accents */
+    --tax-slate-950: #020617;
+    --tax-slate-900: #0f172a;
+    --tax-slate-800: #1e293b;
+    --tax-slate-700: #334155;
+    --tax-slate-600: #475569;
+    --tax-slate-500: #64748b;
+    --tax-slate-400: #94a3b8;
+    --tax-slate-300: #cbd5e1;
+    --tax-slate-200: #e2e8f0;
+    --tax-slate-100: #f1f5f9;
+    --tax-slate-50:  #f8fafc;
+    --tax-white:     #ffffff;
+
+    --tax-blue-600:  #2563eb;
+    --tax-green-600: #059669;
+    --tax-red-600:   #dc2626;
+    --tax-amber-600: #d97706;
+    --tax-teal-600:  #0d9488;
 }
-.table-daily-ledger th {
-    font-size: 0.70rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 10px 8px;
-    white-space: nowrap;
-    background-color: #0f172a !important;
-    color: #ffffff !important;
-    vertical-align: middle;
+
+body {
+    font-family: var(--tax-font-sans);
+    color: var(--tax-slate-900);
 }
-.table-daily-ledger td {
-    font-size: 0.78rem;
-    padding: 8px 8px;
-    vertical-align: middle;
-    white-space: nowrap;
-}
-.col-num {
-    font-family: 'JetBrains Mono', monospace;
+
+.font-mono {
+    font-family: var(--tax-font-mono) !important;
     font-variant-numeric: tabular-nums;
-    text-align: right;
 }
-.tax-nav-pill {
+
+/* Master Widescreen Canvas: Expands smoothly across large monitors */
+.daily-ledger-shell {
+    max-width: 1820px;
+    margin: 0 auto;
+    padding: 16px 24px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Top Suite Horizontal Navigation Ribbon */
+.tax-suite-ribbon {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 9999px;
     padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 0.75rem;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+}
+
+.tax-nav-pill {
+    padding: 7px 16px;
+    border-radius: 9999px;
+    font-size: 0.775rem;
     font-weight: 700;
-    border: 1px solid var(--erp-slate-200);
-    background: #ffffff;
-    color: var(--erp-slate-600);
-    text-decoration: none;
-    transition: all 0.15s ease;
+    border: 1px solid var(--tax-slate-200);
+    background: var(--tax-white);
+    color: var(--tax-slate-600);
+    text-decoration: none !important;
+    transition: all 0.15s ease-in-out;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
+    white-space: nowrap;
 }
-.tax-nav-pill:hover, .tax-nav-pill.active {
-    background-color: var(--erp-primary) !important;
-    color: #ffffff !important;
-    border-color: var(--erp-primary) !important;
-    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+
+.tax-nav-pill:hover {
+    background-color: var(--tax-slate-100);
+    color: var(--tax-slate-900);
+    border-color: var(--tax-slate-300);
 }
+
+.tax-nav-pill.active {
+    background-color: var(--tax-blue-600) !important;
+    color: var(--tax-white) !important;
+    border-color: var(--tax-blue-600) !important;
+    box-shadow: 0 3px 10px rgba(37, 99, 235, 0.28);
+}
+
+/* Header & Metadata Toolbar */
+.page-hero-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.page-hero-title h3 {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--tax-slate-950);
+    letter-spacing: -0.02em;
+    margin-bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.page-hero-subtitle {
+    font-size: 13px;
+    color: var(--tax-slate-500);
+    margin: 0;
+}
+
+.btn-hero-action {
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 8px 16px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    text-decoration: none !important;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+/* Multi-Calendar Filter Card */
+.filter-console-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 16px;
+    padding: 18px 22px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.filter-console-card label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--tax-slate-600);
+    margin-bottom: 5px;
+}
+
+.filter-console-card .form-control,
+.filter-console-card .form-select {
+    height: 38px;
+    font-size: 12.5px;
+    border-radius: 8px;
+    border: 1px solid var(--tax-slate-300);
+}
+
+.filter-console-card .form-control:focus,
+.filter-console-card .form-select:focus {
+    border-color: var(--tax-blue-600);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+/* ==========================================================================
+   4 EXECUTIVE SUMMARY KPI CARDS
+   ========================================================================== */
+.daily-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+}
+
+.kpi-stat-box {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 140px;
+    position: relative;
+    overflow: hidden;
+}
+
+.kpi-stat-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+}
+
+.kpi-stat-box.kpi-output::before { background: var(--tax-blue-600); }
+.kpi-stat-box.kpi-input::before  { background: var(--tax-green-600); }
+.kpi-stat-box.kpi-net-payable::before { background: var(--tax-red-600); }
+.kpi-stat-box.kpi-net-credit::before  { background: var(--tax-green-600); }
+.kpi-stat-box.kpi-running::before{ background: var(--tax-slate-900); }
+
+.kpi-box-label {
+    font-size: 11.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--tax-slate-500);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.kpi-box-number {
+    font-family: var(--tax-font-mono);
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin-top: 6px;
+    margin-bottom: 6px;
+    white-space: nowrap;
+}
+
+.kpi-box-footnote {
+    font-size: 11.5px;
+    color: var(--tax-slate-500);
+}
+
+/* ==========================================================================
+   HIGH-CONTRAST MASTER DAY-WISE TABLE
+   ========================================================================== */
+.table-panel-card {
+    background: var(--tax-white);
+    border: 1px solid var(--tax-slate-200);
+    border-radius: 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
+}
+
+.table-panel-header {
+    padding: 18px 24px;
+    background: var(--tax-white);
+    border-bottom: 1px solid var(--tax-slate-200);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.table-panel-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--tax-slate-900);
+    letter-spacing: -0.01em;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Dedicated Scroll Container for Sticky Header & Sticky Grand Totals */
+.table-ledger-viewport {
+    max-height: 72vh;
+    overflow-y: auto;
+    overflow-x: auto;
+    position: relative;
+}
+
+.table-daily-ledger {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 0;
+    font-size: 12.5px;
+}
+
+/* Sticky Header */
+.table-daily-ledger thead th {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    background-color: var(--tax-slate-900) !important;
+    color: var(--tax-white) !important;
+    font-size: 10.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--tax-slate-700);
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.table-daily-ledger tbody td {
+    padding: 11px 10px;
+    border-bottom: 1px solid var(--tax-slate-200);
+    vertical-align: middle;
+    color: var(--tax-slate-800);
+    white-space: nowrap;
+}
+
+/* Row states: Active days glow subtly, quiet days stay clean */
+.row-active-day {
+    background-color: var(--tax-white);
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+.row-active-day:hover {
+    background-color: #f0f7ff !important;
+}
+
+.row-quiet-day {
+    background-color: #fafbfc;
+    color: var(--tax-slate-400);
+}
+
+.row-quiet-day:hover {
+    background-color: #f1f5f9;
+}
+
+/* Highlight Column: DAILY NET VAT (THE DIFFERENCE) */
+.col-diff-highlight {
+    background-color: #fdfefe;
+    border-left: 1.5px solid var(--tax-slate-200);
+    border-right: 1.5px solid var(--tax-slate-200);
+}
+
+.row-active-day .col-diff-highlight {
+    background-color: #fcfdfe;
+}
+
+.col-num {
+    font-family: var(--tax-font-mono);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap !important;
+}
+
+.col-center {
+    text-align: center;
+}
+
+/* Badges & Chips */
 .nepali-date-chip {
     background-color: #eff6ff;
     color: #1d4ed8;
     border: 1px solid #bfdbfe;
     font-weight: 800;
-    font-size: 0.76rem;
+    font-size: 0.775rem;
     padding: 3px 8px;
     border-radius: 6px;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--tax-font-mono);
     letter-spacing: 0.02em;
     display: inline-flex;
     align-items: center;
 }
-.fy-active-pill {
-    background: #0f172a;
-    color: #ffffff;
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-    font-size: 0.72rem;
-    padding: 2px 8px;
-    border-radius: 999px;
+
+.badge-daily-status {
+    font-family: var(--tax-font-mono);
+    font-size: 10px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 9999px;
+    text-transform: uppercase;
+    display: inline-block;
+    white-space: nowrap;
 }
-.row-active-day {
-    background-color: #ffffff;
+
+.status-payable {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
 }
-.row-quiet-day {
-    background-color: #fafbfc;
-    opacity: 0.75;
+
+.status-credit {
+    background: #d1fae5;
+    color: #047857;
+    border: 1px solid #6ee7b7;
 }
+
+.status-balanced {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+}
+
+/* Expandable Inline Day Drawer */
+.day-drawer-row {
+    display: none;
+    background-color: #f8fafc;
+}
+
+.day-drawer-row.show {
+    display: table-row;
+}
+
+.day-drawer-box {
+    padding: 20px 24px;
+    border-left: 4px solid var(--tax-blue-600);
+    background: var(--tax-white);
+    margin: 10px 16px;
+    border-radius: 14px;
+    border: 1px solid var(--tax-slate-200);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+/* ==========================================================================
+   STICKY & ELEGANT SOFT-TONE GRAND TOTALS FOOTER
+   ========================================================================== */
+.table-daily-ledger tfoot {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+}
+
+.table-daily-ledger tfoot tr {
+    box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.table-daily-ledger tfoot td {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background-color: #f1f5f9 !important; /* Soft Slate-Gray for clean accounting aesthetics */
+    color: var(--tax-slate-900) !important;
+    padding: 13px 10px;
+    font-size: 12.5px;
+    border-top: 2px solid var(--tax-slate-400) !important;
+    border-bottom: 2px solid var(--tax-slate-300) !important;
+    vertical-align: middle;
+    white-space: nowrap !important;
+}
+
+.table-daily-ledger tfoot td.col-diff-highlight {
+    background-color: #e2e8f0 !important; /* Slightly distinct contrast for the difference column */
+    border-left: 2px solid var(--tax-slate-300) !important;
+    border-right: 2px solid var(--tax-slate-300) !important;
+}
+
+@media (max-width: 1200px) {
+    .daily-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+    .daily-kpi-grid { grid-template-columns: 1fr; }
+}
+
 @media print {
     @page { size: A4 landscape; margin: 8mm; }
-    .no-print, header, aside, nav, .btn, .tax-nav-pill { display: none !important; }
+    .no-print, header, aside, nav, .btn, .tax-suite-ribbon, .filter-console-card { display: none !important; }
     body { background: #fff !important; font-size: 10px !important; }
-    .card { box-shadow: none !important; border: 1px solid #ccc !important; }
-    .table-daily-ledger th { background-color: #1e293b !important; color: #fff !important; }
+    .daily-ledger-shell { max-width: 100% !important; padding: 0 !important; }
+    .table-ledger-viewport { max-height: none !important; overflow: visible !important; }
+    .table-daily-ledger thead th { position: static !important; background-color: #1e293b !important; color: #fff !important; }
+    .table-daily-ledger tfoot td { position: static !important; background-color: #f8fafc !important; }
+    .day-drawer-row { display: table-row !important; }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1720px;">
+<div class="daily-ledger-shell">
 
-    <!-- Suite Navigation Ribbon -->
-    <div class="d-flex align-items-center gap-2 mb-3 p-2 bg-white rounded-4 border shadow-xs overflow-x-auto flex-nowrap no-print">
-        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap"><i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:</span>
+    <!-- 1. Master Suite Navigation Ribbon -->
+    <div class="tax-suite-ribbon no-print">
+        <span class="fs-xs fw-bold text-muted ps-2 pe-1 text-nowrap">
+            <i class="fas fa-landmark text-primary me-1"></i> Taxation Suite:
+        </span>
         <a href="{% url 'taxation:dashboard' %}" class="tax-nav-pill text-nowrap">
             <i class="fas fa-chart-pie text-secondary"></i> VAT Overview
         </a>
         <a href="{% url 'taxation:daily_vat_report' %}" class="tax-nav-pill active text-nowrap">
             <i class="fas fa-calendar-day text-white"></i> Day-Wise VAT Ledger
         </a>
-        <a href="{% url 'taxation:sales_register' %}" class="tax-nav-pill text-nowrap">
+        <a href="{% url 'taxation:sales_register' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
             <i class="fas fa-book-open text-secondary"></i> Sales Book (Annex 5)
         </a>
-        <a href="{% url 'taxation:purchase_register' %}" class="tax-nav-pill text-nowrap">
+        <a href="{% url 'taxation:purchase_register' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
             <i class="fas fa-truck-ramp-box text-secondary"></i> Purchase Book (Annex 7)
+        </a>
+        <a href="{% url 'taxation:six_month_report' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-calendar-week text-secondary"></i> 6-Month VAT Report
+        </a>
+        <a href="{% url 'taxation:reconciliation' %}?{% for k, v in request.GET.items %}{{ k }}={{ v }}&{% endfor %}" class="tax-nav-pill text-nowrap">
+            <i class="fas fa-scale-balanced text-secondary"></i> VAT ↔ GL Reconciliation
         </a>
     </div>
 
-    <!-- Collapsible Non-IRD Compliance Disclaimer Banner -->
-    <div class="alert bg-warning bg-opacity-10 border border-warning border-opacity-25 rounded-4 p-3 mb-4 shadow-sm no-print">
-        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
-            <div class="d-flex align-items-center gap-2">
-                <span class="badge bg-warning text-dark p-2 rounded-circle fs-6"><i class="fas fa-calculator"></i></span>
-                <div>
-                    <h6 class="fw-bold text-dark mb-0">Internal Day-Wise VAT Ledger &amp; Running Liability Settlement</h6>
-                    <small class="text-muted">
-                        Operating Mode: <strong>{{ SHOP_TAX_MODE }}</strong> ({% if IS_VAT_MODE %}13% VAT Calculation Active{% else %}PAN / 0% Tax Proforma{% endif %})
-                    </small>
-                </div>
-            </div>
-            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 py-1 fs-2xs fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#disclaimerDetails" aria-expanded="false">
-                <i class="fas fa-circle-info me-1"></i> Compliance Notice Details
-            </button>
-        </div>
-        <div class="collapse mt-2 pt-2 border-top border-warning border-opacity-25" id="disclaimerDetails">
-            <p class="fs-xs text-muted mb-0">
-                {{ SYS_CONFIG.bill_estimate_disclaimer }} Recorded strictly for store accounting, daily tax reconciliation, and cash-flow estimation.
-            </p>
-        </div>
-    </div>
-
-    <!-- Page Header & Action Controls -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
-        <div>
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-                <h4 class="fw-bold text-dark mb-0">
-                    <i class="fas fa-calendar-days text-primary me-2"></i> Day-Wise VAT &amp; Tax Assessment Ledger (दैनिक भ्याट खाता)
-                </h4>
+    <!-- 2. Header & Action Controls -->
+    <div class="page-hero-header">
+        <div class="page-hero-title">
+            <h3>
+                <i class="fas fa-calendar-days text-primary"></i>
+                <span>Day-Wise VAT &amp; Tax Assessment Ledger</span>
                 {% if fiscal_year %}
-                    <span class="fy-active-pill">
-                        <i class="fas fa-landmark me-1 text-warning"></i> FY {{ fiscal_year }}
+                    <span class="badge bg-dark text-white font-mono fs-2xs px-3 py-1.5 rounded-pill">
+                        FY {{ fiscal_year }}
                     </span>
                 {% endif %}
-            </div>
-            <p class="text-muted fs-xs mb-0 mt-1">
-                Chronological daily matrix consolidating outward sales VAT collected, inward GRN purchase VAT paid, daily net settlement, and progressive running balance.
+            </h3>
+            <p class="page-hero-subtitle">
+                Chronological daily matrix calculating Sales Output VAT, Purchase Input VAT, and the exact Daily Net VAT difference with running balance.
             </p>
         </div>
-        <div class="d-flex flex-wrap gap-2 align-items-center no-print">
+
+        <div class="d-flex align-items-center gap-2 no-print flex-wrap">
             <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=csv" 
-               class="btn btn-outline-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+               class="btn-hero-action btn-outline-success btn btn-sm shadow-xs">
                 <i class="fas fa-file-csv me-1"></i> Export CSV
             </a>
             <a href="?{% for k, v in request.GET.items %}{% if k != 'export' %}{{ k }}={{ v }}&{% endif %}{% endfor %}export=excel" 
-               class="btn btn-success btn-sm rounded-pill px-3 fw-bold shadow-xs">
+               class="btn-hero-action btn btn-sm text-white shadow-xs" style="background-color: var(--tax-green-600);">
                 <i class="fas fa-file-excel me-1"></i> Export Excel (.xlsx)
             </a>
-            <button class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
+            <button class="btn-hero-action btn btn-outline-dark btn-sm shadow-xs" onclick="window.print()">
                 <i class="fas fa-print me-1"></i> Print Sheet (A4)
             </button>
         </div>
     </div>
 
-    <!-- Multi-Calendar Filter Bar (Nepali Fiscal Year, BS Month & Date Pickers) -->
-    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-4 no-print">
+    <!-- 3. Multi-Calendar Filter Console -->
+    <div class="filter-console-card no-print">
         <form method="get" class="row g-2 align-items-end" id="dailyVatFilterForm">
-            <!-- 1. Fiscal Year Selector -->
+            <!-- 1. Fiscal Year -->
             <div class="col-12 col-md-3">
-                <label class="form-label fs-2xs fw-bold text-muted mb-1">
-                    <i class="fas fa-landmark text-primary me-1"></i> Nepali Fiscal Year (आर्थिक वर्ष)
-                </label>
-                <select name="fiscal_year" id="dailyTaxFySelect" class="form-select form-select-sm bg-light border-0 fw-bold text-dark">
+                <label><i class="fas fa-landmark text-primary me-1"></i> Nepali Fiscal Year (आर्थिक वर्ष)</label>
+                <select name="fiscal_year" id="dailyTaxFySelect" class="form-select fw-bold text-dark">
                     <option value="">-- All / Filter by Month --</option>
                     {% for fy in available_fiscal_years %}
                         <option value="{{ fy }}" {% if request.GET.fiscal_year == fy or fiscal_year == fy and is_fiscal_year_mode %}selected{% endif %}>
@@ -186,12 +544,10 @@
                 </select>
             </div>
 
-            <!-- 2. BS Month Selector -->
+            <!-- 2. BS Month -->
             <div class="col-6 col-md-2">
-                <label class="form-label fs-2xs fw-bold text-muted mb-1">
-                    <i class="far fa-calendar text-primary me-1"></i> B.S. Month (महिना)
-                </label>
-                <select name="bs_month" id="dailyTaxBsMonthSelect" class="form-select form-select-sm bg-light border-0 fw-semibold text-dark">
+                <label><i class="far fa-calendar text-primary me-1"></i> B.S. Month (महिना)</label>
+                <select name="bs_month" id="dailyTaxBsMonthSelect" class="form-select fw-semibold text-dark">
                     <option value="">Full Year / All Months</option>
                     {% for m in nepali_months %}
                         <option value="{{ m.num }}" {% if bs_month == m.num and is_month_mode %}selected{% endif %}>
@@ -201,12 +557,10 @@
                 </select>
             </div>
 
-            <!-- 3. BS Year Selector -->
+            <!-- 3. BS Year -->
             <div class="col-6 col-md-2">
-                <label class="form-label fs-2xs fw-bold text-muted mb-1">
-                    <i class="fas fa-calendar-year text-primary me-1"></i> B.S. Year (वर्ष)
-                </label>
-                <select name="bs_year" id="dailyTaxBsYearSelect" class="form-select form-select-sm bg-light border-0 font-monospace fw-semibold">
+                <label><i class="fas fa-calendar-alt text-primary me-1"></i> B.S. Year (वर्ष)</label>
+                <select name="bs_year" id="dailyTaxBsYearSelect" class="form-select font-mono fw-semibold">
                     {% for yr in available_bs_years %}
                         <option value="{{ yr }}" {% if bs_year == yr %}selected{% endif %}>{{ yr }} BS</option>
                     {% endfor %}
@@ -215,49 +569,34 @@
 
             <!-- 4. Start Date BS -->
             <div class="col-6 col-md-2">
-                <label class="form-label fs-2xs fw-bold text-muted mb-1">
-                    <i class="far fa-calendar-alt text-muted me-1"></i> Start Date (B.S.)
-                </label>
-                <input type="text" 
-                       name="start_date_bs" 
-                       id="dailyTaxStartDateBs" 
-                       value="{{ start_date_bs }}" 
-                       class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
-                       placeholder="YYYY-MM-DD (BS)" 
-                       autocomplete="off">
+                <label>Start Date (B.S.)</label>
+                <input type="text" name="start_date_bs" id="dailyTaxStartDateBs" value="{{ start_date_bs }}" class="form-control font-mono nepali-datepicker text-center fw-bold text-dark" placeholder="YYYY-MM-DD" autocomplete="off">
             </div>
 
             <!-- 5. End Date BS -->
             <div class="col-6 col-md-2">
-                <label class="form-label fs-2xs fw-bold text-muted mb-1">
-                    <i class="far fa-calendar-alt text-muted me-1"></i> End Date (B.S.)
-                </label>
-                <input type="text" 
-                       name="end_date_bs" 
-                       id="dailyTaxEndDateBs" 
-                       value="{{ end_date_bs }}" 
-                       class="form-control form-control-sm bg-light border-0 font-monospace nepali-datepicker text-center fw-bold text-dark" 
-                       placeholder="YYYY-MM-DD (BS)" 
-                       autocomplete="off">
+                <label>End Date (B.S.)</label>
+                <input type="text" name="end_date_bs" id="dailyTaxEndDateBs" value="{{ end_date_bs }}" class="form-control font-mono nepali-datepicker text-center fw-bold text-dark" placeholder="YYYY-MM-DD" autocomplete="off">
             </div>
 
-            <!-- 6. Filter & Clear Buttons -->
+            <!-- 6. Filter Buttons -->
             <div class="col-12 col-md-1 d-flex gap-1">
-                <button type="submit" class="btn btn-dark btn-sm w-100 rounded-3 fw-bold">Filter</button>
+                <button type="submit" class="btn btn-dark btn-sm w-100 fw-bold" style="height: 38px;">
+                    <i class="fas fa-filter me-1"></i> Filter
+                </button>
                 {% if request.GET.fiscal_year or request.GET.bs_month or request.GET.start_date_bs or request.GET.end_date_bs %}
-                <a href="{% url 'taxation:daily_vat_report' %}" class="btn btn-outline-secondary btn-sm rounded-3" title="Clear Filters">↺</a>
+                    <a href="{% url 'taxation:daily_vat_report' %}" class="btn btn-outline-secondary btn-sm d-flex align-items-center justify-content-center" style="height: 38px;" title="Reset Filters">↺</a>
                 {% endif %}
             </div>
         </form>
 
-        <!-- Active Period Banner Strip -->
-        <div class="d-flex flex-wrap justify-content-between align-items-center mt-2 pt-2 border-top fs-2xs text-muted">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-2 border-top fs-xs text-muted">
             <div class="d-flex align-items-center gap-2 flex-wrap">
                 <span>Period Scope: <strong class="text-primary font-mono">{{ period_label }}</strong></span>
-                <span class="text-muted">&bull;</span>
-                <span>Gregorian Dates (AD): <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong></span>
-                <span class="text-muted">&bull;</span>
-                <span>Total Days: <strong>{{ report.total_days_in_period }}</strong> (Active Tax Days: <strong>{{ report.active_tax_days_count }}</strong>)</span>
+                <span>&bull;</span>
+                <span>AD Range: <strong>{{ start_date }}</strong> to <strong>{{ end_date }}</strong></span>
+                <span>&bull;</span>
+                <span>Total Days: <strong>{{ report.total_days_in_period }}</strong> (Active Tax Days: <strong class="text-dark">{{ report.active_tax_days_count }}</strong>)</span>
             </div>
             <div>
                 Store Context: <strong>{{ branch.name|default:ACTIVE_BRANCH.name }}</strong> ({{ branch.code|default:ACTIVE_BRANCH.code }})
@@ -265,92 +604,128 @@
         </div>
     </div>
 
-    <!-- 4 High-Level KPI Summary Cards -->
-    <div class="row g-3 mb-4">
-        <!-- 1. Output VAT Collected -->
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="kpi-tax-box border-start border-primary border-4 h-100">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Output VAT (Sales)</span>
-                <h3 class="fw-extrabold text-primary font-monospace mt-2 mb-0">
+    <!-- 4. Executive KPI Summary Cards -->
+    <div class="daily-kpi-grid">
+        <!-- 1. Output VAT -->
+        <div class="kpi-stat-box kpi-output">
+            <div>
+                <div class="kpi-box-label">
+                    <span>Total Output VAT (Sales)</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fs-3xs">Annex 5</span>
+                </div>
+                <div class="kpi-box-number text-primary">
                     Rs. {{ totals.sales_vat|default:0|floatformat:2|intcomma }}
-                </h3>
-                <small class="text-muted fs-2xs">Taxable Base: Rs. {{ totals.sales_taxable|default:0|floatformat:2|intcomma }}</small>
+                </div>
+            </div>
+            <div class="kpi-box-footnote font-mono">
+                Gross: Rs. {{ totals.sales_output_vat|default:0|floatformat:2|intcomma }} &bull; Ret: -Rs. {{ totals.sales_return_vat|default:0|floatformat:2|intcomma }}
             </div>
         </div>
 
-        <!-- 2. Input VAT Paid -->
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="kpi-tax-box border-start border-success border-4 h-100">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Total Input VAT (Purchases)</span>
-                <h3 class="fw-extrabold text-success font-monospace mt-2 mb-0">
+        <!-- 2. Input VAT -->
+        <div class="kpi-stat-box kpi-input">
+            <div>
+                <div class="kpi-box-label">
+                    <span>Total Input VAT (Purchases)</span>
+                    <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs">Annex 7</span>
+                </div>
+                <div class="kpi-box-number text-success">
                     Rs. {{ totals.purchase_vat|default:0|floatformat:2|intcomma }}
-                </h3>
-                <small class="text-muted fs-2xs">Taxable Base: Rs. {{ totals.purchase_taxable|default:0|floatformat:2|intcomma }}</small>
+                </div>
+            </div>
+            <div class="kpi-box-footnote font-mono">
+                Inward: Rs. {{ totals.purchase_input_vat|default:0|floatformat:2|intcomma }} &bull; Debit Notes: -Rs. {{ totals.purchase_return_vat|default:0|floatformat:2|intcomma }}
             </div>
         </div>
 
-        <!-- 3. Period Net VAT Position -->
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="kpi-tax-box border-start {% if totals.is_net_payable %}border-danger{% elif totals.is_net_credit %}border-success{% else %}border-secondary{% endif %} border-4 h-100">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Period Net VAT Balance</span>
-                <h3 class="fw-extrabold {% if totals.is_net_payable %}text-danger{% elif totals.is_net_credit %}text-success{% else %}text-muted{% endif %} font-monospace mt-2 mb-0">
+        <!-- 3. Period Net VAT Difference -->
+        <div class="kpi-stat-box {% if totals.is_net_payable %}kpi-net-payable{% else %}kpi-net-credit{% endif %}">
+            <div>
+                <div class="kpi-box-label">
+                    <span>Period Net VAT (The Difference)</span>
+                    <span class="badge {% if totals.is_net_payable %}bg-danger text-white{% else %}bg-success text-white{% endif %} fs-3xs font-mono">
+                        {% if totals.is_net_payable %}PAYABLE{% else %}TAX CREDIT{% endif %}
+                    </span>
+                </div>
+                <div class="kpi-box-number {% if totals.is_net_payable %}text-danger{% else %}text-success{% endif %}">
                     Rs. {{ totals.net_vat|default:0|floatformat:2|intcomma }}
-                </h3>
-                <small class="fs-2xs fw-bold {% if totals.is_net_payable %}text-danger{% elif totals.is_net_credit %}text-success{% else %}text-muted{% endif %}">
-                    {% if totals.is_net_payable %}
-                        <i class="fas fa-arrow-up me-1"></i> Net Tax Payable to Govt
-                    {% elif totals.is_net_credit %}
-                        <i class="fas fa-arrow-down me-1"></i> Net Tax Credit Available
-                    {% else %}
-                        Balanced (Rs. 0.00)
-                    {% endif %}
-                </small>
+                </div>
+            </div>
+            <div class="kpi-box-footnote fw-bold {% if totals.is_net_payable %}text-danger{% else %}text-success{% endif %}">
+                {% if totals.is_net_payable %}
+                    <i class="fas fa-arrow-trend-up me-1"></i> Net Tax Liability Payable to Inland Revenue
+                {% elif totals.is_net_credit %}
+                    <i class="fas fa-arrow-trend-down me-1"></i> Excess Input Tax Credit Available (Carried Forward)
+                {% else %}
+                    Balanced (Rs. 0.00 Difference)
+                {% endif %}
             </div>
         </div>
 
-        <!-- 4. Final Cumulative Progressive Balance -->
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="kpi-tax-box border-start border-dark border-4 h-100 bg-light">
-                <span class="text-muted text-uppercase fw-bold fs-2xs">Progressive Closing Tax Debt</span>
-                <h3 class="fw-extrabold text-dark font-monospace mt-2 mb-0">
+        <!-- 4. Progressive Closing Balance -->
+        <div class="kpi-stat-box kpi-running">
+            <div>
+                <div class="kpi-box-label">
+                    <span>Progressive Closing Debt</span>
+                    <span class="badge bg-light text-dark border fs-3xs font-mono">Cumulative</span>
+                </div>
+                <div class="kpi-box-number text-dark">
                     Rs. {{ totals.final_cumulative_balance|default:0|floatformat:2|intcomma }}
-                </h3>
-                <small class="text-muted fs-2xs">Cumulative liability closing balance</small>
+                </div>
+            </div>
+            <div class="kpi-box-footnote">
+                Cumulative liability running balance
             </div>
         </div>
     </div>
 
-    <!-- Complete Day-Wise Combined VAT Ledger Table -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
-        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-            <h6 class="fw-bold text-dark mb-0">
-                <i class="fas fa-table-list text-primary me-2"></i> Daily Chronological Tax Movements &amp; Progressive Balances
-            </h6>
-            <span class="badge bg-secondary rounded-pill px-3">{{ daily_rows|length }} Calendar Days</span>
+    <!-- 5. Complete Day-Wise Combined VAT Ledger Table -->
+    <div class="table-panel-card">
+        <div class="table-panel-header">
+            <div>
+                <h5 class="table-panel-title">
+                    <i class="fas fa-table-list text-primary"></i> Daily Chronological Tax Movements &amp; Running Settlement
+                </h5>
+                <small class="text-muted fs-xs">
+                    Click any active day row to reveal that day's itemized sales invoices, credit notes, inward GRNs, and debit notes
+                </small>
+            </div>
+            <span class="badge bg-dark text-white font-mono px-3 py-1.5 rounded-pill fs-xs">
+                {{ daily_rows|length }} Calendar Days
+            </span>
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 table-daily-ledger table-bordered">
+        <!-- Scrollable Ledger Viewport: Pinned Header at Top, Pinned Grand Totals at Bottom -->
+        <div class="table-ledger-viewport">
+            <table class="table-daily-ledger" id="dailyLedgerMasterTable">
                 <thead>
                     <tr>
-                        <th class="ps-3" style="width: 140px;">Nepali Date (B.S.)</th>
+                        <th class="ps-4" style="width: 140px;">Nepali Date (B.S.)</th>
                         <th style="width: 110px;">Date (A.D.)</th>
-                        <th class="text-end" style="width: 130px;">Sales Taxable Base</th>
-                        <th class="text-end" style="width: 120px;">Output VAT (Sales)</th>
-                        <th class="text-end" style="width: 130px;">Sales Total (Turnover)</th>
-                        <th class="text-end" style="width: 130px;">Purchase Taxable Base</th>
-                        <th class="text-end" style="width: 120px;">Input VAT (Purchases)</th>
-                        <th class="text-end" style="width: 130px;">Purchase Net Total</th>
-                        <th class="text-end" style="width: 130px;">Daily Net VAT</th>
-                        <th class="text-center" style="width: 100px;">Daily State</th>
-                        <th class="text-end pe-3" style="width: 150px;">Running Balance (Cumulative)</th>
+                        <th class="col-num" style="width: 130px;">Sales Taxable Base</th>
+                        <th class="col-num" style="width: 125px; color: #93c5fd;">Output VAT (Sales)</th>
+                        <th class="col-num" style="width: 130px;">Sales Total</th>
+                        <th class="col-num" style="width: 130px;">Purchase Taxable Base</th>
+                        <th class="col-num" style="width: 125px; color: #86efac;">Input VAT (Purchases)</th>
+                        <th class="col-num" style="width: 130px;">Purchase Total</th>
+                        
+                        <!-- THE DIFFERENCE COLUMN (HIGHLIGHTED HEADER) -->
+                        <th class="col-num col-diff-highlight" style="width: 145px; color: #fde047; background-color: #1e293b !important;">
+                            Daily Net VAT (Diff)
+                        </th>
+                        
+                        <th class="col-center" style="width: 100px;">State</th>
+                        <th class="col-num pe-4" style="width: 155px;">Running Balance</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in daily_rows %}
-                    <tr class="{% if row.has_activity %}row-active-day{% else %}row-quiet-day{% endif %}">
+                    <tr class="{% if row.has_activity %}row-active-day{% else %}row-quiet-day{% endif %}"
+                        {% if row.has_activity %}onclick="toggleDayDrawer('day-drawer-{{ forloop.counter }}')"{% endif %}
+                        title="{% if row.has_activity %}Click to inspect {{ row.sales_count }} Invoice(s), {{ row.sales_returns|length }} Return(s), {{ row.purchase_count }} GRN(s), {{ row.purchase_returns|length }} Debit Note(s){% endif %}">
+                        
                         <!-- 1. B.S. Date -->
-                        <td class="ps-3 font-monospace">
+                        <td class="ps-4 font-mono">
                             <span class="nepali-date-chip">
                                 <i class="far fa-calendar-check text-primary me-1"></i>
                                 {{ row.date_bs }} BS
@@ -358,13 +733,13 @@
                         </td>
 
                         <!-- 2. A.D. Date -->
-                        <td class="font-monospace text-muted fs-2xs">
-                            {{ row.date_ad_str }} <span class="badge bg-light text-secondary border py-0 px-1">{{ row.day_name }}</span>
+                        <td class="font-mono text-muted fs-xs">
+                            {{ row.date_ad_str }} <span class="badge bg-light text-dark border px-1.5 ms-1">{{ row.day_name }}</span>
                         </td>
 
                         <!-- 3. Sales Taxable Base -->
                         <td class="col-num fw-semibold text-dark">
-                            {% if row.sales_taxable > 0 %}
+                            {% if row.sales_taxable != 0 %}
                                 Rs. {{ row.sales_taxable|floatformat:2|intcomma }}
                             {% else %}
                                 <span class="text-muted opacity-50">-</span>
@@ -372,8 +747,8 @@
                         </td>
 
                         <!-- 4. Output VAT Collected -->
-                        <td class="col-num fw-bold text-primary">
-                            {% if row.sales_vat > 0 %}
+                        <td class="col-num fw-bold {% if row.sales_vat < 0 %}text-danger{% elif row.sales_vat > 0 %}text-primary{% else %}text-muted{% endif %}">
+                            {% if row.sales_vat != 0 %}
                                 Rs. {{ row.sales_vat|floatformat:2|intcomma }}
                             {% else %}
                                 <span class="text-muted opacity-50">-</span>
@@ -382,7 +757,7 @@
 
                         <!-- 5. Sales Grand Total -->
                         <td class="col-num text-dark">
-                            {% if row.sales_grand_total > 0 %}
+                            {% if row.sales_grand_total != 0 %}
                                 Rs. {{ row.sales_grand_total|floatformat:2|intcomma }}
                             {% else %}
                                 <span class="text-muted opacity-50">-</span>
@@ -391,7 +766,7 @@
 
                         <!-- 6. Purchase Taxable Base -->
                         <td class="col-num fw-semibold text-dark">
-                            {% if row.purchase_taxable > 0 %}
+                            {% if row.purchase_taxable != 0 %}
                                 Rs. {{ row.purchase_taxable|floatformat:2|intcomma }}
                             {% else %}
                                 <span class="text-muted opacity-50">-</span>
@@ -399,8 +774,8 @@
                         </td>
 
                         <!-- 7. Input VAT Paid -->
-                        <td class="col-num fw-bold text-success">
-                            {% if row.purchase_vat > 0 %}
+                        <td class="col-num fw-bold {% if row.purchase_vat < 0 %}text-danger{% elif row.purchase_vat > 0 %}text-success{% else %}text-muted{% endif %}">
+                            {% if row.purchase_vat != 0 %}
                                 Rs. {{ row.purchase_vat|floatformat:2|intcomma }}
                             {% else %}
                                 <span class="text-muted opacity-50">-</span>
@@ -409,15 +784,15 @@
 
                         <!-- 8. Purchase Net Total -->
                         <td class="col-num text-dark">
-                            {% if row.purchase_net_total > 0 %}
+                            {% if row.purchase_net_total != 0 %}
                                 Rs. {{ row.purchase_net_total|floatformat:2|intcomma }}
                             {% else %}
                                 <span class="text-muted opacity-50">-</span>
                             {% endif %}
                         </td>
 
-                        <!-- 9. Daily Net VAT (Difference) -->
-                        <td class="col-num fw-extrabold {% if row.is_daily_payable %}text-danger{% elif row.is_daily_credit %}text-success{% else %}text-muted{% endif %}">
+                        <!-- 9. THE DIFFERENCE (DAILY NET VAT) - DISTINCT HIGHLIGHT -->
+                        <td class="col-num col-diff-highlight fw-extrabold fs-xs {% if row.is_daily_payable %}text-danger{% elif row.is_daily_credit %}text-success{% else %}text-muted{% endif %}">
                             {% if row.daily_net_vat != 0 %}
                                 Rs. {{ row.daily_net_vat|floatformat:2|intcomma }}
                             {% else %}
@@ -426,27 +801,253 @@
                         </td>
 
                         <!-- 10. Daily State Badge -->
-                        <td class="text-center">
+                        <td class="col-center">
                             {% if row.is_daily_payable %}
-                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 fs-3xs px-2 py-0.5 fw-bold">
-                                    Payable
-                                </span>
+                                <span class="badge-daily-status status-payable">Payable</span>
                             {% elif row.is_daily_credit %}
-                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fs-3xs px-2 py-0.5 fw-bold">
-                                    Credit
-                                </span>
+                                <span class="badge-daily-status status-credit">Credit</span>
                             {% else %}
-                                <span class="badge bg-light text-muted border fs-3xs py-0.5">
-                                    Balanced
-                                </span>
+                                <span class="badge-daily-status status-balanced">Balanced</span>
                             {% endif %}
                         </td>
 
-                        <!-- 11. Progressive Cumulative Running Balance -->
-                        <td class="col-num pe-3 fw-bold font-monospace {% if row.is_cumulative_payable %}text-danger{% elif row.is_cumulative_credit %}text-success{% else %}text-dark{% endif %}">
+                        <!-- 11. Progressive Running Balance -->
+                        <td class="col-num pe-4 fw-bold font-mono {% if row.is_cumulative_payable %}text-danger{% elif row.is_cumulative_credit %}text-success{% else %}text-dark{% endif %}">
                             Rs. {{ row.cumulative_balance|floatformat:2|intcomma }}
                         </td>
                     </tr>
+
+                    <!-- Expandable Drawer Row for this Day -->
+                    {% if row.has_activity %}
+                    <tr id="day-drawer-{{ forloop.counter }}" class="day-drawer-row">
+                        <td colspan="11" class="p-0 border-0">
+                            <div class="day-drawer-box">
+                                <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+                                    <div>
+                                        <strong class="text-dark fs-sm">
+                                            <i class="fas fa-folder-tree text-primary me-1.5"></i>
+                                            Audit Inward / Outward Breakdown: {{ row.date_bs }} BS ({{ row.date_ad_str }})
+                                        </strong>
+                                        <span class="badge bg-primary bg-opacity-10 text-primary ms-2 fs-2xs font-mono">
+                                            {{ row.sales_count }} Invoice(s) &bull; {{ row.sales_returns|length }} Credit Note(s) &bull; {{ row.purchase_count }} GRN(s) &bull; {{ row.purchase_returns|length }} Debit Note(s)
+                                        </span>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm py-0.5 px-3 rounded-pill fs-2xs" 
+                                            onclick="event.stopPropagation(); toggleDayDrawer('day-drawer-{{ forloop.counter }}')">
+                                        &times; Close Drawer
+                                    </button>
+                                </div>
+
+                                <div class="row g-3">
+                                    <!-- LEFT COLUMN: OUTPUT VAT (SALES & RETURNS) -->
+                                    <div class="col-12 col-xl-6 d-flex flex-column gap-3">
+                                        <!-- Sales Invoices -->
+                                        <div class="card border rounded-3 p-2.5 bg-light bg-opacity-50">
+                                            <div class="d-flex justify-content-between align-items-center mb-1.5">
+                                                <span class="fs-xs fw-bold text-uppercase text-primary d-block">
+                                                    <i class="fas fa-file-invoice me-1"></i> Billed Sales Invoices (Gross Output VAT)
+                                                </span>
+                                                <span class="badge bg-primary text-white font-mono fs-2xs">{{ row.sales_invoices|length }} Slips</span>
+                                            </div>
+                                            
+                                            {% if row.sales_invoices %}
+                                            <div class="table-responsive bg-white rounded border">
+                                                <table class="table table-sm table-hover align-middle mb-0 fs-xs">
+                                                    <thead class="bg-light text-muted fs-3xs text-uppercase">
+                                                        <tr>
+                                                            <th class="ps-2">Slip No</th>
+                                                            <th>Customer</th>
+                                                            <th class="text-end">Taxable</th>
+                                                            <th class="text-end">13% VAT</th>
+                                                            <th class="text-end">Total</th>
+                                                            <th class="text-center pe-2" style="width: 50px;">Link</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for inv in row.sales_invoices %}
+                                                        <tr>
+                                                            <td class="ps-2 font-mono fw-bold">
+                                                                <a href="{% url 'sales:estimate_detail' inv.id %}" target="_blank" class="text-primary text-decoration-none">
+                                                                    {{ inv.estimate_number }}
+                                                                </a>
+                                                            </td>
+                                                            <td><strong class="text-dark">{{ inv.customer_name }}</strong></td>
+                                                            <td class="text-end font-mono">Rs. {{ inv.taxable_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-end font-mono fw-bold text-primary">Rs. {{ inv.vat_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-end font-mono fw-bold">Rs. {{ inv.grand_total|floatformat:2|intcomma }}</td>
+                                                            <td class="text-center pe-2">
+                                                                <a href="{% url 'sales:estimate_detail' inv.id %}" target="_blank" class="btn btn-outline-primary btn-sm py-0 px-2 rounded-pill fs-3xs" title="Open Bill">
+                                                                    &rarr;
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            {% else %}
+                                                <div class="text-muted fs-2xs p-2 text-center bg-white rounded border">No sales invoices billed on this date.</div>
+                                            {% endif %}
+                                        </div>
+
+                                        <!-- Sales Returns -->
+                                        <div class="card border border-danger border-opacity-25 rounded-3 p-2.5 bg-danger bg-opacity-10">
+                                            <div class="d-flex justify-content-between align-items-center mb-1.5">
+                                                <span class="fs-xs fw-bold text-uppercase text-danger d-block">
+                                                    <i class="fas fa-rotate-left me-1"></i> Sales Returns / Credit Notes (Output VAT Reversals)
+                                                </span>
+                                                <span class="badge bg-danger text-white font-mono fs-2xs">{{ row.sales_returns|length }} Returns</span>
+                                            </div>
+
+                                            {% if row.sales_returns %}
+                                            <div class="table-responsive bg-white rounded border">
+                                                <table class="table table-sm table-hover align-middle mb-0 fs-xs">
+                                                    <thead class="bg-light text-muted fs-3xs text-uppercase">
+                                                        <tr>
+                                                            <th class="ps-2">Credit Note No</th>
+                                                            <th>Customer</th>
+                                                            <th class="text-end">Taxable Rev</th>
+                                                            <th class="text-end">VAT Reversal</th>
+                                                            <th class="text-end">Refund Total</th>
+                                                            <th class="text-center pe-2" style="width: 50px;">Link</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for ret in row.sales_returns %}
+                                                        <tr>
+                                                            <td class="ps-2 font-mono fw-bold">
+                                                                <a href="{% url 'sales:return_detail' ret.id %}" target="_blank" class="text-danger text-decoration-none">
+                                                                    {{ ret.return_number }}
+                                                                </a>
+                                                            </td>
+                                                            <td><strong class="text-dark">{{ ret.customer_name }}</strong></td>
+                                                            <td class="text-end font-mono text-danger">-Rs. {{ ret.taxable_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-end font-mono fw-bold text-danger">-Rs. {{ ret.vat_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-end font-mono fw-bold">Rs. {{ ret.total_refund_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-center pe-2">
+                                                                <a href="{% url 'sales:return_detail' ret.id %}" target="_blank" class="btn btn-outline-danger btn-sm py-0 px-2 rounded-pill fs-3xs" title="Open Return">
+                                                                    &rarr;
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            {% else %}
+                                                <div class="text-muted fs-2xs p-2 text-center bg-white rounded border">No customer credit notes recorded on this date.</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+
+                                    <!-- RIGHT COLUMN: INPUT VAT (GRNS & DEBIT NOTES) -->
+                                    <div class="col-12 col-xl-6 d-flex flex-column gap-3">
+                                        <!-- Inward GRNs -->
+                                        <div class="card border rounded-3 p-2.5 bg-light bg-opacity-50">
+                                            <div class="d-flex justify-content-between align-items-center mb-1.5">
+                                                <span class="fs-xs fw-bold text-uppercase text-success d-block">
+                                                    <i class="fas fa-truck-ramp-box me-1"></i> Inward Goods Receipts (Gross Input VAT)
+                                                </span>
+                                                <span class="badge bg-success text-white font-mono fs-2xs">{{ row.purchase_grns|length }} GRNs</span>
+                                            </div>
+
+                                            {% if row.purchase_grns %}
+                                            <div class="table-responsive bg-white rounded border">
+                                                <table class="table table-sm table-hover align-middle mb-0 fs-xs">
+                                                    <thead class="bg-light text-muted fs-3xs text-uppercase">
+                                                        <tr>
+                                                            <th class="ps-2">GRN No</th>
+                                                            <th>Supplier</th>
+                                                            <th>Bill No</th>
+                                                            <th class="text-end">Taxable</th>
+                                                            <th class="text-end">13% VAT</th>
+                                                            <th class="text-end">Net Bill</th>
+                                                            <th class="text-center pe-2" style="width: 50px;">Link</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for grn in row.purchase_grns %}
+                                                        <tr>
+                                                            <td class="ps-2 font-mono fw-bold">
+                                                                <a href="{% url 'purchases:grn_detail' grn.id %}" target="_blank" class="text-success text-decoration-none">
+                                                                    {{ grn.grn_number }}
+                                                                </a>
+                                                            </td>
+                                                            <td><strong class="text-dark">{{ grn.supplier_name }}</strong></td>
+                                                            <td class="font-mono text-muted">{{ grn.supplier_bill_no }}</td>
+                                                            <td class="text-end font-mono">Rs. {{ grn.taxable_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-end font-mono fw-bold text-success">Rs. {{ grn.vat_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-end font-mono fw-bold">Rs. {{ grn.net_total_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-center pe-2">
+                                                                <a href="{% url 'purchases:grn_detail' grn.id %}" target="_blank" class="btn btn-outline-success btn-sm py-0 px-2 rounded-pill fs-3xs" title="Open GRN">
+                                                                    &rarr;
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            {% else %}
+                                                <div class="text-muted fs-2xs p-2 text-center bg-white rounded border">No inward purchases received on this date.</div>
+                                            {% endif %}
+                                        </div>
+
+                                        <!-- Purchase Returns (Debit Notes) -->
+                                        <div class="card border border-warning border-opacity-50 rounded-3 p-2.5 bg-warning bg-opacity-10">
+                                            <div class="d-flex justify-content-between align-items-center mb-1.5">
+                                                <span class="fs-xs fw-bold text-uppercase text-warning-emphasis d-block">
+                                                    <i class="fas fa-truck-moving me-1"></i> Purchase Returns / Debit Notes (Input VAT Reversals)
+                                                </span>
+                                                <span class="badge bg-warning text-dark font-mono fs-2xs">{{ row.purchase_returns|length }} Debit Notes</span>
+                                            </div>
+
+                                            {% if row.purchase_returns %}
+                                            <div class="table-responsive bg-white rounded border">
+                                                <table class="table table-sm table-hover align-middle mb-0 fs-xs">
+                                                    <thead class="bg-light text-muted fs-3xs text-uppercase">
+                                                        <tr>
+                                                            <th class="ps-2">Debit Note No</th>
+                                                            <th>Supplier</th>
+                                                            <th class="text-end">Taxable Rev</th>
+                                                            <th class="text-end">VAT Reversal</th>
+                                                            <th class="text-end">Net Refund</th>
+                                                            <th class="text-center pe-2" style="width: 50px;">Link</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for pret in row.purchase_returns %}
+                                                        <tr>
+                                                            <td class="ps-2 font-mono fw-bold">
+                                                                <a href="{% url 'purchases:purchase_return_detail' pret.id %}" target="_blank" class="text-warning-emphasis text-decoration-none">
+                                                                    {{ pret.return_number }}
+                                                                </a>
+                                                            </td>
+                                                            <td><strong class="text-dark">{{ pret.supplier_name }}</strong></td>
+                                                            <td class="text-end font-mono text-danger">-Rs. {{ pret.total_return_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-end font-mono fw-bold text-danger">-Rs. {{ pret.tax_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-end font-mono fw-bold">Rs. {{ pret.net_refund_amount|floatformat:2|intcomma }}</td>
+                                                            <td class="text-center pe-2">
+                                                                <a href="{% url 'purchases:purchase_return_detail' pret.id %}" target="_blank" class="btn btn-outline-warning btn-sm py-0 px-2 rounded-pill fs-3xs" title="Open Debit Note">
+                                                                    &rarr;
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            {% else %}
+                                                <div class="text-muted fs-2xs p-2 text-center bg-white rounded border">No supplier debit notes recorded on this date.</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+
                     {% empty %}
                     <tr>
                         <td colspan="11" class="text-center py-5 text-muted">
@@ -459,29 +1060,46 @@
                 </tbody>
 
                 {% if daily_rows %}
-                <!-- Grand Totals Reconciled Footer -->
-                <tfoot class="bg-dark text-white fw-bold fs-xs border-top" style="background-color: #0f172a !important; color: #ffffff;">
+                <!-- Grand Reconciled Totals Footer: Sticky Pinned, Soft Slate-Gray Tone, Single Row Currency -->
+                <tfoot>
                     <tr>
-                        <td colspan="2" class="ps-3 text-uppercase text-white-50">Grand Totals:</td>
-                        <td class="col-num text-info">Rs. {{ totals.sales_taxable|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-primary bg-white bg-opacity-10">Rs. {{ totals.sales_vat|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white-50">Rs. {{ totals.sales_grand_total|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-info">Rs. {{ totals.purchase_taxable|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-success bg-white bg-opacity-10">Rs. {{ totals.purchase_vat|floatformat:2|intcomma }}</td>
-                        <td class="col-num text-white-50">Rs. {{ totals.purchase_net_total|floatformat:2|intcomma }}</td>
-                        <td class="col-num {% if totals.is_net_payable %}text-danger{% elif totals.is_net_credit %}text-success{% else %}text-white{% endif %} fs-6">
+                        <td colspan="2" class="ps-4 text-uppercase fw-extrabold text-slate-800">
+                            <i class="fas fa-calculator text-primary me-1.5"></i> Grand Totals:
+                        </td>
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ totals.sales_taxable|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-extrabold text-primary">
+                            Rs. {{ totals.sales_vat|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-semibold text-secondary">
+                            Rs. {{ totals.sales_grand_total|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-bold text-dark">
+                            Rs. {{ totals.purchase_taxable|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-extrabold text-success">
+                            Rs. {{ totals.purchase_vat|floatformat:2|intcomma }}
+                        </td>
+                        <td class="col-num fw-semibold text-secondary">
+                            Rs. {{ totals.purchase_net_total|floatformat:2|intcomma }}
+                        </td>
+                        
+                        <!-- FOOTER DIFFERENCE CELL -->
+                        <td class="col-num col-diff-highlight fw-extrabold {% if totals.is_net_payable %}text-danger{% elif totals.is_net_credit %}text-success{% else %}text-dark{% endif %}">
                             Rs. {{ totals.net_vat|floatformat:2|intcomma }}
                         </td>
-                        <td class="text-center">
+                        
+                        <td class="col-center">
                             {% if totals.is_net_payable %}
-                                <span class="badge bg-danger text-white fs-3xs">Payable</span>
+                                <span class="badge-daily-status status-payable">Payable</span>
                             {% elif totals.is_net_credit %}
-                                <span class="badge bg-success text-white fs-3xs">Credit</span>
+                                <span class="badge-daily-status status-credit">Credit</span>
                             {% else %}
-                                <span class="badge bg-secondary text-white fs-3xs">Balanced</span>
+                                <span class="badge-daily-status status-balanced">Balanced</span>
                             {% endif %}
                         </td>
-                        <td class="col-num pe-3 text-warning fs-6">
+                        <td class="col-num pe-4 fw-extrabold text-dark font-mono">
                             Rs. {{ totals.final_cumulative_balance|floatformat:2|intcomma }}
                         </td>
                     </tr>
@@ -490,9 +1108,17 @@
             </table>
         </div>
     </div>
+
 </div>
 
 <script>
+// Toggle inline day drawer
+function toggleDayDrawer(drawerId) {
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
+    drawer.classList.toggle('show');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const fySelect = document.getElementById('dailyTaxFySelect');
     const monthSelect = document.getElementById('dailyTaxBsMonthSelect');

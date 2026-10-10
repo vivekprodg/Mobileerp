@@ -16,25 +16,40 @@ Core Architecture & Capabilities:
    - Standardizes error responses with machine-readable error_code across all validation failures.
    - Validates that attached repair tickets have corresponding billing items before marking as delivered.
    - Returns authoritative document titles, sequence numbers, and thermal print URLs.
-3. SalesEstimateDetailView & SalesEstimateThermalSlipView:
+3. SalesEstimateDetailView (VAT & Tax Audit Drilldown Engine):
    - Detailed invoice review, thermal 80mm/58mm printing, and formal A4 sheet views.
-4. SalesEstimateUpdateView (Safe Counter Bill Corrections):
+   - Enriched context exposing exact VAT snapshots for VAT report drill-downs:
+     * Taxable amount
+     * VAT rate
+     * VAT amount
+     * Non-taxable / Exempt base
+     * Grand total & subtotal
+     * Item-by-item VAT breakdown (taxable base, VAT rate, tax amount, and pricing mode)
+4. SalesEstimateThermalSlipView:
+   - POS thermal printing layout formatted for standard receipt rolls.
+5. SalesEstimateUpdateView (Safe Counter Bill Corrections):
    - Provides safe counter-level metadata corrections (Dates, Customer Name, Phone, PAN, Remarks).
    - Strict Lockout Rule: CANCELLED, RETURNED, and PARTIALLY_RETURNED bills are permanently locked.
    - Explicit `get_success_url` implementation and direct form saving to prevent ImproperlyConfigured errors.
    - Atomic Save: Recalculates BS/AD dates, synchronizes linked accounting journals, item warranties,
      and customer debt records, while writing full forensic audit trails into AuditLog.
-5. Sales Estimate Voiding & Cancellation:
+6. Sales Estimate Voiding & Cancellation:
    - cancel_estimate_view & SalesEstimateCancelView:
      * Strictly restricted to Owners, Managers, and Superusers (cashiers blocked).
      * Blocks cancellation of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
      * Fully delegates atomic reversal (merchandise stock, Udhaari debt, trade-in vouchers,
        repair tickets, and General Ledger journal vouchers) to SalesPOSService.cancel_sales_estimate.
-     * Enhanced redirection support: Redirects back to list view or detail view cleanly with clear audit alerts.
-6. Itemized Sales Returns:
+7. Itemized Sales Returns & SalesReturnDetailView (Corrected VAT Snapshot & Fallback Engine):
    - SalesReturnListView, SalesReturnCreateView, SalesReturnDetailView, SalesReturnThermalSlipView.
-   - Enforces active cash drawer shift when issuing CASH refunds to prevent drawer discrepancies.
-7. Trade-In & Buy-Back Vouchers:
+   - SalesReturnDetailView reads directly from stored VAT snapshot fields on SalesReturnItem:
+     * vat_rate
+     * taxable_return_amount
+     * non_taxable_return_amount
+     * vat_reversal_amount
+   - For legacy records lacking stored snapshots, safely obtains historical figures from the original
+     invoice item without recalculating on top of refund totals or using current product master tax settings.
+   - Ensures displayed header totals agree with the item-level breakdown.
+8. Trade-In & Buy-Back Vouchers:
    - TradeInListView, TradeInEvaluationWizardView, TradeInDetailView, TradeInPoliceUndertakingPrintView.
    - Bidirectional customer identification fallback between Step 1 intake and Step 3 KYC undertaking.
    - Guarantees SYS_CONFIG injection for statutory police anti-theft undertaking documents.
@@ -708,6 +723,9 @@ class POSCheckoutAPIView(LoginRequiredMixin, View):
                 'bill_discount_type': estimate.bill_discount_type,
                 'bill_discount_percent': str(estimate.bill_discount_percent),
                 'total_sales_discount': str(estimate.total_sales_discount),
+                'taxable_amount': str(estimate.taxable_amount),
+                'non_taxable_amount': str(estimate.non_taxable_amount),
+                'vat_amount': str(estimate.vat_amount),
                 'discount_reason': estimate.discount_reason or "",
                 'print_url': f"/sales/estimates/{estimate.id}/thermal-slip/"
             }
@@ -787,6 +805,12 @@ class SalesEstimateListView(LoginRequiredMixin, ListView):
 class SalesEstimateDetailView(LoginRequiredMixin, DetailView):
     """
     Renders detailed estimation invoice view (invoice_detail.html).
+    Exposes complete VAT breakdown context to allow VAT audit report drill-downs:
+    - Taxable base amount
+    - VAT rate & VAT amount
+    - Non-taxable / Exempt base
+    - Subtotal, discounts, round-off, and grand total
+    - Each line item's individual VAT attributes
     Supports '?format=a4' to seamlessly render the formal A4 estimation sheet.
     """
     model = SalesEstimate
@@ -802,16 +826,59 @@ class SalesEstimateDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        estimate = self.object
         user = self.request.user
         is_supervisor = bool(user.is_superuser or getattr(user, 'role', '') in ['OWNER', 'MANAGER'])
 
-        context['items'] = self.object.items.select_related('product', 'product__base_unit', 'item_instance').all()
-        context['payments'] = self.object.payment_transactions.all()
-        context['returns'] = self.object.returns.select_related('processed_by').prefetch_related('items__product').order_by('-created_at')
-        context['config'] = SystemConfiguration.get_solo()
-        context['SYS_CONFIG'] = SystemConfiguration.get_solo()
+        items = list(estimate.items.select_related('product', 'product__base_unit', 'item_instance').all())
+        context['items'] = items
+        context['payments'] = estimate.payment_transactions.all()
+        context['returns'] = estimate.returns.select_related('processed_by').prefetch_related('items__product').order_by('-created_at')
+        config = SystemConfiguration.get_solo()
+        context['config'] = config
+        context['SYS_CONFIG'] = config
         context['is_supervisor'] = is_supervisor
         context['void_reason_choices'] = VOID_REASON_CHOICES
+
+        # -------------------------------------------------------------
+        # VAT & TAX AUDIT DRILLDOWN PAYLOAD (HARMONIZED FOR REPORTS)
+        # -------------------------------------------------------------
+        context['tax_summary'] = {
+            'taxable_amount': estimate.taxable_amount or Decimal('0.00'),
+            'non_taxable_amount': estimate.non_taxable_amount or Decimal('0.00'),
+            'vat_amount': estimate.vat_amount or Decimal('0.00'),
+            'subtotal': estimate.subtotal or Decimal('0.00'),
+            'item_discount_total': estimate.item_discount_total or Decimal('0.00'),
+            'bill_discount_amount': estimate.bill_discount_amount or Decimal('0.00'),
+            'total_discount': (estimate.item_discount_total or Decimal('0.00')) + (estimate.bill_discount_amount or Decimal('0.00')),
+            'round_off': estimate.round_off or Decimal('0.00'),
+            'grand_total': estimate.grand_total or Decimal('0.00'),
+            'is_vat_applicable': estimate.is_vat_applicable,
+            'has_vat': (estimate.vat_amount or Decimal('0.00')) > Decimal('0.00'),
+            'fiscal_year': estimate.fiscal_year,
+            'bill_date_ad': estimate.bill_date_ad,
+            'bill_date_bs': estimate.bill_date_bs,
+        }
+
+        # Item-by-item explicit VAT breakdown list
+        items_vat_breakdown = []
+        for itm in items:
+            items_vat_breakdown.append({
+                'item': itm,
+                'product_name': itm.product.name if itm.product else (itm.device_condition or 'Item'),
+                'quantity': itm.quantity,
+                'unit_price': itm.unit_price,
+                'discount_amount': itm.discount_amount,
+                'line_total': itm.line_total,
+                'is_vat_applicable': itm.is_vat_applicable,
+                'vat_rate': itm.vat_rate or Decimal('0.00'),
+                'tax_pricing_type': itm.tax_pricing_type,
+                'base_taxable_amount': itm.base_taxable_amount or itm.taxable_line_amount or Decimal('0.00'),
+                'tax_amount': itm.tax_amount or Decimal('0.00'),
+                'is_taxable': bool(itm.is_vat_applicable and (itm.vat_rate or Decimal('0.00')) > Decimal('0.00')),
+            })
+        context['items_vat_breakdown'] = items_vat_breakdown
+
         return context
 
 class SalesEstimateThermalSlipView(LoginRequiredMixin, DetailView):
@@ -962,7 +1029,7 @@ def cancel_estimate_view(request, pk):
     4. Authoritatively delegates full atomic reversal (merchandise stock, Udhaari debt,
        repair ticket restoration, trade-in buy-back rollback, and GL vouchers) directly
        to SalesPOSService.cancel_sales_estimate.
-    5. Clean redirect handling: returns to estimate list or bill detail view with green audit alerts.
+    5. Clean redirect handling: returns to estimate list or bill detail view with audit alerts.
     """
     estimate = get_object_or_404(SalesEstimate, pk=pk)
 
@@ -1038,7 +1105,6 @@ def cancel_estimate_view(request, pk):
 
         messages.success(request, success_msg)
 
-        # Determine smart redirect destination
         redirect_target = request.POST.get('next') or request.GET.get('next')
         if redirect_target == 'list':
             return redirect('sales:estimate_list')
@@ -1274,6 +1340,19 @@ class SalesReturnCreateView(LoginRequiredMixin, View):
 class SalesReturnDetailView(LoginRequiredMixin, DetailView):
     """
     Renders detailed voucher overview for a specific Sales Return.
+    Exposes complete VAT reversal and credit note accounting breakdown
+    for drill-down inspection from VAT reports and Annex registers:
+    - Total return/refund amount
+    - Reversible taxable base amount
+    - Dedicated VAT reversal amount
+    - Non-taxable / exempt return amount
+    - Original invoice reference & link
+    - Return dates (AD & BS) and fiscal year
+    - Itemized breakdown of returned items with tax implications
+
+    Hierarchical Audit Resolution:
+    Sales Return Detail ➔ SalesReturnItem ➔ Stored VAT Snapshot ➔ Display VAT
+    (With safe fallback for legacy historical records lacking snapshots).
     """
     model = SalesReturn
     template_name = 'sales/return_detail.html'
@@ -1281,9 +1360,175 @@ class SalesReturnDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['items'] = self.object.items.select_related('product', 'product__base_unit', 'estimate_item').all()
-        context['config'] = SystemConfiguration.get_solo()
-        context['SYS_CONFIG'] = SystemConfiguration.get_solo()
+        sales_return = self.object
+        config = SystemConfiguration.get_solo()
+        is_vat_shop = (config.tax_system_mode == 'VAT')
+
+        items = list(sales_return.items.select_related('product', 'product__base_unit', 'estimate_item').all())
+        context['items'] = items
+        context['config'] = config
+        context['SYS_CONFIG'] = config
+
+        # -------------------------------------------------------------
+        # EXACT VAT REVERSAL CALCULATION FROM STORED SNAPSHOTS & FALLBACK
+        # -------------------------------------------------------------
+        return_taxable_reversal = Decimal('0.00')
+        return_vat_reversal = Decimal('0.00')
+        return_non_taxable_reversal = Decimal('0.00')
+
+        items_vat_breakdown = []
+        for r_item in items:
+            est_item = r_item.estimate_item
+            refund_amt = (r_item.refund_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            pricing_type = (est_item.tax_pricing_type or 'INCLUSIVE') if est_item else 'INCLUSIVE'
+
+            if not is_vat_shop:
+                vat_rate = Decimal('0.00')
+                line_taxable = Decimal('0.00')
+                line_vat = Decimal('0.00')
+                line_non_taxable = refund_amt
+                pricing_type = 'EXEMPT'
+            else:
+                # 1. Primary Hierarchy: Read directly from stored SalesReturnItem VAT snapshot
+                has_stored_snapshot = (
+                    (r_item.taxable_return_amount or Decimal('0.00')) > Decimal('0.00') or
+                    (r_item.vat_reversal_amount or Decimal('0.00')) > Decimal('0.00') or
+                    (r_item.non_taxable_return_amount or Decimal('0.00')) > Decimal('0.00')
+                )
+
+                if has_stored_snapshot:
+                    vat_rate = (r_item.vat_rate or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    line_taxable = (r_item.taxable_return_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    line_vat = (r_item.vat_reversal_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    line_non_taxable = (r_item.non_taxable_return_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    if vat_rate <= Decimal('0.00'):
+                        pricing_type = 'EXEMPT'
+                else:
+                    # 2. Legacy Data Fallback: Obtain correct values from the original invoice item's
+                    # stored VAT figures (base_taxable_amount, tax_amount, line_total, vat_rate)
+                    # and the returned quantity, avoiding current Product settings or calculating
+                    # VAT on top of refund_amount.
+                    line_taxable = Decimal('0.00')
+                    line_vat = Decimal('0.00')
+                    line_non_taxable = Decimal('0.00')
+                    vat_rate = Decimal('0.00')
+
+                    if est_item:
+                        orig_qty = est_item.quantity if (est_item.quantity and est_item.quantity > Decimal('0.000')) else Decimal('1.000')
+                        return_qty = r_item.return_quantity if (r_item.return_quantity and r_item.return_quantity > Decimal('0.000')) else Decimal('1.000')
+
+                        orig_base_taxable = (est_item.base_taxable_amount or est_item.taxable_line_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        orig_vat = (est_item.tax_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        orig_total = (est_item.line_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        orig_vat_rate = (est_item.vat_rate or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        pricing_type = str(est_item.tax_pricing_type or 'INCLUSIVE').upper().strip()
+
+                        is_item_taxable = bool(
+                            est_item.is_vat_applicable and 
+                            orig_vat_rate > Decimal('0.00') and 
+                            (orig_vat > Decimal('0.00') or orig_base_taxable > Decimal('0.00'))
+                        )
+
+                        # Defensive recovery for legacy invoices where VAT rate was recorded but tax/base were not snapshotted
+                        if not is_item_taxable and est_item.is_vat_applicable and orig_vat_rate > Decimal('0.00') and orig_total > Decimal('0.00'):
+                            divisor = Decimal('1.00') + (orig_vat_rate / Decimal('100.00'))
+                            orig_base_taxable = (orig_total / divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                            orig_vat = (orig_total - orig_base_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                            is_item_taxable = (orig_vat > Decimal('0.00'))
+
+                        prior_items_qs = SalesReturnItem.objects.filter(estimate_item=est_item)
+                        if r_item.pk:
+                            prior_items_qs = prior_items_qs.exclude(pk=r_item.pk)
+
+                        prior_agg = prior_items_qs.aggregate(
+                            tot_qty=Sum('return_quantity'),
+                            tot_taxable=Sum('taxable_return_amount'),
+                            tot_vat=Sum('vat_reversal_amount'),
+                            tot_non_taxable=Sum('non_taxable_return_amount'),
+                            tot_refund=Sum('refund_amount')
+                        )
+                        prior_qty = (prior_agg['tot_qty'] or Decimal('0.000')).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+                        prior_taxable = (prior_agg['tot_taxable'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        prior_vat = (prior_agg['tot_vat'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        prior_non_taxable = (prior_agg['tot_non_taxable'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        prior_refund = (prior_agg['tot_refund'] or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+                        is_final_return = bool(prior_qty + return_qty >= orig_qty)
+                        ratio = min(Decimal('1.000000'), return_qty / orig_qty) if orig_qty > Decimal('0.000') else Decimal('1.000000')
+
+                        effective_refund = refund_amt
+                        if effective_refund <= Decimal('0.00'):
+                            if is_final_return:
+                                effective_refund = max(Decimal('0.00'), orig_total - prior_refund)
+                            else:
+                                effective_refund = (orig_total * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+                        if is_item_taxable:
+                            vat_rate = orig_vat_rate
+                            rem_vat = max(Decimal('0.00'), orig_vat - prior_vat)
+                            rem_taxable = max(Decimal('0.00'), orig_base_taxable - prior_taxable)
+
+                            if is_final_return:
+                                calc_vat = rem_vat
+                            else:
+                                calc_vat = min(rem_vat, (orig_vat * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+                            line_vat = calc_vat
+                            line_taxable = max(Decimal('0.00'), effective_refund - line_vat)
+                            line_non_taxable = Decimal('0.00')
+                        else:
+                            vat_rate = Decimal('0.00')
+                            line_taxable = Decimal('0.00')
+                            line_vat = Decimal('0.00')
+                            line_non_taxable = effective_refund
+                            pricing_type = 'EXEMPT'
+                    else:
+                        line_non_taxable = refund_amt
+                        pricing_type = 'EXEMPT'
+
+            return_taxable_reversal += line_taxable
+            return_vat_reversal += line_vat
+            return_non_taxable_reversal += line_non_taxable
+
+            items_vat_breakdown.append({
+                'return_item': r_item,
+                'product_name': r_item.product.name if r_item.product else 'Item',
+                'return_quantity': r_item.return_quantity,
+                'refund_amount': refund_amt,
+                'taxable_amount': line_taxable,
+                'vat_amount': line_vat,
+                'non_taxable_amount': line_non_taxable,
+                'vat_rate': vat_rate,
+                'pricing_type': pricing_type,
+                'is_defective': r_item.is_defective,
+                'defect_reason': r_item.defect_reason,
+                'returned_imei': r_item.returned_imei,
+            })
+
+        context['items_vat_breakdown'] = items_vat_breakdown
+
+        # Ensure displayed header totals agree with the item-level breakdown
+        final_taxable_reversal = return_taxable_reversal.quantize(Decimal('0.01'))
+        final_vat_reversal = return_vat_reversal.quantize(Decimal('0.01'))
+        final_non_taxable_reversal = return_non_taxable_reversal.quantize(Decimal('0.01'))
+        final_refund = (sales_return.total_refund_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if final_refund <= Decimal('0.00') or final_refund != (final_taxable_reversal + final_vat_reversal + final_non_taxable_reversal):
+            final_refund = (final_taxable_reversal + final_vat_reversal + final_non_taxable_reversal).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        context['tax_summary'] = {
+            'return_amount': final_refund,
+            'taxable_return_amount': final_taxable_reversal,
+            'vat_reversal_amount': final_vat_reversal,
+            'non_taxable_return_amount': final_non_taxable_reversal,
+            'original_invoice_number': sales_return.original_estimate.estimate_number if sales_return.original_estimate else 'N/A',
+            'original_invoice': sales_return.original_estimate,
+            'return_date_ad': sales_return.return_date_ad,
+            'return_date_bs': sales_return.return_date_bs,
+            'fiscal_year': sales_return.fiscal_year,
+            'refund_mode': sales_return.get_refund_mode_display(),
+            'has_vat_reversal': final_vat_reversal > Decimal('0.00'),
+        }
+
         return context
 
 class SalesReturnThermalSlipView(LoginRequiredMixin, DetailView):

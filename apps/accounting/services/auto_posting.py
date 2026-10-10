@@ -1,9 +1,30 @@
 """
 Double-Entry Journal Posting Engine & Automated Operational Dispatcher.
 
-Features:
-1. Strict GRN Inward Double-Entry Synchronization (Nepal Tax Standard):
-   - Debit: Merchandise Inventory Asset (Account 1310 at Total Landed Cost = Pre-VAT Base + All 5 Overheads:
+Core Architectural Features & VAT Audit Linkage:
+1. Strict VAT Entry-to-Document Traceability (Audit Drilldown Invariant):
+   - Every Output VAT (Account 2210) and Input VAT (Account 1410) journal line maintains
+     an explicit, bidirectional link back to the originating source document:
+       Output VAT 13% Line (2210 Cr / Dr)
+           ↓
+       Journal Entry (reference_document = INV-..., source_module = POS_SALE, source_id = ID)
+           ↓
+       Sales Invoice / Estimation Slip / Sales Return Voucher
+   
+       Input VAT 13% Line (1410 Dr / Cr)
+           ↓
+       Journal Entry (reference_document = GRN-..., source_module = PURCHASE_GRN, source_id = ID)
+           ↓
+       Inward Goods Received Note / Supplier Bill / Purchase Return Debit Note
+
+   - Every VAT JournalItem line:
+     * Stores the explicit counterparty relationship (Customer on Sales/Returns, Supplier on GRN/Returns).
+     * Includes an audit-standard line narration containing document numbers, party PAN,
+       taxable base amount, and invoice cross-references.
+     * Enables end-to-end drilldowns: VAT Register Report ↔ Source Document ↔ General Ledger Entry.
+
+2. Strict GRN Inward Double-Entry Synchronization (Nepal Tax Standard):
+   - Debit: Merchandise Inventory Asset (Account 1310 at Landed Cost = Pre-VAT Base + All 5 Overheads:
      Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads).
    - Debit: Dedicated 13% Input VAT (Account 1410 for Input VAT claimable on supplier tax bill).
    - Credit: Cash/Bank/Wallet for spot cash payments made to merchandise supplier upon delivery.
@@ -11,7 +32,8 @@ Features:
    - Credit: Cash in Hand (1110) or Freight/Logistics Clearing (2160) for the 5-tier shipping overheads.
      Strictly isolates third-party logistics overheads from the merchandise supplier's debt ledger.
    - Enforces absolute mathematical equality: Sum(Debits) == Sum(Credits) with penny rounding reconciliation.
-2. Three-Way Sales Tax Split & Trade-In Clearing Alignment:
+
+3. Three-Way Sales Tax Split & Trade-In Clearing Alignment:
    - Dr: Genuine Monetary Payment Modes (Cash, FonePay, eSewa, Khalti, Card, Bank) for paid collections.
    - Dr: Customer Accounts Receivable (1210) strictly for the remaining unpaid Udhaari due debt.
    - Dr: Trade-In Buy-Back Clearing (Account 2150) for the FULL buy-back valuation of the traded-in device.
@@ -19,23 +41,31 @@ Features:
    - Cr: Cash in Hand (1110) if physical cash change was returned to a customer or trade-in surplus cash paid to walk-in customer.
    - Cr: Customer Accounts Receivable (1210) for surplus trade-in buy-back credit deposited into a registered customer profile.
    - Cr: Sales Revenue Account (4110) (Taxable Base + Non-Taxable / Exempt Base).
-   - Cr: Output VAT 13% Account (2210) (Output VAT Collected).
+   - Cr: Output VAT 13% Account (2210) (Output VAT Collected with document and customer linkage).
    - COGS / Inventory Asset: Relieved at landed cost (skipped if cost == 0.00 for historical migrations).
-3. Non-Monetary Tender Isolation (Double-Accounting Prevention):
+
+4. Sales & Purchase Returns VAT Reversal Synchronizer (Verified Multi-Attribute Linkage):
+   - Sales Return: Debits Output VAT (Account 2210) by the exact return VAT amount obtained from
+     verified header and line-item snapshots, linking back to the return voucher and original sales invoice.
+     (Voucher Type: CREDIT_NOTE, Source Module: SALES_RETURN, Source ID: sales_return.id, Reference: sales_return.return_number).
+   - Purchase Return: Credits Input VAT (Account 1410) by the exact debit note tax amount, linking
+     back to the debit note voucher, supplier PAN, and original GRN/bill reference.
+     (Voucher Type: DEBIT_NOTE, Source Module: PURCHASE_RETURN, Source ID: purchase_return.id, Reference: purchase_return.return_number).
+
+5. Non-Monetary Tender Isolation (Double-Accounting Prevention):
    - In post_sales_estimate, 'CREDIT' and 'UDHAARI' tenders inside the payment loop are skipped.
    - The dedicated estimate.due_amount handler creates the single authoritative debit to AR (1210).
    - In post_customer_payment, non-monetary store credit / trade-in adjustments are shielded from posting fake cash receipts.
-4. Historical Backdating Integrity & Fiscal Year Lock Enforcement:
+
+6. Historical Backdating Integrity & Fiscal Year Lock Enforcement:
    - post_sales_estimate strictly stamps vouchers with estimate.bill_date_ad.
    - post_grn_receipt strictly stamps vouchers with grn.bill_date.
    - post_customer_payment and post_supplier_payment read the true historical payment date
      from the subledger (entry_date / entry_date_bs) rather than using today's creation timestamp.
    - Rejects any transaction where the date falls into an audited, closed fiscal year
      while allowing back-dated postings within the active open fiscal year (2083/84).
-5. Balance Sheet Asset Protection:
-   - Skips COGS and Inventory Asset credits when total_cost_amount is 0.00,
-     preventing artificial inventory deficits during historical data migrations.
-6. Omnichannel Payment Ledger Routing:
+
+7. Omnichannel Payment Ledger Routing:
    - Cash (1110), Bank (1120), FonePay (1130), eSewa (1140), Khalti (1150), Card POS (1160),
      AR (1210), AP (2110), Trade-In Clearing (2150), Freight Clearing (2160).
 """
@@ -74,7 +104,7 @@ class JournalEngine:
     def generate_voucher_number(branch: Branch, voucher_type: str) -> str:
         """
         Atomically generates unique sequential voucher numbers.
-        Example: JV-BR01-000001, SV-BR01-000045, PUV-BR01-000012
+        Example: JV-BR01-000001, SV-BR01-000045, PUV-BR01-000012, CN-BR01-000008, DN-BR01-000004
         """
         prefix_map = {
             'JOURNAL': f"JV-{branch.code}",
@@ -406,17 +436,18 @@ class AutoPostingService:
         Creates a balanced double-entry voucher for a finalized Sales POS Invoice.
         Strictly uses estimate.bill_date_ad and validates against closed fiscal years.
         
-        Trade-In & Surplus Credit Rules:
-        - The full agreed buy-back value of the traded-in device debits Trade-In Clearing (Account 2150).
-        - The portion covering new merchandise credits Sales Revenue and Output VAT.
-        - Any remaining surplus credit on a registered customer profile directly credits Customer
-          Accounts Receivable (Account 1210) as an advance liability.
-        - Never routes surplus trade-in credit through Cash or Bank accounts.
+        VAT Entry Linkage:
+        - Output VAT 13% (Account 2210) is credited for `estimate.vat_amount`.
+        - The VAT JournalItem line attaches `customer=estimate.customer` and records an
+          audit-standard narration:
+          `Output VAT 13% [Doc: <estimate_number>] (Recipient: <name>, Taxable Base: Rs. <amount>)`
+        - JournalEntry establishes the document link via:
+          `reference_document=estimate.estimate_number`, `source_module='POS_SALE'`, `source_id=str(estimate.id)`
         """
-        source_module = 'SALES'
+        source_module = 'POS_SALE'
         source_id = str(estimate.id)
 
-        duplicate_filter = Q(source_module=source_module, source_id=source_id, status='POSTED')
+        duplicate_filter = Q(source_module__in=['SALES', 'POS_SALE'], source_id=source_id, status='POSTED')
         duplicate_filter |= Q(voucher_type='SALES', reference_document=estimate.estimate_number, status='POSTED')
         existing = JournalEntry.objects.filter(duplicate_filter).first()
         if existing:
@@ -506,7 +537,7 @@ class AutoPostingService:
                 'debit': p_amount,
                 'credit': Decimal('0.00'),
                 'customer': estimate.customer,
-                'narration': f"Sale collection ({display_mode}) - Ref: {ref}"
+                'narration': f"Sale collection ({display_mode}) [Doc: {estimate.estimate_number}] - Ref: {ref}"
             })
 
         if not has_recorded_payments:
@@ -561,7 +592,7 @@ class AutoPostingService:
                     })
                 else:
                     # Walk-in customer: Physical cash change paid out from drawer float.
-                    # This is handled below in change_returned (which credits Cash in Hand 1110).
+                    # Handled below in change_returned (which credits Cash in Hand 1110).
                     pass
 
         # ---------------------------------------------------------------------
@@ -591,7 +622,7 @@ class AutoPostingService:
             })
 
         # ---------------------------------------------------------------------
-        # 5. CREDIT: Sales Revenue & 13% Output VAT
+        # 5. CREDIT: Sales Revenue & 13% Output VAT (AUDIT-LINKED TRACEABILITY)
         # ---------------------------------------------------------------------
         if estimate.is_vat_applicable and estimate.vat_amount > Decimal('0.00'):
             pre_tax_base = (estimate.taxable_amount + estimate.non_taxable_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -610,11 +641,24 @@ class AutoPostingService:
             vat_acc = cls.get_or_create_control_account(
                 branch, 'OUTPUT_VAT', '2210', 'Output VAT 13%', 'LIABILITY', 'CREDIT'
             )
+
+            # Reliable VAT-to-Document Linkage Narration
+            cust_pan_str = (
+                f", PAN: {estimate.customer_pan}" if estimate.customer_pan else (
+                    f", PAN: {estimate.customer.pan_number}" if estimate.customer and estimate.customer.pan_number else ""
+                )
+            )
+            vat_narration = (
+                f"13% Output VAT [Doc: {estimate.estimate_number}] "
+                f"(Recipient: {estimate.recipient_display_name}{cust_pan_str}, Taxable Base: Rs. {pre_tax_base:,.2f})"
+            )
+
             lines.append({
                 'account': vat_acc,
                 'debit': Decimal('0.00'),
                 'credit': estimate.vat_amount,
-                'narration': f"13% Output VAT collected on {estimate.estimate_number}"
+                'customer': estimate.customer,
+                'narration': vat_narration
             })
         else:
             revenue_credit = estimate.subtotal
@@ -685,17 +729,18 @@ class AutoPostingService:
         Creates a balanced double-entry voucher for an approved Goods Received Note (GRN):
         1. Debit: Merchandise Inventory Asset (1310) at Total Landed Cost (Pre-VAT Base + All 5 Overheads:
            Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads).
-        2. Debit: Dedicated 13% Input VAT (1410) for tax claimable on supplier tax bill.
+        2. Debit: Dedicated 13% Input VAT (1410) for tax claimable on supplier tax bill,
+           explicitly linked with supplier, PAN, GRN number, and bill reference.
         3. Credit: Cash/Bank/Wallet for spot cash payments made to merchandise supplier upon delivery.
         4. Credit: Accounts Payable (2110) strictly for the merchandise supplier's remaining debt (Net Invoice - Paid).
         5. Credit: Cash in Hand (1110) or Freight/Logistics Clearing (2160) for the 5-tier shipping overheads.
            Strictly isolates third-party logistics overheads from the merchandise supplier's debt ledger.
         6. Enforces exact mathematical double-entry equality: Sum(Debits) == Sum(Credits).
         """
-        source_module = 'PURCHASE'
+        source_module = 'PURCHASE_GRN'
         source_id = str(grn.id)
 
-        duplicate_filter = Q(source_module=source_module, source_id=source_id, status='POSTED')
+        duplicate_filter = Q(source_module__in=['PURCHASE', 'PURCHASE_GRN'], source_id=source_id, status='POSTED')
         duplicate_filter |= Q(voucher_type='PURCHASE', reference_document=grn.grn_number, status='POSTED')
         existing = JournalEntry.objects.filter(duplicate_filter).first()
         if existing:
@@ -728,9 +773,9 @@ class AutoPostingService:
             branch, 'ACCOUNTS_PAYABLE', '2110', 'Accounts Payable (Trade Creditors)', 'LIABILITY', 'CREDIT'
         )
 
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         # 1. DEBIT: Merchandise Inventory Asset (Landed Cost with All 5 Overheads)
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         extra_freight = getattr(grn, 'extra_freight_charge', Decimal('0.00')) or Decimal('0.00')
         customs_charge = getattr(grn, 'customs_import_charge', Decimal('0.00')) or Decimal('0.00')
         handling_charge = getattr(grn, 'other_handling_charge', Decimal('0.00')) or Decimal('0.00')
@@ -761,26 +806,35 @@ class AutoPostingService:
             )
         })
 
-        # ---------------------------------------------------------------------
-        # 2. DEBIT: Dedicated 13% Input VAT (When Inward Bill is VAT Registered)
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
+        # 2. DEBIT: Dedicated 13% Input VAT (AUDIT-LINKED TRACEABILITY)
+        # -------------------------------------------------------------
         input_vat = Decimal('0.00')
         if grn.is_vat_bill and (grn.vat_amount or Decimal('0.00')) > Decimal('0.00'):
             input_vat = grn.vat_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             input_vat_acc = cls.get_or_create_control_account(
                 branch, 'INPUT_VAT', '1410', 'Input VAT 13%', 'ASSET', 'DEBIT'
             )
+
+            # Reliable VAT-to-Document Linkage Narration
+            supp_pan_str = f", PAN: {grn.supplier.pan_number}" if grn.supplier and grn.supplier.pan_number else ""
+            vat_narration = (
+                f"13% Input VAT Claim [GRN: {grn.grn_number}] "
+                f"(Supplier Bill: {grn.supplier_bill_no}, Supplier: {grn.supplier.company_name}{supp_pan_str}, "
+                f"Taxable Base: Rs. {pre_tax_base:,.2f})"
+            )
+
             lines.append({
                 'account': input_vat_acc,
                 'debit': input_vat,
                 'credit': Decimal('0.00'),
                 'supplier': grn.supplier,
-                'narration': f"Dedicated 13% Input VAT claimed on supplier invoice {grn.supplier_bill_no}"
+                'narration': vat_narration
             })
 
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         # 3. CREDIT: Merchandise Supplier Settlement (Strictly Merchandise Net + VAT)
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         net_supplier_invoice = (
             grn.net_total_amount or (pre_tax_base + input_vat)
         ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -811,10 +865,10 @@ class AutoPostingService:
                 'narration': f"Supplier Accounts Payable owed to {grn.supplier.company_name} on bill {grn.supplier_bill_no}"
             })
 
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         # 4. CREDIT: 5-Tier Overheads (Freight, Customs, Handling, Insurance, Other)
         # Strictly isolates shipping/customs overheads from the merchandise supplier's debt!
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         if overheads_5_tier > Decimal('0.00'):
             overhead_payment_mode = str(
                 kwargs.get('overhead_payment_mode') or
@@ -847,9 +901,9 @@ class AutoPostingService:
                 'narration': overhead_narr
             })
 
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         # 5. Penny Rounding Residual Reconciliation
-        # ---------------------------------------------------------------------
+        # -------------------------------------------------------------
         sum_dr = sum(l['debit'] for l in lines)
         sum_cr = sum(l['credit'] for l in lines)
         diff = sum_dr - sum_cr
@@ -905,8 +959,6 @@ class AutoPostingService:
             amt = ledger_entry.amount
             mode = (ledger_entry.payment_mode or 'CASH').upper().strip()
 
-            # Non-monetary adjustments (Store Credit, Trade-In Surplus, Opening Balance)
-            # must NOT trigger cash/bank receipt vouchers!
             if mode in ['OTHER', 'ADJUSTMENT', 'STORE_CREDIT', 'TRADE_IN', 'NON_MONETARY']:
                 return None
 
@@ -919,7 +971,6 @@ class AutoPostingService:
             source_id = str(ledger_entry.id)
             user = user or getattr(ledger_entry, 'recorded_by', None)
 
-            # Read historical entry_date if present on sub-ledger; fallback to created_at
             raw_date = getattr(ledger_entry, 'entry_date', None) or kwargs.get('date_ad')
             if not raw_date:
                 raw_date = ledger_entry.created_at.date() if hasattr(ledger_entry.created_at, 'date') else ledger_entry.created_at
@@ -941,7 +992,6 @@ class AutoPostingService:
         if amt <= Decimal('0.00') or not cust:
             return None
 
-        # Closed fiscal year pre-check
         bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(date_ad)
         fy_name = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
         locked_fy = AccountingFiscalYear.objects.filter(name=fy_name, is_closed=True).first()
@@ -1033,7 +1083,6 @@ class AutoPostingService:
             source_id = str(ledger_entry.id)
             user = user or getattr(ledger_entry, 'recorded_by', None)
 
-            # Read historical entry_date from SupplierUdhaariLedger
             raw_date = getattr(ledger_entry, 'entry_date', None) or kwargs.get('date_ad')
             if not raw_date:
                 raw_date = ledger_entry.created_at.date() if hasattr(ledger_entry.created_at, 'date') else ledger_entry.created_at
@@ -1055,7 +1104,6 @@ class AutoPostingService:
         if amt <= Decimal('0.00') or not supp:
             return None
 
-        # Closed fiscal year pre-check
         bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(date_ad)
         fy_name = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
         locked_fy = AccountingFiscalYear.objects.filter(name=fy_name, is_closed=True).first()
@@ -1113,7 +1161,7 @@ class AutoPostingService:
     post_supplier_payout_journal = post_supplier_payment
 
     # =========================================================================
-    # 5. CUSTOMER SALES RETURN POSTING
+    # 5. CUSTOMER SALES RETURN POSTING (REVERSES OUTPUT VAT 2210 WITH LINKAGE)
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -1121,10 +1169,14 @@ class AutoPostingService:
         """
         Posts customer return or exchange credit note:
         - Strictly binds date_ad to sales_return.return_date_ad
-        - Debit: Sales Returns & Deductions (4020)
-        - Debit: Inventory Asset (1310 working) OR Quarantine Asset (1330 defective)
-        - Credit: Cash/Bank/Wallet (refund) OR Accounts Receivable (1210 store credit)
-        - Credit: COGS (5110 reversal)
+        - Obtains the exact Output VAT reversal amount from verified header and line-item snapshots.
+        - Does NOT silently post a zero VAT reversal when underlying return lines contain a non-zero VAT reversal.
+        - Debits Sales Returns & Deductions (4020) for the pre-tax base.
+        - Debits Output VAT 13% (2210) strictly for the verified VAT reversal amount, maintaining
+          the bidirectional document audit link to the sales return and original sales invoice.
+        - Debits Inventory Asset (1310 working) OR Quarantine Asset (1330 defective) for COGS.
+        - Credits Cash/Bank/Wallet (refund) OR Accounts Receivable (1210 store credit).
+        - Credits COGS (5110 reversal).
         """
         source_module = 'SALES_RETURN'
         source_id = str(sales_return.id)
@@ -1144,6 +1196,9 @@ class AutoPostingService:
         ret_rev_acc = cls.get_or_create_control_account(
             branch, 'SALES_RETURN', '4020', 'Sales Returns & Deductions', 'REVENUE', 'DEBIT'
         )
+        output_vat_acc = cls.get_or_create_control_account(
+            branch, 'OUTPUT_VAT', '2210', 'Output VAT 13%', 'LIABILITY', 'CREDIT'
+        )
         ar_acc = cls.get_or_create_control_account(
             branch, 'ACCOUNTS_RECEIVABLE', '1210', 'Accounts Receivable (Trade Debtors)', 'ASSET', 'DEBIT'
         )
@@ -1157,37 +1212,114 @@ class AutoPostingService:
             branch, 'COGS', '5110', 'Cost of Goods Sold (COGS)', 'DIRECT_EXPENSE', 'DEBIT'
         )
 
-        lines.append({
-            'account': ret_rev_acc,
-            'debit': sales_return.total_refund_amount,
-            'credit': Decimal('0.00'),
-            'customer': sales_return.customer,
-            'narration': f"Sales return voucher {sales_return.return_number} on bill {sales_return.original_estimate.estimate_number}"
-        })
+        # -------------------------------------------------------------
+        # 1. VERIFY EXACT VAT REVERSAL AMOUNT & PRE-TAX RETURN BASE
+        # -------------------------------------------------------------
+        # Calculate aggregate VAT reversal from line-item snapshots
+        items_vat_sum = Decimal('0.00')
+        if sales_return.items.exists():
+            for item in sales_return.items.all():
+                line_vat_rev = item.vat_reversal_amount
+                if line_vat_rev is None or line_vat_rev <= Decimal('0.00'):
+                    # Fallback check on item level if tax rate > 0
+                    if getattr(item, 'vat_rate', Decimal('0.00')) > Decimal('0.00') and item.refund_amount > Decimal('0.00'):
+                        divisor = Decimal('1.00') + (item.vat_rate / Decimal('100.00'))
+                        taxable_part = (item.refund_amount / divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        line_vat_rev = item.refund_amount - taxable_part
+                    else:
+                        line_vat_rev = Decimal('0.00')
+                items_vat_sum += (line_vat_rev or Decimal('0.00'))
 
+        items_vat_sum = items_vat_sum.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        header_vat_amt = (sales_return.vat_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # Authoritatively resolve VAT reversal: prefer non-zero item snapshot sum over zero/incorrect header
+        if items_vat_sum > Decimal('0.00'):
+            vat_reversal_amt = items_vat_sum
+        elif header_vat_amt > Decimal('0.00'):
+            vat_reversal_amt = header_vat_amt
+        elif hasattr(sales_return, 'total_vat_amount') and sales_return.total_vat_amount > Decimal('0.00'):
+            vat_reversal_amt = sales_return.total_vat_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            vat_reversal_amt = Decimal('0.00')
+
+        total_refund_amt = Decimal(str(sales_return.total_refund_amount or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        orig_bill_no = sales_return.original_estimate.estimate_number if sales_return.original_estimate else 'N/A'
+        cust_name = sales_return.customer.name if sales_return.customer else (sales_return.original_estimate.recipient_display_name if sales_return.original_estimate else 'Walk-in')
+        cust_pan = (
+            sales_return.customer.pan_number if sales_return.customer and sales_return.customer.pan_number else (
+                sales_return.original_estimate.customer_pan if sales_return.original_estimate and sales_return.original_estimate.customer_pan else ''
+            )
+        )
+        cust_pan_str = f", PAN: {cust_pan}" if cust_pan else ""
+
+        if vat_reversal_amt > Decimal('0.00'):
+            pre_tax_return_base = max(Decimal('0.00'), total_refund_amt - vat_reversal_amt).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            lines.append({
+                'account': ret_rev_acc,
+                'debit': pre_tax_return_base,
+                'credit': Decimal('0.00'),
+                'customer': sales_return.customer,
+                'narration': (
+                    f"Sales return merchandise base reversal [Return: {sales_return.return_number}] "
+                    f"on Bill {orig_bill_no}"
+                )
+            })
+
+            vat_narration = (
+                f"13% Output VAT Reversal [Return: {sales_return.return_number}] "
+                f"(Original Bill: {orig_bill_no}, "
+                f"Customer: {cust_name}{cust_pan_str}, "
+                f"Taxable Base: Rs. {pre_tax_return_base:,.2f})"
+            )
+
+            lines.append({
+                'account': output_vat_acc,
+                'debit': vat_reversal_amt,
+                'credit': Decimal('0.00'),
+                'customer': sales_return.customer,
+                'narration': vat_narration
+            })
+        else:
+            lines.append({
+                'account': ret_rev_acc,
+                'debit': total_refund_amt,
+                'credit': Decimal('0.00'),
+                'customer': sales_return.customer,
+                'narration': f"Sales return voucher {sales_return.return_number} on Bill {orig_bill_no}"
+            })
+
+        # -------------------------------------------------------------
+        # 2. CREDIT: Refund Settlement (Cash, Store Credit, or Udhaari Deduction)
+        # -------------------------------------------------------------
         refund_mode = str(sales_return.refund_mode or '').upper()
         if refund_mode in ['CREDIT', 'STORE_CREDIT', 'UDHAARI', 'CREDIT_NOTE']:
             lines.append({
                 'account': ar_acc,
                 'debit': Decimal('0.00'),
-                'credit': sales_return.total_refund_amount,
+                'credit': total_refund_amt,
                 'customer': sales_return.customer,
-                'narration': f"Store credit / Udhaari adjustment on return {sales_return.return_number}"
+                'narration': f"Store credit / Udhaari adjustment on return {sales_return.return_number} (Bill: {orig_bill_no})"
             })
         else:
             refund_acc = cls.resolve_payment_account(branch, refund_mode, for_party='CUSTOMER')
             lines.append({
                 'account': refund_acc,
                 'debit': Decimal('0.00'),
-                'credit': sales_return.total_refund_amount,
-                'narration': f"Refund ({sales_return.refund_mode}) issued to customer on return {sales_return.return_number}"
+                'credit': total_refund_amt,
+                'customer': sales_return.customer,
+                'narration': f"Refund ({sales_return.refund_mode}) issued to customer on return {sales_return.return_number} (Bill: {orig_bill_no})"
             })
 
+        # -------------------------------------------------------------
+        # 3. INVENTORY & COGS REVERSAL
+        # -------------------------------------------------------------
         total_restocked_cogs = Decimal('0.00')
         total_quarantined_cogs = Decimal('0.00')
 
         for item in sales_return.items.select_related('estimate_item', 'product'):
-            unit_cost = item.estimate_item.cost_price or item.product.purchase_price
+            unit_cost = item.estimate_item.cost_price or item.product.purchase_price or Decimal('0.00')
             line_cost = (unit_cost * item.base_unit_quantity).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             if getattr(item, 'is_defective', False):
                 total_quarantined_cogs += line_cost
@@ -1199,13 +1331,13 @@ class AutoPostingService:
                 'account': inv_asset_acc,
                 'debit': total_restocked_cogs,
                 'credit': Decimal('0.00'),
-                'narration': "Restock sellable returned goods at landed cost"
+                'narration': f"Restock sellable returned goods at landed cost [Return: {sales_return.return_number}]"
             })
             lines.append({
                 'account': cogs_acc,
                 'debit': Decimal('0.00'),
                 'credit': total_restocked_cogs,
-                'narration': "COGS reversal on restocked return items"
+                'narration': f"COGS reversal on restocked return items [Return: {sales_return.return_number}]"
             })
 
         if total_quarantined_cogs > Decimal('0.00'):
@@ -1213,16 +1345,28 @@ class AutoPostingService:
                 'account': quar_asset_acc,
                 'debit': total_quarantined_cogs,
                 'credit': Decimal('0.00'),
-                'narration': "Route defective returned items to quarantine asset"
+                'narration': f"Route defective returned items to quarantine asset [Return: {sales_return.return_number}]"
             })
             lines.append({
                 'account': cogs_acc,
                 'debit': Decimal('0.00'),
                 'credit': total_quarantined_cogs,
-                'narration': "COGS reversal for defective items quarantined for RMA"
+                'narration': f"COGS reversal for defective items quarantined for RMA [Return: {sales_return.return_number}]"
             })
 
-        narration = f"Sales Return Voucher {sales_return.return_number} (Ref Bill: {sales_return.original_estimate.estimate_number})"
+        # -------------------------------------------------------------
+        # 4. PENNY ROUNDING RESIDUAL RECONCILIATION
+        # -------------------------------------------------------------
+        sum_dr = sum(l['debit'] for l in lines)
+        sum_cr = sum(l['credit'] for l in lines)
+        diff = sum_dr - sum_cr
+        if Decimal('0.00') < abs(diff) <= Decimal('0.05'):
+            for l in lines:
+                if l['account'] == ret_rev_acc and l['debit'] > Decimal('0.00'):
+                    l['debit'] -= diff
+                    break
+
+        narration = f"Sales Return Credit Note {sales_return.return_number} (Ref Bill: {orig_bill_no}, Customer: {cust_name})"
         return JournalEngine.create_balanced_entry(
             voucher_type='CREDIT_NOTE',
             date_ad=date_ad,
@@ -1237,7 +1381,7 @@ class AutoPostingService:
         )
 
     # =========================================================================
-    # 6. COMMERCIAL PURCHASE RETURN (DEBIT NOTE) POSTING
+    # 6. COMMERCIAL PURCHASE RETURN (DEBIT NOTE) POSTING (REVERSES INPUT VAT 1410)
     # =========================================================================
     @classmethod
     @transaction.atomic
@@ -1247,7 +1391,8 @@ class AutoPostingService:
         - Strictly binds date_ad to purchase_return.return_date
         - Debit: Accounts Payable (2110) OR Cash in Hand (if cash refund received)
         - Credit: Merchandise Inventory Asset (1310 at purchase value)
-        - Credit: Input VAT 13% (1410 reversal if tax bill)
+        - Credit: Input VAT 13% (1410 reversal if tax bill by exact debit note tax amount),
+          explicitly linked with supplier, PAN, Debit Note number, and original bill reference.
         """
         source_module = 'PURCHASE_RETURN'
         source_id = str(purchase_return.id)
@@ -1268,7 +1413,7 @@ class AutoPostingService:
             branch, 'ACCOUNTS_PAYABLE', '2110', 'Accounts Payable (Trade Creditors)', 'LIABILITY', 'CREDIT'
         )
         cash_acc = cls.get_or_create_control_account(
-            branch, 'CASH', '1110', 'Cash in Hand', 'ASSET', 'DEBIT'
+            branch, 'CASH', '1110', 'Cash in Hand (Main Drawer)', 'ASSET', 'DEBIT'
         )
         inv_asset_acc = cls.get_or_create_control_account(
             branch, 'INVENTORY_ASSET', '1310', 'Merchandise Inventory Asset', 'ASSET', 'DEBIT'
@@ -1277,10 +1422,14 @@ class AutoPostingService:
             branch, 'INPUT_VAT', '1410', 'Input VAT 13%', 'ASSET', 'DEBIT'
         )
 
-        if purchase_return.refund_mode == 'CASH_REFUND':
+        refund_mode = str(purchase_return.refund_mode or '').upper()
+        net_refund_val = purchase_return.net_refund_amount or Decimal('0.00')
+
+        # 1. DEBIT: Settlement Mode (AP Reduction or Cash Refund)
+        if refund_mode in ['CASH_REFUND', 'CASH']:
             lines.append({
                 'account': cash_acc,
-                'debit': purchase_return.net_refund_amount,
+                'debit': net_refund_val,
                 'credit': Decimal('0.00'),
                 'supplier': purchase_return.supplier,
                 'narration': f"Cash refund received on Debit Note {purchase_return.return_number}"
@@ -1288,27 +1437,45 @@ class AutoPostingService:
         else:
             lines.append({
                 'account': ap_acc,
-                'debit': purchase_return.net_refund_amount,
+                'debit': net_refund_val,
                 'credit': Decimal('0.00'),
                 'supplier': purchase_return.supplier,
                 'narration': f"Accounts Payable reduced on Debit Note {purchase_return.return_number}"
             })
 
+        # 2. CREDIT: Merchandise Inventory Asset
         lines.append({
             'account': inv_asset_acc,
             'debit': Decimal('0.00'),
-            'credit': purchase_return.total_return_amount,
+            'credit': purchase_return.total_return_amount or Decimal('0.00'),
             'supplier': purchase_return.supplier,
             'narration': f"Merchandise inventory returned to vendor {purchase_return.supplier.company_name}"
         })
 
-        if purchase_return.tax_amount > Decimal('0.00'):
+        # 3. CREDIT: Input VAT 13% Reversal (AUDIT-LINKED TRACEABILITY)
+        tax_amt = purchase_return.tax_amount or Decimal('0.00')
+        if tax_amt <= Decimal('0.00') and purchase_return.items.exists():
+            tax_amt = sum((item.tax_amount or Decimal('0.00') for item in purchase_return.items.all()), Decimal('0.00'))
+
+        if tax_amt > Decimal('0.00'):
+            supp_pan_str = f", PAN: {purchase_return.supplier.pan_number}" if purchase_return.supplier and purchase_return.supplier.pan_number else ""
+            orig_ref_str = (
+                f", Ref Bill: {purchase_return.original_bill_reference}" if purchase_return.original_bill_reference else (
+                    f", GRN: {purchase_return.original_grn.grn_number}" if purchase_return.original_grn else ""
+                )
+            )
+            vat_narration = (
+                f"13% Input VAT Reversal [Debit Note: {purchase_return.return_number}] "
+                f"(Supplier: {purchase_return.supplier.company_name}{supp_pan_str}{orig_ref_str}, "
+                f"Taxable Base: Rs. {purchase_return.total_return_amount:,.2f})"
+            )
+
             lines.append({
                 'account': input_vat_acc,
                 'debit': Decimal('0.00'),
-                'credit': purchase_return.tax_amount,
+                'credit': tax_amt,
                 'supplier': purchase_return.supplier,
-                'narration': f"Input VAT claimed reversal on Debit Note {purchase_return.return_number}"
+                'narration': vat_narration
             })
 
         # Residual Penny Reconciler
@@ -1317,7 +1484,7 @@ class AutoPostingService:
         diff = sum_dr - sum_cr
         if Decimal('0.00') < abs(diff) <= Decimal('0.05'):
             for l in lines:
-                if l['account'] == ap_acc and l['debit'] > Decimal('0.00'):
+                if l['account'] in [ap_acc, cash_acc] and l['debit'] > Decimal('0.00'):
                     l['debit'] -= diff
                     break
 
