@@ -1,9 +1,6 @@
 """
 Historical Sales Return VAT Snapshot Repair & Backfill Command.
 
-Path:
-D:\Mobile Shop\Inventory\apps\sales\management\commands\backfill_sales_return_vat_snapshots.py
-
 Capabilities:
 1. Scans all historical SalesReturn and SalesReturnItem records in the database.
 2. Identifies items with missing, zero, or drifted VAT snapshots:

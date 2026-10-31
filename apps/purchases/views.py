@@ -2,50 +2,41 @@
 Purchases, Suppliers, GRN & Commercial Purchase Return (Debit Note) Views.
 
 Key Architectural Improvements & Capabilities:
-1. Reversal Architecture Correction (Fixes Double-Reversal Bug in cancel_grn_view):
+1. Purchase Order Item-Level VAT Calculation & Financial Rollup:
+   - In `PurchaseOrderCreateView.post`:
+     * Computes Pre-VAT merchandise subtotal (`ordered_quantity * unit_cost_price`).
+     * Accurately calculates line-level VAT (`tax_amount`) based on the chosen rate (13% or 0%).
+     * Sets `item.line_total = pre_tax_subtotal + tax_amount`.
+     * Accumulates Pre-VAT subtotal and VAT amount across all lines and writes `po.subtotal`,
+       `po.tax_amount`, and `po.total_amount` onto the Purchase Order header.
+2. Reversal Architecture Correction (Fixes Double-Reversal Bug in cancel_grn_view):
    - Adopts the standard double-entry audit convention: the original purchase journal entry
      remains POSTED (annotated with reversal cross-references) while a distinct reversing entry
      is posted with status='POSTED' that inverts debits and credits.
    - Prevents balance recalculations from double-subtracting cancelled bills into negative balances.
-
-2. Settlement-Aware Supplier Debt Cancellation (Fixes Unearned Debt Deduction):
+3. Settlement-Aware Supplier Debt Cancellation:
    - Differentiates between unpaid credit balances (due_amount > 0) and spot payments (paid_amount > 0).
    - If a bill was an unpaid credit purchase, reverses strictly the unpaid debt added to supplier AP.
    - If a bill was paid in full on delivery (due_amount == 0), does not penalize unrelated debts;
      records the disbursed cash as an advance due from the supplier / pending refund.
-
-3. Supplier Payout Historical Date & Calendar Ingestion (Fixes Backdating Amnesia):
+4. Supplier Payout Historical Date & Calendar Ingestion:
    - SupplierPaymentRecordView extracts and synchronizes entry_date (AD) and entry_date_bs (BS).
    - Stamps the sub-ledger and passes ledger_entry and date_ad directly to the General Ledger
      so historical payment dates are preserved in both ledgers.
-
-4. Standardized Chart of Accounts Fallback Bindings:
+5. Standardized Chart of Accounts Fallback Bindings:
    - Fallback GL poster adheres to official Nepal COA codes:
      Cash in Hand (1110), Bank (1120), and Accounts Payable (2110).
-
-5. Optimized GRNDetailView (The Kitchen Chef):
-   - Point A: Prefetches products, brands, categories, base units, and packaging conversions
-     in one single optimized query, eliminating N+1 database round trips.
-   - Point B: Pre-packages the 5-Card Financial reconciliation dictionary directly in the view
-     (including true non-taxable merchandise base) to guarantee zero calculation discrepancies.
-   - Point C: Prepares and checks parsed_imei_pairs across all items, aggregating handset counts,
-     dual-SIM indicators, and warranty providers cleanly for the expandable drawer template.
-   - Safe Staff Preparer: Defensively handles nullable grn.received_by, resolving full name,
-     username, or a polite fallback string ('Warehouse Staff') so template rendering never crashes.
-
-6. Dedicated Physical IMEI Scanner Controller (GRNManageIMEIsView):
+6. Optimized GRNDetailView:
+   - Prefetches products, brands, categories, base units, and packaging conversions in one single query.
+   - Pre-packages the 5-Card Financial reconciliation dictionary directly in the view.
+   - Prepares and checks parsed_imei_pairs across all items.
+7. Dedicated Physical IMEI Scanner Controller (GRNManageIMEIsView):
    - Displays all items on the purchase bill.
    - Automatically enables requires_imei_tracking = True if IMEIs are added to an untracked product.
-   - Zero Stock Inflation: Does NOT touch BranchStock quantities.
-   - Zero Accounting Impact: Does NOT alter purchase costs, VAT, or supplier debt.
-
-7. High-Performance Multi-Token Search APIs:
-   - Asynchronous lookup for suppliers and verified inward GRN consignments.
-
+   - Zero Stock Inflation & Zero Accounting Impact.
 8. Comprehensive Purchase Return VAT ➔ GL Audit Linkage (PurchaseReturnDetailView):
    - Resolves the complete accounting chain when accessed from VAT reporting drill-down:
-     Debit Note ➔ GL Journal Entry ➔ Journal Items ➔ Input VAT 1410 Reversal,
-     with the Original GRN / Bill Reference as reference.
+     Debit Note ➔ GL Journal Entry ➔ Journal Items ➔ Input VAT 1410 Reversal.
 """
 
 import csv
@@ -616,7 +607,7 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
             return redirect('purchases:supplier_detail', pk=pk)
 
 # ==============================================================================
-# PURCHASE ORDER (PO) VIEWS
+# PURCHASE ORDER (PO) VIEWS (WITH PRE-VAT SUB-TOTAL & 13% VAT ROLLUP)
 # ==============================================================================
 class PurchaseOrderListView(PurchaseModuleAccessMixin, ListView):
     model = PurchaseOrder
@@ -701,12 +692,14 @@ class PurchaseOrderCreateView(PurchaseModuleAccessMixin, View):
                     po.po_number = po_seq
                     po.status = 'DRAFT'
                     po.subtotal = Decimal('0.00')
+                    po.tax_amount = Decimal('0.00')
                     po.total_amount = Decimal('0.00')
                     po.save()
 
                     items = formset.save(commit=False)
                     valid_items_count = 0
-                    running_subtotal = Decimal('0.00')
+                    running_pre_vat_subtotal = Decimal('0.00')
+                    running_vat_total = Decimal('0.00')
 
                     for item in items:
                         if item.product and item.ordered_quantity > Decimal('0.000'):
@@ -716,12 +709,28 @@ class PurchaseOrderCreateView(PurchaseModuleAccessMixin, View):
 
                             cost = item.unit_cost_price if item.unit_cost_price is not None else item.product.purchase_price
                             item.unit_cost_price = cost
-                            line_tot = (item.ordered_quantity * cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                            item.line_total = line_tot
+                            
+                            # 1. Calculate Pre-VAT Line Subtotal
+                            pre_tax_line = (item.ordered_quantity * cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                            
+                            # 2. Extract and Normalize Item-Level VAT Rate (13% or 0%)
+                            v_rate = item.vat_rate if (item.vat_rate is not None and item.vat_rate > Decimal('0.00')) else Decimal('0.00')
+                            if v_rate > Decimal('0.00'):
+                                item.vat_rate = Decimal('13.00')
+                                line_tax = (pre_tax_line * Decimal('0.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                            else:
+                                item.vat_rate = Decimal('0.00')
+                                line_tax = Decimal('0.00')
+
+                            # 3. Snapshot Exact Line VAT and Total including VAT
+                            item.tax_amount = line_tax
+                            item.line_total = (pre_tax_line + line_tax).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                             item.received_quantity = Decimal('0.000')
                             item.save()
 
-                            running_subtotal += line_tot
+                            # 4. Accumulate to Header Financial Buckets
+                            running_pre_vat_subtotal += pre_tax_line
+                            running_vat_total += line_tax
                             valid_items_count += 1
 
                     for del_item in formset.deleted_objects:
@@ -730,9 +739,11 @@ class PurchaseOrderCreateView(PurchaseModuleAccessMixin, View):
                     if valid_items_count == 0:
                         raise ValidationError("Please add at least one valid product line item with ordered quantity > 0.")
 
-                    po.subtotal = running_subtotal
-                    po.total_amount = running_subtotal + po.tax_amount
-                    po.save(update_fields=['subtotal', 'total_amount', 'updated_at'])
+                    # 5. Persist Header Totals (Subtotal + VAT = Grand Total)
+                    po.subtotal = running_pre_vat_subtotal
+                    po.tax_amount = running_vat_total
+                    po.total_amount = (running_pre_vat_subtotal + running_vat_total).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    po.save(update_fields=['subtotal', 'tax_amount', 'total_amount', 'updated_at'])
 
                     AuditLog.objects.create(
                         user=request.user,
@@ -743,15 +754,22 @@ class PurchaseOrderCreateView(PurchaseModuleAccessMixin, View):
                         ip_address=request.META.get('REMOTE_ADDR'),
                         details={
                             'supplier': po.supplier.company_name,
+                            'subtotal': str(po.subtotal),
+                            'vat_amount': str(po.tax_amount),
                             'total_amount': str(po.total_amount),
                             'items_count': valid_items_count
                         }
                     )
 
-                messages.success(request, f"Purchase Order {po.po_number} created with {valid_items_count} item lines (Total: Rs. {po.total_amount:,.2f}).")
+                messages.success(
+                    request,
+                    f"Purchase Order {po.po_number} issued successfully with {valid_items_count} item(s) "
+                    f"(Pre-VAT Base: Rs. {po.subtotal:,.2f}, 13% VAT: Rs. {po.tax_amount:,.2f}, Total with VAT: Rs. {po.total_amount:,.2f})."
+                )
                 return redirect('purchases:po_detail', pk=po.pk)
 
             except Exception as e:
+                logger.error(f"[PO Create Error]: {e}", exc_info=True)
                 messages.error(request, f"Error generating purchase order: {str(e)}")
         else:
             messages.error(request, "Validation errors occurred in the purchase order submission. Please check all line entries.")
@@ -1200,15 +1218,6 @@ class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
     """
     Dedicated view allowing warehouse staff and managers to scan/type physical
     15-digit IMEI numbers for mobile phones received on a completed GRN.
-    
-    Guarantees:
-    - Displays all items on the bill. If a product (such as 'test') was created without
-      the 'Track 15-Digit IMEI' box checked, adding IMEIs to it automatically enables
-      requires_imei_tracking = True for that product.
-    - Zero Stock Inflation: Does NOT touch BranchStock quantities (units already in stock).
-    - Zero Accounting Impact: Does NOT alter purchase costs, VAT, or supplier debt.
-    - Preserves POS-Sold Phones: Detects and protects any handsets already sold under Backlog Mode.
-    - Reuses existing validation and ItemInstance creation logic.
     """
     template_name = 'purchases/grn_manage_imeis.html'
 
@@ -1221,7 +1230,6 @@ class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
             messages.error(request, f"Cannot manage IMEIs: Goods Received Note {grn.grn_number} is cancelled.")
             return redirect('purchases:grn_detail', pk=grn.pk)
 
-        # Include all line items on this bill so any product can have IMEIs added
         grn_items = grn.items.select_related('product', 'product__base_unit').all()
 
         if not grn_items.exists():
@@ -1241,7 +1249,6 @@ class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
             base_qty = int(grn_item.base_unit_quantity or grn_item.purchased_quantity or 1)
             total_handsets += base_qty
 
-            # Find existing ItemInstance records linked to this GRN and product
             existing_instances = list(
                 ItemInstance.objects.filter(
                     purchase_reference=grn.grn_number,
@@ -1266,7 +1273,6 @@ class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
                     'is_sold': (inst.status == 'SOLD'),
                 })
 
-            # Check if any IMEIs in scanned_imei_list were textually saved but not yet in ItemInstance
             if grn_item.scanned_imei_list:
                 tokens = [t.strip() for t in re.split(r'[\n,;]+', grn_item.scanned_imei_list) if t.strip()]
                 for token in tokens:
@@ -1356,8 +1362,6 @@ class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
 
         try:
             with transaction.atomic():
-                # Auto-Enable: If user added IMEIs to a product that was requires_imei_tracking=False,
-                # automatically turn ON requires_imei_tracking = True!
                 for item_id_str, item_info in items_payload.items():
                     raw_imeis = item_info.get('imeis', [])
                     if raw_imeis:
@@ -1399,21 +1403,7 @@ class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
 def cancel_grn_view(request, pk):
     """
     Dedicated view function allowing store managers and authorized users to atomically
-    cancel / void an erroneous purchase bill (GRN):
-    1. Checks role authorization (Superuser, Owner, Manager).
-    2. Mandates a formal cancellation justification reason.
-    3. Verifies that received handsets (IMEIs) have not already been sold to retail customers.
-    4. Deducts inward merchandise quantities back out of BranchStock via InventoryService.
-    5. Depletes / archives active FIFO ProductBatch records associated with this GRN.
-    6. Archives unsold ItemInstance handset records so they cannot be sold.
-    7. Atomically reconciles SupplierUdhaariLedger and updates supplier balance:
-       - If unpaid credit purchase: reverses exact due debt added to supplier AP.
-       - If paid on delivery: records spot cash disbursed as an advance due from supplier / pending refund.
-    8. Adopts Method 1 (Audit Standard) for General Ledger reversal:
-       - Leaves original purchase journal voucher with status POSTED (annotated with reversal ref).
-       - Posts a distinct reversing double-entry journal entry with status POSTED that inverts debits/credits.
-    9. Sets GRN status to 'CANCELLED'.
-    10. Records an immutable forensic event in AuditLog.
+    cancel / void an erroneous purchase bill (GRN).
     """
     grn = get_object_or_404(GoodsReceivedNote, pk=pk)
 
@@ -1511,7 +1501,6 @@ def cancel_grn_view(request, pk):
             paid = grn.paid_amount or Decimal('0.00')
 
             if due > Decimal('0.00') and paid == Decimal('0.00'):
-                # Case A: Entirely unpaid credit bill
                 new_bal = prev_bal - due
                 supplier.current_balance = new_bal
                 supplier.save(update_fields=['current_balance', 'updated_at'])
@@ -1530,7 +1519,6 @@ def cancel_grn_view(request, pk):
                 )
 
             elif due > Decimal('0.00') and paid > Decimal('0.00'):
-                # Case B: Partially paid bill
                 total_reversal = due + paid
                 new_bal = prev_bal - total_reversal
                 supplier.current_balance = new_bal
@@ -1553,7 +1541,6 @@ def cancel_grn_view(request, pk):
                 )
 
             else:
-                # Case C: Fully paid on delivery (due == 0.00)
                 new_bal = prev_bal - paid
                 supplier.current_balance = new_bal
                 supplier.save(update_fields=['current_balance', 'updated_at'])
@@ -1669,7 +1656,6 @@ def cancel_grn_view(request, pk):
         return redirect('purchases:grn_detail', pk=grn.pk)
 
 class GRNCancelView(PurchaseModuleAccessMixin, View):
-    """Class-based wrapper around cancel_grn_view for class routing compatibility."""
     def post(self, request, pk, *args, **kwargs):
         return cancel_grn_view(request, pk)
 
@@ -1677,12 +1663,6 @@ class GRNCancelView(PurchaseModuleAccessMixin, View):
 # COMMERCIAL PURCHASE RETURN & DEBIT NOTE VIEWS
 # ==============================================================================
 class PurchaseReturnListView(PurchaseModuleAccessMixin, ListView):
-    """
-    The Commercial Purchase Return Report screen.
-    Displays all debit notes issued to suppliers with multi-parameter filtering
-    (Supplier, Status, Refund Mode, Date Range) and summary metrics.
-    Includes CSV export handling via ?export=csv.
-    """
     model = PurchaseReturn
     template_name = 'purchases/purchase_return_list.html'
     context_object_name = 'returns'
@@ -1783,11 +1763,6 @@ class PurchaseReturnListView(PurchaseModuleAccessMixin, ListView):
         return context
 
 class PurchaseReturnCreateView(PurchaseModuleAccessMixin, View):
-    """
-    Commercial Purchase Return entry form:
-    Allows staff to select supplier, choose return date, pick products,
-    input quantities, rates, and scanned IMEIs to issue a formal Debit Note voucher.
-    """
     template_name = 'purchases/purchase_return_form.html'
 
     def get(self, request, *args, **kwargs):
@@ -1900,13 +1875,6 @@ class PurchaseReturnCreateView(PurchaseModuleAccessMixin, View):
         })
 
 class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
-    """
-    Renders detailed voucher overview and printable A4 Debit Note slip
-    for a completed Purchase Return.
-    Provides complete GL and VAT audit trail when accessed from VAT reporting:
-    Debit Note ➔ GL Journal ➔ Journal Items ➔ Input VAT 1410 Reversal,
-    with Original GRN / Bill Reference as reference.
-    """
     model = PurchaseReturn
     template_name = 'purchases/purchase_return_detail.html'
     context_object_name = 'purchase_return'
@@ -1926,23 +1894,19 @@ class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
         from apps.accounting.models import JournalEntry
         from apps.taxation.services.vat_ledger_service import VATLedgerService
 
-        # Fetch authoritative VAT drill-down resolution
         vat_drilldown = None
         try:
             vat_drilldown = VATLedgerService.get_purchase_return_vat_drilldown(pret.id)
         except Exception as e:
             logger.warning(f"[PurchaseReturnDetailView] VAT drilldown resolution error for PR #{pret.id}: {e}")
 
-        # Direct GL Journal Entry Lookup (matching AutoPostingService.post_purchase_return)
         je_obj = None
-        # Link 1: source_module='PURCHASE_RETURN' and source_id=str(pret.id)
         je_obj = JournalEntry.objects.filter(
             source_module='PURCHASE_RETURN',
             source_id=str(pret.id),
             status='POSTED'
         ).prefetch_related('items__account', 'items__supplier').first()
 
-        # Link 2: reference_document matching return_number with voucher_type='DEBIT_NOTE'
         if not je_obj:
             je_obj = JournalEntry.objects.filter(
                 reference_document__iexact=pret.return_number,
@@ -1950,21 +1914,18 @@ class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
                 status='POSTED'
             ).prefetch_related('items__account', 'items__supplier').first()
 
-        # Link 3: reference_document matching return_number (any voucher type)
         if not je_obj:
             je_obj = JournalEntry.objects.filter(
                 reference_document__iexact=pret.return_number,
                 status='POSTED'
             ).prefetch_related('items__account', 'items__supplier').first()
 
-        # Link 4: voucher_number matching return_number
         if not je_obj:
             je_obj = JournalEntry.objects.filter(
                 voucher_number__iexact=pret.return_number,
                 status='POSTED'
             ).prefetch_related('items__account', 'items__supplier').first()
 
-        # Extract Journal Items and locate Account 1410 (Input VAT Reversal)
         journal_items_list = []
         gl_account_1410_detail = None
         if je_obj:
@@ -1988,7 +1949,6 @@ class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
                 if is_1410 and not gl_account_1410_detail:
                     gl_account_1410_detail = item_dict
 
-        # If vat_drilldown was resolved, prefer its structured details
         if vat_drilldown and vat_drilldown.get('status') == 'SUCCESS':
             context['vat_drilldown'] = vat_drilldown
             context['gl_entry'] = vat_drilldown.get('gl_entry')
@@ -2034,7 +1994,6 @@ class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
                 'is_vat_1410_linked': bool(gl_account_1410_detail is not None),
             }
 
-        # Tax Summary payload matching SalesReturnDetailView structure
         context['tax_summary'] = {
             'total_return_amount': pret.total_return_amount or Decimal('0.00'),
             'taxable_amount': pret.total_return_amount or Decimal('0.00'),
@@ -2045,7 +2004,6 @@ class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
             'original_grn': pret.original_grn,
         }
 
-        # Check if opened specifically from VAT report drilldown
         source = (self.request.GET.get('source') or self.request.GET.get('from') or '').lower()
         context['is_from_vat_drilldown'] = bool(source in ['vat', 'taxation', 'report', 'audit'] or 'drilldown' in self.request.GET)
 

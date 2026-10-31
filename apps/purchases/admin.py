@@ -3,6 +3,12 @@ Django Admin Configuration for Suppliers, Purchase Orders, Goods Received Notes 
 Commercial Purchase Returns (Debit Notes) & Supplier Udhaari Ledgers.
 
 Synchronized with `apps/purchases/models.py`:
+- Purchase Order Enhancements:
+    1. Dual Calendar Delivery Dates: Tracks and displays `expected_delivery_date` (AD)
+       and `expected_delivery_date_bs` (BS) side-by-side.
+    2. Item-Level VAT Persistence: Displays `vat_rate` (13% vs 0%) and calculated `tax_amount`
+       on both `PurchaseOrderItemInline` and `PurchaseOrderItemAdmin`.
+    3. Formatted Financial Columns: Pre-VAT Subtotal, 13% VAT, and Grand Total.
 - Inward GRN features 5-Section Financial Summary Cards:
     1. Gross Merchandise Value & Pre-VAT Bases (Dual-pot split: Taxable vs. Non-Taxable)
     2. Dedicated 13% VAT Amount (Hardened Invariant: Exactly equals sum of line-level item VATs)
@@ -87,9 +93,9 @@ class PurchaseOrderItemInline(admin.TabularInline):
     autocomplete_fields = ['product', 'unit']
     fields = [
         'product', 'unit', 'ordered_quantity', 'received_quantity',
-        'unit_cost_price', 'line_total'
+        'unit_cost_price', 'vat_rate', 'tax_amount', 'line_total'
     ]
-    readonly_fields = ['line_total']
+    readonly_fields = ['tax_amount', 'line_total']
 
 class PurchaseReturnItemInline(admin.TabularInline):
     model = PurchaseReturnItem
@@ -233,33 +239,41 @@ class SupplierAdmin(admin.ModelAdmin):
         )
 
 # =============================================================================
-# PURCHASE ORDER ADMIN
+# PURCHASE ORDER ADMIN (SYNCHRONIZED WITH BS DATES & ITEM-LEVEL VAT)
 # =============================================================================
 @admin.register(PurchaseOrder)
 class PurchaseOrderAdmin(admin.ModelAdmin):
     list_display = [
         'po_number', 'supplier', 'branch', 'order_date', 'order_date_bs',
-        'fiscal_year', 'status_badge', 'subtotal', 'total_amount', 'created_by'
+        'expected_delivery_date', 'expected_delivery_date_bs',
+        'fiscal_year', 'status_badge',
+        'formatted_subtotal', 'formatted_tax_amount', 'formatted_total_amount',
+        'created_by'
     ]
-    list_filter = ['status', 'fiscal_year', 'branch', 'order_date']
+    list_filter = ['status', 'fiscal_year', 'branch', 'order_date', 'expected_delivery_date']
     search_fields = [
         'po_number', 'supplier__company_name', 'supplier__phone_number',
-        'fiscal_year', 'order_date_bs', 'notes'
+        'fiscal_year', 'order_date_bs', 'expected_delivery_date_bs', 'notes'
     ]
     readonly_fields = ['fiscal_year', 'created_at', 'updated_at']
     autocomplete_fields = ['supplier', 'branch', 'created_by']
     inlines = [PurchaseOrderItemInline]
 
     fieldsets = (
-        (_("1. Purchase Order Identification & Historical Dates"), {
+        (_("1. Purchase Order Identification & Dual Historical Dates"), {
+            'description': _(
+                "Both Order Date and Expected Delivery Date support bidirectional AD and BS date inputs. "
+                "Saving updates the corresponding calendar representation and derives the Nepali Fiscal Year."
+            ),
             'fields': (
                 ('po_number', 'status'),
                 ('supplier', 'branch'),
                 ('order_date', 'order_date_bs', 'fiscal_year'),
-                ('expected_delivery_date', 'created_by')
+                ('expected_delivery_date', 'expected_delivery_date_bs'),
+                'created_by'
             )
         }),
-        (_("2. Financial Totals"), {
+        (_("2. Financial Totals (Tax-Inclusive Breakdown)"), {
             'fields': (
                 ('subtotal', 'tax_amount', 'total_amount'),
             )
@@ -288,16 +302,58 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         )
     status_badge.short_description = _("PO Status")
 
+    def formatted_subtotal(self, obj):
+        return format_html('Rs. {:,.2f}', obj.subtotal or Decimal('0.00'))
+    formatted_subtotal.short_description = _("Subtotal (Pre-VAT)")
+    formatted_subtotal.admin_order_field = 'subtotal'
+
+    def formatted_tax_amount(self, obj):
+        val = obj.tax_amount or Decimal('0.00')
+        color = '#059669' if val > Decimal('0.00') else '#64748b'
+        return format_html('<span style="color: {}; font-weight: 600;">Rs. {:,.2f}</span>', color, val)
+    formatted_tax_amount.short_description = _("13% VAT")
+    formatted_tax_amount.admin_order_field = 'tax_amount'
+
+    def formatted_total_amount(self, obj):
+        return format_html('<strong>Rs. {:,.2f}</strong>', obj.total_amount or Decimal('0.00'))
+    formatted_total_amount.short_description = _("Grand Total")
+    formatted_total_amount.admin_order_field = 'total_amount'
+
 @admin.register(PurchaseOrderItem)
 class PurchaseOrderItemAdmin(admin.ModelAdmin):
     list_display = [
         'purchase_order', 'product', 'ordered_quantity', 'received_quantity',
-        'unit_cost_price', 'line_total'
+        'unit_cost_price', 'vat_rate_badge', 'formatted_tax_amount', 'formatted_line_total'
     ]
-    list_filter = ['purchase_order__branch', 'purchase_order__status']
+    list_filter = ['vat_rate', 'purchase_order__branch', 'purchase_order__status']
     search_fields = ['purchase_order__po_number', 'product__name', 'product__sku']
     autocomplete_fields = ['purchase_order', 'product', 'unit']
-    readonly_fields = ['line_total', 'created_at', 'updated_at']
+    readonly_fields = ['tax_amount', 'line_total', 'created_at', 'updated_at']
+
+    def vat_rate_badge(self, obj):
+        if obj.vat_rate and obj.vat_rate > Decimal('0.00'):
+            return format_html(
+                '<span style="color: #065f46; background-color: #ecfdf5; border: 1px solid #a7f3d0; '
+                'padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">13% VAT</span>'
+            )
+        return format_html(
+            '<span style="color: #64748b; background-color: #f1f5f9; border: 1px solid #cbd5e1; '
+            'padding: 2px 7px; border-radius: 999px; font-weight: 600; font-size: 10px;">0% (Exempt)</span>'
+        )
+    vat_rate_badge.short_description = _("VAT Rate")
+    vat_rate_badge.admin_order_field = 'vat_rate'
+
+    def formatted_tax_amount(self, obj):
+        val = obj.tax_amount or Decimal('0.00')
+        color = '#059669' if val > Decimal('0.00') else '#64748b'
+        return format_html('<span style="color: {}; font-weight: 600;">Rs. {:,.2f}</span>', color, val)
+    formatted_tax_amount.short_description = _("VAT Amount")
+    formatted_tax_amount.admin_order_field = 'tax_amount'
+
+    def formatted_line_total(self, obj):
+        return format_html('<strong>Rs. {:,.2f}</strong>', obj.line_total or Decimal('0.00'))
+    formatted_line_total.short_description = _("Line Total (with VAT)")
+    formatted_line_total.admin_order_field = 'line_total'
 
 # =============================================================================
 # GOODS RECEIVED NOTE (GRN) ADMIN

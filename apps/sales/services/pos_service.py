@@ -2,88 +2,33 @@
 POS Counter Terminal, Sales Estimation & Parked Bill Recovery Service.
 
 Core Capabilities & Architectural Safeguards:
-1. One Clear VAT Calculation & Snapshot Chain (Front-End to Back-End Alignment):
-   POS Input
-       ↓
-   Calculate VAT (Net Line Payable × Rate / Pricing Mode)
-       ↓
-   Save Exact VAT Snapshot on SalesEstimateItem
-       (vat_rate, tax_pricing_type, is_vat_applicable, base_taxable_amount, tax_amount, line_total)
-       ↓
-   Add All Line VAT
-       (Sum of line base_taxable_amount, Sum of line tax_amount, Sum of non-taxable lines)
-       ↓
-   Save Exact VAT Snapshot on SalesEstimate
-       (taxable_amount, non_taxable_amount, vat_amount, grand_total, is_vat_applicable)
-       ↓
-   VAT Reports (Annex 5 Sales Book, Annex 7, Day-Wise VAT Ledger, TaxPeriodSummary)
-
+1. Guaranteed 13% VAT Split & Inclusive Retail Default:
+   - When bill_type == 'SALES', 13% Output VAT is automatically enabled by default on all taxable merchandise,
+     preventing zero-VAT invoices even if the global shop configuration is temporarily set to PAN or Proforma mode.
+   - Treats retail prices as VAT-Inclusive by default (Nepal standard retail convention). When an item is sold
+     at retail MRP (e.g. Rs. 25,500.00), the service authoritatively decomposes it into:
+       * Taxable Base: Rs. 22,566.37
+       * 13% Output VAT: Rs. 2,933.63
+       * Payable Grand Total: Rs. 25,500.00
+   - Prevents treating the net taxable base as the total bill, eliminating phantom customer cash-change leakages.
 2. Absolute Historical Tax Immutability:
    - All tax attributes (rate, pricing type, taxable base, VAT amount) are captured and
      frozen onto `SalesEstimateItem` and `SalesEstimate` at the exact moment of sale.
-   - Any subsequent alteration to `Product.vat_rate`, `Product.is_vat_applicable`, or
-     `Product.tax_pricing_type` in the product master NEVER mutates historical invoices.
-   - Example: A January invoice sold at 13% VAT remains permanently locked at 13% VAT,
-     retaining identical taxable base and tax amount throughout all accounting and audit reports.
-
+   - Any subsequent alteration to product master tax settings NEVER mutates historical invoices.
 3. Corrected Sales Return VAT Processing:
    - Derives returned item VAT snapshots directly from the original invoice line item's stored
      historical tax data (base_taxable_amount, tax_amount, line_total, vat_rate, tax_pricing_type).
-   - Prevents calculating tax again on VAT-exclusive bills where refund_amount already includes VAT.
    - Accurately allocates returned portion based on return_quantity vs. original quantity.
    - Caps cumulative VAT reversals across partial returns to never exceed the original item's VAT.
    - Sets and saves SalesReturn header totals (taxable_amount, non_taxable_amount, vat_amount,
      total_refund_amount) before General Ledger auto-posting dispatches.
-
-4. Dual Document Sequencing (Official Sales Bill vs Internal Estimate):
-   - generate_estimate_number() dynamically checks bill_type:
-     * If bill_type == 'SALES': Generates official Sales/Tax Invoices (e.g. INV-NR-000001)
-       using document_type='SALES_INVOICE'.
-     * If bill_type == 'ESTIMATE': Generates quotation estimation slips (e.g. EST-NR-000001)
-       using document_type='SALES_ESTIMATE'.
-
-5. Standard Retail Turnover Accounting (No Revenue Distortion):
+4. Dual Document Sequencing:
+   - 'SALES': Generates official Sales/Tax Invoices (e.g. INV-NR-000001) using document_type='SALES_INVOICE'.
+   - 'ESTIMATE': Generates quotation estimation slips (e.g. EST-NR-000001) using document_type='SALES_ESTIMATE'.
+5. Turnover Accounting & Barter Offsets:
    - grand_total strictly represents the full merchandise gross sales value + applicable tax.
-   - trade_in_discount_amount is treated exclusively as a tender settlement offset (barter payment),
-     protecting statutory revenue reporting and customer spend analytics from distortion.
-
-6. Robust Two-Way Historical Date & Fiscal Period Synchronization:
-   - When bill_date_bs is provided, converts immediately to Gregorian AD date and automatically
-     calculates the proper Bikram Sambat fiscal year without requiring manual fiscal_year input.
-   - Ensures estimate.bill_date_ad, estimate.bill_date_bs, and estimate.fiscal_year are preserved.
-   - Calibrates ItemInstance sale dates, warranty start dates, and component expiration schedules
-     to the historical bill date rather than the current server clock.
-
-7. Intelligent Customer Resolution for Credit Purchases:
-   - In _process_payments_and_udhaari, when a credit sale is initiated without an explicit customer_id,
-     the system automatically attempts resolution via Phone number, 9-digit PAN (via Customer.resolve_or_create_by_pan),
-     or business name before raising a validation error.
-
-8. Itemized Audit Description in CustomerUdhaariLedger:
-   - Multi-tender payments (Cash, FonePay, eSewa, Cards, Bank, Trade-In) are compiled into an itemized
-     audit summary stored directly in CustomerUdhaariLedger.remarks.
-
-9. Prevention of Double-Accounting of Credit:
-   - estimate.paid_amount strictly captures genuine monetary tenders.
-   - estimate.due_amount strictly equals the unpaid balance / credit tender.
-   - Non-monetary credit transactions are isolated so General Ledger auto-posting does not double-debit AR (1210).
-
-10. Dynamic Master Switch Sensitive IMEI Allocation:
-   - When enforce_imei_tracking is OFF (Backlog Mode): Mobile phones can be sold without IMEIs,
-     deducting directly from shelf stock and depleting FIFO batches like standard accessories.
-   - When enforce_imei_tracking is ON (Strict Mode): Enforces strict 15-digit IMEI verification.
-   - Transition Safety Guard: Seamlessly registers and sells backlog shelf stock when scanned with
-     a live physical IMEI in Strict Mode without throwing "Stock Not Found" crashes.
-
-11. Digital Tender-Aware Trade-In Cash Return Guard (Cash Refund Scam Prevention):
-    - In process_sales_return, inspects all genuine monetary tenders (Cash, FonePay, eSewa, Khalti, Card, Bank).
-    - Customers who paid via digital channels are not blocked from refunds up to their total monetary spend.
-
-12. Comprehensive Atomic Bill Cancellation with Payroll & Trade-In Safeguards:
-    - Leaves original journal entry as POSTED and posts an inverted balancing entry to eliminate double-reversal.
-    - Inspects traded-in handsets; if already resold to another customer, locks voucher from reactivation.
-    - Blocks voiding of PARTIALLY_RETURNED bills to prevent phantom inventory duplication.
-    - Restores sold physical merchandise stock, batches, serials, and voids active device warranties.
+   - trade_in_discount_amount is treated exclusively as a tender settlement offset (barter payment).
+6. Comprehensive Atomic Bill Cancellation with Payroll & Trade-In Safeguards.
 """
 
 import re
@@ -162,7 +107,7 @@ class TaxCalculator:
             return base_taxable, line_vat, final_line_total
 
         elif clean_tax_mode == 'INCLUSIVE':
-            # Tax extracted from gross net price using exact statutory divisor (e.g. 1.13)
+            # Tax extracted from retail price using statutory divisor: Base = Price / (1 + Rate)
             final_line_total = net_line_payable
             multiplier = Decimal('1.00') + (effective_vat_rate / Decimal('100.00'))
             base_taxable = (final_line_total / multiplier).quantize(
@@ -272,11 +217,14 @@ class SalesPOSService:
         cls._validate_cart_items(cart_items)
 
         config = SystemConfiguration.get_solo()
-        is_shop_vat_registered = (config.tax_system_mode == 'VAT')
 
         # Normalize Bill Type: 'SALES' or 'ESTIMATE'
         raw_bill_type = kwargs.get('bill_type') or bill_type or 'SALES'
         normalized_bill_type = 'ESTIMATE' if str(raw_bill_type).upper().strip() in ['ESTIMATE', 'EST'] else 'SALES'
+
+        # Auto-Enable VAT for Official Sales Invoices:
+        # If bill_type == 'SALES', force VAT to True so standard retail sales calculate 13% tax.
+        is_shop_vat_registered = bool(config.tax_system_mode == 'VAT' or normalized_bill_type == 'SALES')
 
         # ---------------------------------------------------------------------
         # 1. DATE & FISCAL PERIOD RESOLUTION (TWO-WAY SYNCHRONIZATION)
@@ -354,7 +302,8 @@ class SalesPOSService:
             config=config,
             cashier=cashier,
             branch=branch,
-            is_historical=is_historical_import
+            is_historical=is_historical_import,
+            bill_type=normalized_bill_type
         )
 
         # ---------------------------------------------------------------------
@@ -640,11 +589,13 @@ class SalesPOSService:
         config: SystemConfiguration = None,
         cashier=None,
         branch: Branch = None,
-        is_historical: bool = False
+        is_historical: bool = False,
+        bill_type: str = 'SALES'
     ) -> Tuple[list, Decimal, Decimal]:
         """
         Parses cart items, verifies prices, and captures explicit tax attributes per line
         from the POS cart input (or falls back to the current product snapshot).
+        Retail Standard: Defaults to INCLUSIVE 13% VAT for official sales invoices.
         """
         processed = []
         subtotal = Decimal('0.00')
@@ -836,8 +787,9 @@ class SalesPOSService:
 
             # -------------------------------------------------------------
             # EXACT TAX SNAPSHOT CAPTURE FROM CART / PRODUCT STATE
+            # Retail Convention: Default to INCLUSIVE 13% VAT for official sales
             # -------------------------------------------------------------
-            if not is_shop_vat_registered:
+            if not is_shop_vat_registered and bill_type != 'SALES':
                 line_tax_mode = 'EXEMPT'
                 line_is_vat_applicable = False
                 line_vat_rate = Decimal('0.00')
@@ -847,10 +799,17 @@ class SalesPOSService:
                 if line_tax_mode not in ['INCLUSIVE', 'EXCLUSIVE', 'EXEMPT']:
                     line_tax_mode = 'INCLUSIVE'
 
+                # If official Sales bill and item was passed as EXCLUSIVE, preserve or extract appropriately
+                if bill_type == 'SALES' and line_tax_mode == 'EXEMPT' and getattr(product, 'tax_pricing_type', '') != 'EXEMPT':
+                    line_tax_mode = 'INCLUSIVE'
+
                 if item_data.get('is_vat_applicable') is not None:
                     line_is_vat_applicable = bool(item_data.get('is_vat_applicable'))
                 else:
                     line_is_vat_applicable = bool(getattr(product, 'is_vat_applicable', True))
+
+                if bill_type == 'SALES' and not line_is_vat_applicable and getattr(product, 'tax_pricing_type', '') != 'EXEMPT':
+                    line_is_vat_applicable = True
 
                 if line_tax_mode == 'EXEMPT':
                     line_is_vat_applicable = False
@@ -2501,10 +2460,6 @@ class SalesPOSService:
             from apps.accounting.models import JournalEntry
             from apps.accounting.services.auto_posting import JournalEngine
 
-            # In standard double-entry bookkeeping:
-            # - Keep the original sales entry as status='POSTED' (do NOT mark CANCELLED).
-            # - Post an equal and opposite reversing entry as status='POSTED'.
-            # - Both entries offset each other to exactly zero in general ledger recalculations.
             orig_entry = JournalEntry.objects.filter(
                 voucher_type='SALES',
                 reference_document=estimate.estimate_number,

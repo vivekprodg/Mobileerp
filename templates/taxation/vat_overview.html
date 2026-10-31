@@ -418,7 +418,7 @@ body {
     position: sticky;
     bottom: 0;
     z-index: 9;
-    background-color: #f1f5f9 !important; /* Soft Slate-Gray for clean accounting aesthetics */
+    background-color: #f1f5f9 !important;
     color: var(--tax-slate-900) !important;
     padding: 13px 14px;
     border-top: 2px solid var(--tax-slate-400) !important;
@@ -643,10 +643,11 @@ body {
 
     <!-- =========================================================================
          4. THE 3 CORE HERO VAT KPI CARDS (OUTPUT, INPUT & NET DIFFERENCE)
+         Guaranteed: Cards ALWAYS display actual VAT amounts with Taxable & Gross breakdown
          ========================================================================= -->
     <div class="vat-kpi-grid">
         
-        <!-- CARD 1: OUTPUT VAT (SALES BOOK) -->
+        <!-- CARD 1: OUTPUT VAT (SALES BOOK - ANNEX 5) -->
         <a href="{{ drilldown_urls.sales_register|default:'/taxation/sales-register/' }}" class="kpi-master-card card-output">
             <div>
                 <div class="kpi-top-row">
@@ -654,19 +655,18 @@ body {
                     <span class="kpi-stat-badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">Annex 5</span>
                 </div>
                 
+                <!-- Primary Metric: Always genuine Output VAT collected -->
                 <div class="kpi-main-number text-primary">
-                    {% if IS_VAT_MODE %}
-                        Rs. {{ sales_summary.vat|default:0|floatformat:2|intcomma }}
-                    {% else %}
-                        Rs. {{ sales_summary.grand_total|default:0|floatformat:2|intcomma }}
-                    {% endif %}
+                    Rs. {{ sales_summary.vat|default:0|floatformat:2|intcomma }}
                 </div>
 
+                <!-- Secondary Sub-Metrics: Taxable Base, Non-Taxable Turnover & Gross Sales Total -->
                 <div class="kpi-breakdown-subtext">
                     <span>Taxable Base:</span>
                     <strong class="font-mono text-dark">Rs. {{ sales_summary.taxable|default:0|floatformat:2|intcomma }}</strong>
+                    <span>&bull; Gross Sales: <strong class="font-mono text-dark">Rs. {{ sales_summary.grand_total|default:0|floatformat:2|intcomma }}</strong></span>
                     {% if sales_summary.total_refunds > 0 %}
-                        <span class="text-danger">&bull; Returns: -Rs. {{ sales_summary.total_refunds|floatformat:2|intcomma }}</span>
+                        <span class="text-danger">&bull; Ret: -Rs. {{ sales_summary.total_refunds|floatformat:2|intcomma }}</span>
                     {% endif %}
                 </div>
             </div>
@@ -677,7 +677,7 @@ body {
             </div>
         </a>
 
-        <!-- CARD 2: INPUT VAT (PURCHASE BOOK) -->
+        <!-- CARD 2: INPUT VAT (PURCHASE BOOK - ANNEX 7) -->
         <a href="{{ drilldown_urls.purchase_register|default:'/taxation/purchase-register/' }}" class="kpi-master-card card-input">
             <div>
                 <div class="kpi-top-row">
@@ -685,18 +685,16 @@ body {
                     <span class="kpi-stat-badge bg-success bg-opacity-10 text-success border border-success border-opacity-25">Annex 7</span>
                 </div>
 
+                <!-- Primary Metric: Always genuine Input VAT claimed on inward purchases -->
                 <div class="kpi-main-number text-success">
-                    {% if IS_VAT_MODE %}
-                        Rs. {{ purchase_summary.vat|default:0|floatformat:2|intcomma }}
-                    {% else %}
-                        Rs. {{ purchase_summary.net|default:0|floatformat:2|intcomma }}
-                    {% endif %}
+                    Rs. {{ purchase_summary.vat|default:0|floatformat:2|intcomma }}
                 </div>
 
+                <!-- Secondary Sub-Metrics: Taxable Base & Total Landed / Net Purchases -->
                 <div class="kpi-breakdown-subtext">
                     <span>Taxable Base:</span>
                     <strong class="font-mono text-dark">Rs. {{ purchase_summary.taxable|default:0|floatformat:2|intcomma }}</strong>
-                    <span>&bull; Net Inward: <strong class="font-mono text-dark">Rs. {{ purchase_summary.net|default:0|floatformat:2|intcomma }}</strong></span>
+                    <span>&bull; Total Inward: <strong class="font-mono text-dark">Rs. {{ purchase_summary.net|default:0|floatformat:2|intcomma }}</strong></span>
                 </div>
             </div>
 

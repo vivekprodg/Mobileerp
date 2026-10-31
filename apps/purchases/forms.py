@@ -2,7 +2,15 @@
 Procurement, Supplier Udhaari & Purchase Return Forms.
 
 Upgraded Capabilities:
-1. GoodsReceivedNoteForm:
+1. PurchaseOrderForm:
+   - Full bidirectional date synchronization between `order_date` (AD) and `order_date_bs` (BS).
+   - Full bidirectional date synchronization between `expected_delivery_date` (AD) and `expected_delivery_date_bs` (BS).
+   - Visual calendar class bindings (`nepali-datepicker`) for instant Bikram Sambat datepicker activation.
+   - Fiscal Year Locking Guard: Prevents backdating purchase orders into audited and closed fiscal years.
+2. PurchaseOrderItemForm & PurchaseOrderItemFormSet:
+   - Exposes `vat_rate` with a compact dropdown select widget strictly displaying '13%' and '0%'.
+   - Strict server-side validation enforcing that `unit_cost_price` cannot be negative, `ordered_quantity` must be greater than zero, and `vat_rate` is strictly 13.00% or 0.00%.
+3. GoodsReceivedNoteForm:
    - Full bidirectional date synchronization between `bill_date` (A.D.) and `bill_date_bs` (B.S.).
    - Distinct delivery challan synchronization: `challan_no`, `challan_date` (AD), and `challan_date_bs` (BS).
    - Explicit Fiscal Year Lock Enforcement: Rejects bills falling within closed/audited fiscal years.
@@ -11,19 +19,13 @@ Upgraded Capabilities:
    - 5-Tier Overhead Expense Controls: Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads.
    - Multi-Field Observations: `consignment_narration`, `receiving_notes`, and `internal_notes`.
    - Flexible Draft Saving: Allows saving in-progress vouchers as drafts without failing on incomplete mandatory fields.
-2. GRNItemForm & BaseGRNItemFormSet:
+4. GRNItemForm & BaseGRNItemFormSet:
    - Locked Tax Rate Dropdown Widget: Renders `vat_rate` strictly as a locked select dropdown (13% or 0%).
    - Strict Tax Rate Validation: Rejects arbitrary tax percentages (preventing typos like 130%).
    - Automated Tax Applicability Sync: Sets `is_vat_applicable=True` on 13% and `is_vat_applicable=False` on 0%.
    - Captures physical vendor batch numbers via `batch_number`.
-   - Dynamic Master Switch IMEI Enforcement:
-     * When `enforce_imei_tracking=True` (Strict Mode): Enforces exact 1-to-1 match between handset quantity and scanned IMEIs on final verification.
-     * When `enforce_imei_tracking=False` (Backlog Mode): Allows phones to be saved as quantity-only entries without IMEIs.
-     * Draft Mode (`is_draft=True`): Relaxes IMEI count checks so warehouse staff can save partially scanned consignments.
-     * Accessories: Always bypass IMEI requirements regardless of mode.
-3. Strict Serialized & Dual-IMEI Validation:
-   - Validates numeric IMEI format and prevents internal duplicates within the consignment.
-4. PurchaseReturnForm & SupplierPaymentForm:
+   - Dynamic Master Switch IMEI Enforcement (Strict Mode vs. Backlog Mode).
+5. PurchaseReturnForm & SupplierPaymentForm:
    - Synchronized historical date inputs with closed fiscal year validation guards.
 """
 
@@ -225,18 +227,39 @@ class SupplierForm(forms.ModelForm):
 # 2. PURCHASE ORDER (PO) HEADER & LINE ITEM FORMSET
 # ==============================================================================
 class PurchaseOrderForm(forms.ModelForm):
+    """
+    Purchase Order (PO) Header Requisition Form.
+    Features:
+    - Bidirectional calendar synchronization between Order Date (AD <-> BS) and Expected Delivery Date (AD <-> BS).
+    - Interactive visual datepicker widget activation (`nepali-datepicker`).
+    - Fiscal Year Locking Guard: Prevents entering POs into audited and closed fiscal periods.
+    """
+
     class Meta:
         model = PurchaseOrder
         fields = [
-            'supplier', 'order_date', 'order_date_bs', 'expected_delivery_date', 'notes'
+            'supplier',
+            'order_date',
+            'order_date_bs',
+            'expected_delivery_date',
+            'expected_delivery_date_bs',
+            'notes'
         ]
         widgets = {
             'supplier': forms.Select(attrs={'class': 'form-select select2-enable', 'required': 'required'}),
             'order_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date', 'required': 'required'}),
-            'order_date_bs': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'YYYY-MM-DD (BS)'}),
+            'order_date_bs': forms.TextInput(attrs={
+                'class': 'form-control font-monospace nepali-datepicker',
+                'placeholder': 'YYYY-MM-DD (BS)'
+            }),
             'expected_delivery_date': forms.DateInput(attrs={'class': 'form-control', 'type': 'date'}),
+            'expected_delivery_date_bs': forms.TextInput(attrs={
+                'class': 'form-control font-monospace nepali-datepicker',
+                'placeholder': 'YYYY-MM-DD (BS)'
+            }),
             'notes': forms.Textarea(attrs={
-                'class': 'form-control', 'rows': 2,
+                'class': 'form-control',
+                'rows': 2,
                 'placeholder': 'Special delivery instructions, consignment urgency, or payment terms...'
             }),
         }
@@ -244,6 +267,15 @@ class PurchaseOrderForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['supplier'].queryset = Supplier.objects.filter(is_active=True).order_by('company_name')
+        
+        # Explicitly configure required states
+        self.fields['supplier'].required = True
+        self.fields['order_date'].required = True
+        self.fields['order_date_bs'].required = False
+        self.fields['expected_delivery_date'].required = False
+        self.fields['expected_delivery_date_bs'].required = False
+        self.fields['notes'].required = False
+
         if not self.instance.pk:
             today = date.today()
             self.fields['order_date'].initial = today
@@ -255,47 +287,77 @@ class PurchaseOrderForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
+
+        # -------------------------------------------------------------
+        # 1. Order Date Bidirectional Synchronization (AD <-> BS)
+        # -------------------------------------------------------------
         order_date = cleaned_data.get('order_date')
         order_date_bs = (cleaned_data.get('order_date_bs') or '').strip()
 
-        target_date_ad = None
-        target_date_bs = None
+        target_order_ad = None
+        target_order_bs = None
         target_fiscal_year = None
 
         if order_date_bs:
             try:
                 bs_y, bs_m, bs_d = parse_bs_date_components(order_date_bs)
-                target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
-                target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                target_order_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                target_order_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
                 target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
 
-                cleaned_data['order_date'] = target_date_ad
-                cleaned_data['order_date_bs'] = target_date_bs
+                cleaned_data['order_date'] = target_order_ad
+                cleaned_data['order_date_bs'] = target_order_bs
             except Exception as e:
-                self.add_error('order_date_bs', _(f"Invalid Bikram Sambat date format: {e}"))
+                self.add_error('order_date_bs', _(f"Invalid Bikram Sambat order date format: {e}"))
                 return cleaned_data
         elif order_date:
             try:
                 ad_date = order_date.date() if isinstance(order_date, datetime) else order_date
                 bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(ad_date)
-                target_date_ad = ad_date
-                target_date_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+                target_order_ad = ad_date
+                target_order_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
                 target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
 
-                cleaned_data['order_date'] = target_date_ad
-                cleaned_data['order_date_bs'] = target_date_bs
+                cleaned_data['order_date'] = target_order_ad
+                cleaned_data['order_date_bs'] = target_order_bs
             except Exception as e:
-                self.add_error('order_date', _(f"Could not convert date to Nepali calendar: {e}"))
+                self.add_error('order_date', _(f"Could not convert order date to Nepali calendar: {e}"))
                 return cleaned_data
 
+        # -------------------------------------------------------------
+        # 2. Expected Delivery Date Bidirectional Synchronization (AD <-> BS)
+        # -------------------------------------------------------------
+        exp_date = cleaned_data.get('expected_delivery_date')
+        exp_date_bs = (cleaned_data.get('expected_delivery_date_bs') or '').strip()
+
+        if exp_date_bs:
+            try:
+                e_y, e_m, e_d = parse_bs_date_components(exp_date_bs)
+                target_exp_ad = NepaliCalendar.bs_to_ad(e_y, e_m, e_d)
+                cleaned_data['expected_delivery_date'] = target_exp_ad
+                cleaned_data['expected_delivery_date_bs'] = f"{e_y:04d}-{e_m:02d}-{e_d:02d}"
+            except Exception as e:
+                self.add_error('expected_delivery_date_bs', _(f"Invalid Bikram Sambat expected delivery date format: {e}"))
+        elif exp_date:
+            try:
+                exp_ad = exp_date.date() if isinstance(exp_date, datetime) else exp_date
+                e_y, e_m, e_d = NepaliCalendar.ad_to_bs(exp_ad)
+                cleaned_data['expected_delivery_date'] = exp_ad
+                cleaned_data['expected_delivery_date_bs'] = NepaliCalendar.format_bs(e_y, e_m, e_d, lang='en')
+            except Exception:
+                pass
+
+        # -------------------------------------------------------------
+        # 3. Fiscal Year Lock Enforcement
+        # -------------------------------------------------------------
         if target_fiscal_year:
             locked_fy = AccountingFiscalYear.objects.filter(name=target_fiscal_year, is_closed=True).first()
             if locked_fy:
                 active_open_fy = AccountingFiscalYear.objects.filter(is_closed=False).order_by('-start_date_ad').first()
-                open_name = active_open_fy.name if active_open_fy else "an active fiscal year"
+                open_name = active_open_fy.name if active_open_fy else "an active open fiscal year"
                 error_msg = _(
-                    f"Order rejected: Date ({target_date_bs}) belongs to Fiscal Year {target_fiscal_year}, "
-                    f"which is locked and audited. Only orders in {open_name} are permitted."
+                    f"Order rejected: Date ({target_order_bs}) belongs to Fiscal Year {target_fiscal_year}, "
+                    f"which is locked and audited. Only purchase orders in {open_name} are permitted."
                 )
                 self.add_error('order_date_bs', error_msg)
                 self.add_error('order_date', error_msg)
@@ -303,15 +365,60 @@ class PurchaseOrderForm(forms.ModelForm):
         return cleaned_data
 
 class PurchaseOrderItemForm(forms.ModelForm):
+    """
+    Line Item Form for Purchase Orders.
+    Features:
+    - Pre-VAT Unit Wholesale Cost Input (`unit_cost_price`).
+    - Compact Locked VAT Rate Dropdown Widget (`vat_rate` choice strictly '13%' or '0%').
+    - Strict Server-Side Validation: Rejects negative cost prices, zero quantities, and arbitrary tax rates.
+    """
+
+    VAT_RATE_CHOICES = [
+        ('13.00', '13%'),
+        ('0.00', '0%'),
+    ]
+
     class Meta:
         model = PurchaseOrderItem
-        fields = ['product', 'unit', 'ordered_quantity', 'unit_cost_price']
+        fields = [
+            'product',
+            'unit',
+            'ordered_quantity',
+            'unit_cost_price',
+            'vat_rate'
+        ]
         widgets = {
             'product': forms.Select(attrs={'class': 'form-select form-select-sm select-po-product', 'required': 'required'}),
             'unit': forms.Select(attrs={'class': 'form-select form-select-sm select-po-unit'}),
-            'ordered_quantity': forms.NumberInput(attrs={'class': 'form-control form-control-sm text-center font-monospace po-qty', 'step': '1', 'min': '1', 'value': '1', 'required': 'required'}),
-            'unit_cost_price': forms.NumberInput(attrs={'class': 'form-control form-control-sm text-end font-monospace po-price', 'step': '0.01', 'min': '0.00', 'placeholder': '0.00', 'required': 'required'}),
+            'ordered_quantity': forms.NumberInput(attrs={
+                'class': 'form-control form-control-sm text-center font-monospace po-qty',
+                'step': '1', 'min': '1', 'value': '1', 'required': 'required'
+            }),
+            'unit_cost_price': forms.NumberInput(attrs={
+                'class': 'form-control form-control-sm text-end font-monospace po-price',
+                'step': '0.01', 'min': '0.00', 'placeholder': '0.00', 'required': 'required'
+            }),
+            'vat_rate': forms.Select(
+                attrs={'class': 'form-select form-select-sm po-vat-rate text-center', 'required': 'required'},
+                choices=[
+                    ('13.00', '13%'),
+                    ('0.00', '0%'),
+                ]
+            ),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['product'].required = True
+        self.fields['ordered_quantity'].required = True
+        self.fields['unit_cost_price'].required = True
+        self.fields['vat_rate'].required = True
+        self.fields['unit'].required = False
+
+        if not self.instance.pk:
+            self.fields['ordered_quantity'].initial = Decimal('1.000')
+            self.fields['unit_cost_price'].initial = Decimal('0.00')
+            self.fields['vat_rate'].initial = Decimal('13.00')
 
     def clean_ordered_quantity(self):
         qty = self.cleaned_data.get('ordered_quantity')
@@ -322,8 +429,23 @@ class PurchaseOrderItemForm(forms.ModelForm):
     def clean_unit_cost_price(self):
         price = self.cleaned_data.get('unit_cost_price')
         if price is None or price < Decimal('0.00'):
-            raise forms.ValidationError(_("Cost price cannot be negative."))
+            raise forms.ValidationError(_("Unit cost price without VAT cannot be negative."))
         return price
+
+    def clean_vat_rate(self):
+        val = self.cleaned_data.get('vat_rate')
+        if val is None:
+            return Decimal('13.00')
+
+        try:
+            dec_val = Decimal(str(val))
+        except Exception:
+            raise forms.ValidationError(_("Invalid VAT rate format."))
+
+        if dec_val not in [Decimal('13.00'), Decimal('0.00'), Decimal('13'), Decimal('0')]:
+            raise forms.ValidationError(_("Invalid VAT rate. Only 13% or 0% are permitted."))
+
+        return Decimal('13.00') if dec_val > Decimal('0.00') else Decimal('0.00')
 
 PurchaseOrderItemFormSet = inlineformset_factory(
     PurchaseOrder,
@@ -483,7 +605,6 @@ class GoodsReceivedNoteForm(forms.ModelForm):
         challan_date = cleaned_data.get('challan_date')
         challan_date_bs = (cleaned_data.get('challan_date_bs') or '').strip()
 
-        # If saving as draft and no invoice number is provided, supply a safe draft placeholder
         if self.is_draft and not (cleaned_data.get('supplier_bill_no') or '').strip():
             cleaned_data['supplier_bill_no'] = f"DRAFT-{uuid.uuid4().hex[:6].upper()}"
 
@@ -603,11 +724,7 @@ class GRNItemForm(forms.ModelForm):
     - Captures physical vendor batch code via `batch_number`.
     - Unit Purchase Rate accepts Pre-VAT or Post-VAT rates depending on selected VAT handling mode.
     - Two-Way Line Discount: Flat Amount (रू) or Percentage (%).
-    - Dynamic Master Switch IMEI Enforcement:
-      * When enforce_imei_tracking is ON: Exact 1-to-1 match between handset quantity and scanned IMEIs on verification.
-      * When enforce_imei_tracking is OFF (Backlog Mode): Allows phones to be saved as quantity-only entries with empty IMEIs.
-      * When is_draft is True: Allows partial/in-progress scanning without blocking the draft save.
-      * Accessories: Always bypass IMEI requirements regardless of mode.
+    - Dynamic Master Switch IMEI Enforcement (Strict Mode vs Backlog Mode).
     """
 
     VAT_RATE_CHOICES = [
@@ -645,7 +762,6 @@ class GRNItemForm(forms.ModelForm):
                 'class': 'form-control font-monospace text-end', 'step': '0.01', 'min': '0.00', 'placeholder': 'MRP / Sell Price'
             }),
             'is_vat_applicable': forms.CheckboxInput(attrs={'class': 'form-check-input grn-vat-check'}),
-            # Locked select dropdown widget preventing user typos
             'vat_rate': forms.Select(
                 attrs={'class': 'form-select form-select-sm grn-vat-rate select-tax-rate text-center'},
                 choices=[
@@ -712,10 +828,6 @@ class GRNItemForm(forms.ModelForm):
         return val
 
     def clean_vat_rate(self):
-        """
-        Strict server-side validation: Ensures vat_rate is strictly 13.00 or 0.00.
-        Rejects arbitrary or typo inputs like 130%.
-        """
         val = self.cleaned_data.get('vat_rate')
         if val is None:
             return Decimal('13.00')
@@ -739,7 +851,6 @@ class GRNItemForm(forms.ModelForm):
         disc_input = cleaned_data.get('discount_input_value') or Decimal('0.00')
         scanned_raw = (cleaned_data.get('scanned_imei_list') or '').strip()
 
-        # If saving as draft with an empty line, skip strict row errors
         if self.is_draft and not product:
             return cleaned_data
 
@@ -777,18 +888,15 @@ class GRNItemForm(forms.ModelForm):
             expected_units = int(base_units)
             tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
 
-            # DRAFT MODE: Allow saving in-progress vouchers even if IMEIs are not fully scanned yet
             if self.is_draft:
                 return cleaned_data
 
             sys_config = SystemConfiguration.get_solo()
             enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
 
-            # BACKLOG MODE: If master switch is OFF and user left box blank, allow quantity-only
             if not enforce_imei and len(tokens) == 0:
                 return cleaned_data
 
-            # STRICT MODE: Mandate exact 1-to-1 match between quantity and scanned IMEIs
             if enforce_imei:
                 if expected_units > 0 and len(tokens) != expected_units:
                     raise forms.ValidationError(
@@ -803,7 +911,6 @@ class GRNItemForm(forms.ModelForm):
                           f"In Backlog Mode, please either leave the IMEI field completely empty or enter all {expected_units} IMEI pair(s).")
                     )
 
-            # Validate format of any tokens provided
             for token in tokens:
                 parts = token.split('|')
                 im1 = parts[0].strip() if len(parts) > 0 and parts[0].strip() else ''
@@ -819,10 +926,6 @@ class GRNItemForm(forms.ModelForm):
         return cleaned_data
 
 class BaseGRNItemFormSet(BaseInlineFormSet):
-    """
-    Custom FormSet to propagate draft mode flag to child forms, cleanly handle tabular deletions,
-    and automatically align the parent GRN header's `is_vat_bill` based on child lines.
-    """
     def __init__(self, *args, **kwargs):
         self.is_draft = kwargs.pop('is_draft', False)
         super().__init__(*args, **kwargs)
@@ -834,7 +937,6 @@ class BaseGRNItemFormSet(BaseInlineFormSet):
             return
         super().clean()
 
-        # Automatically align parent GRN header is_vat_bill with line items
         has_taxable_item = False
         for form in self.forms:
             if not hasattr(form, 'cleaned_data') or not form.cleaned_data:
@@ -861,11 +963,6 @@ GRNItemFormSet = inlineformset_factory(
 # 5. COMMERCIAL PURCHASE RETURN (DEBIT NOTE) FORMS & FORMSET
 # ==============================================================================
 class PurchaseReturnForm(forms.ModelForm):
-    """
-    Header form for commercial purchase returns / debit notes to suppliers.
-    Captures supplier, origin branch, return date, original invoice/GRN references,
-    settlement mode, and debit note voucher remarks.
-    """
     class Meta:
         model = PurchaseReturn
         fields = [
@@ -966,12 +1063,6 @@ class PurchaseReturnForm(forms.ModelForm):
         return cleaned_data
 
 class PurchaseReturnItemForm(forms.ModelForm):
-    """
-    Line item form for each product returned to a supplier.
-    Captures product, return quantity, agreed return rate, tax rate,
-    specific defect reason, and scanned IMEI/serial numbers for phones.
-    Supports Backlog Mode skipping if returning units entered without serials.
-    """
     class Meta:
         model = PurchaseReturnItem
         fields = [
@@ -1048,7 +1139,6 @@ class PurchaseReturnItemForm(forms.ModelForm):
             sys_config = SystemConfiguration.get_solo()
             enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
 
-            # If Backlog Mode is active and no IMEIs were entered, permit return without IMEIs
             if not enforce_imei and len(tokens) == 0:
                 return cleaned_data
 

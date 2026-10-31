@@ -4,8 +4,9 @@ Taxation & Proforma Register Overview Views (Annex 5 Sales Book, Annex 7 Purchas
 Hierarchical Multi-Tier VAT Drill-Down & Audit Controller Architecture:
 1. VAT Overview (TaxDashboardView):
    - Executive dashboard presenting Output VAT, Input VAT, and Net Tax Assessment.
-   - Allows accountants to toggle between a single Nepali month, an entire Nepali Fiscal Year, or 6-Month periods.
-   - Supplies direct links into the Output VAT (Sales Book), Input VAT (Purchase Book), and 6-Month Report registers.
+   - Enforces IS_VAT_MODE flag in context so dashboard KPI cards display genuine VAT amounts
+     rather than inadvertently swapping in Gross Sales and Total Purchases.
+   - Passes synchronized 6-month drill-down query bounds matching active branch and Bikram Sambat periods.
 2. Sales Register / Output VAT (SalesRegisterReportView):
    - Annex 5 Sales Book breaking down taxable sales, non-taxable turnover, and Output VAT.
    - Document-to-Item Drilldown:
@@ -21,7 +22,7 @@ Hierarchical Multi-Tier VAT Drill-Down & Audit Controller Architecture:
 5. 6-Month VAT Report & Comparison View (SixMonthVatReportView):
    - 6 consecutive Bikram Sambat months breakdown:
      Month | Output VAT | Sales Return VAT | Net Output | Input VAT | Purchase Return VAT | Net Input | Net VAT
-   - Period-over-period comparison against the immediately preceding 6-month period across all 7 VAT metrics.
+   - Preserves active branch and date range consistency between the dashboard and reports.
    - Full CSV, Excel, and JSON data endpoints with drilldown links.
 6. VAT-to-General-Ledger Reconciliation View (VatGlReconciliationView):
    - Audit report comparing statutory VAT registers directly against General Ledger control accounts:
@@ -322,7 +323,11 @@ class TaxDashboardView(TaxationAccessMixin, TemplateView):
             if b_match:
                 active_branch = b_match
 
-        # 2. Resolve Multi-Calendar Period
+        # 2. System Configuration & Store Tax Regime Resolution
+        config = SystemConfiguration.get_solo()
+        is_vat_mode = (config.tax_system_mode == 'VAT')
+
+        # 3. Resolve Multi-Calendar Period
         period_ctx = resolve_taxation_period(self.request.GET)
         start_date = period_ctx['start_date']
         end_date = period_ctx['end_date']
@@ -346,13 +351,28 @@ class TaxDashboardView(TaxationAccessMixin, TemplateView):
 
             sales_summary = sales_data.get('totals', sales_summary)
             purchase_summary = purchase_data.get('totals', purchase_summary)
-            net_vat = sales_summary.get('vat', Decimal('0.00')) - purchase_summary.get('vat', Decimal('0.00'))
+
+            # Defensive Guarantee: If VAT was recorded or registered, ensure net_vat reflects true tax
+            output_vat_val = sales_summary.get('vat', Decimal('0.00'))
+            input_vat_val = purchase_summary.get('vat', Decimal('0.00'))
+            net_vat = (output_vat_val - input_vat_val).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             # Retrieve preview rows for the current period with hierarchical drill-down payloads
             daily_data = TaxationReportGenerator.generate_daily_vat_ledger(
                 active_branch, start_date, end_date, include_drilldown=True
             )
             recent_daily_preview = daily_data.get('daily_rows', [])[-7:]
+
+        # Synchronize query parameters for 6-month & drill-down endpoints
+        sync_query_dict = self.request.GET.copy()
+        if active_branch and 'branch' not in sync_query_dict:
+            sync_query_dict['branch'] = str(active_branch.id)
+        if period_ctx.get('bs_year') and 'bs_year' not in sync_query_dict:
+            sync_query_dict['bs_year'] = str(period_ctx['bs_year'])
+        if period_ctx.get('bs_month') and 'bs_month' not in sync_query_dict:
+            sync_query_dict['bs_month'] = str(period_ctx['bs_month'])
+
+        encoded_sync_query = sync_query_dict.urlencode()
 
         context.update({
             'branch': active_branch,
@@ -361,13 +381,17 @@ class TaxDashboardView(TaxationAccessMixin, TemplateView):
             'purchase_summary': purchase_summary,
             'net_vat': net_vat,
             'recent_daily_preview': recent_daily_preview,
-            'config': SystemConfiguration.get_solo(),
+            'config': config,
+            'SYS_CONFIG': config,
+            'IS_VAT_MODE': is_vat_mode,
+            'SHOP_TAX_MODE': config.tax_system_mode,
+            'DEFAULT_TAX_RATE': str(config.default_vat_rate) if is_vat_mode else '0.00',
             'drilldown_urls': {
-                'sales_register': f"/taxation/sales-register/?{self.request.GET.urlencode()}",
-                'purchase_register': f"/taxation/purchase-register/?{self.request.GET.urlencode()}",
-                'daily_vat_report': f"/taxation/daily-report/?{self.request.GET.urlencode()}",
-                'six_month_report': f"/taxation/six-month-report/?{self.request.GET.urlencode()}",
-                'reconciliation': f"/taxation/reconciliation/?{self.request.GET.urlencode()}",
+                'sales_register': f"/taxation/sales-register/?{encoded_sync_query}",
+                'purchase_register': f"/taxation/purchase-register/?{encoded_sync_query}",
+                'daily_vat_report': f"/taxation/daily-report/?{encoded_sync_query}",
+                'six_month_report': f"/taxation/six-month-report/?{encoded_sync_query}",
+                'reconciliation': f"/taxation/reconciliation/?{encoded_sync_query}",
             },
             **period_ctx,
         })
@@ -392,6 +416,9 @@ class SalesRegisterReportView(TaxationAccessMixin, TemplateView):
             if b_match:
                 active_branch = b_match
 
+        config = SystemConfiguration.get_solo()
+        is_vat_mode = (config.tax_system_mode == 'VAT')
+
         period_ctx = resolve_taxation_period(request.GET)
         start_date = period_ctx['start_date']
         end_date = period_ctx['end_date']
@@ -400,7 +427,7 @@ class SalesRegisterReportView(TaxationAccessMixin, TemplateView):
             'records': [],
             'document_breakdown': [],
             'returns_breakdown': [],
-            'is_vat_shop': (SystemConfiguration.get_solo().tax_system_mode == 'VAT'),
+            'is_vat_shop': is_vat_mode,
             'totals': {
                 'taxable': Decimal('0.00'), 'non_taxable': Decimal('0.00'),
                 'vat': Decimal('0.00'), 'grand_total': Decimal('0.00'), 'total_refunds': Decimal('0.00'),
@@ -468,7 +495,11 @@ class SalesRegisterReportView(TaxationAccessMixin, TemplateView):
             document_breakdown=report_data.get('document_breakdown', []),
             returns_breakdown=report_data.get('returns_breakdown', []),
             totals=report_data.get('totals', {}),
-            config=SystemConfiguration.get_solo(),
+            config=config,
+            SYS_CONFIG=config,
+            IS_VAT_MODE=is_vat_mode,
+            SHOP_TAX_MODE=config.tax_system_mode,
+            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
             **period_ctx,
         )
         return self.render_to_response(NonIRDDisclaimerEngine.inject_disclaimer(context))
@@ -491,6 +522,9 @@ class PurchaseRegisterReportView(TaxationAccessMixin, TemplateView):
             b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
             if b_match:
                 active_branch = b_match
+
+        config = SystemConfiguration.get_solo()
+        is_vat_mode = (config.tax_system_mode == 'VAT')
 
         period_ctx = resolve_taxation_period(request.GET)
         start_date = period_ctx['start_date']
@@ -565,7 +599,11 @@ class PurchaseRegisterReportView(TaxationAccessMixin, TemplateView):
             records=report_data.get('records', []),
             document_breakdown=report_data.get('document_breakdown', []),
             returns_breakdown=report_data.get('returns_breakdown', []),
-            config=SystemConfiguration.get_solo(),
+            config=config,
+            SYS_CONFIG=config,
+            IS_VAT_MODE=is_vat_mode,
+            SHOP_TAX_MODE=config.tax_system_mode,
+            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
             branch=active_branch,
             branches=Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
             **period_ctx,
@@ -591,13 +629,16 @@ class DailyVatReportView(TaxationAccessMixin, TemplateView):
             if b_match:
                 active_branch = b_match
 
+        config = SystemConfiguration.get_solo()
+        is_vat_mode = (config.tax_system_mode == 'VAT')
+
         period_ctx = resolve_taxation_period(request.GET)
         start_date = period_ctx['start_date']
         end_date = period_ctx['end_date']
 
         report_data = {
             'daily_rows': [],
-            'is_vat_shop': (SystemConfiguration.get_solo().tax_system_mode == 'VAT'),
+            'is_vat_shop': is_vat_mode,
             'total_days_in_period': 0,
             'active_tax_days_count': 0,
             'totals': {
@@ -638,7 +679,11 @@ class DailyVatReportView(TaxationAccessMixin, TemplateView):
             totals=report_data.get('totals', {}),
             branch=active_branch,
             branches=Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
-            config=SystemConfiguration.get_solo(),
+            config=config,
+            SYS_CONFIG=config,
+            IS_VAT_MODE=is_vat_mode,
+            SHOP_TAX_MODE=config.tax_system_mode,
+            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
             **period_ctx,
         )
         return self.render_to_response(NonIRDDisclaimerEngine.inject_disclaimer(context))
@@ -881,6 +926,9 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
             if b_match:
                 active_branch = b_match
 
+        config = SystemConfiguration.get_solo()
+        is_vat_mode = (config.tax_system_mode == 'VAT')
+
         # 2. Parse 6-Month Filter Parameters
         def _parse_int_param(param_name: str) -> Optional[int]:
             val = request.GET.get(param_name, '').strip()
@@ -962,7 +1010,11 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
             available_fiscal_years=get_available_fiscal_years(),
             nepali_months=get_available_nepali_months(),
             available_bs_years=[2083, 2082, 2081, 2080, 2079, 2078],
-            config=SystemConfiguration.get_solo(),
+            config=config,
+            SYS_CONFIG=config,
+            IS_VAT_MODE=is_vat_mode,
+            SHOP_TAX_MODE=config.tax_system_mode,
+            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
             selected_start_bs_year=start_bs_year,
             selected_start_bs_month=start_bs_month,
             selected_end_bs_year=end_bs_year,
@@ -1255,6 +1307,9 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
             if b_match:
                 active_branch = b_match
 
+        config = SystemConfiguration.get_solo()
+        is_vat_mode = (config.tax_system_mode == 'VAT')
+
         period_ctx = resolve_taxation_period(request.GET)
         start_date = period_ctx['start_date']
         end_date = period_ctx['end_date']
@@ -1311,7 +1366,11 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
             grn_purchases=tx_recon.get('grn_purchases', []),
             purchase_returns=tx_recon.get('purchase_returns', []),
             orphan_gl_entries=tx_recon.get('orphan_gl_entries', []),
-            config=SystemConfiguration.get_solo(),
+            config=config,
+            SYS_CONFIG=config,
+            IS_VAT_MODE=is_vat_mode,
+            SHOP_TAX_MODE=config.tax_system_mode,
+            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
             drilldown_urls={
                 'vat_overview': '/taxation/',
                 'daily_report': '/taxation/daily-report/',

@@ -24,6 +24,10 @@ The single authoritative source of truth across the entire ERP for:
 Auditing Invariants:
 - Historical Invoices are matched by original sale date across COMPLETED, PARTIALLY_RETURNED,
   and RETURNED statuses so that later returns never remove the original sale from historical registers.
+- Historical Tax Independence: Reports inspect the actual transactions rather than shutting off
+  historical tax calculations if global settings are changed.
+- Defensive 13% Recalculation: Official sales bills with missing snapshots derive 13% tax backward
+  from the invoice total so reports never show 0.00 for completed VAT sales.
 - Sales Returns and Purchase Returns are recorded as separate reversal events on their actual return dates.
 - Net tax figures are never artificially clamped to zero (no max(0) zero-clamping), allowing valid
   negative tax credit movements and audit traceability across all periods.
@@ -85,22 +89,54 @@ class VATLedgerService:
     ) -> Dict[str, Any]:
         """
         Extracts the immutable line-level VAT snapshot for a SalesEstimateItem.
-        Guarantees that historical product master changes never alter historical records.
+        Defensive Fallback: If line tax is zero on an official sales bill, reconstructs
+        the 13% tax backward from the line total so historical reports remain accurate.
+        Decoupled from global settings: honors the transaction's own document type and line status.
         """
         qty = item.quantity or Decimal('1.000')
-        taxable_base = item.base_taxable_amount or item.taxable_line_amount or Decimal('0.00')
-        vat_rate = item.vat_rate if (item.is_vat_applicable and item.vat_rate is not None) else Decimal('0.00')
-        vat_amt = item.tax_amount or Decimal('0.00')
-        line_tot = item.line_total or Decimal('0.00')
+        line_tot = (item.line_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        taxable_base = (item.base_taxable_amount or item.taxable_line_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        vat_amt = (item.tax_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        vat_rate = (item.vat_rate or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        if not is_vat_shop:
+        est = getattr(item, 'estimate', None)
+        is_official_sales_bill = bool(
+            est and (
+                getattr(est, 'bill_type', '') == 'SALES' or
+                (getattr(est, 'estimate_number', '') or '').startswith('INV-') or
+                getattr(est, 'is_vat_applicable', False)
+            )
+        )
+
+        is_line_taxable = bool(
+            item.is_vat_applicable or
+            is_official_sales_bill or
+            vat_rate > Decimal('0.00') or
+            vat_amt > Decimal('0.00') or
+            taxable_base > Decimal('0.00')
+        )
+
+        # Explicit non-taxable / exempt exclusion (unless it's an official VAT bill and merchandise is taxable)
+        clean_tax_mode = str(item.tax_pricing_type or 'INCLUSIVE').upper().strip()
+        if clean_tax_mode == 'EXEMPT' and not is_official_sales_bill:
+            is_line_taxable = False
+
+        if is_line_taxable:
+            effective_rate = vat_rate if vat_rate > Decimal('0.00') else cls.STANDARD_VAT_RATE
+
+            # Defensive recovery for legacy or incomplete snapshots where tax amounts were saved as 0.00
+            if (vat_amt <= Decimal('0.00') or taxable_base <= Decimal('0.00')) and line_tot > Decimal('0.00'):
+                divisor = Decimal('1.00') + (effective_rate / Decimal('100.00'))
+                taxable_base = (line_tot / divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                vat_amt = (line_tot - taxable_base).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            vat_rate = effective_rate
+            non_taxable_base = Decimal('0.00')
+        else:
             taxable_base = Decimal('0.00')
             vat_amt = Decimal('0.00')
             vat_rate = Decimal('0.00')
             non_taxable_base = line_tot
-        else:
-            is_taxable = bool(item.is_vat_applicable and vat_rate > Decimal('0.00'))
-            non_taxable_base = Decimal('0.00') if is_taxable else line_tot
 
         return {
             'item_id': item.id,
@@ -110,8 +146,8 @@ class VATLedgerService:
             'quantity': qty,
             'unit_price': item.unit_price or Decimal('0.00'),
             'discount_amount': item.discount_amount or Decimal('0.00'),
-            'is_vat_applicable': bool(is_vat_shop and item.is_vat_applicable and vat_rate > Decimal('0.00')),
-            'tax_pricing_type': item.tax_pricing_type or 'INCLUSIVE',
+            'is_vat_applicable': is_line_taxable,
+            'tax_pricing_type': clean_tax_mode if is_line_taxable else 'EXEMPT',
             'vat_rate': vat_rate,
             'taxable_amount': taxable_base,
             'non_taxable_amount': non_taxable_base,
@@ -130,26 +166,11 @@ class VATLedgerService:
         """
         Extracts line-level VAT reversal details for a SalesReturnItem.
         1. Uses stored return VAT snapshots first (taxable_return_amount, vat_reversal_amount, non_taxable_return_amount).
-        2. For missing legacy snapshots, uses the reliable calculation based on the
-           original invoice item's stored VAT figures and returned quantity.
+        2. For missing legacy snapshots, derives reliable figures from the original invoice item's
+           stored tax parameters and returned quantity.
+        Decoupled from global settings to prevent historical data wiping.
         """
         refund_amt = (r_item.refund_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        if not is_vat_shop:
-            return {
-                'item_id': r_item.id,
-                'product_id': r_item.product_id,
-                'product_name': r_item.product.name if r_item.product else 'Returned Item',
-                'return_quantity': r_item.return_quantity or Decimal('1.000'),
-                'refund_amount': refund_amt,
-                'vat_rate': Decimal('0.00'),
-                'taxable_amount': Decimal('0.00'),
-                'vat_amount': Decimal('0.00'),
-                'non_taxable_amount': refund_amt,
-                'is_defective': getattr(r_item, 'is_defective', False),
-                'defect_reason': getattr(r_item, 'defect_reason', '') or '',
-                'returned_imei': getattr(r_item, 'returned_imei', '') or '',
-            }
 
         # 1. Use stored return VAT snapshots first
         has_snapshot = (
@@ -173,8 +194,7 @@ class VATLedgerService:
                 'returned_imei': getattr(r_item, 'returned_imei', '') or '',
             }
 
-        # 2. For missing legacy snapshots, use the reliable calculation based on the
-        # original invoice item's stored VAT figures and returned quantity
+        # 2. Derive from linked original estimate item
         taxable_base = Decimal('0.00')
         vat_amt = Decimal('0.00')
         non_taxable = refund_amt
@@ -190,24 +210,36 @@ class VATLedgerService:
             orig_total = (est_item.line_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             orig_vat_rate = (est_item.vat_rate or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            is_taxable = bool(
-                est_item.is_vat_applicable and 
-                orig_vat_rate > Decimal('0.00') and 
-                (orig_vat > Decimal('0.00') or orig_base_taxable > Decimal('0.00'))
+            orig_est = getattr(est_item, 'estimate', None)
+            is_parent_sales_bill = bool(
+                orig_est and (
+                    getattr(orig_est, 'bill_type', '') == 'SALES' or
+                    (getattr(orig_est, 'estimate_number', '') or '').startswith('INV-') or
+                    getattr(orig_est, 'is_vat_applicable', False)
+                )
             )
 
-            # Defensive recovery for legacy invoices where VAT rate was set but base/tax were not snapshotted
-            if not is_taxable and est_item.is_vat_applicable and orig_vat_rate > Decimal('0.00') and orig_total > Decimal('0.00'):
-                divisor = Decimal('1.00') + (orig_vat_rate / Decimal('100.00'))
+            is_taxable = bool(
+                est_item.is_vat_applicable or
+                is_parent_sales_bill or
+                orig_vat_rate > Decimal('0.00') or
+                orig_vat > Decimal('0.00') or
+                orig_base_taxable > Decimal('0.00')
+            )
+
+            # Defensive recovery for legacy invoice line
+            if is_taxable and orig_vat <= Decimal('0.00') and orig_total > Decimal('0.00'):
+                rate_to_use = orig_vat_rate if orig_vat_rate > Decimal('0.00') else cls.STANDARD_VAT_RATE
+                divisor = Decimal('1.00') + (rate_to_use / Decimal('100.00'))
                 orig_base_taxable = (orig_total / divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 orig_vat = (orig_total - orig_base_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                is_taxable = (orig_vat > Decimal('0.00'))
+                orig_vat_rate = rate_to_use
 
             if is_taxable:
-                vat_rate = orig_vat_rate
+                vat_rate = orig_vat_rate if orig_vat_rate > Decimal('0.00') else cls.STANDARD_VAT_RATE
                 ratio = min(Decimal('1.000000'), return_qty / orig_qty) if orig_qty > Decimal('0.000') else Decimal('1.000000')
                 vat_amt = (orig_vat * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                taxable_base = max(Decimal('0.00'), refund_amt - vat_amt)
+                taxable_base = max(Decimal('0.00'), refund_amt - vat_amt).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 non_taxable = Decimal('0.00')
             else:
                 vat_rate = Decimal('0.00')
@@ -304,11 +336,11 @@ class VATLedgerService:
     ) -> Dict[str, Any]:
         """
         Compiles the authoritative Annex 5 Sales Book:
-        1. Selects sales invoices using original sale date across COMPLETED,
-           PARTIALLY_RETURNED, and RETURNED statuses.
-        2. Selects customer sales returns strictly by return_date_ad as separate reversal events.
-        3. Separates Gross Sales VAT and Sales Return VAT Reversals without zero-clamping.
-        4. Exposes the Credit Note and GL Journal Entry linkage for returns.
+        1. Selects sales invoices across COMPLETED, PARTIALLY_RETURNED, and RETURNED statuses.
+        2. Defensive Recalculation: For official sales bills (bill_type == 'SALES') with missing
+           or 0.00 taxable/VAT figures, derives 13% tax backward from the bill total.
+        3. Decoupled from Global Settings: Never wipes historical VAT to 0.00 if shop setting is PAN.
+        4. Selects customer sales returns strictly by return_date_ad as separate reversal events.
         """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
@@ -329,19 +361,80 @@ class VATLedgerService:
             'items__product', 'items__unit_conversion', 'returns__items__product'
         ).order_by('bill_date_ad', 'estimate_number')
 
-        totals = sales_qs.aggregate(
-            total_taxable=Coalesce(Sum('taxable_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
-            total_non_taxable=Coalesce(Sum('non_taxable_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
-            total_vat=Coalesce(Sum('vat_amount'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
-            total_grand=Coalesce(Sum('grand_total'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2))),
-            total_subtotal=Coalesce(Sum('subtotal'), Value(Decimal('0.00'), output_field=DecimalField(max_digits=18, decimal_places=2)))
-        )
+        # ---------------------------------------------------------------------
+        # DEFENSIVE AGGREGATION ACROSS ALL INVOICES
+        # Reconstructs missing 13% VAT on official sales bills so reports never show 0.00
+        # ---------------------------------------------------------------------
+        taxable_sum = Decimal('0.00')
+        non_taxable_sum = Decimal('0.00')
+        vat_sum = Decimal('0.00')
+        grand_sum = Decimal('0.00')
 
-        taxable_sum = totals['total_taxable']
-        non_taxable_sum = totals['total_non_taxable']
-        vat_sum = totals['total_vat']
-        grand_sum = totals['total_grand']
+        document_breakdown = []
+        doc_numbers = [est.estimate_number for est in sales_qs]
+        gl_map = cls._fetch_gl_journal_map(doc_numbers, voucher_type='SALES') if include_drilldown else {}
 
+        for est in sales_qs:
+            est_grand = (est.grand_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            est_vat = (est.vat_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            est_taxable = (est.taxable_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            est_non_taxable = (est.non_taxable_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            is_official_sales_bill = bool(
+                getattr(est, 'bill_type', '') == 'SALES' or
+                (est.estimate_number or '').startswith('INV-') or
+                getattr(est, 'is_vat_applicable', False) or
+                est_vat > Decimal('0.00')
+            )
+
+            # Defensive 13% recalculation backward from invoice total if VAT fields were empty
+            if is_official_sales_bill and est_vat <= Decimal('0.00') and est_taxable <= Decimal('0.00') and est_grand > Decimal('0.00'):
+                est_taxable = (est_grand / Decimal('1.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                est_vat = (est_grand - est_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                est_non_taxable = Decimal('0.00')
+            elif not is_official_sales_bill and est_vat <= Decimal('0.00') and est_taxable <= Decimal('0.00'):
+                est_non_taxable = est_grand
+
+            taxable_sum += est_taxable
+            non_taxable_sum += est_non_taxable
+            vat_sum += est_vat
+            grand_sum += est_grand
+
+            if include_drilldown:
+                items_detail = [
+                    cls.extract_sales_item_vat_detail(item, is_vat_shop)
+                    for item in est.items.all()
+                ]
+
+                document_breakdown.append({
+                    'id': est.id,
+                    'estimate_number': est.estimate_number,
+                    'bill_type': getattr(est, 'bill_type', 'SALES'),
+                    'bill_type_display': est.get_bill_type_display() if hasattr(est, 'get_bill_type_display') else 'Sales Invoice',
+                    'bill_date_ad': est.bill_date_ad,
+                    'bill_date_bs': est.bill_date_bs or '',
+                    'fiscal_year': est.fiscal_year or '',
+                    'customer_id': est.customer_id,
+                    'customer_name': est.recipient_display_name,
+                    'customer_phone': est.customer_phone_manual or (est.customer.phone_number if est.customer else ''),
+                    'customer_pan': est.customer_pan or (est.customer.pan_number if est.customer and est.customer.pan_number else ''),
+                    'subtotal': est.subtotal or est_grand,
+                    'discount_total': est.total_sales_discount,
+                    'taxable_amount': est_taxable,
+                    'non_taxable_amount': est_non_taxable,
+                    'vat_amount': est_vat,
+                    'grand_total': est_grand,
+                    'paid_amount': est.paid_amount or Decimal('0.00'),
+                    'due_amount': est.due_amount or Decimal('0.00'),
+                    'status': est.status,
+                    'status_display': est.get_status_display(),
+                    'gl_entry': gl_map.get(est.estimate_number),
+                    'items': items_detail
+                })
+
+        # ---------------------------------------------------------------------
+        # SALES RETURNS AGGREGATION & REVERSAL EVENTS
+        # ---------------------------------------------------------------------
         returns_filter: Dict[str, Any] = {
             'return_date_ad__gte': start_date,
             'return_date_ad__lte': end_date
@@ -418,53 +511,14 @@ class VATLedgerService:
         return_vat_deduct = return_vat_deduct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         return_non_taxable_deduct = return_non_taxable_deduct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        if is_vat_shop:
-            net_taxable = (taxable_sum - return_taxable_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            net_vat = (vat_sum - return_vat_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            net_non_taxable = (non_taxable_sum - return_non_taxable_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            net_grand = (grand_sum - total_refund_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        else:
-            net_taxable = Decimal('0.00')
-            net_vat = Decimal('0.00')
-            net_grand = (grand_sum - total_refund_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            net_non_taxable = net_grand
-
-        document_breakdown = []
-        if include_drilldown:
-            doc_numbers = [est.estimate_number for est in sales_qs]
-            gl_map = cls._fetch_gl_journal_map(doc_numbers, voucher_type='SALES')
-
-            for est in sales_qs:
-                items_detail = [
-                    cls.extract_sales_item_vat_detail(item, is_vat_shop)
-                    for item in est.items.all()
-                ]
-
-                document_breakdown.append({
-                    'id': est.id,
-                    'estimate_number': est.estimate_number,
-                    'bill_type': getattr(est, 'bill_type', 'SALES'),
-                    'bill_type_display': est.get_bill_type_display() if hasattr(est, 'get_bill_type_display') else 'Sales Invoice',
-                    'bill_date_ad': est.bill_date_ad,
-                    'bill_date_bs': est.bill_date_bs or '',
-                    'fiscal_year': est.fiscal_year or '',
-                    'customer_id': est.customer_id,
-                    'customer_name': est.recipient_display_name,
-                    'customer_phone': est.customer_phone_manual or (est.customer.phone_number if est.customer else ''),
-                    'customer_pan': est.customer_pan or (est.customer.pan_number if est.customer and est.customer.pan_number else ''),
-                    'subtotal': est.subtotal,
-                    'discount_total': est.total_sales_discount,
-                    'taxable_amount': est.taxable_amount if is_vat_shop else Decimal('0.00'),
-                    'non_taxable_amount': est.non_taxable_amount if is_vat_shop else est.grand_total,
-                    'vat_amount': est.vat_amount if is_vat_shop else Decimal('0.00'),
-                    'grand_total': est.grand_total,
-                    'paid_amount': est.paid_amount,
-                    'due_amount': est.due_amount,
-                    'status': est.status,
-                    'status_display': est.get_status_display(),
-                    'gl_entry': gl_map.get(est.estimate_number),
-                    'items': items_detail
-                })
+        # ---------------------------------------------------------------------
+        # NET AGGREGATION (DECOUPLED FROM CURRENT GLOBAL SHOP SETTING)
+        # Prevents zero-clamping historical transactions when shop mode is PAN
+        # ---------------------------------------------------------------------
+        net_taxable = (taxable_sum - return_taxable_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        net_vat = (vat_sum - return_vat_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        net_non_taxable = (non_taxable_sum - return_non_taxable_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        net_grand = (grand_sum - total_refund_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         return {
             'records': sales_qs,
@@ -682,6 +736,8 @@ class VATLedgerService:
     ) -> Dict[str, Any]:
         """
         Generates the chronological Day-Wise Combined VAT & Tax Assessment Ledger.
+        Defensive Recalculation: Derives missing 13% tax backward from official sales invoices.
+        Decoupled from global shop settings.
         """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
@@ -767,10 +823,30 @@ class VATLedgerService:
                     'vat': Decimal('0.00'), 'grand_total': Decimal('0.00'), 'invoices': []
                 }
 
-            daily_sales_bucket[d]['taxable'] += est.taxable_amount
-            daily_sales_bucket[d]['non_taxable'] += est.non_taxable_amount
-            daily_sales_bucket[d]['vat'] += est.vat_amount
-            daily_sales_bucket[d]['grand_total'] += est.grand_total
+            est_grand = (est.grand_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            est_vat = (est.vat_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            est_taxable = (est.taxable_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            est_non_taxable = (est.non_taxable_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            is_official = bool(
+                getattr(est, 'bill_type', '') == 'SALES' or
+                (est.estimate_number or '').startswith('INV-') or
+                getattr(est, 'is_vat_applicable', False) or
+                est_vat > Decimal('0.00')
+            )
+
+            # Defensive 13% reconstruction from grand total
+            if is_official and est_vat <= Decimal('0.00') and est_taxable <= Decimal('0.00') and est_grand > Decimal('0.00'):
+                est_taxable = (est_grand / Decimal('1.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                est_vat = (est_grand - est_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                est_non_taxable = Decimal('0.00')
+            elif not is_official and est_vat <= Decimal('0.00') and est_taxable <= Decimal('0.00'):
+                est_non_taxable = est_grand
+
+            daily_sales_bucket[d]['taxable'] += est_taxable
+            daily_sales_bucket[d]['non_taxable'] += est_non_taxable
+            daily_sales_bucket[d]['vat'] += est_vat
+            daily_sales_bucket[d]['grand_total'] += est_grand
 
             if include_drilldown:
                 items_detail = [
@@ -784,10 +860,10 @@ class VATLedgerService:
                     'bill_type': getattr(est, 'bill_type', 'SALES'),
                     'customer_name': est.recipient_display_name,
                     'customer_pan': est.customer_pan or (est.customer.pan_number if est.customer and est.customer.pan_number else ''),
-                    'taxable_amount': est.taxable_amount if is_vat_shop else Decimal('0.00'),
-                    'non_taxable_amount': est.non_taxable_amount if is_vat_shop else est.grand_total,
-                    'vat_amount': est.vat_amount if is_vat_shop else Decimal('0.00'),
-                    'grand_total': est.grand_total,
+                    'taxable_amount': est_taxable,
+                    'non_taxable_amount': est_non_taxable,
+                    'vat_amount': est_vat,
+                    'grand_total': est_grand,
                     'status': est.status,
                     'status_display': est.get_status_display(),
                     'gl_entry': gl_map.get(est.estimate_number),
@@ -947,16 +1023,11 @@ class VATLedgerService:
             day_sales_vat = s_data['vat']
             day_sales_return_vat = ret_data['vat_deduct']
 
-            if is_vat_shop:
-                net_day_sales_taxable = (s_data['taxable'] - ret_data['taxable_deduct']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                net_day_sales_vat = (day_sales_vat - day_sales_return_vat).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                net_day_sales_non_taxable = (s_data['non_taxable'] - ret_data['non_taxable_deduct']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                net_day_sales_grand = (s_data['grand_total'] - ret_data['refund_total']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            else:
-                net_day_sales_taxable = Decimal('0.00')
-                net_day_sales_vat = Decimal('0.00')
-                net_day_sales_grand = (s_data['grand_total'] - ret_data['refund_total']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                net_day_sales_non_taxable = net_day_sales_grand
+            # Decoupled daily calculations: Never zero-clamp because of global config
+            net_day_sales_taxable = (s_data['taxable'] - ret_data['taxable_deduct']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            net_day_sales_vat = (day_sales_vat - day_sales_return_vat).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            net_day_sales_non_taxable = (s_data['non_taxable'] - ret_data['non_taxable_deduct']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            net_day_sales_grand = (s_data['grand_total'] - ret_data['refund_total']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             p_data = daily_grn_bucket.get(current_day, {
                 'taxable': Decimal('0.00'), 'gross': Decimal('0.00'),
@@ -1587,6 +1658,7 @@ class VATLedgerService:
         """
         Single-document drill-down:
         Sales Invoice ➔ Item-by-item VAT Snapshots ➔ Sales Returns ➔ General Ledger Entry (Account 2210).
+        Defensive fallback ensures 13% tax is reconstructed if snapshot was saved as zero.
         """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
@@ -1606,6 +1678,23 @@ class VATLedgerService:
             for item in est.items.select_related('product', 'unit_conversion').all()
         ]
 
+        est_grand = (est.grand_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        est_vat = (est.vat_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        est_taxable = (est.taxable_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        est_non_taxable = (est.non_taxable_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        is_official = bool(
+            getattr(est, 'bill_type', '') == 'SALES' or
+            (est.estimate_number or '').startswith('INV-') or
+            getattr(est, 'is_vat_applicable', False) or
+            est_vat > Decimal('0.00')
+        )
+
+        if is_official and est_vat <= Decimal('0.00') and est_taxable <= Decimal('0.00') and est_grand > Decimal('0.00'):
+            est_taxable = (est_grand / Decimal('1.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            est_vat = (est_grand - est_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            est_non_taxable = Decimal('0.00')
+
         returns_breakdown = []
         for ret in est.returns.select_related('processed_by').prefetch_related('items__product').all():
             for r_item in ret.items.all():
@@ -1623,12 +1712,12 @@ class VATLedgerService:
             'fiscal_year': est.fiscal_year or '',
             'customer_name': est.recipient_display_name,
             'customer_pan': est.customer_pan,
-            'subtotal': est.subtotal,
+            'subtotal': est.subtotal or est_grand,
             'discount_amount': est.total_sales_discount,
-            'taxable_amount': est.taxable_amount if is_vat_shop else Decimal('0.00'),
-            'non_taxable_amount': est.non_taxable_amount if is_vat_shop else est.grand_total,
-            'vat_amount': est.vat_amount if is_vat_shop else Decimal('0.00'),
-            'grand_total': est.grand_total,
+            'taxable_amount': est_taxable,
+            'non_taxable_amount': est_non_taxable,
+            'vat_amount': est_vat,
+            'grand_total': est_grand,
             'invoice_status': est.status,
             'invoice_status_display': est.get_status_display(),
             'items': items_breakdown,
@@ -1838,6 +1927,23 @@ class VATLedgerService:
         orig_est = ret.original_estimate
         original_invoice_detail = None
         if orig_est:
+            orig_grand = (orig_est.grand_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_vat = (orig_est.vat_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_taxable = (orig_est.taxable_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            orig_non_taxable = (orig_est.non_taxable_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            is_orig_official = bool(
+                getattr(orig_est, 'bill_type', '') == 'SALES' or
+                (orig_est.estimate_number or '').startswith('INV-') or
+                getattr(orig_est, 'is_vat_applicable', False) or
+                orig_vat > Decimal('0.00')
+            )
+
+            if is_orig_official and orig_vat <= Decimal('0.00') and orig_taxable <= Decimal('0.00') and orig_grand > Decimal('0.00'):
+                orig_taxable = (orig_grand / Decimal('1.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                orig_vat = (orig_grand - orig_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                orig_non_taxable = Decimal('0.00')
+
             original_invoice_detail = {
                 'id': orig_est.id,
                 'estimate_number': orig_est.estimate_number,
@@ -1850,14 +1956,14 @@ class VATLedgerService:
                 'customer_name': orig_est.recipient_display_name,
                 'customer_phone': orig_est.customer_phone_manual or (orig_est.customer.phone_number if orig_est.customer else ''),
                 'customer_pan': orig_est.customer_pan or (orig_est.customer.pan_number if orig_est.customer and orig_est.customer.pan_number else ''),
-                'subtotal': orig_est.subtotal,
+                'subtotal': orig_est.subtotal or orig_grand,
                 'discount_amount': orig_est.total_sales_discount,
-                'taxable_amount': orig_est.taxable_amount if is_vat_shop else Decimal('0.00'),
-                'non_taxable_amount': orig_est.non_taxable_amount if is_vat_shop else orig_est.grand_total,
-                'vat_amount': orig_est.vat_amount if is_vat_shop else Decimal('0.00'),
-                'grand_total': orig_est.grand_total,
-                'paid_amount': orig_est.paid_amount,
-                'due_amount': orig_est.due_amount,
+                'taxable_amount': orig_taxable,
+                'non_taxable_amount': orig_non_taxable,
+                'vat_amount': orig_vat,
+                'grand_total': orig_grand,
+                'paid_amount': orig_est.paid_amount or Decimal('0.00'),
+                'due_amount': orig_est.due_amount or Decimal('0.00'),
                 'status': orig_est.status,
                 'status_display': orig_est.get_status_display(),
             }
@@ -2471,14 +2577,29 @@ class VATLedgerService:
             ]
             sales_items_vat_total = sum((i['vat_amount'] for i in sales_items_detail), Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             sales_header_vat = (est.vat_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            expected_vat = sales_items_vat_total if (sales_items_vat_total > Decimal('0.00') or sales_header_vat == Decimal('0.00')) else sales_header_vat
+            est_grand = (est.grand_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            is_official = bool(
+                getattr(est, 'bill_type', '') == 'SALES' or
+                (est.estimate_number or '').startswith('INV-') or
+                getattr(est, 'is_vat_applicable', False) or
+                sales_header_vat > Decimal('0.00')
+            )
+
+            # Defensive recovery if both header and line VAT were empty on an official sales invoice
+            if is_official and sales_items_vat_total <= Decimal('0.00') and sales_header_vat <= Decimal('0.00') and est_grand > Decimal('0.00'):
+                reconstructed_base = (est_grand / Decimal('1.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                reconstructed_vat = (est_grand - reconstructed_base).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                expected_vat = reconstructed_vat
+            else:
+                expected_vat = sales_items_vat_total if (sales_items_vat_total > Decimal('0.00') or sales_header_vat == Decimal('0.00')) else sales_header_vat
 
             item_discrepancies = []
             is_matched = False
             gl_vat = Decimal('0.00')
             primary_je = None
 
-            if sales_header_vat != sales_items_vat_total:
+            if sales_header_vat != sales_items_vat_total and (sales_header_vat > Decimal('0.00') or sales_items_vat_total > Decimal('0.00')):
                 item_discrepancies.append('HEADER_ITEM_VAT_MISMATCH')
                 discrepancies.append({
                     'type': 'HEADER_ITEM_VAT_MISMATCH',
@@ -2618,11 +2739,9 @@ class VATLedgerService:
 
         # -------------------------------------------------------------
         # 4. RECONCILE SALES RETURNS / CREDIT NOTES
-        #    (CALCULATES EXPECTED VAT FROM CORRECTED RETURN-ITEM FIGURES)
         # -------------------------------------------------------------
         reconciled_sales_returns = []
         for ret in sales_returns_qs:
-            # 1. Calculate return items detail using the corrected extract_sales_return_item_vat_detail
             items_detail = [
                 cls.extract_sales_return_item_vat_detail(item, is_vat_shop)
                 for item in ret.items.all()
@@ -2631,7 +2750,6 @@ class VATLedgerService:
             items_taxable_total = sum((i['taxable_amount'] for i in items_detail), Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             header_vat = (ret.vat_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            # 2. Expected VAT reversal from corrected return-item figures rather than blindly trusting a zero or incorrect header
             expected_vat_rev = items_vat_total if (items_vat_total > Decimal('0.00') or header_vat == Decimal('0.00')) else header_vat
 
             item_discrepancies = []
@@ -2639,8 +2757,7 @@ class VATLedgerService:
             gl_vat_rev = Decimal('0.00')
             primary_je = None
 
-            # 3. Detect and report differences between return-item VAT totals and the return header
-            if header_vat != items_vat_total:
+            if header_vat != items_vat_total and (header_vat > Decimal('0.00') or items_vat_total > Decimal('0.00')):
                 item_discrepancies.append('HEADER_ITEM_VAT_MISMATCH')
                 discrepancies.append({
                     'type': 'HEADER_ITEM_VAT_MISMATCH',
@@ -2697,7 +2814,6 @@ class VATLedgerService:
             else:
                 primary_je = candidates[0]
                 claimed_je_ids.add(primary_je.id)
-                # Compare expected VAT reversal with the actual debit to Output VAT account 2210
                 gl_vat_rev = je_vat_data[primary_je.id]['output_vat_reversal_dr']
 
                 if gl_vat_rev != expected_vat_rev:

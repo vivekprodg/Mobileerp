@@ -3,23 +3,128 @@
 
 {% block title %}Purchase Order {{ order.po_number }} | {{ SYS_CONFIG.company_name_en }}{% endblock %}
 
+{% block extra_head %}
+<style>
+.font-mono {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace) !important;
+    font-variant-numeric: tabular-nums;
+}
+
+.po-print-sheet {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: var(--erp-shadow-xs);
+}
+
+.table-po-detail th {
+    background-color: #f8fafc !important;
+    color: var(--erp-slate-600);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 10px 12px;
+    vertical-align: middle;
+    border-bottom: 2px solid var(--erp-slate-200);
+}
+
+.table-po-detail td {
+    padding: 11px 12px;
+    vertical-align: middle;
+    font-size: 0.84rem;
+    border-bottom: 1px solid var(--erp-slate-100);
+}
+
+.vat-rate-pill {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.vat-rate-13 {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+.vat-rate-0 {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+}
+
+@media print {
+    @page {
+        size: A4 portrait;
+        margin: 10mm 12mm;
+    }
+
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 11px;
+    }
+
+    .no-print, header, aside, footer, nav, .btn, #sidebarOffcanvas {
+        display: none !important;
+    }
+
+    .po-print-sheet {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    .table-po-detail th {
+        background-color: #1e293b !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid px-4 py-4" style="max-width: 1400px;">
-    <!-- Top Action & Status Bar -->
-    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+    
+    <!-- =========================================================================
+         TOP ACTION & WORKFLOW STATUS BAR (SCREEN ONLY)
+         ========================================================================= -->
+    <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4 no-print">
         <div>
             <div class="d-flex align-items-center gap-2">
-                <h4 class="fw-bold text-dark mb-0 font-monospace">{{ order.po_number }}</h4>
+                <span class="badge bg-primary fs-xs font-mono px-3 py-1 rounded-pill">{{ order.po_number }}</span>
+                <h4 class="fw-bold text-dark mb-0">Purchase Order Requisition</h4>
                 <span class="badge bg-{% if order.status == 'COMPLETED' %}success{% elif order.status == 'ISSUED' %}primary{% elif order.status == 'PARTIALLY_RECEIVED' %}warning text-dark{% elif order.status == 'CANCELLED' %}danger{% else %}secondary{% endif %} fs-xs px-3 py-1 rounded-pill">
                     {{ order.get_status_display }}
                 </span>
             </div>
-            <p class="text-muted fs-xs mb-0 mt-1">
-                Supplier: <strong>{{ order.supplier.company_name }}</strong> | 
-                Branch: <strong>{{ order.branch.name }}</strong> | 
-                Order Date: <strong>{{ order.order_date }}</strong>
-                {% if order.expected_delivery_date %}&bull; Expected Delivery: <strong class="text-primary">{{ order.expected_delivery_date }}</strong>{% endif %}
-            </p>
+
+            <!-- Dual Calendar Header Date Indicators -->
+            <div class="text-muted fs-xs mt-1 d-flex flex-wrap align-items-center gap-2">
+                <span>Supplier: <strong class="text-dark">{{ order.supplier.company_name }}</strong></span>
+                <span>&bull;</span>
+                <span>Branch: <strong>{{ order.branch.name }}</strong></span>
+                <span>&bull;</span>
+                <span>Order Date: <strong>{{ order.order_date }}</strong></span>
+                {% if order.order_date_bs %}
+                    <span class="badge bg-light text-dark border font-mono">({{ order.order_date_bs }} BS)</span>
+                {% endif %}
+
+                {% if order.expected_delivery_date %}
+                    <span>&bull;</span>
+                    <span>Expected Delivery: <strong class="text-primary">{{ order.expected_delivery_date }}</strong></span>
+                    {% if order.expected_delivery_date_bs %}
+                        <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 font-mono">({{ order.expected_delivery_date_bs }} BS)</span>
+                    {% endif %}
+                {% endif %}
+            </div>
         </div>
 
         <div class="d-flex flex-wrap gap-2 align-items-center">
@@ -32,7 +137,7 @@
 
             <!-- Print Button -->
             <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-bold" onclick="window.print()">
-                <i class="fas fa-print me-1"></i> Print PO
+                <i class="fas fa-print me-1"></i> Print Formal PO
             </button>
 
             <a href="{% url 'purchases:po_list' %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
@@ -41,49 +146,63 @@
         </div>
     </div>
 
-    <!-- Summary Overview Cards -->
-    <div class="row g-3 mb-4">
+    <!-- =========================================================================
+         SUMMARY OVERVIEW CARDS (4-TIER FINANCIAL RADAR)
+         ========================================================================= -->
+    <div class="row g-3 mb-4 no-print">
+        <!-- 1. Total Estimated Value with Tax Breakdown -->
         <div class="col-12 col-sm-6 col-xl-3">
             <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-primary border-4 h-100">
-                <span class="text-muted fs-xs text-uppercase fw-bold">Total Estimated Value</span>
-                <h3 class="fw-bold text-primary font-monospace mt-1 mb-0">Rs. {{ order.total_amount|floatformat:2|intcomma }}</h3>
-                <small class="text-muted fs-2xs">Subtotal: Rs. {{ order.subtotal|floatformat:2|intcomma }}</small>
+                <span class="text-muted fs-xs text-uppercase fw-bold">Total Estimated Order Value</span>
+                <h3 class="fw-extrabold text-primary font-mono mt-1 mb-0">Rs. {{ order.total_amount|floatformat:2|intcomma }}</h3>
+                <div class="d-flex justify-content-between text-muted fs-3xs mt-1 pt-1 border-top font-mono">
+                    <span>Base: Rs. {{ order.subtotal|floatformat:2|intcomma }}</span>
+                    <span class="text-success fw-bold">VAT: +Rs. {{ order.tax_amount|floatformat:2|intcomma }}</span>
+                </div>
             </div>
         </div>
 
+        <!-- 2. Supplier Contact -->
         <div class="col-12 col-sm-6 col-xl-3">
             <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-info border-4 h-100">
                 <span class="text-muted fs-xs text-uppercase fw-bold">Supplier Contact</span>
-                <h5 class="fw-bold text-dark mt-1 mb-0">{{ order.supplier.contact_person }}</h5>
-                <small class="text-muted fs-2xs font-monospace"><i class="fas fa-phone text-success me-1"></i>{{ order.supplier.phone_number }}</small>
-            </div>
-        </div>
-
-        <div class="col-12 col-sm-6 col-xl-3">
-            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-warning border-4 h-100">
-                <span class="text-muted fs-xs text-uppercase fw-bold">Requisition Origin</span>
-                <h6 class="fw-bold text-dark mt-1 mb-0">{{ order.branch.name }}</h6>
-                <small class="text-muted fs-2xs">
-                    Issued by: 
-                    {% if order.created_by %}
-                        {{ order.created_by.get_full_name|default:order.created_by.username }}
-                    {% else %}
-                        System / Automated
-                    {% endif %}
+                <h5 class="fw-bold text-dark mt-1 mb-0 text-truncate" title="{{ order.supplier.contact_person }}">{{ order.supplier.contact_person }}</h5>
+                <small class="text-muted fs-2xs font-mono">
+                    <i class="fas fa-phone text-success me-1"></i>{{ order.supplier.phone_number }}
+                    {% if order.supplier.pan_number %}&bull; PAN: {{ order.supplier.pan_number }}{% endif %}
                 </small>
             </div>
         </div>
 
+        <!-- 3. Delivery Schedule & Requisition Origin -->
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-warning border-4 h-100">
+                <span class="text-muted fs-xs text-uppercase fw-bold">Delivery Schedule</span>
+                <h6 class="fw-bold text-dark font-mono mt-1 mb-0">
+                    {% if order.expected_delivery_date %}
+                        {{ order.expected_delivery_date }}
+                        {% if order.expected_delivery_date_bs %}
+                            <small class="text-primary d-block fs-3xs">({{ order.expected_delivery_date_bs }} BS)</small>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted fw-normal">Open / Unscheduled</span>
+                    {% endif %}
+                </h6>
+                <small class="text-muted fs-3xs mt-1 d-block">Origin: {{ order.branch.name }}</small>
+            </div>
+        </div>
+
+        <!-- 4. Workflow Status & Transition -->
         <div class="col-12 col-sm-6 col-xl-3">
             <div class="card border-0 shadow-sm rounded-4 p-3 bg-white border-start border-success border-4 h-100">
                 <span class="text-muted fs-xs text-uppercase fw-bold">Workflow Status</span>
-                <!-- Status Transition Dropdown -->
                 <form action="{% url 'purchases:po_status_update' order.pk %}" method="post" class="mt-1">
                     {% csrf_token %}
                     <div class="input-group input-group-sm">
                         <select name="status" class="form-select form-select-sm fw-bold">
                             <option value="DRAFT" {% if order.status == 'DRAFT' %}selected{% endif %}>Draft PO</option>
                             <option value="ISSUED" {% if order.status == 'ISSUED' %}selected{% endif %}>Issued to Supplier</option>
+                            <option value="PARTIALLY_RECEIVED" {% if order.status == 'PARTIALLY_RECEIVED' %}selected{% endif %}>Partially Received</option>
                             <option value="COMPLETED" {% if order.status == 'COMPLETED' %}selected{% endif %}>Completed &amp; Received</option>
                             <option value="CANCELLED" {% if order.status == 'CANCELLED' %}selected{% endif %}>Cancelled</option>
                         </select>
@@ -94,92 +213,254 @@
         </div>
     </div>
 
-    <!-- Line Items Table -->
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
-        <div class="p-3 border-bottom bg-light d-flex justify-content-between align-items-center">
-            <h6 class="fw-bold text-dark mb-0"><i class="fas fa-boxes-stacked text-primary me-2"></i> Ordered Line Items</h6>
-            <span class="badge bg-primary rounded-pill">{{ items.count }} Line Items</span>
+    <!-- =========================================================================
+         OFFICIAL A4 PRINTABLE PURCHASE ORDER SHEET
+         ========================================================================= -->
+    <div class="po-print-sheet">
+        
+        <!-- Printable Company Letterhead (Visible on Screen & Print) -->
+        <div class="d-flex justify-content-between align-items-start border-bottom pb-3 mb-4">
+            <div>
+                {% if order.branch.logo_url %}
+                    <img src="{{ order.branch.logo_url }}" alt="{{ order.branch.display_company_name }}" class="mb-2" style="max-height: 48px; max-width: 220px; object-fit: contain;">
+                {% elif COMPANY_LOGO_URL %}
+                    <img src="{{ COMPANY_LOGO_URL }}" alt="{{ COMPANY_NAME }}" class="mb-2" style="max-height: 48px; max-width: 220px; object-fit: contain;">
+                {% endif %}
+                <h4 class="fw-extrabold text-dark mb-0">{{ order.branch.display_company_name|default:COMPANY_NAME }}</h4>
+                <div class="text-muted fs-xs">
+                    {{ order.branch.address }}, {{ order.branch.city }} | Phone: {{ order.branch.phone_number }}
+                    {% if SYS_CONFIG.pan_number %} &bull; <strong>PAN: {{ SYS_CONFIG.pan_number }}</strong>{% endif %}
+                </div>
+            </div>
+
+            <div class="text-end">
+                <span class="badge bg-primary text-white fs-6 font-mono px-3 py-1 mb-1">{{ order.po_number }}</span>
+                <h5 class="fw-bold text-dark text-uppercase fs-xs mb-0">PURCHASE ORDER / खरिद आदेश</h5>
+                <small class="text-muted font-mono fs-2xs">Fiscal Year: {{ order.fiscal_year|default:"2083/84" }}</small>
+            </div>
         </div>
+
+        <!-- Order & Supplier Metadata Grid -->
+        <div class="row g-3 mb-4 fs-xs">
+            <!-- Supplier Card -->
+            <div class="col-6">
+                <div class="p-3 bg-light rounded-3 border h-100">
+                    <span class="text-muted text-uppercase fw-bold fs-3xs d-block mb-1">To / Supplier Details:</span>
+                    <h6 class="fw-bold text-dark mb-1">{{ order.supplier.company_name }}</h6>
+                    <div class="text-secondary">{{ order.supplier.address }}, {{ order.supplier.city }}</div>
+                    <div class="text-secondary">Contact Person: <strong>{{ order.supplier.contact_person }}</strong> ({{ order.supplier.phone_number }})</div>
+                    {% if order.supplier.pan_number %}
+                        <div class="font-mono text-dark mt-1">PAN / VAT: <strong>{{ order.supplier.pan_number }}</strong></div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- PO Schedule Card with Dual Dates -->
+            <div class="col-6">
+                <div class="p-3 bg-light rounded-3 border h-100">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">PO Number:</span>
+                        <strong class="font-mono text-primary">{{ order.po_number }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Order Date (AD):</span>
+                        <strong class="text-dark">{{ order.order_date }}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Order Date (BS):</span>
+                        <strong class="text-primary font-mono">{{ order.order_date_bs|default:"-" }} BS</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-muted">Expected Delivery:</span>
+                        <strong class="text-dark font-mono">
+                            {{ order.expected_delivery_date|default:"Open Delivery" }}
+                            {% if order.expected_delivery_date_bs %} ({{ order.expected_delivery_date_bs }} BS){% endif %}
+                        </strong>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">Requisition Outlet:</span>
+                        <strong class="text-dark">{{ order.branch.name }}</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- =========================================================================
+             LINE ITEMS TABLE (WITH PRE-VAT COST, VAT %, VAT AMOUNT & LINE TOTAL)
+             ========================================================================= -->
+        <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 table-po-detail">
+                    <thead>
+                        <tr>
+                            <th class="ps-3 text-center" style="width: 45px;">#</th>
+                            <th>Product / Handset Model</th>
+                            <th class="text-center" style="width: 70px;">Unit</th>
+                            <th class="text-center" style="width: 85px;">Ordered</th>
+                            <th class="text-center no-print" style="width: 85px;">Received</th>
+                            <th class="text-end" style="width: 140px;">Pre-VAT Cost</th>
+                            <th class="text-center" style="width: 95px;">VAT %</th>
+                            <th class="text-end" style="width: 120px;">VAT (Rs.)</th>
+                            <th class="text-end pe-3" style="width: 150px;">Total (With VAT)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in items %}
+                        <tr>
+                            <td class="ps-3 text-center text-muted fw-bold">{{ forloop.counter }}</td>
+                            <td>
+                                <strong class="text-dark">{{ item.product.name }}</strong>
+                                <small class="text-muted d-block font-mono fs-3xs">SKU: {{ item.product.sku }}</small>
+                            </td>
+                            <td class="text-center"><span class="badge bg-light text-dark border">{{ item.unit.code }}</span></td>
+                            <td class="text-center font-mono fw-bold">{{ item.ordered_quantity|floatformat:0 }}</td>
+                            <td class="text-center font-mono no-print">
+                                {% if item.received_quantity >= item.ordered_quantity %}
+                                    <span class="badge bg-success bg-opacity-10 text-success fw-bold">{{ item.received_quantity|floatformat:0 }}</span>
+                                {% elif item.received_quantity > 0 %}
+                                    <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold">{{ item.received_quantity|floatformat:0 }}</span>
+                                {% else %}
+                                    <span class="text-muted">0</span>
+                                {% endif %}
+                            </td>
+                            <!-- Pre-VAT Unit Wholesale Rate -->
+                            <td class="text-end font-mono">Rs. {{ item.unit_cost_price|floatformat:2|intcomma }}</td>
+                            
+                            <!-- VAT % Badge -->
+                            <td class="text-center">
+                                {% if item.vat_rate > 0 %}
+                                    <span class="vat-rate-pill vat-rate-13">13%</span>
+                                {% else %}
+                                    <span class="vat-rate-pill vat-rate-0">0%</span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Line Calculated VAT Amount -->
+                            <td class="text-end font-mono text-success fw-bold">
+                                {% if item.tax_amount > 0 %}
+                                    Rs. {{ item.tax_amount|floatformat:2|intcomma }}
+                                {% else %}
+                                    <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Line Total Including VAT -->
+                            <td class="text-end pe-3 font-mono fw-bold text-primary">
+                                Rs. {{ item.line_total|floatformat:2|intcomma }}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="9" class="text-center py-4 text-muted">No line items attached to this purchase order.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+
+                    <!-- =========================================================================
+                         THREE-TIER AUDITED FINANCIAL SUMMARY FOOTER
+                         ========================================================================= -->
+                    <tfoot class="bg-light border-top">
+                        <!-- 1. Merchandise Subtotal (Pre-VAT) -->
+                        <tr>
+                            <td colspan="7" class="text-end fw-bold text-muted text-uppercase fs-xs">
+                                Order Subtotal (Pre-VAT Base):
+                            </td>
+                            <td colspan="2" class="text-end pe-3 font-mono fw-bold text-dark fs-xs">
+                                Rs. {{ order.subtotal|floatformat:2|intcomma }}
+                            </td>
+                        </tr>
+
+                        <!-- 2. Total 13% Input VAT -->
+                        <tr>
+                            <td colspan="7" class="text-end fw-bold text-success text-uppercase fs-xs">
+                                Total 13% Input VAT Amount:
+                            </td>
+                            <td colspan="2" class="text-end pe-3 font-mono fw-bold text-success fs-xs">
+                                +Rs. {{ order.tax_amount|floatformat:2|intcomma }}
+                            </td>
+                        </tr>
+
+                        <!-- 3. Grand Total Order Amount (With VAT) -->
+                        <tr class="table-primary bg-opacity-25 border-top-2 border-primary">
+                            <td colspan="7" class="text-end fw-extrabold text-primary text-uppercase fs-sm">
+                                Grand Total Estimated Order Amount (With VAT):
+                            </td>
+                            <td colspan="2" class="text-end pe-3 font-mono fw-extrabold text-primary fs-5">
+                                Rs. {{ order.total_amount|floatformat:2|intcomma }}
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- Notes & Consignment Instructions -->
+        {% if order.notes %}
+        <div class="p-3 bg-light rounded-3 border mb-4 fs-xs">
+            <h6 class="fw-bold text-dark border-bottom pb-2 mb-2">
+                <i class="fas fa-file-lines text-primary me-2"></i> Order Notes &amp; Consignment Requirements
+            </h6>
+            <p class="text-secondary mb-0">{{ order.notes|linebreaks }}</p>
+        </div>
+        {% endif %}
+
+        <!-- Legal Authorized Signatures (For Official Printouts) -->
+        <div class="d-flex justify-content-between align-items-end mt-5 pt-4">
+            <div style="width: 220px; text-align: center; border-top: 1.5px solid #0f172a; padding-top: 6px; font-size: 0.78rem; font-weight: 700;">
+                <div class="mb-5"></div>
+                <div>Authorized Signatory / Stamp</div>
+                <small class="text-muted fw-normal">({{ order.branch.name }})</small>
+            </div>
+
+            <div class="text-center text-muted fs-3xs" style="max-width: 340px;">
+                * This Purchase Order requisition is an official commitment of inventory purchase. Please verify wholesale rates, 13% VAT, and delivery dates before shipment.
+            </div>
+
+            <div style="width: 220px; text-align: center; border-top: 1.5px solid #0f172a; padding-top: 6px; font-size: 0.78rem; font-weight: 700;">
+                <div class="mb-5"></div>
+                <div>Distributor Acceptance / Stamp</div>
+                <small class="text-muted fw-normal">({{ order.supplier.company_name }})</small>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Linked Goods Received Notes (GRN) Inward History (Screen Only) -->
+    {% if linked_grns %}
+    <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mt-4 no-print">
+        <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
+            <i class="fas fa-truck-ramp-box text-success me-2"></i> Linked Inward Goods Received Notes (GRN)
+        </h6>
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 fs-sm">
-                <thead class="bg-light text-muted text-uppercase fs-2xs">
+            <table class="table table-hover align-middle mb-0 fs-xs">
+                <thead class="bg-light text-muted text-uppercase fs-3xs">
                     <tr>
-                        <th class="ps-4" style="width: 40px;">#</th>
-                        <th>Product / Handset Model</th>
-                        <th>Unit</th>
-                        <th class="text-center">Ordered Qty</th>
-                        <th class="text-center">Received Qty</th>
-                        <th class="text-end">Agreed Cost (NPR)</th>
-                        <th class="text-end pe-4">Line Total</th>
+                        <th class="ps-3">GRN Number</th>
+                        <th>Supplier Bill Ref</th>
+                        <th>Received Date</th>
+                        <th>Received By</th>
+                        <th class="text-end pe-3">Bill Net Total</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for item in items %}
+                    {% for grn in linked_grns %}
                     <tr>
-                        <td class="ps-4 text-center text-muted fw-bold">{{ forloop.counter }}</td>
-                        <td>
-                            <strong class="text-dark">{{ item.product.name }}</strong>
-                            <small class="text-muted d-block font-monospace">SKU: {{ item.product.sku }}</small>
+                        <td class="ps-3 font-mono fw-bold">
+                            <a href="{% url 'purchases:grn_detail' grn.pk %}" class="text-primary text-decoration-none">
+                                {{ grn.grn_number }}
+                            </a>
                         </td>
-                        <td><span class="badge bg-light text-dark border">{{ item.unit.code }}</span></td>
-                        <td class="text-center font-monospace fw-bold">{{ item.ordered_quantity|floatformat:0 }}</td>
-                        <td class="text-center font-monospace">
-                            {% if item.received_quantity >= item.ordered_quantity %}
-                                <span class="badge bg-success bg-opacity-10 text-success fw-bold">{{ item.received_quantity|floatformat:0 }}</span>
-                            {% elif item.received_quantity > 0 %}
-                                <span class="badge bg-warning bg-opacity-10 text-warning-emphasis fw-bold">{{ item.received_quantity|floatformat:0 }}</span>
-                            {% else %}
-                                <span class="text-muted">0</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-end font-monospace">Rs. {{ item.unit_cost_price|floatformat:2|intcomma }}</td>
-                        <td class="text-end pe-4 font-monospace fw-bold text-primary">Rs. {{ item.line_total|floatformat:2|intcomma }}</td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="7" class="text-center py-4 text-muted">No line items attached to this purchase order.</td>
+                        <td class="font-mono"><code>{{ grn.supplier_bill_no }}</code></td>
+                        <td>{{ grn.bill_date }} {% if grn.bill_date_bs %}({{ grn.bill_date_bs }} BS){% endif %}</td>
+                        <td>{{ grn.received_by.get_full_name|default:grn.received_by.username|default:"Warehouse Staff" }}</td>
+                        <td class="text-end pe-3 font-mono fw-bold text-success">Rs. {{ grn.net_total_amount|floatformat:2|intcomma }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
-                <tfoot class="bg-light fw-bold fs-xs border-top">
-                    <tr>
-                        <td colspan="6" class="ps-4 text-end text-uppercase text-muted">Order Total Amount:</td>
-                        <td class="text-end pe-4 font-monospace text-primary fs-5">Rs. {{ order.total_amount|floatformat:2|intcomma }}</td>
-                    </tr>
-                </tfoot>
             </table>
         </div>
     </div>
+    {% endif %}
 
-    <!-- Notes & Linked Goods Received Notes (GRN) -->
-    <div class="row g-4">
-        {% if order.notes %}
-        <div class="col-12 col-lg-6">
-            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
-                <h6 class="fw-bold text-dark border-bottom pb-2 mb-2"><i class="fas fa-file-lines text-primary me-2"></i> Order Notes &amp; Consignment Remarks</h6>
-                <p class="fs-xs text-secondary mb-0">{{ order.notes|linebreaks }}</p>
-            </div>
-        </div>
-        {% endif %}
-
-        {% if linked_grns %}
-        <div class="col-12 {% if order.notes %}col-lg-6{% else %}col-12{% endif %}">
-            <div class="card border-0 shadow-sm rounded-4 p-4 bg-white h-100">
-                <h6 class="fw-bold text-dark border-bottom pb-2 mb-3"><i class="fas fa-truck-ramp-box text-success me-2"></i> Inward Goods Received Notes (GRN)</h6>
-                <ul class="list-group list-group-flush fs-xs">
-                    {% for grn in linked_grns %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-                        <div>
-                            <a href="{% url 'purchases:grn_detail' grn.pk %}" class="fw-bold text-primary text-decoration-none font-monospace">{{ grn.grn_number }}</a>
-                            <small class="text-muted d-block">Received: {{ grn.bill_date }} (Bill: {{ grn.supplier_bill_no }})</small>
-                        </div>
-                        <span class="badge bg-success bg-opacity-10 text-success fw-bold font-monospace">Rs. {{ grn.net_total_amount|floatformat:2|intcomma }}</span>
-                    </li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
-        {% endif %}
-    </div>
 </div>
 {% endblock %}

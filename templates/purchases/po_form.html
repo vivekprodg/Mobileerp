@@ -28,11 +28,46 @@
     border-radius: 16px 16px 0 0;
     box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
 }
+.font-mono {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace) !important;
+}
+
+/* Compact, Uniform Summary KPI Badges (Strict Single-Line Alignment) */
+.summary-kpi-badge {
+    background: #ffffff;
+    border: 1px solid var(--erp-slate-200);
+    border-radius: 8px;
+    padding: 6px 14px;
+    min-width: 135px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.summary-kpi-badge.total-badge {
+    background: #f0fdfa;
+    border-color: #99f6e4;
+}
+.summary-kpi-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    margin-bottom: 2px;
+    white-space: nowrap;
+}
+.summary-kpi-amount {
+    font-size: 0.925rem;
+    font-weight: 800;
+    line-height: 1.2;
+    white-space: nowrap;
+}
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid px-4 py-4" style="max-width: 1320px;">
+<div class="container-fluid px-4 py-4" style="max-width: 1400px;">
     <!-- Page Header -->
     <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
@@ -40,7 +75,7 @@
                 <i class="fas fa-file-invoice text-primary me-2"></i> Issue New Purchase Order (PO)
             </h4>
             <p class="text-muted fs-xs mb-0">
-                Create formal purchase orders to send to national brand distributors and regional suppliers before stock arrival
+                Create formal purchase orders with Pre-VAT rates, 13% / 0% VAT breakdown, and dual AD &amp; BS delivery schedules
             </p>
         </div>
         <div class="d-flex gap-2">
@@ -70,7 +105,9 @@
     <form method="post" id="purchaseOrderMasterForm" novalidate>
         {% csrf_token %}
 
-        <!-- Section 1: Supplier & Order Details Header -->
+        <!-- =========================================================================
+             SECTION 1: SUPPLIER & REQUISITION SCHEDULE (DUAL AD & BS DATES)
+             ========================================================================= -->
         <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
             <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">
                 <i class="fas fa-building-user text-primary me-2"></i> 1. Supplier &amp; Requisition Schedule
@@ -78,7 +115,7 @@
 
             <div class="row g-3">
                 <!-- Universal Contextual Supplier Search -->
-                <div class="col-12 col-md-5">
+                <div class="col-12 col-lg-4">
                     <label class="form-label fw-bold text-dark fs-xs">
                         Distributor / Supplier <span class="text-danger">*</span>
                     </label>
@@ -99,37 +136,56 @@
                     {% if form.supplier.errors %}
                         <div class="text-danger fs-2xs mt-1">{{ form.supplier.errors|striptags }}</div>
                     {% endif %}
-                    <small class="text-muted fs-2xs mt-1 d-block">Choose the verified supplier or brand distributor receiving this order.</small>
+                    <small class="text-muted fs-3xs mt-1 d-block">Choose verified supplier or brand distributor.</small>
                 </div>
 
-                <div class="col-12 col-md-3">
+                <!-- Order Date (AD) -->
+                <div class="col-6 col-lg-2">
                     <label class="form-label fw-bold text-dark fs-xs">
                         Order Date (AD) <span class="text-danger">*</span>
                     </label>
                     {{ form.order_date }}
                 </div>
 
-                <div class="col-12 col-md-4">
-                    <label class="form-label fw-bold text-dark fs-xs">Expected Delivery Date (AD)</label>
+                <!-- Order Date (BS) -->
+                <div class="col-6 col-lg-2">
+                    <label class="form-label fw-bold text-dark fs-xs">
+                        Order Date (BS) <span class="text-primary">*</span>
+                    </label>
+                    {{ form.order_date_bs }}
+                </div>
+
+                <!-- Expected Delivery Date (AD) -->
+                <div class="col-6 col-lg-2">
+                    <label class="form-label fw-bold text-dark fs-xs">Expected Delivery (AD)</label>
                     {{ form.expected_delivery_date }}
                 </div>
 
+                <!-- Expected Delivery Date (BS) -->
+                <div class="col-6 col-lg-2">
+                    <label class="form-label fw-bold text-dark fs-xs">Expected Delivery (BS)</label>
+                    {{ form.expected_delivery_date_bs }}
+                </div>
+
+                <!-- Notes / Special Instructions -->
                 <div class="col-12">
                     <label class="form-label fw-bold text-dark fs-xs">Order Notes / Consignment Requirements</label>
                     {{ form.notes }}
-                    <small class="text-muted fs-2xs mt-1 d-block">Specify preferred colors, storage variations, payment terms, or urgent logistics instructions.</small>
+                    <small class="text-muted fs-3xs mt-1 d-block">Specify preferred colors, storage variations, payment terms, or urgent logistics instructions.</small>
                 </div>
             </div>
         </div>
 
-        <!-- Section 2: Order Line Items Formset -->
+        <!-- =========================================================================
+             SECTION 2: ORDERED PRODUCTS, QUANTITIES & ESTIMATED COST WITH VAT
+             ========================================================================= -->
         <div class="card border-0 shadow-sm rounded-4 p-4 bg-white mb-4">
             <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 border-bottom pb-3 mb-3">
                 <div>
                     <h6 class="fw-bold text-dark mb-0">
                         <i class="fas fa-boxes-stacked text-primary me-2"></i> 2. Ordered Products, Quantities &amp; Estimated Cost
                     </h6>
-                    <small class="text-muted fs-2xs">Specify the products, order quantities, and agreed wholesale unit costs.</small>
+                    <small class="text-muted fs-2xs">Specify products, order quantities, agreed Pre-VAT unit costs, and applicable VAT (13% or 0%).</small>
                 </div>
                 <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold" id="addNewPoItemBtn">
                     <i class="fas fa-plus me-1"></i> Add Another Product
@@ -142,9 +198,10 @@
                 {% for item_form in formset %}
                 <div class="po-item-row" data-row-index="{{ forloop.counter0 }}">
                     {{ item_form.id }}
-                    <div class="row g-3 align-items-end">
-                        <!-- Universal Contextual Product Search for Rendered Row -->
-                        <div class="col-12 col-md-5">
+                    <div class="row g-2 align-items-end">
+                        
+                        <!-- 1. Universal Contextual Product Search -->
+                        <div class="col-12 col-lg-4">
                             <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
                             <div class="contextual-search-wrapper" 
                                  data-search-url="/products/api/search/?mode=simple" 
@@ -164,42 +221,83 @@
                             {% endif %}
                         </div>
 
-                        <div class="col-6 col-md-2">
-                            <label class="form-label fw-bold text-dark fs-xs">Order Quantity <span class="text-danger">*</span></label>
+                        <!-- 2. Order Quantity -->
+                        <div class="col-6 col-sm-4 col-lg-1">
+                            <label class="form-label fw-bold text-dark fs-xs">Qty <span class="text-danger">*</span></label>
                             {{ item_form.ordered_quantity }}
                         </div>
-                        <div class="col-6 col-md-2">
-                            <label class="form-label fw-bold text-dark fs-xs">Unit Cost (NPR) <span class="text-danger">*</span></label>
+
+                        <!-- 3. Unit Cost without VAT -->
+                        <div class="col-6 col-sm-4 col-lg-2">
+                            <label class="form-label fw-bold text-dark fs-xs" title="Wholesale cost excluding VAT">
+                                Unit Cost (Excl. VAT) <span class="text-danger">*</span>
+                            </label>
                             {{ item_form.unit_cost_price }}
                         </div>
-                        <div class="col-6 col-md-2">
-                            <label class="form-label fw-bold text-muted fs-2xs text-uppercase">Line Estimated Total</label>
-                            <div class="form-control form-control-sm bg-light border-0 font-monospace fw-bold text-primary po-line-total-text" id="lineTotalText_{{ forloop.counter0 }}">
+
+                        <!-- 4. VAT Rate Dropdown (13% or 0%) -->
+                        <div class="col-6 col-sm-4 col-lg-1">
+                            <label class="form-label fw-bold text-dark fs-xs">VAT % <span class="text-danger">*</span></label>
+                            {{ item_form.vat_rate }}
+                        </div>
+
+                        <!-- 5. Calculated VAT Amount -->
+                        <div class="col-6 col-sm-6 col-lg-1">
+                            <label class="form-label fw-bold text-muted fs-3xs text-uppercase">VAT (Rs.)</label>
+                            <div class="form-control form-control-sm bg-light border-0 font-mono text-end text-success fw-bold po-line-vat-text" id="lineVatText_{{ forloop.counter0 }}">
                                 Rs. 0.00
                             </div>
                         </div>
-                        <div class="col-6 col-md-1 text-end">
+
+                        <!-- 6. Line Total with VAT -->
+                        <div class="col-10 col-sm-5 col-lg-2">
+                            <label class="form-label fw-bold text-muted fs-3xs text-uppercase">Total (With VAT)</label>
+                            <div class="form-control form-control-sm bg-light border-0 font-mono text-end text-primary fw-bold po-line-total-text" id="lineTotalText_{{ forloop.counter0 }}">
+                                Rs. 0.00
+                            </div>
+                        </div>
+
+                        <!-- 7. Delete / Remove Button -->
+                        <div class="col-2 col-sm-1 col-lg-1 text-end">
                             {% if formset.can_delete %}
-                                <div class="form-check form-check-inline mt-4">
+                                <div class="form-check form-check-inline mb-2">
                                     {{ item_form.DELETE }}
-                                    <label class="form-check-label text-danger fs-2xs fw-bold" title="Remove line">Remove</label>
+                                    <label class="form-check-label text-danger fs-3xs fw-bold cursor-pointer" title="Remove line">Del</label>
                                 </div>
                             {% endif %}
                         </div>
+
                     </div>
                 </div>
                 {% endfor %}
             </div>
 
-            <!-- Real-Time Order Totals Summary Panel -->
+            <!-- =========================================================================
+                 REAL-TIME ORDER TOTALS SUMMARY PANEL (COMPACT SINGLE-LINE ROW)
+                 ========================================================================= -->
             <div class="p-3 bg-light rounded-3 border mt-3 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
                 <div class="fs-xs text-muted">
-                    <i class="fas fa-calculator text-primary me-1"></i> Order Subtotal updates automatically based on quantity and wholesale rates.
+                    <i class="fas fa-calculator text-primary me-1"></i> Pre-VAT unit rates automatically calculate 13% or 0% tax and update grand totals in real time.
                 </div>
-                <div class="d-flex align-items-center gap-4">
-                    <div class="text-end">
-                        <span class="text-muted fs-2xs text-uppercase fw-bold d-block">Estimated Total Amount</span>
-                        <h4 class="fw-extrabold text-primary font-monospace mb-0" id="poGrandTotalText">Rs. 0.00</h4>
+                
+                <!-- Single-Line, Non-Zigzag Summary Strip -->
+                <div class="d-flex align-items-center gap-2 flex-nowrap overflow-auto">
+                    <!-- Step 1: Subtotal -->
+                    <div class="summary-kpi-badge text-end">
+                        <span class="summary-kpi-label text-muted">Subtotal</span>
+                        <span class="summary-kpi-amount text-dark font-mono" id="poPreVatSubtotalText">Rs. 0.00</span>
+                    </div>
+
+                    <!-- Step 2: VAT (13%) -->
+                    <div class="summary-kpi-badge text-end border-success">
+                        <span class="summary-kpi-label text-success">VAT (13%)</span>
+                        <span class="summary-kpi-amount text-success font-mono" id="poTotalVatText">+Rs. 0.00</span>
+                    </div>
+
+                    <!-- Step 3: Grand Total -->
+                    <div class="summary-kpi-badge total-badge text-end">
+                        <span class="summary-kpi-label text-primary">Grand Total</span>
+                        <span class="summary-kpi-amount text-primary font-mono" id="poGrandTotalText">Rs. 0.00</span>
                     </div>
                 </div>
             </div>
@@ -215,7 +313,7 @@
                 <a href="{% url 'purchases:po_list' %}" class="btn btn-outline-secondary px-4 rounded-pill">
                     Cancel
                 </a>
-                <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm">
+                <button type="submit" class="btn btn-primary px-5 py-2 rounded-pill fw-bold shadow-sm" id="btnSubmitPo">
                     <i class="fas fa-paper-plane me-2"></i> Issue Purchase Order
                 </button>
             </div>
@@ -223,13 +321,15 @@
     </form>
 </div>
 
-<!-- Empty Form Template for Dynamic Line Additions -->
+<!-- =========================================================================
+     EMPTY FORM TEMPLATE FOR DYNAMIC LINE ADDITIONS (+ Add Another Product)
+     ========================================================================= -->
 <div id="emptyPoFormTemplate" style="display: none;">
     <div class="po-item-row" data-row-index="__prefix__">
         {{ formset.empty_form.id }}
-        <div class="row g-3 align-items-end">
-            <!-- Universal Contextual Product Search Template -->
-            <div class="col-12 col-md-5">
+        <div class="row g-2 align-items-end">
+            <!-- Product Search Template -->
+            <div class="col-12 col-lg-4">
                 <label class="form-label fw-bold text-dark fs-xs">Product / Handset Model <span class="text-danger">*</span></label>
                 <div class="contextual-search-wrapper" 
                      data-search-url="/products/api/search/?mode=simple" 
@@ -241,24 +341,49 @@
                            autocomplete="off">
                 </div>
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-bold text-dark fs-xs">Order Quantity <span class="text-danger">*</span></label>
+
+            <!-- Ordered Quantity -->
+            <div class="col-6 col-sm-4 col-lg-1">
+                <label class="form-label fw-bold text-dark fs-xs">Qty <span class="text-danger">*</span></label>
                 {{ formset.empty_form.ordered_quantity }}
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-bold text-dark fs-xs">Unit Cost (NPR) <span class="text-danger">*</span></label>
+
+            <!-- Unit Cost without VAT -->
+            <div class="col-6 col-sm-4 col-lg-2">
+                <label class="form-label fw-bold text-dark fs-xs">Unit Cost (Excl. VAT) <span class="text-danger">*</span></label>
                 {{ formset.empty_form.unit_cost_price }}
             </div>
-            <div class="col-6 col-md-2">
-                <label class="form-label fw-bold text-muted fs-2xs text-uppercase">Line Estimated Total</label>
-                <div class="form-control form-control-sm bg-light border-0 font-monospace fw-bold text-primary po-line-total-text" id="lineTotalText___prefix__">
+
+            <!-- Clean VAT Rate Dropdown (13% and 0% Only) -->
+            <div class="col-6 col-sm-4 col-lg-1">
+                <label class="form-label fw-bold text-dark fs-xs">VAT % <span class="text-danger">*</span></label>
+                <select name="items-__prefix__-vat_rate" class="form-select form-select-sm po-vat-rate text-center" required>
+                    <option value="13.00" selected>13%</option>
+                    <option value="0.00">0%</option>
+                </select>
+            </div>
+
+            <!-- VAT Amount -->
+            <div class="col-6 col-sm-6 col-lg-1">
+                <label class="form-label fw-bold text-muted fs-3xs text-uppercase">VAT (Rs.)</label>
+                <div class="form-control form-control-sm bg-light border-0 font-mono text-end text-success fw-bold po-line-vat-text" id="lineVatText___prefix__">
                     Rs. 0.00
                 </div>
             </div>
-            <div class="col-6 col-md-1 text-end">
-                <div class="form-check form-check-inline mt-4">
+
+            <!-- Line Total with VAT -->
+            <div class="col-10 col-sm-5 col-lg-2">
+                <label class="form-label fw-bold text-muted fs-3xs text-uppercase">Total (With VAT)</label>
+                <div class="form-control form-control-sm bg-light border-0 font-mono text-end text-primary fw-bold po-line-total-text" id="lineTotalText___prefix__">
+                    Rs. 0.00
+                </div>
+            </div>
+
+            <!-- Remove Button -->
+            <div class="col-2 col-sm-1 col-lg-1 text-end">
+                <div class="form-check form-check-inline mb-2">
                     {{ formset.empty_form.DELETE }}
-                    <label class="form-check-label text-danger fs-2xs fw-bold">Remove</label>
+                    <label class="form-check-label text-danger fs-3xs fw-bold cursor-pointer" title="Remove line">Del</label>
                 </div>
             </div>
         </div>
@@ -267,17 +392,97 @@
 
 <script>
 /**
- * PO Dynamic Line Management & Real-time Subtotal Calculator
- * Relies strictly on the master contextual_search.js engine loaded from base.html.
+ * Real-Time Purchase Order Calculator & Dual Calendar Synchronizer Engine
  */
 document.addEventListener('DOMContentLoaded', () => {
     const container = document.getElementById('poFormsetContainer');
     const addBtn = document.getElementById('addNewPoItemBtn');
     const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+    
+    // Grand Summary Elements
+    const subtotalEl = document.getElementById('poPreVatSubtotalText');
+    const vatTotalEl = document.getElementById('poTotalVatText');
     const grandTotalEl = document.getElementById('poGrandTotalText');
 
+    // Date Fields
+    const orderDateAd = document.querySelector('[name="order_date"]');
+    const orderDateBs = document.querySelector('[name="order_date_bs"]');
+    const expDateAd = document.querySelector('[name="expected_delivery_date"]');
+    const expDateBs = document.querySelector('[name="expected_delivery_date_bs"]');
+
+    // -------------------------------------------------------------
+    // 1. Dual Calendar Bidirectional Synchronization (AD <-> BS)
+    // -------------------------------------------------------------
+    function setupCalendarSync(adInput, bsInput) {
+        if (!adInput || !bsInput) return;
+
+        // A. AD -> BS Synchronization
+        adInput.addEventListener('change', () => {
+            const adVal = adInput.value;
+            if (!adVal) return;
+
+            if (typeof NepaliFunctions !== 'undefined') {
+                try {
+                    const converted = NepaliFunctions.AD2BS(adVal);
+                    if (converted) bsInput.value = converted;
+                    return;
+                } catch (e) {}
+            }
+
+            // AJAX Fallback
+            fetch(`/api/convert-date/?action=ad_to_bs&date=${encodeURIComponent(adVal)}`)
+                .then(r => r.json())
+                .then(d => {
+                    if (d.status === 'success' && d.bs_en) {
+                        bsInput.value = d.bs_en;
+                    }
+                })
+                .catch(() => {});
+        });
+
+        // B. BS -> AD Synchronization
+        function onBsChange() {
+            const bsVal = bsInput.value.trim().replace(/\//g, '-').replace(/\./g, '-');
+            if (!bsVal || bsVal.length < 9) return;
+
+            if (typeof NepaliFunctions !== 'undefined') {
+                try {
+                    const converted = NepaliFunctions.BS2AD(bsVal);
+                    if (converted) adInput.value = converted;
+                    return;
+                } catch (e) {}
+            }
+
+            // AJAX Fallback
+            fetch(`/api/convert-date/?action=bs_to_ad&date=${encodeURIComponent(bsVal)}`)
+                .then(r => r.json())
+                .then(d => {
+                    if (d.status === 'success' && d.ad_date) {
+                        adInput.value = d.ad_date;
+                    }
+                })
+                .catch(() => {});
+        }
+
+        bsInput.addEventListener('change', onBsChange);
+        bsInput.addEventListener('input', () => {
+            if (bsInput.value.trim().length === 10) onBsChange();
+        });
+
+        // Bind custom datepicker select event
+        bsInput.addEventListener('dateSelect', onBsChange);
+    }
+
+    setupCalendarSync(orderDateAd, orderDateBs);
+    setupCalendarSync(expDateAd, expDateBs);
+
+    // -------------------------------------------------------------
+    // 2. Real-Time Pre-VAT & 13% VAT Calculation Engine
+    // -------------------------------------------------------------
     function recalculatePoTotals() {
-        let runningTotal = 0;
+        let runningPreVatSubtotal = 0;
+        let runningVatTotal = 0;
+
         document.querySelectorAll('.po-item-row').forEach(row => {
             const deleteCb = row.querySelector('input[name$="-DELETE"]');
             if (deleteCb && deleteCb.checked) {
@@ -286,26 +491,55 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const qtyInput = row.querySelector('input[name$="-ordered_quantity"]');
             const priceInput = row.querySelector('input[name$="-unit_cost_price"]');
+            const vatSelect = row.querySelector('select[name$="-vat_rate"]');
+            const lineVatText = row.querySelector('.po-line-vat-text');
             const lineTotalText = row.querySelector('.po-line-total-text');
 
             const qty = parseFloat(qtyInput ? qtyInput.value : 0) || 0;
-            const price = parseFloat(priceInput ? priceInput.value : 0) || 0;
-            const lineTot = qty * price;
+            const unitCost = parseFloat(priceInput ? priceInput.value : 0) || 0;
+            const vatRate = parseFloat(vatSelect ? vatSelect.value : 13) || 0;
 
-            if (lineTotalText) {
-                lineTotalText.innerText = `Rs. ${lineTot.toFixed(2)}`;
+            // 1. Calculate Base Merchandise Cost
+            const baseAmount = qty * unitCost;
+
+            // 2. Calculate VAT Amount based on Dropdown (13% or 0%)
+            let lineVat = 0;
+            if (vatRate > 0) {
+                lineVat = baseAmount * (vatRate / 100);
             }
 
-            runningTotal += lineTot;
+            // 3. Final Line Total including VAT
+            const lineTotal = baseAmount + lineVat;
+
+            if (lineVatText) {
+                lineVatText.innerText = `Rs. ${lineVat.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            }
+
+            if (lineTotalText) {
+                lineTotalText.innerText = `Rs. ${lineTotal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            }
+
+            runningPreVatSubtotal += baseAmount;
+            runningVatTotal += lineVat;
         });
 
+        const grandTotal = runningPreVatSubtotal + runningVatTotal;
+
+        if (subtotalEl) {
+            subtotalEl.innerText = `Rs. ${runningPreVatSubtotal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        }
+        if (vatTotalEl) {
+            vatTotalEl.innerText = `+Rs. ${runningVatTotal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        }
         if (grandTotalEl) {
-            grandTotalEl.innerText = `Rs. ${runningTotal.toFixed(2)}`;
+            grandTotalEl.innerText = `Rs. ${grandTotal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
         }
     }
 
+    // -------------------------------------------------------------
+    // 3. Event Delegation for Live Product Selection & Formset
+    // -------------------------------------------------------------
     if (container) {
-        // Universal Selection Event Hook for Product Line Items
         container.addEventListener('item-selected', (e) => {
             const row = e.target.closest('.po-item-row');
             if (!row) return;
@@ -328,6 +562,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 qtyInput.value = '1';
             }
 
+            // Auto-align VAT rate if product is tax-exempt
+            const vatSelect = row.querySelector('select[name$="-vat_rate"]');
+            if (vatSelect) {
+                if (extra.is_vat_applicable === false || extra.tax_pricing_type === 'EXEMPT') {
+                    vatSelect.value = '0.00';
+                } else {
+                    vatSelect.value = '13.00';
+                }
+            }
+
             recalculatePoTotals();
         });
 
@@ -335,20 +579,25 @@ document.addEventListener('DOMContentLoaded', () => {
             recalculatePoTotals();
         });
 
+        // Trigger on quantity, rate, or tax dropdown modification
         container.addEventListener('input', (e) => {
-            if (e.target.name && (e.target.name.endsWith('-ordered_quantity') || e.target.name.endsWith('-unit_cost_price'))) {
+            const name = e.target.name || '';
+            if (name.endsWith('-ordered_quantity') || name.endsWith('-unit_cost_price') || name.endsWith('-vat_rate')) {
                 recalculatePoTotals();
             }
         });
 
         container.addEventListener('change', (e) => {
-            if (e.target.name && e.target.name.endsWith('-DELETE')) {
+            const name = e.target.name || '';
+            if (name.endsWith('-vat_rate') || name.endsWith('-DELETE')) {
                 recalculatePoTotals();
             }
         });
     }
 
-    // Dynamic Row Insertion via "+ Add Another Product"
+    // -------------------------------------------------------------
+    // 4. Dynamic Row Insertion via "+ Add Another Product"
+    // -------------------------------------------------------------
     if (addBtn && totalFormsInput && container) {
         addBtn.addEventListener('click', () => {
             const currentCount = parseInt(totalFormsInput.value, 10);
@@ -362,7 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             totalFormsInput.value = currentCount + 1;
 
-            // Automatically initialize universal contextual search on the newly inserted row
+            // Initialize universal contextual search on the new row
             if (typeof window.initContextualSearch === 'function') {
                 window.initContextualSearch(newRow);
             }
@@ -374,6 +623,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Initial calculation on load
     recalculatePoTotals();
 });
 </script>

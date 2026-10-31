@@ -1,34 +1,37 @@
 /**
- * POS Counter Terminal & Billing Engine (Growerp Minimalist Architecture)
+ * POS Counter Terminal & Billing Engine (GrowERP Minimalist Architecture)
  * File: static/js/pos_engine.js
  *
  * Core Capabilities & Upgrades:
- * 1. Bill Type State Management:
+ * 1. Default VAT-Inclusive Retail Pricing (Nepal Convention):
+ *    - Standard counter prices (MRP) are treated as VAT-Inclusive by default.
+ *    - Decomposes Rs. 25,500.00 into Base: Rs. 22,566.37 and VAT: Rs. 2,933.63 while
+ *      keeping Grand Total strictly at Rs. 25,500.00.
+ *    - Eliminates phantom "Change Returned: Rs. 2,933.63" cash leakages.
+ * 2. Bill Type State Management:
  *    - Tracks active document mode: this.billType ('SALES' vs 'ESTIMATE').
  *    - Binds #btnBillTypeSales and #btnBillTypeEstimate buttons with active class toggling.
- *    - Injects bill_type into the checkout payload and parked bill records.
- * 2. Active Thermal Print Driver & Modal Integration:
- *    - Captures data.print_url and data.estimate_id from the server response.
- *    - Dynamically wires up #printThermalReceiptModalBtn to launch the thermal print window.
- *    - Updates the modal title and receipt slip header dynamically based on bill_type.
- *    - Populates line items, IMEIs, and discounts into the receipt preview container.
- * 3. Self-Healing Two-Tier Card Rendering:
- *    - Dynamically detects or creates the items container (#itemsContainer) without null-pointer crashes.
+ *    - Injects bill_type into checkout payload and parked bill records.
+ * 3. Active Thermal Print Driver & Modal Integration:
+ *    - Captures data.print_url and data.estimate_id from server response.
+ *    - Dynamically wires up #printThermalReceiptModalBtn to launch thermal print window.
+ *    - Updates modal title and receipt slip header dynamically based on bill_type.
+ * 4. Self-Healing Two-Tier Card Rendering:
+ *    - Dynamically detects or creates items container (#itemsContainer) without null crashes.
  *    - Renders two-tier stacked cards (.item-card) with instant quantity, price, and discount calculations.
- * 4. Complete Historical & Backdated Bill Synchronization:
+ * 5. Complete Historical & Backdated Bill Synchronization:
  *    - Entire #btnChangeBillDate container is clickable with hover feedback.
- *    - Auto-Select Date Event (onChange): Clicking any day on the calendar instantly selects and updates the bill date.
- *    - Zero "Apply" Button Dependency: Directly applies the date on click without requiring an extra button press.
- *    - Explicit Floating Calendar Cleanup: Immediately closes and hides #ndp-nepali-box so it never hangs on screen.
- *    - Validates selected dates against the active open Fiscal Year (e.g. 2083/84).
- * 5. Zero-Query Instant Suggestions & Live Typeahead:
+ *    - 1-Click Auto-Select Date Event (onChange) without "Apply" button dependency.
+ *    - Closes floating #ndp-nepali-box immediately to prevent on-screen hanging.
+ *    - Validates selected dates against active open Fiscal Year (e.g. 2083/84).
+ * 6. Zero-Query Instant Suggestions & Live Typeahead:
  *    - Barcode / 15-Digit IMEI box opens live suggestions with recent products.
  *    - Patron Details box opens live suggestions with recent customers and debtors.
- *    - Two-tier item row autocomplete queries the live catalog under the active row.
- * 6. Dual-Mode Discounts (% vs Flat Rs.):
+ *    - Two-tier item row autocomplete queries live catalog under active row.
+ * 7. Dual-Mode Discounts (% vs Flat Rs.):
  *    - In-row and whole-bill segmented toggles with instant VAT recalculation and savings badges.
- * 7. Split Payments & Customer Udhaari Allocation [F8].
- * 8. Trade-In [F6], Repair Handover [F7], and Parked Cart [F9/F10] Parity.
+ * 8. Split Payments & Customer Udhaari Allocation [F8].
+ * 9. Trade-In [F6], Repair Handover [F7], and Parked Cart [F9/F10] Parity.
  */
 
 // ============================================================================
@@ -391,7 +394,7 @@ class POSCustomerManager {
 }
 
 // ============================================================================
-// 3. TWO-TIER STACKED CARD CART & CALCULATION ENGINE (SELF-HEALING)
+// 3. TWO-TIER STACKED CARD CART & VAT-INCLUSIVE CALCULATION ENGINE
 // ============================================================================
 class POSCart {
     constructor(engine) {
@@ -854,6 +857,7 @@ class POSCart {
             this.items[rowIdx].name = item.name || item.title;
             this.items[rowIdx].unit_price = price;
             this.items[rowIdx].tax_type = isVatApplicable ? '13%' : 'No';
+            this.items[rowIdx].tax_pricing_type = item.tax_pricing_type || 'INCLUSIVE';
             this.items[rowIdx].requires_imei = Boolean(item.requires_imei || item.requires_imei_tracking);
             this.items[rowIdx].imei_1 = item.imei_1 || '';
 
@@ -908,6 +912,7 @@ class POSCart {
             discount_value: 0,
             discount_percent: 0,
             tax_type: '13%',
+            tax_pricing_type: 'INCLUSIVE',
             requires_imei: false,
             imei_1: '',
             imei_2: '',
@@ -1010,6 +1015,7 @@ class POSCart {
                 discount_value: discountValue,
                 discount_percent: discountType === 'PERCENTAGE' ? discountValue : 0,
                 tax_type: taxType,
+                tax_pricing_type: product.tax_pricing_type || 'INCLUSIVE',
                 requires_imei: isSerializedHandset,
                 imei_1: incomingImei1,
                 imei_2: incomingImei2,
@@ -1122,6 +1128,15 @@ class POSCart {
         this.recalculateTotals();
     }
 
+    /**
+     * Authoritative VAT-Inclusive Retail Pricing Math (Nepal Standard):
+     * MRP / Counter Price = Gross retail amount (e.g. Rs. 25,500.00).
+     * Decomposes line totals into:
+     * - Pre-Tax Base: Rs. 22,566.37
+     * - 13% Output VAT: Rs. 2,933.63
+     * - Total Payable: Rs. 25,500.00
+     * Eliminates phantom cash change leakages.
+     */
     recalculateTotals() {
         let subTotal = 0;
         let itemDiscountTotal = 0;
@@ -1167,6 +1182,8 @@ class POSCart {
 
         let taxableAmount = 0;
         let nonTaxableAmount = 0;
+        let vatAmount = 0;
+        let exclusiveVatToAdd = 0;
 
         for (const item of this.items) {
             const qty = Math.max(0, parseFloat(item.quantity) || 0);
@@ -1188,14 +1205,33 @@ class POSCart {
             const lineBillDisc = netAfterItemDisc > 0 ? (billDiscountAmt * (lineNet / netAfterItemDisc)) : 0;
             const finalLinePayable = Math.max(0, lineNet - lineBillDisc);
 
-            if (item.tax_type === '13%') {
-                taxableAmount += finalLinePayable;
+            const isTaxable = (item.tax_type === '13%');
+            const taxMode = (item.tax_pricing_type || 'INCLUSIVE').toUpperCase().trim();
+
+            if (isTaxable) {
+                if (taxMode === 'EXCLUSIVE') {
+                    // Tax added on top
+                    const lineBase = finalLinePayable;
+                    const lineTax = Math.round(lineBase * 0.13 * 100) / 100;
+                    taxableAmount += lineBase;
+                    vatAmount += lineTax;
+                    exclusiveVatToAdd += lineTax;
+                } else {
+                    // Standard Retail Default: VAT-Inclusive (Tax extracted from price)
+                    // Base = Payable / 1.13, VAT = Payable - Base
+                    const lineBase = Math.round((finalLinePayable / 1.13) * 100) / 100;
+                    const lineTax = Math.round((finalLinePayable - lineBase) * 100) / 100;
+                    taxableAmount += lineBase;
+                    vatAmount += lineTax;
+                }
             } else {
                 nonTaxableAmount += finalLinePayable;
             }
         }
 
-        const vatAmount = taxableAmount * 0.13;
+        // Net merchandise payable before barter trade-in deductions
+        // In INCLUSIVE mode: taxableAmount + vatAmount + nonTaxableAmount == (subTotal - itemDiscountTotal - billDiscountAmt)
+        const grossMerchandisePayable = (netAfterItemDisc - billDiscountAmt) + exclusiveVatToAdd;
 
         let tradeInCredit = 0;
         if (this.tradeInInput) {
@@ -1204,8 +1240,8 @@ class POSCart {
             tradeInCredit = this.engine.tradeInManager.getCreditAmount();
         }
 
-        const payableTotal = Math.max(0, (taxableAmount + vatAmount + nonTaxableAmount) - tradeInCredit);
-        const grandTotal = Math.round(payableTotal);
+        const payableTotal = Math.max(0, (subTotal - itemDiscountTotal - billDiscountAmt + exclusiveVatToAdd) - tradeInCredit);
+        const grandTotal = Math.round(payableTotal * 100) / 100;
         const combinedDiscount = itemDiscountTotal + billDiscountAmt;
 
         if (this.subtotalText) {
@@ -1533,6 +1569,7 @@ class POSHoldCartManager {
             discount_input_value: item.discount_value || 0,
             discount_percent: item.discount_percent || 0,
             tax_type: item.tax_type || '13%',
+            tax_pricing_type: item.tax_pricing_type || (item.tax_type === '13%' ? 'INCLUSIVE' : 'EXEMPT'),
             requires_imei: Boolean(item.requires_imei),
             imei_1: item.imei_1 || '',
             imei_2: item.imei_2 || '',
@@ -1676,7 +1713,8 @@ class POSHoldCartManager {
                         ...item,
                         unit_price: item.unit_price || item.price || 0,
                         discount_value: item.discount_value || item.discount_amount || 0,
-                        tax_type: item.tax_type || (item.tax_pricing_type === 'EXEMPT' ? 'No' : '13%')
+                        tax_type: item.tax_type || (item.tax_pricing_type === 'EXEMPT' ? 'No' : '13%'),
+                        tax_pricing_type: item.tax_pricing_type || (item.tax_type === 'No' ? 'EXEMPT' : 'INCLUSIVE')
                     });
                 });
 
@@ -1922,6 +1960,10 @@ class POSCheckout {
                 effectivePct = (Math.min(discVal, gross) / gross) * 100;
             }
 
+            const isTaxable = (item.tax_type === '13%');
+            // INCLUSIVE RETAIL STANDARD: Default to INCLUSIVE for taxable merchandise!
+            const taxPricingType = isTaxable ? (item.tax_pricing_type || 'INCLUSIVE') : 'EXEMPT';
+
             return {
                 product_id: item.product_id,
                 item_instance_id: item.item_instance_id || null,
@@ -1933,8 +1975,9 @@ class POSCheckout {
                 discount_value: discVal,
                 discount_input_value: discVal,
                 discount_percent: effectivePct,
-                tax_pricing_type: item.tax_type === '13%' ? 'EXCLUSIVE' : 'EXEMPT',
-                vat_rate: item.tax_type === '13%' ? 13 : 0,
+                tax_pricing_type: taxPricingType,
+                is_vat_applicable: isTaxable,
+                vat_rate: isTaxable ? 13 : 0,
                 requires_imei: Boolean(item.requires_imei),
                 imei_1: item.imei_1 || '',
                 imei_number: item.imei_1 || '',
@@ -2840,7 +2883,8 @@ class SmartPOSEngine {
                     unit_price: 0,
                     imei_1: code.length >= 14 ? code : '',
                     requires_imei: code.length >= 14,
-                    tax_type: '13%'
+                    tax_type: '13%',
+                    tax_pricing_type: 'INCLUSIVE'
                 });
                 this.showNotification(`Item '${code}' added to bill. Please verify name and rate.`, 'info');
                 POSAudioSynthesizer.play('second');
@@ -2899,7 +2943,6 @@ class SmartPOSEngine {
             itemsContainer.innerHTML = this.cart.items.map(i => {
                 const qty = i.quantity || 1;
                 const price = (i.unit_price !== undefined) ? i.unit_price : 0;
-                const lineTotal = qty * price;
                 const imei = i.imei_1 || i.imei_number || '';
                 return `
                     <div class="mb-1">

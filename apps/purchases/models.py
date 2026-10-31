@@ -2,41 +2,45 @@
 Procurement, Supplier Udhaari, Goods Received Notes (GRN) & Commercial Purchase Return Models.
 
 Key Architectural Improvements & Verification Hardening:
-1. Strict Line-to-Header VAT Sum Invariant (Verified & Hardened):
+1. Purchase Order Dual Calendar Dates (AD & BS):
+   - Added `expected_delivery_date_bs` alongside `expected_delivery_date`.
+   - Updated `PurchaseOrder.save()` to invoke `sync_nepali_and_ad_dates` bidirectionally for
+     both the Order Date pair (with Nepali Fiscal Year derivation) and the Expected Delivery Date pair.
+
+2. Purchase Order Item-Level VAT Persistence & Calculation:
+   - Added `vat_rate` (strict choices of 13.00% vs. 0.00%) and `tax_amount` to `PurchaseOrderItem`.
+   - Overrode `PurchaseOrderItem.save()` to treat `unit_cost_price` as the tax-exclusive base rate,
+     compute pre-tax subtotal (`ordered_quantity * unit_cost_price`), calculate `tax_amount`,
+     and assign `line_total = pre_tax_subtotal + tax_amount`.
+
+3. Strict Line-to-Header VAT Sum Invariant on GRN:
    - In `GoodsReceivedNote.recalculate_financials()`, line-level VAT is computed individually per line item:
      * Taxable Pot: Items with 13% VAT generate exact line VAT (`tax_amount` / `vat_amount`).
      * Non-Taxable Pot: Items with 0% VAT generate exactly `0.00` VAT.
    - The GRN header's `vat_amount` is calculated strictly as the exact sum of all line-level `tax_amount`s:
-     $$\\text{GRN.vat\\_amount} = \\sum_{i} \\text{GRNItem}_{i}.\\text{tax\\_amount}$$
+     GRN.vat_amount = sum(GRNItem.tax_amount)
    - Guarantees front-end and back-end audit drill-down consistency between the VAT registers and invoice details.
 
-2. Supplier Udhaari Balance Continuous Recalculation (Fixes Spot-Payment Debt Inflation):
-   - In `Supplier.recalculate_balance_from_ledger()`, the mathematical formula strictly balances:
-     $$\\text{True Balance} = \\text{Opening Balance} + \\sum \\text{Purchase Bills} - \\sum \\text{Payments} - \\sum \\text{Returns} \\pm \\text{Adjustments}$$
-   - Includes defensive legacy audit reconciliation: if an older purchase bill exists where cash was
-     paid on delivery but no explicit linked `PAYMENT` row was generated, the paid amount is deducted
+4. Supplier Udhaari Balance Continuous Recalculation (Spot-Payment Continuity):
+   - True Balance = Opening Balance + Sum(Bills) - Sum(Payments) - Sum(Returns) +/- Adjustments.
+   - Defensive legacy audit reconciliation: if an older purchase bill exists where cash was
+     paid on delivery but no explicit linked PAYMENT row was generated, the paid amount is deducted
      so historical data imports do not artificially inflate liabilities.
 
-3. Coherent Pre-Tax Extraction for VAT-Inclusive Purchases (Fixes Inclusive Discount Math):
-   - In both `GoodsReceivedNote.recalculate_financials()` and `GRNItem.save()`, when `vat_handling_mode == 'INCLUSIVE'`
-     and the line has 13% VAT, discounts and base values are separated into their pre-tax base using
-     the exact statutory tax divisor `1.13`.
+5. Coherent Pre-Tax Extraction for VAT-Inclusive Purchases (Inclusive Discount Math):
+   - When `vat_handling_mode == 'INCLUSIVE'` and the line has 13% VAT, discounts and base values are separated
+     into their pre-tax base using the exact statutory tax divisor 1.13.
    - Items marked with 0% VAT bypass tax extraction completely (divisor 1.00).
-   - Pre-tax gross is reconstituted as `taxable_extracted + pre_tax_discount`, ensuring both numbers reside on
-     an identical pre-tax basis and eliminating gross amount distortion.
 
-4. 5-Tier Proportional Landed Cost Overhead Allocation:
+6. 5-Tier Proportional Landed Cost Overhead Allocation:
    - Accurately distributes Freight, Customs/Duty, Handling & Unloading, Transit Insurance, and Other Overheads
      proportionally across line items based on net merchandise value to establish exact unit landed costs (`unit_landed_cost`).
 
-5. Custom Physical Batch Number Persistence & Delivery Challan Trackers:
+7. Custom Physical Batch Number Persistence & Delivery Challan Trackers:
    - Line-level `batch_number` on `GRNItem` allowing direct capture of manufacturer/vendor batch identifiers.
    - Distinct tracking for `challan_no`, `challan_date`, and `challan_date_bs`.
 
-6. Bidirectional Date & Fiscal Year Synchronization:
-   - Standardizes Bikram Sambat (BS) and Gregorian (AD) dates across POs, GRNs, Returns, and Ledger entries.
-
-7. Structured Multi-Set Vertical IMEI Parser Property (`parsed_imei_pairs` on `GRNItem`):
+8. Structured Multi-Set Vertical IMEI Parser Property (`parsed_imei_pairs` on `GRNItem`):
    - Converts raw unstructured IMEI text into clean, structured records separating Phone Sets, SIM 1, and SIM 2.
 """
 
@@ -59,7 +63,6 @@ from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import parse_bs_date_components
 
 logger = logging.getLogger(__name__)
-
 
 def sync_nepali_and_ad_dates(
     instance,
@@ -144,7 +147,6 @@ def sync_nepali_and_ad_dates(
                 setattr(instance, fy_field_name, NepaliCalendar.get_fiscal_year(bs_y, bs_m))
         except Exception as e:
             logger.warning(f"[sync_nepali_and_ad_dates] Could not convert AD date '{current_ad}': {e}")
-
 
 # =============================================================================
 # SUPPLIER / DISTRIBUTOR MODEL
@@ -516,14 +518,14 @@ class Supplier(TimeStampedModel):
             )
         return new_balance
 
-
 # =============================================================================
-# PURCHASE ORDER (PO) MODELS
+# PURCHASE ORDER (PO) MODELS (ENHANCED WITH BS DATES & ITEM-LEVEL VAT)
 # =============================================================================
 class PurchaseOrder(TimeStampedModel):
     """
     Purchase Order (PO) Header.
-    Allows manual specification of historical order dates with automatic BS & Fiscal Year sync.
+    Allows manual specification of historical order dates and expected delivery dates
+    with automatic bidirectional Gregorian (AD) and Bikram Sambat (BS) date synchronization.
     """
     PO_STATUS = [
         ('DRAFT', 'Draft PO'),
@@ -537,6 +539,7 @@ class PurchaseOrder(TimeStampedModel):
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='purchase_orders')
     branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name='purchase_orders')
 
+    # Order Date Trackers (AD & BS)
     order_date = models.DateField(
         default=timezone.now,
         db_index=True,
@@ -560,12 +563,36 @@ class PurchaseOrder(TimeStampedModel):
         help_text=_("Nepali Fiscal Year derived from BS date (e.g. 2080/81, 2081/82, 2082/83, 2083/84).")
     )
 
-    expected_delivery_date = models.DateField(blank=True, null=True)
+    # Expected Delivery Date Trackers (AD & BS)
+    expected_delivery_date = models.DateField(
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Expected Delivery Date (AD)")
+    )
+    expected_delivery_date_bs = models.CharField(
+        max_length=15,
+        blank=True,
+        null=True,
+        db_index=True,
+        verbose_name=_("Expected Delivery Date (BS)"),
+        help_text=_("Bikram Sambat formatted delivery date string (YYYY-MM-DD).")
+    )
+
     status = models.CharField(max_length=25, choices=PO_STATUS, default='DRAFT', db_index=True)
     
-    subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
-    tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
-    total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    subtotal = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Order Pre-VAT Subtotal (NPR)")
+    )
+    tax_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Total 13% VAT Amount (NPR)")
+    )
+    total_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Total Order Amount with VAT (NPR)")
+    )
     
     notes = models.TextField(blank=True, null=True)
     created_by = models.ForeignKey(
@@ -582,29 +609,70 @@ class PurchaseOrder(TimeStampedModel):
             models.Index(fields=['fiscal_year', 'branch'], name='idx_po_fy_branch'),
             models.Index(fields=['po_number'], name='idx_po_num'),
             models.Index(fields=['supplier', 'order_date'], name='idx_po_supplier_date'),
+            models.Index(fields=['expected_delivery_date'], name='idx_po_exp_del_ad'),
+            models.Index(fields=['expected_delivery_date_bs'], name='idx_po_exp_del_bs'),
         ]
 
     def __str__(self):
         return f"{self.po_number} - {self.supplier.company_name} ({self.status})"
 
     def save(self, *args, **kwargs):
+        # 1. Synchronize Order Date (AD <-> BS) and derive Nepali Fiscal Year
         sync_nepali_and_ad_dates(
             instance=self,
             ad_field_name='order_date',
             bs_field_name='order_date_bs',
             fy_field_name='fiscal_year'
         )
+        # 2. Synchronize Expected Delivery Date (AD <-> BS)
+        if self.expected_delivery_date or self.expected_delivery_date_bs:
+            sync_nepali_and_ad_dates(
+                instance=self,
+                ad_field_name='expected_delivery_date',
+                bs_field_name='expected_delivery_date_bs',
+                fy_field_name=None
+            )
         super().save(*args, **kwargs)
 
-
 class PurchaseOrderItem(TimeStampedModel):
+    """
+    Line item in a Purchase Order.
+    Tracks product, packaging unit, ordered quantity, unit cost price (excluding VAT),
+    line VAT rate (13% or 0%), calculated line tax amount, and final line total including VAT.
+    """
+    VAT_RATE_CHOICES = [
+        (Decimal('13.00'), _('13% (Standard VAT)')),
+        (Decimal('0.00'), _('0% (Exempt / Non-VAT)')),
+    ]
+
     purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='po_items')
     unit = models.ForeignKey(UnitOfMeasurement, on_delete=models.PROTECT)
-    ordered_quantity = models.DecimalField(max_digits=10, decimal_places=3)
+    
+    ordered_quantity = models.DecimalField(max_digits=10, decimal_places=3, default=Decimal('1.000'))
     received_quantity = models.DecimalField(max_digits=10, decimal_places=3, default=Decimal('0.000'))
-    unit_cost_price = models.DecimalField(max_digits=12, decimal_places=2)
-    line_total = models.DecimalField(max_digits=14, decimal_places=2)
+    
+    unit_cost_price = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Unit Cost Price without VAT (NPR)"),
+        help_text=_("Pre-VAT wholesale rate agreed with supplier.")
+    )
+    vat_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('13.00'),
+        choices=VAT_RATE_CHOICES,
+        verbose_name=_("VAT Rate (%)"),
+        help_text=_("VAT rate applicable to this PO line item (13.00% or 0.00%).")
+    )
+    tax_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Line VAT Amount (NPR)"),
+        help_text=_("Calculated 13% or 0% tax amount for this line.")
+    )
+    line_total = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        verbose_name=_("Line Total with VAT (NPR)"),
+        help_text=_("Pre-VAT subtotal plus calculated tax amount.")
+    )
 
     class Meta:
         db_table = 'pur_po_items'
@@ -615,8 +683,30 @@ class PurchaseOrderItem(TimeStampedModel):
         ]
 
     def __str__(self):
-        return f"{self.product.name} ({self.ordered_quantity} {self.unit.code})"
+        unit_code = self.unit.code if self.unit else 'Pcs'
+        return f"{self.product.name} ({self.ordered_quantity} {unit_code}) - Rs. {self.line_total}"
 
+    @property
+    def vat_amount(self) -> Decimal:
+        """Alias for tax_amount to provide seamless consistency across reports and templates."""
+        return self.tax_amount or Decimal('0.00')
+
+    def save(self, *args, **kwargs):
+        qty = self.ordered_quantity if (self.ordered_quantity is not None and self.ordered_quantity > Decimal('0.000')) else Decimal('1.000')
+        cost = self.unit_cost_price if self.unit_cost_price is not None else Decimal('0.00')
+        pre_tax_subtotal = (qty * cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # Normalize vat_rate to strictly 13.00 or 0.00
+        current_rate = self.vat_rate if (self.vat_rate is not None and self.vat_rate > Decimal('0.00')) else Decimal('0.00')
+        if current_rate > Decimal('0.00'):
+            self.vat_rate = Decimal('13.00')
+            self.tax_amount = (pre_tax_subtotal * (self.vat_rate / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            self.vat_rate = Decimal('0.00')
+            self.tax_amount = Decimal('0.00')
+
+        self.line_total = (pre_tax_subtotal + self.tax_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        super().save(*args, **kwargs)
 
 # =============================================================================
 # GOODS RECEIVED NOTE (GRN) & INWARD PROCUREMENT
@@ -1111,7 +1201,6 @@ class GoodsReceivedNote(TimeStampedModel):
                 'net_total_amount', 'paid_amount', 'due_amount', 'updated_at'
             ])
 
-
 class GRNItem(TimeStampedModel):
     """
     Line item in GRN with package unit conversion, custom batch numbers, dual-mode discounts,
@@ -1251,20 +1340,13 @@ class GRNItem(TimeStampedModel):
 
     @property
     def vat_amount(self) -> Decimal:
-        """
-        Alias for tax_amount to provide seamless consistency across reports and templates.
-        """
+        """Alias for tax_amount to provide seamless consistency across reports and templates."""
         return self.tax_amount or Decimal('0.00')
 
     @property
     def parsed_imei_pairs(self) -> List[Dict[str, Any]]:
         """
         Parses raw text from scanned_imei_list into structured phone set records.
-        Handles:
-        - Step A: Read raw text. Returns empty list if blank.
-        - Step B: Breaks input into individual phone sets across newlines, spaces, commas, or semicolons.
-        - Step C: Separates SIM 1 and SIM 2 using the pipe symbol ('|').
-        - Step D: Packages clean structured records for vertical template rendering.
         """
         raw_text = str(self.scanned_imei_list or '').strip()
         if not raw_text:
@@ -1357,7 +1439,6 @@ class GRNItem(TimeStampedModel):
                 self.unit_landed_cost = Decimal('0.00')
 
         super().save(*args, **kwargs)
-
 
 # =============================================================================
 # COMMERCIAL PURCHASE RETURN / DEBIT NOTE
@@ -1473,7 +1554,6 @@ class PurchaseReturn(TimeStampedModel):
         )
         super().save(*args, **kwargs)
 
-
 class PurchaseReturnItem(TimeStampedModel):
     purchase_return = models.ForeignKey(
         PurchaseReturn, on_delete=models.CASCADE, related_name='items',
@@ -1553,7 +1633,6 @@ class PurchaseReturnItem(TimeStampedModel):
             self.tax_amount = Decimal('0.00')
         self.line_total = gross + self.tax_amount
         super().save(*args, **kwargs)
-
 
 # =============================================================================
 # SUPPLIER UDHAARI (ACCOUNTS PAYABLE) LEDGER (HISTORICAL DATES INCLUDED)
