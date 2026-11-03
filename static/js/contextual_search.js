@@ -1,29 +1,3 @@
-/**
- * Universal Contextual Asynchronous Searchable Dropdown Engine
- * Enterprise ERP - Mobile Shop & Optical Store Management System
- * File: static/js/contextual_search.js
- *
- * Core Capabilities:
- * 1. Dual Element Initialization:
- *    - Direct Inputs: Decorated <input data-autocomplete-url="..."> or .async-search-input.
- *    - Container Wrappers: Containers such as <div class="async-search-group"> or
- *      <div class="contextual-search-wrapper"> that contain only a hidden input. Automatically
- *      generates visible text search input, loading indicators, clear buttons, and dropdown boxes.
- * 2. Zero-Query Instant Population:
- *    - Focusing or clicking an empty input triggers a fetch with q="" to display top 15-20
- *      active, recent, or default records immediately without requiring typing.
- * 3. Dynamic Parameter & Chaining Support:
- *    - Supports dynamic query parameters (e.g. data-extra-params, category_id filtering, supplier scoping).
- *    - Exposes setUrl(newUrl) and setExtraParams(paramsObj) to dynamically re-chain dependent dropdowns.
- * 4. Template-Safe Isolation & Clean Re-initialization:
- *    - Automatically ignores dormant template/blueprint elements during page-wide initialization scans.
- *    - Inherits search URLs from parent wrappers to prevent "Endpoint URL is not configured" errors.
- *    - Prevents duplicate initializations when an input sits inside an already-initialized search container.
- * 5. Robust Keyboard Navigation & Form Sync:
- *    - ArrowDown, ArrowUp, Enter, and Escape support with auto-scrolling into view.
- *    - Synchronizes selected ID with hidden inputs and dispatches native 'change' and custom 'item-selected' events.
- */
-
 (function () {
     'use strict';
 
@@ -60,7 +34,6 @@
             const el = this.target;
             const parentWrapper = el.closest ? el.closest('.contextual-search-wrapper, .async-search-group') : null;
 
-            // Inherit endpoint URL from the element or its parent container
             this.url = el.dataset.searchUrl || 
                        el.dataset.autocompleteUrl || 
                        (parentWrapper ? (parentWrapper.dataset.searchUrl || parentWrapper.dataset.autocompleteUrl) : '') || 
@@ -137,12 +110,10 @@
                 this.input.classList.add('async-search-input');
             }
 
-            // Sync URL attribute onto the input itself for direct reference
             if (this.url && !this.input.dataset.searchUrl) {
                 this.input.dataset.searchUrl = this.url;
             }
 
-            // Inline action controls (Spinner & Clear) - Clean previous duplicate elements if re-initializing
             let controlsWrap = this.wrapper.querySelector('.async-controls-wrap');
             if (controlsWrap) {
                 controlsWrap.remove();
@@ -165,7 +136,6 @@
             this.clearBtn.title = 'Clear selection';
             controlsWrap.appendChild(this.clearBtn);
 
-            // Clean previous dropdown results container if re-initializing
             let existingDropdown = this.wrapper.querySelector('.async-search-dropdown');
             if (existingDropdown) {
                 existingDropdown.remove();
@@ -174,7 +144,6 @@
             this.dropdown.className = 'async-search-dropdown shadow-lg';
             this.wrapper.appendChild(this.dropdown);
 
-            // Clean previous selected chip if re-initializing
             let existingChip = this.wrapper.querySelector('.async-selected-chip');
             if (existingChip) {
                 existingChip.remove();
@@ -187,7 +156,6 @@
             `;
             this.wrapper.appendChild(this.chip);
 
-            // Pre-fill initial selection if provided
             const initialId = this.target.dataset.initialId || (this.hiddenInput ? this.hiddenInput.value : '');
             const initialTitle = this.target.dataset.initialTitle || this.target.dataset.initialLabel || this.input.dataset.initialLabel || '';
             const initialSubtitle = this.target.dataset.initialSubtitle || '';
@@ -202,7 +170,6 @@
         }
 
         bindEvents() {
-            // Zero-Query population on Focus and Click
             const triggerInitialFetch = () => {
                 if (this.hiddenInput && this.hiddenInput.value && !this.chip.classList.contains('d-none')) {
                     return;
@@ -220,7 +187,6 @@
                 }
             });
 
-            // Debounced typing handler
             this.input.addEventListener('input', () => {
                 clearTimeout(this.debounceTimer);
                 const query = this.input.value.trim();
@@ -244,10 +210,8 @@
                 }, this.debounceDelay);
             });
 
-            // Keyboard navigation
             this.input.addEventListener('keydown', (e) => this.handleKeydown(e));
 
-            // Inline clear button
             if (this.clearBtn) {
                 this.clearBtn.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -255,13 +219,11 @@
                 });
             }
 
-            // Chip remove button
             this.chip.querySelector('.chip-remove').addEventListener('click', (e) => {
                 e.preventDefault();
                 this.clearSelection();
             });
 
-            // Close dropdown when clicking outside
             document.addEventListener('click', (e) => {
                 if (!this.wrapper.contains(e.target)) {
                     this.closeDropdown();
@@ -508,10 +470,159 @@
         }
     }
 
-    /**
-     * Unified Global Contextual Search Initializer
-     * Accepts Document, Form, Modal, Table Row, or Container DIV
-     */
+    class TableRealtimeFilterEngine {
+        constructor(config = {}) {
+            this.input = typeof config.input === 'string' ? document.querySelector(config.input) : config.input;
+            this.clearBtn = typeof config.clearBtn === 'string' ? document.querySelector(config.clearBtn) : config.clearBtn;
+            this.tableBody = typeof config.tableBody === 'string' ? document.querySelector(config.tableBody) : config.tableBody;
+            this.noResultsRow = typeof config.noResultsRow === 'string' ? document.querySelector(config.noResultsRow) : config.noResultsRow;
+            this.queryDisplaySpan = typeof config.queryDisplaySpan === 'string' ? document.querySelector(config.queryDisplaySpan) : config.queryDisplaySpan;
+            this.counterBadge = typeof config.counterBadge === 'string' ? document.querySelector(config.counterBadge) : config.counterBadge;
+            this.rowSelector = config.rowSelector || '.grn-data-row, .table-search-row';
+
+            if (!this.input || !this.tableBody) {
+                return;
+            }
+
+            this.indexedRows = [];
+            this.totalRowsCount = 0;
+
+            this.buildIndex();
+            this.bindEvents();
+
+            if (this.input.value.trim().length > 0) {
+                this.filter(this.input.value);
+            }
+        }
+
+        buildIndex() {
+            const rows = Array.from(this.tableBody.querySelectorAll(this.rowSelector));
+            this.totalRowsCount = rows.length;
+
+            this.indexedRows = rows.map(row => {
+                const grn = (row.dataset.grn || '').toLowerCase();
+                const supplier = (row.dataset.supplier || '').toLowerCase();
+                const bill = (row.dataset.bill || '').toLowerCase();
+                const date = (row.dataset.date || '').toLowerCase();
+                const status = (row.dataset.status || '').toLowerCase();
+                const amount = (row.dataset.amount || '').toLowerCase();
+                const fullText = row.textContent.toLowerCase();
+
+                return {
+                    element: row,
+                    searchData: `${grn} ${supplier} ${bill} ${date} ${status} ${amount} ${fullText}`.replace(/\s+/g, ' ')
+                };
+            });
+        }
+
+        filter(query) {
+            const cleanQuery = (query || '').toLowerCase().trim();
+            const tokens = cleanQuery.split(/\s+/).filter(Boolean);
+
+            let visibleCount = 0;
+
+            this.indexedRows.forEach(item => {
+                const matches = tokens.length === 0 || tokens.every(token => item.searchData.includes(token));
+
+                if (matches) {
+                    item.element.style.display = '';
+                    visibleCount++;
+                } else {
+                    item.element.style.display = 'none';
+                }
+            });
+
+            if (this.noResultsRow) {
+                if (visibleCount === 0 && this.totalRowsCount > 0) {
+                    if (this.queryDisplaySpan) {
+                        this.queryDisplaySpan.innerText = query;
+                    }
+                    this.noResultsRow.style.display = '';
+                } else {
+                    this.noResultsRow.style.display = 'none';
+                }
+            }
+
+            if (this.counterBadge) {
+                this.counterBadge.innerText = `Showing ${visibleCount} of ${this.totalRowsCount} GRNs`;
+            }
+
+            if (this.clearBtn) {
+                this.clearBtn.style.display = cleanQuery.length > 0 ? 'block' : 'none';
+            }
+        }
+
+        reset() {
+            if (this.input) {
+                this.input.value = '';
+            }
+            this.filter('');
+            if (this.input) {
+                this.input.focus();
+            }
+        }
+
+        bindEvents() {
+            this.input.addEventListener('input', (e) => {
+                this.filter(e.target.value);
+            });
+
+            if (this.clearBtn) {
+                this.clearBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.reset();
+                });
+            }
+
+            this.input.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.reset();
+                }
+            });
+        }
+    }
+
+    function initTableSearch(container = document) {
+        if (!container) return;
+
+        const grnSearchInput = container.querySelector('#grnSearchInput');
+        const grnTableBody = container.querySelector('#grnTableBody');
+
+        if (grnSearchInput && grnTableBody && !grnSearchInput.dataset.tableSearchInitialized) {
+            grnSearchInput.dataset.tableSearchInitialized = 'true';
+            new TableRealtimeFilterEngine({
+                input: grnSearchInput,
+                clearBtn: container.querySelector('#clearGrnSearchBtn'),
+                tableBody: grnTableBody,
+                noResultsRow: container.querySelector('#noGrnMatchesRow'),
+                queryDisplaySpan: container.querySelector('#searchQueryTermText'),
+                counterBadge: container.querySelector('#grnCounterBadge'),
+                rowSelector: '.grn-data-row'
+            });
+        }
+
+        const genericSearchInputs = container.querySelectorAll('[data-table-search-target]');
+        genericSearchInputs.forEach(input => {
+            if (input.dataset.tableSearchInitialized) return;
+            input.dataset.tableSearchInitialized = 'true';
+
+            const targetTableBodyId = input.dataset.tableSearchTarget;
+            const targetTableBody = document.querySelector(targetTableBodyId);
+            if (targetTableBody) {
+                new TableRealtimeFilterEngine({
+                    input: input,
+                    clearBtn: input.dataset.clearBtn ? document.querySelector(input.dataset.clearBtn) : null,
+                    tableBody: targetTableBody,
+                    noResultsRow: input.dataset.noResultsRow ? document.querySelector(input.dataset.noResultsRow) : null,
+                    queryDisplaySpan: input.dataset.queryDisplay ? document.querySelector(input.dataset.queryDisplay) : null,
+                    counterBadge: input.dataset.counterBadge ? document.querySelector(input.dataset.counterBadge) : null,
+                    rowSelector: input.dataset.rowSelector || 'tr'
+                });
+            }
+        });
+    }
+
     function initContextualSearch(container = document) {
         if (!container) return;
 
@@ -534,42 +645,44 @@
         }
 
         elements.forEach(el => {
-            // Guard 1: Never initialize blueprint templates or dormant prototype containers
             if (el.closest('template, [id*="template" i], [id*="Template"], [data-template]')) {
                 return;
             }
 
-            // Guard 2: If this element is an inner <input> inside an outer wrapper, skip the inner input to prevent duplicate overwrites
             if (el.tagName === 'INPUT' && el.closest('.contextual-search-wrapper, .async-search-group')) {
                 return;
             }
 
-            // Guard 3: Skip elements already successfully initialized on the live document
             if (el.dataset.asyncSearchInitialized === 'true' && container === document) {
                 return;
             }
 
             new ContextualSearchDropdown(el);
         });
+
+        initTableSearch(container);
     }
 
-    // Protect Global Scope against accidental inline script overwrites
     try {
         Object.defineProperty(window, 'initContextualSearch', {
             value: initContextualSearch,
             writable: false,
             configurable: false
         });
+        Object.defineProperty(window, 'TableRealtimeFilterEngine', {
+            value: TableRealtimeFilterEngine,
+            writable: false,
+            configurable: false
+        });
     } catch (e) {
         window.initContextualSearch = initContextualSearch;
+        window.TableRealtimeFilterEngine = TableRealtimeFilterEngine;
     }
 
-    // Auto-mount on DOM Ready
     document.addEventListener('DOMContentLoaded', () => {
         window.initContextualSearch(document);
     });
 
-    // Re-mount on dynamic Bootstrap Modal display
     document.addEventListener('shown.bs.modal', (e) => {
         if (e.target) {
             window.initContextualSearch(e.target);

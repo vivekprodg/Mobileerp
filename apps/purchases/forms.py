@@ -1,34 +1,3 @@
-"""
-Procurement, Supplier Udhaari & Purchase Return Forms.
-
-Upgraded Capabilities:
-1. PurchaseOrderForm:
-   - Full bidirectional date synchronization between `order_date` (AD) and `order_date_bs` (BS).
-   - Full bidirectional date synchronization between `expected_delivery_date` (AD) and `expected_delivery_date_bs` (BS).
-   - Visual calendar class bindings (`nepali-datepicker`) for instant Bikram Sambat datepicker activation.
-   - Fiscal Year Locking Guard: Prevents backdating purchase orders into audited and closed fiscal years.
-2. PurchaseOrderItemForm & PurchaseOrderItemFormSet:
-   - Exposes `vat_rate` with a compact dropdown select widget strictly displaying '13%' and '0%'.
-   - Strict server-side validation enforcing that `unit_cost_price` cannot be negative, `ordered_quantity` must be greater than zero, and `vat_rate` is strictly 13.00% or 0.00%.
-3. GoodsReceivedNoteForm:
-   - Full bidirectional date synchronization between `bill_date` (A.D.) and `bill_date_bs` (B.S.).
-   - Distinct delivery challan synchronization: `challan_no`, `challan_date` (AD), and `challan_date_bs` (BS).
-   - Explicit Fiscal Year Lock Enforcement: Rejects bills falling within closed/audited fiscal years.
-   - Dual VAT Handling Modes: `vat_handling_mode` ('EXCLUSIVE' vs. 'INCLUSIVE') with server-side validation.
-   - Automated Tax Alignment: Automatically aligns `is_vat_bill` based on whether any item lines have 13% VAT.
-   - 5-Tier Overhead Expense Controls: Freight, Customs Duty, Handling & Unloading, Transit Insurance, and Other Overheads.
-   - Multi-Field Observations: `consignment_narration`, `receiving_notes`, and `internal_notes`.
-   - Flexible Draft Saving: Allows saving in-progress vouchers as drafts without failing on incomplete mandatory fields.
-4. GRNItemForm & BaseGRNItemFormSet:
-   - Locked Tax Rate Dropdown Widget: Renders `vat_rate` strictly as a locked select dropdown (13% or 0%).
-   - Strict Tax Rate Validation: Rejects arbitrary tax percentages (preventing typos like 130%).
-   - Automated Tax Applicability Sync: Sets `is_vat_applicable=True` on 13% and `is_vat_applicable=False` on 0%.
-   - Captures physical vendor batch numbers via `batch_number`.
-   - Dynamic Master Switch IMEI Enforcement (Strict Mode vs. Backlog Mode).
-5. PurchaseReturnForm & SupplierPaymentForm:
-   - Synchronized historical date inputs with closed fiscal year validation guards.
-"""
-
 import re
 import uuid
 from datetime import date, datetime
@@ -53,41 +22,26 @@ from apps.accounting.models import AccountingFiscalYear
 # 1. SUPPLIER FORM
 # ==============================================================================
 class SupplierForm(forms.ModelForm):
-    """
-    Comprehensive Validator & Input Controller for Supplier Registration.
-    Strictly enforces 5 core mandatory fields while cleanly organizing
-    banking, DOA policies, ratings, and KYC document attachments.
-    """
-
     class Meta:
         model = Supplier
         fields = [
-            # 1. Core Identification (5 Mandatory)
             'company_name', 'contact_person', 'phone_number', 'address', 'registration_number',
-            # 2. Type & Secondary Location Details
             'supplier_type', 'designation', 'alt_phone', 'email', 'pan_number', 'vat_number',
             'city', 'province', 'country',
-            # 3. Business Terms & Banking
             'credit_period_days', 'credit_limit', 'opening_balance', 'balance_type',
             'preferred_payment_method', 'bank_name', 'bank_account_number', 'account_holder_name',
             'bank_branch', 'qr_payment_details',
-            # 4. Catalog Coverage & Vendor Evaluation
             'product_categories_supplied', 'brands_supplied', 'is_preferred', 'rating',
-            # 5. Mobile-Specific Distributor & Warranty Policies
             'is_authorized_distributor', 'distributor_tier', 'warranty_support_available',
             'brand_authorization_details', 'warranty_claim_contact', 'doa_policy', 'defective_return_policy',
-            # 6. Control, KYC Documents & Remarks
             'status', 'kyc_document', 'notes'
         ]
         widgets = {
-            # Core 5 Mandatory
             'company_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Apex Mobile Importers Pvt. Ltd.'}),
             'contact_person': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Ramesh Shrestha'}),
             'phone_number': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': '98XXXXXXXX / 01XXXXXX'}),
             'address': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Tamrakar Complex, 3rd Floor, Pako, New Road'}),
             'registration_number': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'e.g. 102938/078/079'}),
-
-            # Secondary Basics
             'supplier_type': forms.Select(attrs={'class': 'form-select'}),
             'designation': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Managing Director / Sales Head'}),
             'alt_phone': forms.TextInput(attrs={'class': 'form-control font-monospace', 'placeholder': 'Optional secondary phone'}),
@@ -97,10 +51,8 @@ class SupplierForm(forms.ModelForm):
             'city': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Kathmandu'}),
             'province': forms.Select(attrs={'class': 'form-select'}),
             'country': forms.TextInput(attrs={'class': 'form-control'}),
-
-            # Credit & Banking
             'credit_period_days': forms.NumberInput(attrs={'class': 'form-control', 'min': '0', 'step': '1'}),
-            'credit_limit': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '100.00', 'min': '0.00'}),
+            'credit_limit': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'opening_balance': forms.NumberInput(attrs={'class': 'form-control font-monospace', 'step': '0.01', 'min': '0.00'}),
             'balance_type': forms.Select(attrs={'class': 'form-select'}),
             'preferred_payment_method': forms.Select(attrs={'class': 'form-select'}),
@@ -109,14 +61,10 @@ class SupplierForm(forms.ModelForm):
             'account_holder_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Apex Mobile Importers Pvt. Ltd.'}),
             'bank_branch': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. New Road Branch, Kathmandu'}),
             'qr_payment_details': forms.Textarea(attrs={'class': 'form-control font-monospace', 'rows': 2, 'placeholder': 'FonePay Merchant ID / QR payment remarks...'}),
-
-            # Catalog & Evaluation
             'product_categories_supplied': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Smartphones, Optical Frames, Tempered Glass, Chargers'}),
             'brands_supplied': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g. Samsung, Apple, Xiaomi, Vivo, Realme'}),
             'is_preferred': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'rating': forms.Select(attrs={'class': 'form-select'}),
-
-            # Mobile Distributor & Warranty Policies
             'is_authorized_distributor': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
             'distributor_tier': forms.Select(attrs={'class': 'form-select'}),
             'warranty_support_available': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
@@ -124,8 +72,6 @@ class SupplierForm(forms.ModelForm):
             'warranty_claim_contact': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Service center lab address, engineer contact numbers, and drop point...'}),
             'doa_policy': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': '7-Day DOA unboxed dead handset replacement policy...'}),
             'defective_return_policy': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'RMA policy for swollen batteries, green line display claims, and credit notes...'}),
-
-            # Status & KYC
             'status': forms.Select(attrs={'class': 'form-select'}),
             'kyc_document': forms.FileInput(attrs={'class': 'form-control', 'accept': '.pdf,.jpg,.jpeg,.png,.webp'}),
             'notes': forms.Textarea(attrs={'class': 'form-control', 'rows': 2, 'placeholder': 'Internal notes, distributor contact hierarchy, etc.'}),
@@ -227,14 +173,6 @@ class SupplierForm(forms.ModelForm):
 # 2. PURCHASE ORDER (PO) HEADER & LINE ITEM FORMSET
 # ==============================================================================
 class PurchaseOrderForm(forms.ModelForm):
-    """
-    Purchase Order (PO) Header Requisition Form.
-    Features:
-    - Bidirectional calendar synchronization between Order Date (AD <-> BS) and Expected Delivery Date (AD <-> BS).
-    - Interactive visual datepicker widget activation (`nepali-datepicker`).
-    - Fiscal Year Locking Guard: Prevents entering POs into audited and closed fiscal periods.
-    """
-
     class Meta:
         model = PurchaseOrder
         fields = [
@@ -268,7 +206,6 @@ class PurchaseOrderForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['supplier'].queryset = Supplier.objects.filter(is_active=True).order_by('company_name')
         
-        # Explicitly configure required states
         self.fields['supplier'].required = True
         self.fields['order_date'].required = True
         self.fields['order_date_bs'].required = False
@@ -288,9 +225,6 @@ class PurchaseOrderForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
 
-        # -------------------------------------------------------------
-        # 1. Order Date Bidirectional Synchronization (AD <-> BS)
-        # -------------------------------------------------------------
         order_date = cleaned_data.get('order_date')
         order_date_bs = (cleaned_data.get('order_date_bs') or '').strip()
 
@@ -324,9 +258,6 @@ class PurchaseOrderForm(forms.ModelForm):
                 self.add_error('order_date', _(f"Could not convert order date to Nepali calendar: {e}"))
                 return cleaned_data
 
-        # -------------------------------------------------------------
-        # 2. Expected Delivery Date Bidirectional Synchronization (AD <-> BS)
-        # -------------------------------------------------------------
         exp_date = cleaned_data.get('expected_delivery_date')
         exp_date_bs = (cleaned_data.get('expected_delivery_date_bs') or '').strip()
 
@@ -347,9 +278,6 @@ class PurchaseOrderForm(forms.ModelForm):
             except Exception:
                 pass
 
-        # -------------------------------------------------------------
-        # 3. Fiscal Year Lock Enforcement
-        # -------------------------------------------------------------
         if target_fiscal_year:
             locked_fy = AccountingFiscalYear.objects.filter(name=target_fiscal_year, is_closed=True).first()
             if locked_fy:
@@ -365,14 +293,6 @@ class PurchaseOrderForm(forms.ModelForm):
         return cleaned_data
 
 class PurchaseOrderItemForm(forms.ModelForm):
-    """
-    Line Item Form for Purchase Orders.
-    Features:
-    - Pre-VAT Unit Wholesale Cost Input (`unit_cost_price`).
-    - Compact Locked VAT Rate Dropdown Widget (`vat_rate` choice strictly '13%' or '0%').
-    - Strict Server-Side Validation: Rejects negative cost prices, zero quantities, and arbitrary tax rates.
-    """
-
     VAT_RATE_CHOICES = [
         ('13.00', '13%'),
         ('0.00', '0%'),
@@ -459,39 +379,19 @@ PurchaseOrderItemFormSet = inlineformset_factory(
 # 3. GOODS RECEIVED NOTE (GRN) HEADER FORM
 # ==============================================================================
 class GoodsReceivedNoteForm(forms.ModelForm):
-    """
-    Inward Procurement Header Form.
-    Features:
-    - Bidirectional date synchronization between `bill_date` (AD) and `bill_date_bs` (BS).
-    - Distinct delivery challan synchronization: `challan_no`, `challan_date` (AD), `challan_date_bs` (BS).
-    - Fiscal Year Locking Guard: Prevents entering bills into closed fiscal years.
-    - Dedicated whole-bill discount controls (`bill_discount_type`, `bill_discount_input_value`).
-    - Dual VAT handling modes: `vat_handling_mode` ('EXCLUSIVE' vs 'INCLUSIVE') relocated to Summary.
-    - Automated Tax Alignment: `is_vat_bill` aligns with line-item VAT applicability.
-    - 5 Overhead expenses (Freight, Customs, Handling & Unloading, Transit Insurance, Other Overheads).
-    - Multi-field observations (`consignment_narration`, `receiving_notes`, `internal_notes`).
-    - Flexible Draft Mode: Relaxed validation rules when saving in-progress vouchers.
-    """
-
     class Meta:
         model = GoodsReceivedNote
         fields = [
             'supplier', 'branch', 'purchase_order',
-            # Invoice Reference
             'supplier_bill_no', 'supplier_product_code', 'bill_date', 'bill_date_bs',
-            # Challan Reference
             'challan_no', 'challan_date', 'challan_date_bs',
-            # Bill-Level Discount & VAT Controls
             'bill_discount_type', 'bill_discount_input_value',
             'vat_handling_mode', 'is_vat_bill', 'vat_rate',
-            # 5 Overhead Expense Fields
             'extra_freight_charge', 'customs_import_charge', 'other_handling_charge',
             'insurance_charge', 'other_overheads_charge',
-            # Compliance & Settlement
             'distributor_mdms_certified', 'mdms_tax_invoice_ref',
             'paid_amount', 'warranty_provider', 'warranty_months',
             'authorized_service_center',
-            # Multi-field Observations
             'consignment_narration', 'receiving_notes', 'internal_notes', 'remarks'
         ]
         widgets = {
@@ -612,9 +512,6 @@ class GoodsReceivedNoteForm(forms.ModelForm):
         target_date_bs = None
         target_fiscal_year = None
 
-        # -------------------------------------------------------------
-        # 1. Bidirectional Date Synchronization (Bill Date)
-        # -------------------------------------------------------------
         if bill_date_bs:
             try:
                 bs_y, bs_m, bs_d = parse_bs_date_components(bill_date_bs)
@@ -652,9 +549,6 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             cleaned_data['bill_date'] = today
             cleaned_data['bill_date_bs'] = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
 
-        # -------------------------------------------------------------
-        # 2. Bidirectional Date Synchronization (Challan Date)
-        # -------------------------------------------------------------
         if challan_date_bs:
             try:
                 c_y, c_m, c_d = parse_bs_date_components(challan_date_bs)
@@ -671,9 +565,6 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             except Exception:
                 pass
 
-        # -------------------------------------------------------------
-        # 3. Fiscal Year Lock Validation
-        # -------------------------------------------------------------
         if target_fiscal_year:
             locked_fy = AccountingFiscalYear.objects.filter(
                 name=target_fiscal_year,
@@ -690,9 +581,6 @@ class GoodsReceivedNoteForm(forms.ModelForm):
                 self.add_error('bill_date_bs', error_msg)
                 self.add_error('bill_date', error_msg)
 
-        # -------------------------------------------------------------
-        # 4. Bill Discount Validation
-        # -------------------------------------------------------------
         b_type = cleaned_data.get('bill_discount_type')
         b_input = cleaned_data.get('bill_discount_input_value') or Decimal('0.00')
 
@@ -701,9 +589,6 @@ class GoodsReceivedNoteForm(forms.ModelForm):
         elif b_type == 'PERCENTAGE' and b_input > Decimal('100.00'):
             self.add_error('bill_discount_input_value', _("Whole-bill percentage discount cannot exceed 100%."))
 
-        # -------------------------------------------------------------
-        # 5. VAT Handling Mode Normalization
-        # -------------------------------------------------------------
         vat_mode = cleaned_data.get('vat_handling_mode') or 'EXCLUSIVE'
         if vat_mode not in ['EXCLUSIVE', 'INCLUSIVE']:
             vat_mode = 'EXCLUSIVE'
@@ -715,18 +600,6 @@ class GoodsReceivedNoteForm(forms.ModelForm):
 # 4. GRN LINE ITEM FORM & INLINE FORMSET
 # ==============================================================================
 class GRNItemForm(forms.ModelForm):
-    """
-    Line Item Input Validator for Goods Received Notes (GRN).
-    Features:
-    - Locked Tax Rate Dropdown Widget: Renders `vat_rate` strictly as a choice of 13% or 0%.
-    - Clean Tax Rate Validation: Rejects invalid or arbitrary tax rates (prevents typos like 130%).
-    - Dynamic Tax Applicability Sync: Synchronizes `is_vat_applicable` (True for 13%, False for 0%).
-    - Captures physical vendor batch code via `batch_number`.
-    - Unit Purchase Rate accepts Pre-VAT or Post-VAT rates depending on selected VAT handling mode.
-    - Two-Way Line Discount: Flat Amount (रू) or Percentage (%).
-    - Dynamic Master Switch IMEI Enforcement (Strict Mode vs Backlog Mode).
-    """
-
     VAT_RATE_CHOICES = [
         ('13.00', _('13% (Taxable)')),
         ('0.00', _('0% (Exempt / PAN)')),
@@ -737,11 +610,8 @@ class GRNItemForm(forms.ModelForm):
         fields = [
             'product', 'supplier_item_code', 'batch_number', 'unit_conversion',
             'purchased_quantity', 'conversion_factor', 'purchase_rate',
-            # Discount Controls
             'discount_type', 'discount_input_value',
-            # Pricing & Tax
             'new_selling_price', 'is_vat_applicable', 'vat_rate',
-            # MDMS & Serialized Handset Info
             'default_mdms_status', 'warranty_months', 'warranty_provider', 'scanned_imei_list'
         ]
         widgets = {
@@ -763,7 +633,7 @@ class GRNItemForm(forms.ModelForm):
             }),
             'is_vat_applicable': forms.CheckboxInput(attrs={'class': 'form-check-input grn-vat-check'}),
             'vat_rate': forms.Select(
-                attrs={'class': 'form-select form-select-sm grn-vat-rate select-tax-rate text-center'},
+                attrs={'class': 'form-select form-select-sm grn-vat-rate select-tax-rate text-center font-mono'},
                 choices=[
                     ('13.00', _('13%')),
                     ('0.00', _('0% (Exempt)')),
@@ -854,7 +724,6 @@ class GRNItemForm(forms.ModelForm):
         if self.is_draft and not product:
             return cleaned_data
 
-        # 1. Automatic Synchronization of is_vat_applicable from vat_rate
         vat_rate = cleaned_data.get('vat_rate')
         if vat_rate == Decimal('13.00'):
             cleaned_data['is_vat_applicable'] = True
@@ -862,7 +731,6 @@ class GRNItemForm(forms.ModelForm):
             cleaned_data['is_vat_applicable'] = False
             cleaned_data['vat_rate'] = Decimal('0.00')
 
-        # 2. Validate Discount Logic Against Line Gross Value
         line_gross = (quantity * rate).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if disc_type == 'PERCENTAGE':
             if disc_input > Decimal('100.00'):
@@ -874,7 +742,6 @@ class GRNItemForm(forms.ModelForm):
                     _(f"Discount amount (Rs. {disc_input:,.2f}) cannot exceed total line value (Rs. {line_gross:,.2f}).")
                 )
 
-        # 3. Dynamic Serialized IMEI Tracking Validation
         if product and (product.requires_imei_tracking or product.requires_serial_tracking):
             factor = cleaned_data.get('conversion_factor') or Decimal('1.000')
             base_units = (quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
@@ -1174,12 +1041,6 @@ PurchaseReturnItemFormSet = inlineformset_factory(
 # 6. SUPPLIER PAYMENT / PAYOUT FORM (HISTORICAL DATES INCLUDED)
 # ==============================================================================
 class SupplierPaymentForm(forms.ModelForm):
-    """
-    Supplier Payout & Debt Settlement Form.
-    Features:
-    - Dedicated `entry_date` (AD) and `entry_date_bs` (BS) to support recording retroactive payments.
-    - Synchronizes BS <-> AD dates bidirectionally and enforces fiscal year lock validation.
-    """
     class Meta:
         model = SupplierUdhaariLedger
         fields = ['amount', 'payment_mode', 'reference_number', 'entry_date', 'entry_date_bs', 'cheque_date', 'remarks']

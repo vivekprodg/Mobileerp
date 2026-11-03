@@ -1,49 +1,3 @@
-"""
-Procurement, Supplier Udhaari, Goods Received Notes (GRN) & Commercial Purchase Return Models.
-
-Key Architectural Improvements & Verification Hardening:
-1. Purchase Order Dual Calendar Dates (AD & BS):
-   - Added `expected_delivery_date_bs` alongside `expected_delivery_date`.
-   - Updated `PurchaseOrder.save()` to invoke `sync_nepali_and_ad_dates` bidirectionally for
-     both the Order Date pair (with Nepali Fiscal Year derivation) and the Expected Delivery Date pair.
-
-2. Purchase Order Item-Level VAT Persistence & Calculation:
-   - Added `vat_rate` (strict choices of 13.00% vs. 0.00%) and `tax_amount` to `PurchaseOrderItem`.
-   - Overrode `PurchaseOrderItem.save()` to treat `unit_cost_price` as the tax-exclusive base rate,
-     compute pre-tax subtotal (`ordered_quantity * unit_cost_price`), calculate `tax_amount`,
-     and assign `line_total = pre_tax_subtotal + tax_amount`.
-
-3. Strict Line-to-Header VAT Sum Invariant on GRN:
-   - In `GoodsReceivedNote.recalculate_financials()`, line-level VAT is computed individually per line item:
-     * Taxable Pot: Items with 13% VAT generate exact line VAT (`tax_amount` / `vat_amount`).
-     * Non-Taxable Pot: Items with 0% VAT generate exactly `0.00` VAT.
-   - The GRN header's `vat_amount` is calculated strictly as the exact sum of all line-level `tax_amount`s:
-     GRN.vat_amount = sum(GRNItem.tax_amount)
-   - Guarantees front-end and back-end audit drill-down consistency between the VAT registers and invoice details.
-
-4. Supplier Udhaari Balance Continuous Recalculation (Spot-Payment Continuity):
-   - True Balance = Opening Balance + Sum(Bills) - Sum(Payments) - Sum(Returns) +/- Adjustments.
-   - Defensive legacy audit reconciliation: if an older purchase bill exists where cash was
-     paid on delivery but no explicit linked PAYMENT row was generated, the paid amount is deducted
-     so historical data imports do not artificially inflate liabilities.
-
-5. Coherent Pre-Tax Extraction for VAT-Inclusive Purchases (Inclusive Discount Math):
-   - When `vat_handling_mode == 'INCLUSIVE'` and the line has 13% VAT, discounts and base values are separated
-     into their pre-tax base using the exact statutory tax divisor 1.13.
-   - Items marked with 0% VAT bypass tax extraction completely (divisor 1.00).
-
-6. 5-Tier Proportional Landed Cost Overhead Allocation:
-   - Accurately distributes Freight, Customs/Duty, Handling & Unloading, Transit Insurance, and Other Overheads
-     proportionally across line items based on net merchandise value to establish exact unit landed costs (`unit_landed_cost`).
-
-7. Custom Physical Batch Number Persistence & Delivery Challan Trackers:
-   - Line-level `batch_number` on `GRNItem` allowing direct capture of manufacturer/vendor batch identifiers.
-   - Distinct tracking for `challan_no`, `challan_date`, and `challan_date_bs`.
-
-8. Structured Multi-Set Vertical IMEI Parser Property (`parsed_imei_pairs` on `GRNItem`):
-   - Converts raw unstructured IMEI text into clean, structured records separating Phone Sets, SIM 1, and SIM 2.
-"""
-
 import re
 import uuid
 import logging
@@ -152,12 +106,6 @@ def sync_nepali_and_ad_dates(
 # SUPPLIER / DISTRIBUTOR MODEL
 # =============================================================================
 class Supplier(TimeStampedModel):
-    """
-    Comprehensive Supplier / Distributor Entity for Nepal's Mobile & Optical Ecosystem.
-    Tracks government registration, tiered brand authorizations, DOA policies,
-    credit terms, and structured banking details.
-    """
-
     SUPPLIER_TYPE_CHOICES = [
         ('NATIONAL_DISTRIBUTOR', 'National Importer / Distributor'),
         ('REGIONAL_WHOLESALER', 'Regional Wholesaler'),
@@ -201,7 +149,6 @@ class Supplier(TimeStampedModel):
         ('BLOCKED', 'Blocked / Disputed (रोक्का गरिएको)'),
     ]
 
-    # --- 1. System Identification & Core Mandatory Fields ---
     code = models.CharField(
         max_length=25, unique=True, db_index=True, blank=True,
         verbose_name=_("Supplier Code"),
@@ -228,7 +175,6 @@ class Supplier(TimeStampedModel):
         verbose_name=_("Company Registrar / Govt Reg No.")
     )
 
-    # --- 2. Location, Type & Secondary Contact ---
     supplier_type = models.CharField(
         max_length=30, choices=SUPPLIER_TYPE_CHOICES, default='NATIONAL_DISTRIBUTOR',
         verbose_name=_("Supplier Classification")
@@ -257,17 +203,16 @@ class Supplier(TimeStampedModel):
     )
     country = models.CharField(max_length=50, default="Nepal", blank=True, verbose_name=_("Country"))
 
-    # --- 3. Business Terms, Credit & Structured Banking ---
     credit_period_days = models.PositiveIntegerField(
         default=30, null=True, blank=True, verbose_name=_("Credit Terms (Days)")
     )
     credit_limit = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'), null=True, blank=True,
+        max_digits=20, decimal_places=2, default=Decimal('0.00'), null=True, blank=True,
         verbose_name=_("Credit Limit (NPR)"),
         help_text=_("Maximum allowed credit line with this vendor (0.00 for unlimited/cash-only)")
     )
     opening_balance = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'), null=True, blank=True,
+        max_digits=20, decimal_places=2, default=Decimal('0.00'), null=True, blank=True,
         verbose_name=_("Opening Balance (NPR)")
     )
     balance_type = models.CharField(
@@ -275,7 +220,7 @@ class Supplier(TimeStampedModel):
         verbose_name=_("Opening Balance Nature")
     )
     current_balance = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'), null=True, blank=True, db_index=True,
+        max_digits=20, decimal_places=2, default=Decimal('0.00'), null=True, blank=True, db_index=True,
         verbose_name=_("Net Outstanding Balance (NPR)"),
         help_text=_("Positive balance indicates amount shop owes supplier. Auto-calculated from ledger.")
     )
@@ -298,7 +243,6 @@ class Supplier(TimeStampedModel):
         help_text=_("Consolidated bank text notes.")
     )
 
-    # --- 4. Catalog Coverage & Vendor Evaluation ---
     product_categories_supplied = models.TextField(
         blank=True, null=True,
         verbose_name=_("Product Categories Supplied"),
@@ -320,7 +264,6 @@ class Supplier(TimeStampedModel):
     last_purchase_date = models.DateField(blank=True, null=True, verbose_name=_("Last Purchase Date"))
     last_payment_date = models.DateField(blank=True, null=True, verbose_name=_("Last Payment Date"))
 
-    # --- 5. Mobile-Specific Distributor & Warranty Policies ---
     is_authorized_distributor = models.BooleanField(
         default=False, verbose_name=_("Is Authorized Brand Distributor"),
         help_text=_("Check if this vendor is an official national or regional brand distributor in Nepal.")
@@ -350,7 +293,6 @@ class Supplier(TimeStampedModel):
         help_text=_("Standard return policies for swollen batteries, line displays, and dead boards.")
     )
 
-    # --- 6. Control, KYC Documents & Remarks ---
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='ACTIVE', db_index=True,
         verbose_name=_("Account Status")
@@ -441,14 +383,6 @@ class Supplier(TimeStampedModel):
             )
 
     def recalculate_balance_from_ledger(self, save=True):
-        """
-        Recalculates current_balance strictly from SupplierUdhaariLedger entries.
-        Positive balance indicates amount owed to supplier (Payable).
-        Negative balance indicates advance paid to supplier (Credit / Advance).
-
-        Mathematical Architecture:
-        True Balance = Opening Balance + Sum(Bills) - Sum(Payments) - Sum(Returns) +/- Adjustments
-        """
         if not self.pk:
             return self.current_balance or Decimal('0.00')
 
@@ -464,22 +398,18 @@ class Supplier(TimeStampedModel):
             else:
                 base_balance = -(self.opening_balance or Decimal('0.00'))
 
-        # Sum of all invoice debts
         bills_total = self.ledger_entries.filter(
             transaction_type='PURCHASE_BILL'
         ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
 
-        # Sum of all explicit payouts / disbursements
         payments_total = self.ledger_entries.filter(
             transaction_type='PAYMENT'
         ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
 
-        # Sum of all debit notes / purchase returns
         returns_total = self.ledger_entries.filter(
             transaction_type='PURCHASE_RETURN'
         ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
 
-        # Sum of all adjustments
         adjustments = self.ledger_entries.filter(transaction_type='ADJUSTMENT')
         adj_total = Decimal('0.00')
         for adj in adjustments:
@@ -488,7 +418,6 @@ class Supplier(TimeStampedModel):
             else:
                 adj_total += adj.amount
 
-        # Defensive Check for Legacy Unrecorded Spot Payments:
         legacy_spot_payment_deduction = Decimal('0.00')
         legacy_bills = self.ledger_entries.filter(transaction_type='PURCHASE_BILL')
         for bill_entry in legacy_bills:
@@ -519,14 +448,9 @@ class Supplier(TimeStampedModel):
         return new_balance
 
 # =============================================================================
-# PURCHASE ORDER (PO) MODELS (ENHANCED WITH BS DATES & ITEM-LEVEL VAT)
+# PURCHASE ORDER (PO) MODELS
 # =============================================================================
 class PurchaseOrder(TimeStampedModel):
-    """
-    Purchase Order (PO) Header.
-    Allows manual specification of historical order dates and expected delivery dates
-    with automatic bidirectional Gregorian (AD) and Bikram Sambat (BS) date synchronization.
-    """
     PO_STATUS = [
         ('DRAFT', 'Draft PO'),
         ('ISSUED', 'Issued to Supplier'),
@@ -539,7 +463,6 @@ class PurchaseOrder(TimeStampedModel):
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='purchase_orders')
     branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name='purchase_orders')
 
-    # Order Date Trackers (AD & BS)
     order_date = models.DateField(
         default=timezone.now,
         db_index=True,
@@ -563,7 +486,6 @@ class PurchaseOrder(TimeStampedModel):
         help_text=_("Nepali Fiscal Year derived from BS date (e.g. 2080/81, 2081/82, 2082/83, 2083/84).")
     )
 
-    # Expected Delivery Date Trackers (AD & BS)
     expected_delivery_date = models.DateField(
         blank=True,
         null=True,
@@ -582,15 +504,15 @@ class PurchaseOrder(TimeStampedModel):
     status = models.CharField(max_length=25, choices=PO_STATUS, default='DRAFT', db_index=True)
     
     subtotal = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Order Pre-VAT Subtotal (NPR)")
     )
     tax_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Total 13% VAT Amount (NPR)")
     )
     total_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Total Order Amount with VAT (NPR)")
     )
     
@@ -617,14 +539,12 @@ class PurchaseOrder(TimeStampedModel):
         return f"{self.po_number} - {self.supplier.company_name} ({self.status})"
 
     def save(self, *args, **kwargs):
-        # 1. Synchronize Order Date (AD <-> BS) and derive Nepali Fiscal Year
         sync_nepali_and_ad_dates(
             instance=self,
             ad_field_name='order_date',
             bs_field_name='order_date_bs',
             fy_field_name='fiscal_year'
         )
-        # 2. Synchronize Expected Delivery Date (AD <-> BS)
         if self.expected_delivery_date or self.expected_delivery_date_bs:
             sync_nepali_and_ad_dates(
                 instance=self,
@@ -635,11 +555,6 @@ class PurchaseOrder(TimeStampedModel):
         super().save(*args, **kwargs)
 
 class PurchaseOrderItem(TimeStampedModel):
-    """
-    Line item in a Purchase Order.
-    Tracks product, packaging unit, ordered quantity, unit cost price (excluding VAT),
-    line VAT rate (13% or 0%), calculated line tax amount, and final line total including VAT.
-    """
     VAT_RATE_CHOICES = [
         (Decimal('13.00'), _('13% (Standard VAT)')),
         (Decimal('0.00'), _('0% (Exempt / Non-VAT)')),
@@ -653,7 +568,7 @@ class PurchaseOrderItem(TimeStampedModel):
     received_quantity = models.DecimalField(max_digits=10, decimal_places=3, default=Decimal('0.000'))
     
     unit_cost_price = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Unit Cost Price without VAT (NPR)"),
         help_text=_("Pre-VAT wholesale rate agreed with supplier.")
     )
@@ -664,12 +579,12 @@ class PurchaseOrderItem(TimeStampedModel):
         help_text=_("VAT rate applicable to this PO line item (13.00% or 0.00%).")
     )
     tax_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Line VAT Amount (NPR)"),
         help_text=_("Calculated 13% or 0% tax amount for this line.")
     )
     line_total = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Line Total with VAT (NPR)"),
         help_text=_("Pre-VAT subtotal plus calculated tax amount.")
     )
@@ -688,7 +603,6 @@ class PurchaseOrderItem(TimeStampedModel):
 
     @property
     def vat_amount(self) -> Decimal:
-        """Alias for tax_amount to provide seamless consistency across reports and templates."""
         return self.tax_amount or Decimal('0.00')
 
     def save(self, *args, **kwargs):
@@ -696,7 +610,6 @@ class PurchaseOrderItem(TimeStampedModel):
         cost = self.unit_cost_price if self.unit_cost_price is not None else Decimal('0.00')
         pre_tax_subtotal = (qty * cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # Normalize vat_rate to strictly 13.00 or 0.00
         current_rate = self.vat_rate if (self.vat_rate is not None and self.vat_rate > Decimal('0.00')) else Decimal('0.00')
         if current_rate > Decimal('0.00'):
             self.vat_rate = Decimal('13.00')
@@ -712,17 +625,6 @@ class PurchaseOrderItem(TimeStampedModel):
 # GOODS RECEIVED NOTE (GRN) & INWARD PROCUREMENT
 # =============================================================================
 class GoodsReceivedNote(TimeStampedModel):
-    """
-    Goods Received Note (GRN) Inward Procurement Voucher.
-    Tracks supplier invoices, separate delivery challans, Pre-VAT merchandise values,
-    flexible bill-level discounts, dual VAT handling modes (exclusive vs. inclusive),
-    5-tier value-based overhead distribution (Landed Cost/COGS), NTA MDMS certification,
-    independent observations, and historical purchase dates.
-    
-    Hardened VAT Invariant:
-    Header `vat_amount` is always mathematically equal to the sum of all child line items' VAT:
-    `vat_amount = sum(item.tax_amount for item in items)`
-    """
     GRN_STATUS = [
         ('DRAFT', 'Draft / In-Inspection'),
         ('RECEIVED', 'Goods Verified & Stock Updated'),
@@ -747,7 +649,6 @@ class GoodsReceivedNote(TimeStampedModel):
         PurchaseOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name='grn_vouchers'
     )
     
-    # Supplier Invoice / Bill Reference
     supplier_bill_no = models.CharField(
         max_length=100, verbose_name=_("Supplier Invoice / Bill Ref No."), db_index=True
     )
@@ -755,7 +656,6 @@ class GoodsReceivedNote(TimeStampedModel):
         max_length=100, blank=True, null=True, verbose_name=_("Supplier Batch / Product Code")
     )
 
-    # Distinct Delivery Challan Reference
     challan_no = models.CharField(
         max_length=100, blank=True, null=True, db_index=True,
         verbose_name=_("Challan / Delivery Ref No.")
@@ -769,7 +669,6 @@ class GoodsReceivedNote(TimeStampedModel):
         verbose_name=_("Challan Date (BS)")
     )
 
-    # Invoice Date Trackers (Allows Historical Imports from 2080 B.S.)
     bill_date = models.DateField(
         default=timezone.now,
         db_index=True,
@@ -806,9 +705,9 @@ class GoodsReceivedNote(TimeStampedModel):
         help_text=_("Pragyapan Patra / Customs Declaration or Distributor MDMS Clearance Ref No.")
     )
     
-    # Financial Base & Discount Controls
+    # Financial Base & Discount Controls (Expanded to 20 digits for 15-digit capacity)
     gross_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Gross Pre-VAT Amount (NPR)"),
         help_text=_("Sum of all item line pre-VAT merchandise values before discounts.")
     )
@@ -817,32 +716,31 @@ class GoodsReceivedNote(TimeStampedModel):
         verbose_name=_("Bill Discount Mode")
     )
     bill_discount_input_value = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Bill Discount Input Value"),
         help_text=_("Value typed by user: flat rupee discount or percentage discount on entire bill.")
     )
     bill_discount_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Bill Discount Amount (NPR)"),
         help_text=_("Cash rupee deduction calculated from bill discount input.")
     )
     total_line_discount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Total Line Discounts (NPR)"),
         help_text=_("Sum of individual item line rupee deductions.")
     )
     discount_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Consolidated Total Discount (NPR)"),
         help_text=_("Total Line Discounts + Whole Bill Discount.")
     )
     taxable_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Pre-VAT Taxable Base (NPR)"),
         help_text=_("Net pre-VAT merchandise value of 13% taxable lines after allocated discounts.")
     )
     
-    # VAT Handling Mode & Calculations
     vat_handling_mode = models.CharField(
         max_length=15, choices=VAT_MODE_CHOICES, default='EXCLUSIVE', db_index=True,
         verbose_name=_("VAT Handling Mode"),
@@ -858,51 +756,51 @@ class GoodsReceivedNote(TimeStampedModel):
         verbose_name=_("VAT Rate (%)")
     )
     vat_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Dedicated 13% Input VAT (NPR)"),
         help_text=_("Sum of item-level 13% VAT amounts. Always equals the sum of line items' tax_amount.")
     )
     
-    # 5 Overhead Expense Fields (Distributed to Landed Cost)
+    # 5 Overhead Expense Fields (Expanded to 20 digits)
     extra_freight_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Freight / Courier Charge (NPR)")
     )
     customs_import_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Customs / Duty / Tax (NPR)")
     )
     other_handling_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Handling & Unloading Cost (NPR)")
     )
     insurance_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Transit Insurance (NPR)")
     )
     other_overheads_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Other Direct Overheads (NPR)")
     )
     total_landed_cost = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Total Landed Cost Valuation / COGS (NPR)"),
         help_text=_("Net Pre-VAT Merchandise Base + 5 Overheads (Freight, Customs, Handling, Insurance, Other).")
     )
     
-    # Supplier Settlement & Due Tracking
+    # Supplier Settlement & Due Tracking (Expanded to 20 digits)
     net_total_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Supplier Invoice Total (NPR)"),
         help_text=_("Net invoice payable to supplier = Pre-VAT Merchandise Base + 13% VAT Amount.")
     )
     paid_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Paid Amount on Receipt (NPR)"),
         help_text=_("Cash, cheque, or digital amount paid on delivery.")
     )
     due_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Net Due / Supplier Debt (NPR)"),
         help_text=_("Invoice Total - Paid Amount. Automatically posted to supplier credit ledger.")
     )
@@ -925,7 +823,6 @@ class GoodsReceivedNote(TimeStampedModel):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='received_grns'
     )
     
-    # Multi-field Audit Narrations & Observations
     consignment_narration = models.TextField(
         blank=True, null=True,
         verbose_name=_("General Consignment Narration"),
@@ -965,14 +862,12 @@ class GoodsReceivedNote(TimeStampedModel):
         return f"{self.grn_number} | {self.supplier.company_name} | Rs. {self.net_total_amount}"
 
     def save(self, *args, **kwargs):
-        # 1. Synchronize Bill Date (AD <-> BS) and derive Fiscal Year
         sync_nepali_and_ad_dates(
             instance=self,
             ad_field_name='bill_date',
             bs_field_name='bill_date_bs',
             fy_field_name='fiscal_year'
         )
-        # 2. Synchronize Challan Date (AD <-> BS) if provided
         if self.challan_date or self.challan_date_bs:
             sync_nepali_and_ad_dates(
                 instance=self,
@@ -980,7 +875,6 @@ class GoodsReceivedNote(TimeStampedModel):
                 bs_field_name='challan_date_bs',
                 fy_field_name=None
             )
-        # 3. Synchronize legacy remarks with consignment_narration if empty
         if not self.remarks and self.consignment_narration:
             self.remarks = self.consignment_narration
         elif not self.consignment_narration and self.remarks:
@@ -1004,36 +898,17 @@ class GoodsReceivedNote(TimeStampedModel):
 
     @property
     def total_line_vat_amount(self) -> Decimal:
-        """
-        Calculates the exact sum of all line-item VAT amounts for audit verification.
-        In clean state, `self.vat_amount == self.total_line_vat_amount`.
-        """
         return sum(
             (getattr(item, 'tax_amount', Decimal('0.00')) or Decimal('0.00') for item in self.items.all()),
             Decimal('0.00')
         ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
     def recalculate_financials(self, save=True):
-        """
-        Calculates all procurement financials, multi-rate line VAT, and distributes overheads to line items.
-        
-        Hardened VAT Invariant:
-        1. Segregates items into Taxable Pot (13% VAT) vs. Non-Taxable Pot (0% VAT).
-        2. In INCLUSIVE mode: Extracts pre-tax base using `Rate ÷ 1.13` strictly on 13% taxable items.
-           Items with 0% VAT remain untouched.
-        3. Prorates whole-bill discount proportionally across pre-tax merchandise bases.
-        4. Calculates line VAT strictly per item: `item.tax_amount = line_vat`.
-        5. Accumulates total consignment VAT strictly as the sum of line VATs:
-           `self.vat_amount = sum(item.tax_amount)`
-        6. Sets net invoice total strictly as: `Net Taxable Pot + Non-Taxable Pot + Calculated Line VAT Sum`.
-        7. Allocates overheads proportionally to calculate accurate `unit_landed_cost` per item.
-        """
         items = list(self.items.all())
         total_line_gross = Decimal('0.00')
         total_line_discount = Decimal('0.00')
         line_meta = []
 
-        # Phase 1: Line Item Gross, Line Discounts & Pre-Tax Extraction
         for item in items:
             qty = item.purchased_quantity if (item.purchased_quantity and item.purchased_quantity > Decimal('0.000')) else Decimal('1.000')
             raw_rate = item.purchase_rate or Decimal('0.00')
@@ -1042,7 +917,6 @@ class GoodsReceivedNote(TimeStampedModel):
             disc_type = item.discount_type or 'NONE'
             disc_input = item.discount_input_value or Decimal('0.00')
 
-            # Calculate raw line discount on entered gross
             if disc_type == 'PERCENTAGE':
                 pct = min(Decimal('100.00'), max(Decimal('0.00'), disc_input))
                 raw_rupee_disc = (raw_gross * (pct / Decimal('100.00'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -1063,14 +937,12 @@ class GoodsReceivedNote(TimeStampedModel):
 
             net_line_base = max(Decimal('0.00'), raw_gross - raw_item_disc)
 
-            # Strict Tax Rate Normalization: 13.00 or 0.00
             current_rate = item.vat_rate if (item.vat_rate is not None and item.vat_rate > Decimal('0.00')) else Decimal('0.00')
             is_line_taxable = bool(current_rate > Decimal('0.00'))
             item_vat_rate = Decimal('13.00') if is_line_taxable else Decimal('0.00')
             item.vat_rate = item_vat_rate
             item.is_vat_applicable = is_line_taxable
 
-            # VAT Handling Mode: If INCLUSIVE and 13% taxable, extract pre-VAT base and discount via 1.13
             if getattr(self, 'vat_handling_mode', 'EXCLUSIVE') == 'INCLUSIVE' and is_line_taxable:
                 tax_divisor = Decimal('1.13')
                 taxable_extracted = (net_line_base / tax_divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -1081,7 +953,6 @@ class GoodsReceivedNote(TimeStampedModel):
                 item.item_discount_amount = pre_tax_discount
                 item.line_total = taxable_extracted
             else:
-                # Mode EXCLUSIVE or 0% Exempt Rate: rate is treated as pure pre-tax cost
                 item.gross_amount = raw_gross
                 item.item_discount_amount = raw_item_disc
                 item.line_total = net_line_base
@@ -1102,7 +973,6 @@ class GoodsReceivedNote(TimeStampedModel):
 
         net_merchandise_subtotal = max(Decimal('0.00'), total_line_gross - total_line_discount)
 
-        # Phase 2: Whole-Bill Discount Calculation
         bill_disc_type = self.bill_discount_type or 'NONE'
         bill_disc_input = self.bill_discount_input_value or Decimal('0.00')
 
@@ -1118,7 +988,6 @@ class GoodsReceivedNote(TimeStampedModel):
             self.bill_discount_input_value = Decimal('0.00')
             self.bill_discount_amount = Decimal('0.00')
 
-        # Phase 3 & 4: Proportional Bill Discount Allocation, Landed Costs & Strict Line-by-Line VAT Summation
         overheads = self.overhead_total
         item_count = len(items)
 
@@ -1152,7 +1021,6 @@ class GoodsReceivedNote(TimeStampedModel):
             else:
                 item.unit_landed_cost = Decimal('0.00')
 
-            # Calculate VAT strictly per line item using 13% for taxable or 0% for exempt
             if is_taxable and rate == Decimal('13.00'):
                 line_vat = (effective_net_base * Decimal('0.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 total_net_taxable_base += effective_net_base
@@ -1160,7 +1028,6 @@ class GoodsReceivedNote(TimeStampedModel):
                 line_vat = Decimal('0.00')
                 total_net_non_taxable_base += effective_net_base
 
-            # Persist exact calculated VAT onto the line item
             item.tax_amount = line_vat
             total_vat_amount += line_vat
 
@@ -1170,7 +1037,6 @@ class GoodsReceivedNote(TimeStampedModel):
                 'base_unit_quantity', 'vat_rate', 'is_vat_applicable'
             ])
 
-        # Phase 5: Reconciled Consignment Financials (Hardened: Header VAT == Sum of Line VATs)
         total_merchandise_net = total_net_taxable_base + total_net_non_taxable_base
         total_landed_valuation = (total_merchandise_net + overheads).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         net_invoice_total = (total_merchandise_net + total_vat_amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -1178,12 +1044,10 @@ class GoodsReceivedNote(TimeStampedModel):
         paid = self.paid_amount or Decimal('0.00')
         net_due = max(Decimal('0.00'), net_invoice_total - paid)
 
-        # Update GRN Header Values
         self.gross_amount = total_line_gross
         self.total_line_discount = total_line_discount
         self.discount_amount = total_line_discount + self.bill_discount_amount
         self.taxable_amount = total_net_taxable_base
-        # Hardened Invariant: Exactly equals sum of all line item tax_amount values
         self.vat_amount = total_vat_amount
         self.total_landed_cost = total_landed_valuation
         self.net_total_amount = net_invoice_total
@@ -1202,11 +1066,6 @@ class GoodsReceivedNote(TimeStampedModel):
             ])
 
 class GRNItem(TimeStampedModel):
-    """
-    Line item in GRN with package unit conversion, custom batch numbers, dual-mode discounts,
-    persisted line-level VAT amount (`tax_amount`), proportional unit landed cost, target selling price,
-    and strict 13% vs 0% tax dropdown choices.
-    """
     DISCOUNT_TYPE_CHOICES = [
         ('NONE', _('No Discount')),
         ('PERCENTAGE', _('Percentage (%)')),
@@ -1234,25 +1093,25 @@ class GRNItem(TimeStampedModel):
         help_text=_("If bought in packaging unit (e.g. Box of 50)")
     )
     purchased_quantity = models.DecimalField(
-        max_digits=10, decimal_places=3, default=Decimal('1.000'),
+        max_digits=12, decimal_places=3, default=Decimal('1.000'),
         help_text=_("Quantity in the purchased package/unit")
     )
     conversion_factor = models.DecimalField(
-        max_digits=10, decimal_places=3, default=Decimal('1.000'),
+        max_digits=12, decimal_places=3, default=Decimal('1.000'),
         help_text=_("Multiplier to convert to smallest base atomic unit")
     )
     base_unit_quantity = models.DecimalField(
-        max_digits=12, decimal_places=3, default=Decimal('1.000'), null=True, blank=True,
+        max_digits=14, decimal_places=3, default=Decimal('1.000'), null=True, blank=True,
         help_text=_("Effective units added to live stock counter")
     )
     
-    # Purchase Rate & Discounts
+    # Purchase Rate & Discounts (Upgraded to max_digits=20 for 15-digit values)
     purchase_rate = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Unit Purchase Rate (NPR)")
     )
     gross_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Line Gross Pre-VAT (NPR)"),
         help_text=_("Pre-discount gross value = Quantity * Purchase Rate")
     )
@@ -1261,12 +1120,12 @@ class GRNItem(TimeStampedModel):
         verbose_name=_("Discount Type")
     )
     discount_input_value = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Discount Input"),
         help_text=_("Store user input: either percentage (e.g. 5) or cash amount (e.g. 2000).")
     )
     item_discount_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Discount Amount (NPR)"),
         help_text=_("Exact cash rupee deduction applied to this line.")
     )
@@ -1276,7 +1135,7 @@ class GRNItem(TimeStampedModel):
         help_text=_("Calculated percentage equivalent for audit and analytics.")
     )
     line_total = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'), null=True, blank=True,
+        max_digits=20, decimal_places=2, default=Decimal('0.00'), null=True, blank=True,
         verbose_name=_("Pre-VAT Net Total (NPR)"),
         help_text=_("Line Gross - Discount Amount.")
     )
@@ -1292,18 +1151,18 @@ class GRNItem(TimeStampedModel):
         help_text=_("Locked to 13.00% (Taxable) or 0.00% (Exempt).")
     )
     tax_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Tax / VAT Amount (NPR)"),
         help_text=_("Exact VAT amount calculated for this line item.")
     )
     
     unit_landed_cost = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Unit Landed Cost (NPR)"),
         help_text=_("Final Pre-VAT unit cost including allocated freight, customs, insurance, handling, and bill discounts.")
     )
     new_selling_price = models.DecimalField(
-        max_digits=12, decimal_places=2, blank=True, null=True,
+        max_digits=20, decimal_places=2, blank=True, null=True,
         verbose_name=_("New Target Selling Price / MRP (NPR)"),
         help_text=_("Updates master product counter rate upon verification")
     )
@@ -1340,14 +1199,10 @@ class GRNItem(TimeStampedModel):
 
     @property
     def vat_amount(self) -> Decimal:
-        """Alias for tax_amount to provide seamless consistency across reports and templates."""
         return self.tax_amount or Decimal('0.00')
 
     @property
     def parsed_imei_pairs(self) -> List[Dict[str, Any]]:
-        """
-        Parses raw text from scanned_imei_list into structured phone set records.
-        """
         raw_text = str(self.scanned_imei_list or '').strip()
         if not raw_text:
             return []
@@ -1399,7 +1254,6 @@ class GRNItem(TimeStampedModel):
 
         net_line_base = max(Decimal('0.00'), raw_gross - raw_item_disc)
 
-        # Normalize vat_rate to strictly 13.00 or 0.00
         current_rate = self.vat_rate if (self.vat_rate is not None and self.vat_rate > Decimal('0.00')) else Decimal('0.00')
         if current_rate > Decimal('0.00'):
             current_rate = Decimal('13.00')
@@ -1409,7 +1263,6 @@ class GRNItem(TimeStampedModel):
             self.is_vat_applicable = False
         self.vat_rate = current_rate
 
-        # Inspect VAT Handling Mode if GRN reference is loaded
         vat_mode = getattr(self.grn, 'vat_handling_mode', 'EXCLUSIVE') if self.grn_id else 'EXCLUSIVE'
 
         if vat_mode == 'INCLUSIVE' and self.is_vat_applicable and current_rate == Decimal('13.00'):
@@ -1423,7 +1276,6 @@ class GRNItem(TimeStampedModel):
             self.line_total = taxable_extracted
             self.tax_amount = (net_line_base - taxable_extracted).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         else:
-            # Mode EXCLUSIVE or 0% Exempt Rate: rate is treated as pure pre-tax cost
             self.gross_amount = raw_gross
             self.item_discount_amount = raw_item_disc
             self.line_total = net_line_base
@@ -1444,11 +1296,6 @@ class GRNItem(TimeStampedModel):
 # COMMERCIAL PURCHASE RETURN / DEBIT NOTE
 # =============================================================================
 class PurchaseReturn(TimeStampedModel):
-    """
-    Commercial Purchase Return / Debit Note Module.
-    Tracks outward return of merchandise (smartphones, accessories, parts) back to suppliers/distributors.
-    Supports deduction from Supplier Udhaari / Ledger Balance or Cash/Bank Refund.
-    """
     STATUS_CHOICES = [
         ('DRAFT', 'Draft / In-Preparation (मस्यौदा)'),
         ('CONFIRMED', 'Confirmed & Stock Deducted (स्वीकृत / मौज्दात कट्टी)'),
@@ -1478,7 +1325,6 @@ class PurchaseReturn(TimeStampedModel):
         max_length=100, blank=True, null=True, verbose_name=_("Supplier Invoice / Challan Ref No.")
     )
 
-    # Date Trackers (Allows Historical Imports from 2080 B.S.)
     return_date = models.DateField(
         default=timezone.now,
         db_index=True,
@@ -1512,15 +1358,15 @@ class PurchaseReturn(TimeStampedModel):
     )
 
     total_return_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Total Return Value (NPR)")
     )
     tax_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Tax / VAT Amount (NPR)")
     )
     net_refund_amount = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Net Refund / Debit Note Amount (NPR)")
     )
 
@@ -1568,19 +1414,19 @@ class PurchaseReturnItem(TimeStampedModel):
         verbose_name=_("Packaging Unit")
     )
     returned_quantity = models.DecimalField(
-        max_digits=10, decimal_places=3, default=Decimal('1.000'),
+        max_digits=12, decimal_places=3, default=Decimal('1.000'),
         verbose_name=_("Returned Quantity")
     )
     conversion_factor = models.DecimalField(
-        max_digits=10, decimal_places=3, default=Decimal('1.000'),
+        max_digits=12, decimal_places=3, default=Decimal('1.000'),
         verbose_name=_("Conversion Factor")
     )
     base_unit_quantity = models.DecimalField(
-        max_digits=12, decimal_places=3, default=Decimal('1.000'),
+        max_digits=14, decimal_places=3, default=Decimal('1.000'),
         verbose_name=_("Base Unit Quantity Deducted")
     )
     purchase_rate = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Unit Purchase Rate (NPR)")
     )
     tax_rate = models.DecimalField(
@@ -1588,11 +1434,11 @@ class PurchaseReturnItem(TimeStampedModel):
         verbose_name=_("Tax / VAT Rate (%)")
     )
     tax_amount = models.DecimalField(
-        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Tax / VAT Amount (NPR)")
     )
     line_total = models.DecimalField(
-        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        max_digits=20, decimal_places=2, default=Decimal('0.00'),
         verbose_name=_("Line Total (NPR)")
     )
     returned_imei_list = models.TextField(
@@ -1635,13 +1481,9 @@ class PurchaseReturnItem(TimeStampedModel):
         super().save(*args, **kwargs)
 
 # =============================================================================
-# SUPPLIER UDHAARI (ACCOUNTS PAYABLE) LEDGER (HISTORICAL DATES INCLUDED)
+# SUPPLIER UDHAARI (ACCOUNTS PAYABLE) LEDGER
 # =============================================================================
 class SupplierUdhaariLedger(TimeStampedModel):
-    """
-    Double-entry credit ledger tracking every invoice debt, debit return, and payout repayment.
-    Explicitly tracks historical entry dates (AD and BS) to reflect real business transaction dates.
-    """
     TRANSACTION_TYPES = [
         ('OPENING_BALANCE', 'Opening Balance (सुरुवाती मौज्दात)'),
         ('PURCHASE_BILL', 'Stock Purchase / GRN (+)'),
@@ -1662,14 +1504,13 @@ class SupplierUdhaariLedger(TimeStampedModel):
     branch = models.ForeignKey(Branch, on_delete=models.SET_NULL, null=True, related_name='supplier_ledgers')
     transaction_type = models.CharField(max_length=25, choices=TRANSACTION_TYPES, db_index=True)
     
-    amount = models.DecimalField(max_digits=14, decimal_places=2)
-    previous_balance = models.DecimalField(max_digits=14, decimal_places=2)
-    resulting_balance = models.DecimalField(max_digits=14, decimal_places=2)
+    amount = models.DecimalField(max_digits=20, decimal_places=2)
+    previous_balance = models.DecimalField(max_digits=20, decimal_places=2)
+    resulting_balance = models.DecimalField(max_digits=20, decimal_places=2)
     
     payment_mode = models.CharField(max_length=30, choices=PAYMENT_MODES, blank=True, null=True)
     reference_number = models.CharField(max_length=100, blank=True, null=True, help_text="GRN No, Cheque No, Bank Ref, Debit Note No")
 
-    # Explicit historical transaction date tracking
     entry_date = models.DateField(
         default=timezone.now,
         db_index=True,

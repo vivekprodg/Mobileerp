@@ -1,10 +1,118 @@
 {% extends "core/base.html" %}
+{% load humanize static %}
 
-{% block title %}Goods Received Notes (GRN){% endblock %}
+{% block title %}Goods Received Notes (Stock Inward) | {{ SYS_CONFIG.company_name_en|default:COMPANY_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ==========================================================================
+   GRN INWARD SEARCH & TABLE STYLING
+   ========================================================================== */
+.grn-search-input-wrap {
+    position: relative;
+    max-width: 520px;
+    width: 100%;
+}
+
+.grn-search-input-wrap .search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--erp-slate-400, #94a3b8);
+    font-size: 0.85rem;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.grn-search-input {
+    height: 38px;
+    padding-left: 38px !important;
+    padding-right: 36px !important;
+    border-radius: var(--erp-radius-pill, 9999px) !important;
+    border: 1px solid var(--erp-slate-300, #cbd5e1);
+    background-color: #ffffff;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--erp-slate-800, #1e293b);
+    transition: all 0.15s ease-in-out;
+}
+
+.grn-search-input:focus {
+    border-color: var(--erp-primary, #2563eb);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    outline: none;
+}
+
+.grn-search-input::placeholder {
+    color: var(--erp-slate-400, #94a3b8);
+    font-weight: 400;
+}
+
+.grn-clear-search-btn {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: var(--erp-slate-400, #94a3b8);
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    display: none;
+    transition: color 0.15s ease;
+    z-index: 2;
+}
+
+.grn-clear-search-btn:hover {
+    color: var(--erp-danger, #ef4444);
+}
+
+.grn-live-counter-badge {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace);
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: var(--erp-radius-pill, 9999px);
+    background-color: var(--erp-slate-100, #f1f5f9);
+    color: var(--erp-slate-600, #475569);
+    border: 1px solid var(--erp-slate-200, #e2e8f0);
+    white-space: nowrap;
+}
+
+.font-mono {
+    font-family: var(--erp-font-mono, 'JetBrains Mono', monospace) !important;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Status Badges */
+.badge-status-received {
+    background-color: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+
+.badge-status-draft {
+    background-color: #f1f5f9;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+}
+
+.badge-status-cancelled {
+    background-color: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="container-fluid px-4 py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+
+    <!-- Top Header: Title & Action Button -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
         <div>
             <h4 class="fw-bold text-dark mb-0">Goods Received Notes (Stock Inward)</h4>
             <p class="text-muted fs-xs mb-0">Inward inventory receipts and supplier bill matching</p>
@@ -14,35 +122,250 @@
         </a>
     </div>
 
-    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
-        <table class="table table-hover align-middle mb-0 fs-sm">
-            <thead class="bg-light text-muted text-uppercase fs-xs">
-                <tr>
-                    <th class="ps-4">GRN No</th>
-                    <th>Supplier</th>
-                    <th>Challan / Bill Ref</th>
-                    <th>Date</th>
-                    <th>Status</th>
-                    <th>Net Amount</th>
-                    <th class="text-end pe-4">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for grn in grns %}
-                <tr>
-                    <td class="ps-4 font-monospace fw-bold">{{ grn.grn_number }}</td>
-                    <td>{{ grn.supplier.company_name }}</td>
-                    <td><code>{{ grn.supplier_bill_no }}</code></td>
-                    <td>{{ grn.bill_date }}</td>
-                    <td><span class="badge bg-{% if grn.status == 'RECEIVED' %}success{% else %}secondary{% endif %}">{{ grn.get_status_display }}</span></td>
-                    <td class="fw-bold text-primary">Rs. {{ grn.net_total_amount|floatformat:2 }}</td>
-                    <td class="text-end pe-4">
-                        <a href="{% url 'purchases:grn_detail' grn.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">View</a>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <!-- Search Bar & Controls Card -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white mb-3">
+        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+            
+            <!-- Real-Time "As-You-Type" Multi-Column Search Input -->
+            <div class="grn-search-input-wrap">
+                <i class="fas fa-search search-icon"></i>
+                <input type="text" 
+                       id="grnSearchInput" 
+                       class="form-control grn-search-input" 
+                       placeholder="Search GRN No, Supplier, Challan / Bill Ref, Date, Status, Net Amount..." 
+                       value="{{ request.GET.q|default:'' }}"
+                       autocomplete="off"
+                       spellcheck="false">
+                <button type="button" 
+                        id="clearGrnSearchBtn" 
+                        class="grn-clear-search-btn" 
+                        title="Clear search">
+                    <i class="fas fa-times-circle"></i>
+                </button>
+            </div>
+
+            <!-- Live Matches Counter Badge -->
+            <div class="d-flex align-items-center gap-2">
+                <span class="grn-live-counter-badge" id="grnCounterBadge">
+                    Showing {{ grns|length }} of {{ page_obj.paginator.count|default:grns|length }} GRNs
+                </span>
+            </div>
+
+        </div>
     </div>
+
+    <!-- Main GRN Records Table Card -->
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 fs-sm" id="grnMasterTable">
+                <thead class="bg-light text-muted text-uppercase fs-xs">
+                    <tr>
+                        <th class="ps-4" style="width: 20%;">GRN No</th>
+                        <th style="width: 20%;">Supplier</th>
+                        <th style="width: 15%;">Challan / Bill Ref</th>
+                        <th style="width: 15%;">Date</th>
+                        <th style="width: 15%;">Status</th>
+                        <th style="width: 15%;">Net Amount</th>
+                        <th class="text-end pe-4" style="width: 100px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="grnTableBody">
+                    {% for grn in grns %}
+                    <tr class="grn-data-row"
+                        data-grn="{{ grn.grn_number|default:'' }}"
+                        data-supplier="{{ grn.supplier.company_name|default:'' }}"
+                        data-bill="{{ grn.supplier_bill_no|default:'' }} {{ grn.challan_no|default:'' }}"
+                        data-date="{{ grn.bill_date|date:'M. d, Y'|default:'' }} {{ grn.bill_date|date:'F d, Y'|default:'' }} {{ grn.bill_date|default:'' }} {{ grn.bill_date_bs|default:'' }}"
+                        data-status="{{ grn.get_status_display|default:'' }}"
+                        data-amount="{{ grn.net_total_amount|floatformat:2|default:'0.00' }}">
+                        
+                        <!-- 1. GRN Number -->
+                        <td class="ps-4 font-monospace fw-bold text-dark">
+                            {{ grn.grn_number }}
+                        </td>
+
+                        <!-- 2. Supplier -->
+                        <td>
+                            <strong class="text-dark">{{ grn.supplier.company_name }}</strong>
+                        </td>
+
+                        <!-- 3. Challan / Bill Reference -->
+                        <td>
+                            <code class="text-danger fw-semibold">{{ grn.supplier_bill_no }}</code>
+                            {% if grn.challan_no %}
+                                <div class="text-muted fs-3xs font-monospace mt-0.5">Challan: {{ grn.challan_no }}</div>
+                            {% endif %}
+                        </td>
+
+                        <!-- 4. Date (Gregorian & Nepali Bikram Sambat) -->
+                        <td class="text-nowrap">
+                            <span class="text-dark">{{ grn.bill_date|date:"M. d, Y" }}</span>
+                            {% if grn.bill_date_bs %}
+                                <div class="text-muted fs-3xs font-monospace">({{ grn.bill_date_bs }} BS)</div>
+                            {% endif %}
+                        </td>
+
+                        <!-- 5. Status Badge -->
+                        <td>
+                            {% if grn.status == 'RECEIVED' %}
+                                <span class="badge badge-status-received rounded-pill px-2.5 py-1 fs-2xs fw-bold">
+                                    <i class="fas fa-check-circle me-1"></i> {{ grn.get_status_display }}
+                                </span>
+                            {% elif grn.status == 'CANCELLED' %}
+                                <span class="badge badge-status-cancelled rounded-pill px-2.5 py-1 fs-2xs fw-bold">
+                                    <i class="fas fa-ban me-1"></i> {{ grn.get_status_display }}
+                                </span>
+                            {% else %}
+                                <span class="badge badge-status-draft rounded-pill px-2.5 py-1 fs-2xs fw-bold">
+                                    <i class="fas fa-clock me-1"></i> {{ grn.get_status_display }}
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 6. Net Amount -->
+                        <td class="font-mono fw-bold text-primary">
+                            Rs. {{ grn.net_total_amount|floatformat:2|intcomma }}
+                        </td>
+
+                        <!-- 7. Actions -->
+                        <td class="text-end pe-4">
+                            <a href="{% url 'purchases:grn_detail' grn.pk %}" class="btn btn-outline-secondary btn-sm rounded-pill px-3">
+                                View
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr id="emptyGrnDbRow">
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            <i class="fas fa-truck-ramp-box fs-1 text-secondary opacity-25 d-block mb-2"></i>
+                            No Goods Received Notes (GRN) records found.
+                        </td>
+                    </tr>
+                    {% endfor %}
+
+                    <!-- Fallback Row: Appears dynamically when search matches 0 rows -->
+                    <tr id="noGrnMatchesRow" style="display: none;">
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            <i class="fas fa-search fs-2 opacity-25 d-block mb-2"></i>
+                            <div class="fw-bold fs-sm text-dark mb-1">No Matching GRN Records Found</div>
+                            <div class="fs-xs">
+                                No records matched your search query: "<strong id="searchQueryTermText" class="text-primary"></strong>"
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if is_paginated %}
+        <div class="p-3 border-top bg-light">
+            {% include "includes/_pagination.html" %}
+        </div>
+        {% endif %}
+    </div>
+
 </div>
+
+<!-- =========================================================================
+     LIVE CLIENT-SIDE REAL-TIME MULTI-COLUMN FILTER SCRIPT
+     ========================================================================= -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('grnSearchInput');
+    const clearBtn = document.getElementById('clearGrnSearchBtn');
+    const tableBody = document.getElementById('grnTableBody');
+    const noResultsRow = document.getElementById('noGrnMatchesRow');
+    const queryTermSpan = document.getElementById('searchQueryTermText');
+    const counterBadge = document.getElementById('grnCounterBadge');
+
+    if (!searchInput || !tableBody) return;
+
+    // 1. Build an in-memory index from all rendered table rows
+    const rows = Array.from(tableBody.querySelectorAll('.grn-data-row'));
+    const indexedRows = rows.map(row => {
+        const grn = (row.dataset.grn || '').toLowerCase();
+        const supplier = (row.dataset.supplier || '').toLowerCase();
+        const bill = (row.dataset.bill || '').toLowerCase();
+        const date = (row.dataset.date || '').toLowerCase();
+        const status = (row.dataset.status || '').toLowerCase();
+        const amount = (row.dataset.amount || '').toLowerCase();
+        const visibleText = row.textContent.toLowerCase();
+
+        return {
+            element: row,
+            combinedText: `${grn} ${supplier} ${bill} ${date} ${status} ${amount} ${visibleText}`
+        };
+    });
+
+    const totalRowsCount = indexedRows.length;
+
+    // 2. Multi-column instant filter function
+    function filterGrnTable(query) {
+        const cleanQuery = (query || '').toLowerCase().trim();
+        const tokens = cleanQuery.split(/\s+/).filter(Boolean);
+
+        let visibleCount = 0;
+
+        indexedRows.forEach(item => {
+            // Check if every typed word/token exists in the row's combined data
+            const matchesAllTokens = tokens.length === 0 || tokens.every(token => item.combinedText.includes(token));
+
+            if (matchesAllTokens) {
+                item.element.style.display = '';
+                visibleCount++;
+            } else {
+                item.element.style.display = 'none';
+            }
+        });
+
+        // 3. Handle the "No Matching Records Found" notification row
+        if (noResultsRow) {
+            if (visibleCount === 0 && totalRowsCount > 0) {
+                if (queryTermSpan) queryTermSpan.innerText = query;
+                noResultsRow.style.display = '';
+            } else {
+                noResultsRow.style.display = 'none';
+            }
+        }
+
+        // 4. Update the live counter badge
+        if (counterBadge) {
+            counterBadge.innerText = `Showing ${visibleCount} of ${totalRowsCount} GRNs`;
+        }
+
+        // 5. Toggle the clear (X) button
+        if (clearBtn) {
+            clearBtn.style.display = cleanQuery.length > 0 ? 'block' : 'none';
+        }
+    }
+
+    // 3. Listen to every keystroke in real-time ("v" -> "vi" -> "viv" -> "vivo")
+    searchInput.addEventListener('input', (e) => {
+        filterGrnTable(e.target.value);
+    });
+
+    // 4. Clear button (X) click resets the search and table instantly
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            filterGrnTable('');
+            searchInput.focus();
+        });
+    }
+
+    // 5. Keyboard shortcut: Pressing 'Escape' clears the search
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            searchInput.value = '';
+            filterGrnTable('');
+        }
+    });
+
+    // 6. If page loaded with an existing query parameter, filter immediately
+    if (searchInput.value.trim()) {
+        filterGrnTable(searchInput.value);
+    }
+});
+</script>
 {% endblock %}

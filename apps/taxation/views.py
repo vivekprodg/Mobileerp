@@ -1,42 +1,3 @@
-"""
-Taxation & Proforma Register Overview Views (Annex 5 Sales Book, Annex 7 Purchase Book, Day-Wise VAT Ledger, 6-Month Reports & GL Reconciliation).
-
-Hierarchical Multi-Tier VAT Drill-Down & Audit Controller Architecture:
-1. VAT Overview (TaxDashboardView):
-   - Executive dashboard presenting Output VAT, Input VAT, and Net Tax Assessment.
-   - Enforces IS_VAT_MODE flag in context so dashboard KPI cards display genuine VAT amounts
-     rather than inadvertently swapping in Gross Sales and Total Purchases.
-   - Passes synchronized 6-month drill-down query bounds matching active branch and Bikram Sambat periods.
-2. Sales Register / Output VAT (SalesRegisterReportView):
-   - Annex 5 Sales Book breaking down taxable sales, non-taxable turnover, and Output VAT.
-   - Document-to-Item Drilldown:
-     Output VAT → Month → Invoices → Line Items (Product, Rate, Taxable Base, VAT Amount) → GL Entry (2210).
-3. Purchase Register / Input VAT (PurchaseRegisterReportView):
-   - Annex 7 Purchase Book breaking down gross cost, trade discounts, taxable base, and Input VAT.
-   - Document-to-Item Drilldown:
-     Input VAT → Month → GRN Consignments → Line Items (Product, Landed Cost, Taxable Base, VAT Amount) → GL Entry (1410).
-4. Day-Wise Combined VAT Ledger (DailyVatReportView):
-   - Chronological Day-by-Day ledger reconciling daily Output VAT collected vs. Input VAT paid.
-   - Daily Multi-Tier Drilldown:
-     Date (Day) → Invoices / GRNs / Debit Notes / Credit Notes → Line Items with VAT Snapshots.
-5. 6-Month VAT Report & Comparison View (SixMonthVatReportView):
-   - 6 consecutive Bikram Sambat months breakdown:
-     Month | Output VAT | Sales Return VAT | Net Output | Input VAT | Purchase Return VAT | Net Input | Net VAT
-   - Preserves active branch and date range consistency between the dashboard and reports.
-   - Full CSV, Excel, and JSON data endpoints with drilldown links.
-6. VAT-to-General-Ledger Reconciliation View (VatGlReconciliationView):
-   - Audit report comparing statutory VAT registers directly against General Ledger control accounts:
-     * Output VAT (Register Net) vs. GL Account 2210 (Output VAT)
-     * Input VAT (Register Net) vs. GL Account 1410 (Input VAT)
-     * Net VAT Assessment comparison (Register Net vs. GL Net)
-     * Overall reconciliation status (Balanced with 0.00 variance vs. Discrepancies Detected)
-     * Itemized transaction-level discrepancies (Missing GL entries, Orphan manual GL entries, duplicates, amount/date/branch mismatches).
-   - Strictly read-only: does not alter accounting records.
-7. Interactive Drill-Down Endpoints (VatDrilldownAPIView, InvoiceVatDrilldownView, GRNVatDrilldownView, SalesReturnVatDrilldownView, PurchaseReturnVatDrilldownView):
-   - Dedicated AJAX and modal controllers providing instant JSON and partial template inspection
-     for Day, Invoice, GRN, Sales Return (Credit Note), and Purchase Return (Debit Note).
-"""
-
 import csv
 import io
 import json
@@ -45,11 +6,12 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, List, Tuple, Optional, Union
 
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.views.generic import TemplateView, View
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, HttpResponsePermanentRedirect
 from django.utils import timezone
+from django.urls import reverse
 from django.core.serializers.json import DjangoJSONEncoder
 
 from apps.taxation.reports import TaxationReportGenerator
@@ -63,9 +25,7 @@ from apps.core.nepali_calendar import NepaliCalendar
 from apps.core.utils.nepali_date_converter import ad_to_bs_string
 from apps.reports.exports import CSVExportEngine, sanitize_csv_row
 
-# ==============================================================================
-# JSON SERIALIZATION HELPER FOR DECIMALS & DATES
-# ==============================================================================
+
 class SafeTaxJSONEncoder(DjangoJSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
@@ -74,14 +34,8 @@ class SafeTaxJSONEncoder(DjangoJSONEncoder):
             return obj.isoformat()
         return super().default(obj)
 
-# ==============================================================================
-# PERIOD & FISCAL YEAR RESOLUTION HELPERS
-# ==============================================================================
+
 def get_available_fiscal_years() -> List[str]:
-    """
-    Returns standard list of relevant Nepali Fiscal Years for selection dropdowns.
-    e.g., ['2083/84', '2082/83', '2081/82', '2080/81', '2079/80', '2078/79']
-    """
     today_ad = timezone.now().date()
     current_bs_y, current_bs_m, _ = NepaliCalendar.ad_to_bs(today_ad)
     current_fy = NepaliCalendar.get_fiscal_year(current_bs_y, current_bs_m)
@@ -93,10 +47,8 @@ def get_available_fiscal_years() -> List[str]:
     fys.sort(reverse=True)
     return fys
 
+
 def get_available_nepali_months() -> List[Dict[str, Any]]:
-    """
-    Returns the 12 Bikram Sambat months with English and Nepali Devanagari labels.
-    """
     return [
         {
             'num': i + 1,
@@ -106,11 +58,8 @@ def get_available_nepali_months() -> List[Dict[str, Any]]:
         for i in range(12)
     ]
 
+
 def parse_flexible_date(val_str: str) -> Optional[Tuple[date, str]]:
-    """
-    Accepts arbitrary date strings in either Gregorian AD or Nepali BS (delimited by - or /)
-    and returns a clean (ad_date_object, bs_date_string) tuple.
-    """
     if not val_str or not str(val_str).strip():
         return None
 
@@ -119,7 +68,6 @@ def parse_flexible_date(val_str: str) -> Optional[Tuple[date, str]]:
     if len(parts) != 3:
         return None
 
-    # Format: YYYY-MM-DD in BS (e.g., 2080-04-01)
     if 2000 <= parts[0] <= 2095:
         bs_y, bs_m, bs_d = parts[0], parts[1], parts[2]
         bs_m = max(1, min(12, bs_m))
@@ -129,7 +77,6 @@ def parse_flexible_date(val_str: str) -> Optional[Tuple[date, str]]:
         bs_str = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
         return ad_date, bs_str
 
-    # Format: DD-MM-YYYY in BS (e.g., 01-04-2080)
     elif 2000 <= parts[2] <= 2095:
         bs_y, bs_m, bs_d = parts[2], parts[1], parts[0]
         bs_m = max(1, min(12, bs_m))
@@ -139,7 +86,6 @@ def parse_flexible_date(val_str: str) -> Optional[Tuple[date, str]]:
         bs_str = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
         return ad_date, bs_str
 
-    # Format: YYYY-MM-DD in AD (e.g., 2023-07-17)
     elif 1970 <= parts[0] <= 2050:
         try:
             ad_date = date(parts[0], parts[1], parts[2])
@@ -151,19 +97,8 @@ def parse_flexible_date(val_str: str) -> Optional[Tuple[date, str]]:
 
     return None
 
-def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Central date & fiscal period resolution engine for taxation registers.
 
-    Capabilities:
-    1. View Mode Toggling:
-       - 'fiscal_year': Full Nepali Fiscal Year (Shrawan 1 of Year A to Ashadh 31/32 of Year B).
-       - 'month': Single Bikram Sambat Month (1st of month to exact last day of month).
-       - 'custom': Custom start and end date inputs (AD or BS).
-    2. Auto-Detection:
-       - If 'view_mode' or 'period_type' is not explicitly passed, detects based on submitted inputs.
-       - Defaults gracefully to the active BS month up to today.
-    """
+def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
     today_ad = timezone.now().date()
     today_bs_y, today_bs_m, today_bs_d = NepaliCalendar.ad_to_bs(today_ad)
     current_fy = NepaliCalendar.get_fiscal_year(today_bs_y, today_bs_m)
@@ -183,7 +118,6 @@ def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
         else:
             view_mode = 'month'
 
-    # Mode 1: Full Nepali Fiscal Year
     if view_mode == 'fiscal_year':
         target_fy = fy_param if fy_param and fy_param.lower() not in ['all', 'none', ''] else current_fy
         clean_fy = target_fy.replace('-', '/').strip()
@@ -203,7 +137,6 @@ def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
         bs_month_name_en = "Full Fiscal Year"
         bs_month_name_np = "सम्पूर्ण आर्थिक वर्ष"
 
-    # Mode 2: Custom Date Range (AD or BS)
     elif view_mode == 'custom':
         start_date_ad = None
         end_date_ad = None
@@ -240,7 +173,6 @@ def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
         bs_month_name_np = NepaliCalendar.NEPALI_MONTH_NAMES_NP[s_m - 1]
         period_label = f"Custom: {start_date_bs} to {end_date_bs} BS ({start_date_ad} to {end_date_ad})"
 
-    # Mode 3: Single Nepali Bikram Sambat Month (Default)
     else:
         view_mode = 'month'
         try:
@@ -289,81 +221,65 @@ def resolve_taxation_period(raw_params: Dict[str, Any]) -> Dict[str, Any]:
         'period_label': period_label,
     }
 
-# ==============================================================================
-# ACCESS CONTROL MIXIN
-# ==============================================================================
+
 class TaxationAccessMixin(LoginRequiredMixin, UserPassesTestMixin):
-    """Restricts taxation and VAT registers to Owners, Accountants, and Managers."""
     def test_func(self):
         user = self.request.user
         return user.is_authenticated and (
             user.is_superuser or getattr(user, 'role', '') in ['OWNER', 'ACCOUNTANT', 'MANAGER']
         )
 
-# ==============================================================================
-# 1. TAX DASHBOARD VIEW (VAT OVERVIEW WITH HIERARCHICAL DRILLDOWN ENTRY POINTS)
-# ==============================================================================
+
 class TaxDashboardView(TaxationAccessMixin, TemplateView):
-    """
-    Taxation & VAT Overview Dashboard.
-    Connects high-level KPI cards to month-by-month, 6-month, and day-by-day drilldowns:
-      VAT Overview → Output VAT → Month → Day → Invoice → Invoice Item
-      VAT Overview → Input VAT → Month → Day → GRN → GRN Item
-    """
     template_name = 'taxation/vat_overview.html'
 
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-
-        # 1. Resolve Active Branch Scope
-        active_branch = getattr(self.request, 'active_branch', None) or Branch.get_default_main_branch()
-        branch_id = self.request.GET.get('branch')
+    def get(self, request, *args, **kwargs):
+        active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        branch_id = request.GET.get('branch')
         if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
             b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
             if b_match:
                 active_branch = b_match
 
-        # 2. System Configuration & Store Tax Regime Resolution
+        period_ctx = resolve_taxation_period(request.GET)
+        start_date = period_ctx['start_date']
+        end_date = period_ctx['end_date']
+        bs_year = period_ctx['bs_year']
+        bs_month = period_ctx['bs_month']
+        fiscal_year = period_ctx['fiscal_year']
+
+        cockpit_data = VATLedgerService.get_unified_vat_cockpit(
+            branch=active_branch,
+            start_date=start_date,
+            end_date=end_date,
+            bs_year=bs_year,
+            bs_month=bs_month,
+            fiscal_year_name=fiscal_year,
+            include_drilldown=True
+        )
+
+        export_mode = request.GET.get('export', '').strip().lower()
+        if export_mode == 'csv':
+            return self.export_daily_ledger_csv(cockpit_data['daily_ledger'], period_ctx)
+        elif export_mode == 'excel':
+            return self.export_daily_ledger_excel(cockpit_data['daily_ledger'], period_ctx, active_branch)
+
+        context = self.get_context_data(
+            active_branch=active_branch,
+            period_ctx=period_ctx,
+            cockpit_data=cockpit_data
+        )
+        return self.render_to_response(NonIRDDisclaimerEngine.inject_disclaimer(context))
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        active_branch = kwargs.get('active_branch')
+        period_ctx = kwargs.get('period_ctx') or resolve_taxation_period(self.request.GET)
+        cockpit_data = kwargs.get('cockpit_data') or {}
+
         config = SystemConfiguration.get_solo()
         is_vat_mode = (config.tax_system_mode == 'VAT')
 
-        # 3. Resolve Multi-Calendar Period
-        period_ctx = resolve_taxation_period(self.request.GET)
-        start_date = period_ctx['start_date']
-        end_date = period_ctx['end_date']
-
-        sales_summary = {
-            'taxable': Decimal('0.00'), 'non_taxable': Decimal('0.00'),
-            'vat': Decimal('0.00'), 'grand_total': Decimal('0.00'), 'total_refunds': Decimal('0.00')
-        }
-        purchase_summary = {
-            'gross': Decimal('0.00'), 'discount': Decimal('0.00'), 'taxable': Decimal('0.00'),
-            'vat': Decimal('0.00'), 'freight': Decimal('0.00'), 'customs': Decimal('0.00'),
-            'handling': Decimal('0.00'), 'overheads': Decimal('0.00'), 'landed': Decimal('0.00'),
-            'net': Decimal('0.00'), 'paid': Decimal('0.00'), 'due': Decimal('0.00')
-        }
-        net_vat = Decimal('0.00')
-        recent_daily_preview = []
-
-        if active_branch:
-            sales_data = TaxationReportGenerator.generate_sales_book(active_branch, start_date, end_date)
-            purchase_data = TaxationReportGenerator.generate_purchase_book(active_branch, start_date, end_date)
-
-            sales_summary = sales_data.get('totals', sales_summary)
-            purchase_summary = purchase_data.get('totals', purchase_summary)
-
-            # Defensive Guarantee: If VAT was recorded or registered, ensure net_vat reflects true tax
-            output_vat_val = sales_summary.get('vat', Decimal('0.00'))
-            input_vat_val = purchase_summary.get('vat', Decimal('0.00'))
-            net_vat = (output_vat_val - input_vat_val).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-            # Retrieve preview rows for the current period with hierarchical drill-down payloads
-            daily_data = TaxationReportGenerator.generate_daily_vat_ledger(
-                active_branch, start_date, end_date, include_drilldown=True
-            )
-            recent_daily_preview = daily_data.get('daily_rows', [])[-7:]
-
-        # Synchronize query parameters for 6-month & drill-down endpoints
         sync_query_dict = self.request.GET.copy()
         if active_branch and 'branch' not in sync_query_dict:
             sync_query_dict['branch'] = str(active_branch.id)
@@ -377,10 +293,22 @@ class TaxDashboardView(TaxationAccessMixin, TemplateView):
         context.update({
             'branch': active_branch,
             'branches': Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
-            'sales_summary': sales_summary,
-            'purchase_summary': purchase_summary,
-            'net_vat': net_vat,
-            'recent_daily_preview': recent_daily_preview,
+            'sales_summary': cockpit_data.get('sales_summary', {}),
+            'purchase_summary': cockpit_data.get('purchase_summary', {}),
+            'net_vat': cockpit_data.get('net_vat', Decimal('0.00')),
+            'is_net_payable': cockpit_data.get('is_net_payable', False),
+            'is_net_credit': cockpit_data.get('is_net_credit', False),
+            'final_cumulative_balance': cockpit_data.get('final_cumulative_balance', Decimal('0.00')),
+            'daily_ledger': cockpit_data.get('daily_ledger', {}),
+            'daily_rows': cockpit_data.get('daily_rows', []),
+            'totals': cockpit_data.get('daily_ledger', {}).get('totals', {}),
+            'total_days_in_period': cockpit_data.get('total_days_in_period', 0),
+            'active_tax_days_count': cockpit_data.get('active_tax_days_count', 0),
+            'six_month_summary': cockpit_data.get('six_month_summary', {}),
+            'six_month_rows': cockpit_data.get('six_month_rows', []),
+            'six_month_totals': cockpit_data.get('six_month_totals', {}),
+            'comparison': cockpit_data.get('comparison', {}),
+            'comparison_rows': cockpit_data.get('comparison_rows', []),
             'config': config,
             'SYS_CONFIG': config,
             'IS_VAT_MODE': is_vat_mode,
@@ -389,337 +317,15 @@ class TaxDashboardView(TaxationAccessMixin, TemplateView):
             'drilldown_urls': {
                 'sales_register': f"/taxation/sales-register/?{encoded_sync_query}",
                 'purchase_register': f"/taxation/purchase-register/?{encoded_sync_query}",
-                'daily_vat_report': f"/taxation/daily-report/?{encoded_sync_query}",
+                'daily_vat_report': f"/taxation/?{encoded_sync_query}",
                 'six_month_report': f"/taxation/six-month-report/?{encoded_sync_query}",
                 'reconciliation': f"/taxation/reconciliation/?{encoded_sync_query}",
             },
             **period_ctx,
         })
-        return NonIRDDisclaimerEngine.inject_disclaimer(context)
+        return context
 
-# ==============================================================================
-# 2. INTERNAL SALES REGISTER VIEW (OUTPUT VAT → INVOICE → ITEM DRILLDOWN)
-# ==============================================================================
-class SalesRegisterReportView(TaxationAccessMixin, TemplateView):
-    """
-    Internal Sales Register (बिक्री खाता - Annex 5 format).
-    Provides document-to-item drill-down and JSON API inspection:
-      Output VAT → Month → Invoices → Line Items → GL Entry (Account 2210).
-    """
-    template_name = 'taxation/sales_vat_register.html'
-
-    def get(self, request, *args, **kwargs):
-        active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
-        branch_id = request.GET.get('branch')
-        if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
-            b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
-            if b_match:
-                active_branch = b_match
-
-        config = SystemConfiguration.get_solo()
-        is_vat_mode = (config.tax_system_mode == 'VAT')
-
-        period_ctx = resolve_taxation_period(request.GET)
-        start_date = period_ctx['start_date']
-        end_date = period_ctx['end_date']
-
-        report_data = {
-            'records': [],
-            'document_breakdown': [],
-            'returns_breakdown': [],
-            'is_vat_shop': is_vat_mode,
-            'totals': {
-                'taxable': Decimal('0.00'), 'non_taxable': Decimal('0.00'),
-                'vat': Decimal('0.00'), 'grand_total': Decimal('0.00'), 'total_refunds': Decimal('0.00'),
-            }
-        }
-
-        if active_branch:
-            report_data = TaxationReportGenerator.generate_sales_book(
-                active_branch, start_date, end_date, include_drilldown=True
-            )
-
-        # 1. JSON API Mode for Modal / Reactive Frontend Consumption
-        if request.GET.get('format', '').strip().lower() == 'json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return JsonResponse({
-                'status': 'success',
-                'period': period_ctx['period_label'],
-                'branch': active_branch.name if active_branch else '',
-                'totals': report_data.get('totals', {}),
-                'document_breakdown': report_data.get('document_breakdown', []),
-                'returns_breakdown': report_data.get('returns_breakdown', []),
-            }, encoder=SafeTaxJSONEncoder)
-
-        # 2. CSV Export
-        if request.GET.get('export', '').strip().lower() == 'csv':
-            response = HttpResponse(content_type='text/csv; charset=utf-8')
-            filename = f"Sales_Register_Annex5_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.csv"
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
-            writer = csv.writer(response)
-            writer.writerow([
-                'Bill Date (AD)', 'Bill Date (BS)', 'Estimate Slip No', 'Customer Name',
-                'Customer Phone', 'Customer PAN', 'Taxable Base (NPR)', 'Non-Taxable Base (NPR)',
-                'Tax / VAT Amount (NPR)', 'Payable Grand Total (NPR)'
-            ])
-
-            for row in report_data.get('records', []):
-                writer.writerow(sanitize_csv_row([
-                    row.bill_date_ad,
-                    row.bill_date_bs or ad_to_bs_string(row.bill_date_ad, lang='en'),
-                    row.estimate_number,
-                    row.recipient_display_name,
-                    row.customer_phone_manual or (row.customer.phone_number if row.customer else ''),
-                    row.customer_pan or (row.customer.pan_number if row.customer and row.customer.pan_number else ''),
-                    f"{row.taxable_amount:.2f}",
-                    f"{row.non_taxable_amount:.2f}",
-                    f"{row.vat_amount:.2f}",
-                    f"{row.grand_total:.2f}"
-                ]))
-
-            t = report_data.get('totals', {})
-            writer.writerow(sanitize_csv_row([
-                'TOTALS', '', f"{len(report_data.get('records', []))} Invoices", '', '', '',
-                f"{t.get('taxable', Decimal('0.00')):.2f}",
-                f"{t.get('non_taxable', Decimal('0.00')):.2f}",
-                f"{t.get('vat', Decimal('0.00')):.2f}",
-                f"{t.get('grand_total', Decimal('0.00')):.2f}"
-            ]))
-            return response
-
-        context = self.get_context_data(
-            branch=active_branch,
-            branches=Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
-            report=report_data,
-            records=report_data.get('records', []),
-            document_breakdown=report_data.get('document_breakdown', []),
-            returns_breakdown=report_data.get('returns_breakdown', []),
-            totals=report_data.get('totals', {}),
-            config=config,
-            SYS_CONFIG=config,
-            IS_VAT_MODE=is_vat_mode,
-            SHOP_TAX_MODE=config.tax_system_mode,
-            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
-            **period_ctx,
-        )
-        return self.render_to_response(NonIRDDisclaimerEngine.inject_disclaimer(context))
-
-# ==============================================================================
-# 3. COMMERCIAL PURCHASE REGISTER VIEW (INPUT VAT → GRN → ITEM DRILLDOWN)
-# ==============================================================================
-class PurchaseRegisterReportView(TaxationAccessMixin, TemplateView):
-    """
-    Commercial Purchase Register (खरिद खाता - Annex 7 format).
-    Provides document-to-item drill-down and JSON API inspection:
-      Input VAT → Month → GRN Consignments → Line Items → GL Entry (Account 1410).
-    """
-    template_name = 'taxation/purchase_vat_register.html'
-
-    def get(self, request, *args, **kwargs):
-        active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
-        branch_id = request.GET.get('branch')
-        if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
-            b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
-            if b_match:
-                active_branch = b_match
-
-        config = SystemConfiguration.get_solo()
-        is_vat_mode = (config.tax_system_mode == 'VAT')
-
-        period_ctx = resolve_taxation_period(request.GET)
-        start_date = period_ctx['start_date']
-        end_date = period_ctx['end_date']
-
-        report_data = {
-            'records': [],
-            'document_breakdown': [],
-            'returns_breakdown': [],
-            'totals': {
-                'gross': Decimal('0.00'), 'discount': Decimal('0.00'), 'taxable': Decimal('0.00'),
-                'vat': Decimal('0.00'), 'freight': Decimal('0.00'), 'customs': Decimal('0.00'),
-                'handling': Decimal('0.00'), 'overheads': Decimal('0.00'), 'landed': Decimal('0.00'),
-                'net': Decimal('0.00'), 'paid': Decimal('0.00'), 'due': Decimal('0.00'),
-            }
-        }
-
-        if active_branch:
-            report_data = TaxationReportGenerator.generate_purchase_book(
-                active_branch, start_date, end_date, include_drilldown=True
-            )
-
-        raw_totals = report_data.get('totals', {})
-        totals_context = {
-            **raw_totals,
-            'total_gross': raw_totals.get('gross', Decimal('0.00')),
-            'total_discount': raw_totals.get('discount', Decimal('0.00')),
-            'total_taxable': raw_totals.get('taxable', Decimal('0.00')),
-            'total_vat': raw_totals.get('vat', Decimal('0.00')),
-            'total_freight': raw_totals.get('freight', Decimal('0.00')),
-            'total_customs': raw_totals.get('customs', Decimal('0.00')),
-            'total_handling': raw_totals.get('handling', Decimal('0.00')),
-            'total_overheads': raw_totals.get('overheads', Decimal('0.00')),
-            'total_landed': raw_totals.get('landed', Decimal('0.00')),
-            'total_net': raw_totals.get('net', Decimal('0.00')),
-            'total_paid': raw_totals.get('paid', Decimal('0.00')),
-            'total_due': raw_totals.get('due', Decimal('0.00')),
-        }
-        report_data['totals'].update(totals_context)
-
-        # 1. JSON API Mode for Modal / Reactive Frontend Consumption
-        if request.GET.get('format', '').strip().lower() == 'json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return JsonResponse({
-                'status': 'success',
-                'period': period_ctx['period_label'],
-                'branch': active_branch.name if active_branch else '',
-                'totals': totals_context,
-                'document_breakdown': report_data.get('document_breakdown', []),
-                'returns_breakdown': report_data.get('returns_breakdown', []),
-            }, encoder=SafeTaxJSONEncoder)
-
-        # 2. Export Actions (CSV / Excel)
-        export_mode = request.GET.get('export', '').strip().lower()
-        if export_mode == 'csv':
-            return CSVExportEngine.export_purchase_register_csv(
-                records=report_data.get('records', []),
-                totals=totals_context,
-                filename=f"Purchase_Register_Annex7_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.csv"
-            )
-        elif export_mode == 'excel':
-            return CSVExportEngine.export_purchase_register_excel(
-                records=report_data.get('records', []),
-                totals=totals_context,
-                date_range_label=period_ctx['period_label'],
-                branch_name=active_branch.name if active_branch else "All Outlets",
-                filename=f"Purchase_Register_Annex7_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.xlsx"
-            )
-
-        context = self.get_context_data(
-            report=report_data,
-            totals=totals_context,
-            records=report_data.get('records', []),
-            document_breakdown=report_data.get('document_breakdown', []),
-            returns_breakdown=report_data.get('returns_breakdown', []),
-            config=config,
-            SYS_CONFIG=config,
-            IS_VAT_MODE=is_vat_mode,
-            SHOP_TAX_MODE=config.tax_system_mode,
-            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
-            branch=active_branch,
-            branches=Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
-            **period_ctx,
-        )
-        return self.render_to_response(NonIRDDisclaimerEngine.inject_disclaimer(context))
-
-# ==============================================================================
-# 4. CHRONOLOGICAL DAY-WISE VAT & TAX ASSESSMENT LEDGER VIEW
-# ==============================================================================
-class DailyVatReportView(TaxationAccessMixin, TemplateView):
-    """
-    Day-Wise VAT Ledger & Tax Assessment View.
-    Combines daily sales output VAT with purchase input VAT, computes daily net settlement,
-    and supports multi-tier drilldown into individual days, documents, returns, and item VAT lines.
-    """
-    template_name = 'taxation/daily_vat_report.html'
-
-    def get(self, request, *args, **kwargs):
-        active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
-        branch_id = request.GET.get('branch')
-        if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
-            b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
-            if b_match:
-                active_branch = b_match
-
-        config = SystemConfiguration.get_solo()
-        is_vat_mode = (config.tax_system_mode == 'VAT')
-
-        period_ctx = resolve_taxation_period(request.GET)
-        start_date = period_ctx['start_date']
-        end_date = period_ctx['end_date']
-
-        report_data = {
-            'daily_rows': [],
-            'is_vat_shop': is_vat_mode,
-            'total_days_in_period': 0,
-            'active_tax_days_count': 0,
-            'totals': {
-                'sales_taxable': Decimal('0.00'),
-                'sales_non_taxable': Decimal('0.00'),
-                'sales_vat': Decimal('0.00'),
-                'sales_grand_total': Decimal('0.00'),
-                'purchase_taxable': Decimal('0.00'),
-                'purchase_vat': Decimal('0.00'),
-                'purchase_net_total': Decimal('0.00'),
-                'net_vat': Decimal('0.00'),
-                'final_cumulative_balance': Decimal('0.00'),
-                'is_net_payable': False,
-                'is_net_credit': False,
-            }
-        }
-
-        if active_branch:
-            report_data = TaxationReportGenerator.generate_daily_vat_ledger(
-                active_branch, start_date, end_date, include_drilldown=True
-            )
-
-        # 1. Modal / AJAX Single-Node Drill-Down Request Interceptor
-        drilldown_target = request.GET.get('drilldown', '').strip().lower()
-        if drilldown_target:
-            return self._handle_drilldown_request(request, active_branch, drilldown_target)
-
-        # 2. Export Actions
-        export_mode = request.GET.get('export', '').strip().lower()
-        if export_mode == 'csv':
-            return self.export_csv(report_data, period_ctx)
-        elif export_mode == 'excel':
-            return self.export_excel(report_data, period_ctx, active_branch)
-
-        context = self.get_context_data(
-            report=report_data,
-            daily_rows=report_data.get('daily_rows', []),
-            totals=report_data.get('totals', {}),
-            branch=active_branch,
-            branches=Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
-            config=config,
-            SYS_CONFIG=config,
-            IS_VAT_MODE=is_vat_mode,
-            SHOP_TAX_MODE=config.tax_system_mode,
-            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
-            **period_ctx,
-        )
-        return self.render_to_response(NonIRDDisclaimerEngine.inject_disclaimer(context))
-
-    def _handle_drilldown_request(self, request, branch: Branch, target: str) -> JsonResponse:
-        """Handles on-demand AJAX drill-downs for Day, Invoice, GRN, Sales Return, or Purchase Return."""
-        if target == 'day':
-            date_str = request.GET.get('date', '').strip()
-            parsed = parse_flexible_date(date_str)
-            target_date = parsed[0] if parsed else timezone.now().date()
-            day_data = TaxationReportGenerator.get_date_vat_drilldown(branch, target_date)
-            return JsonResponse({'status': 'success', 'data': day_data}, encoder=SafeTaxJSONEncoder)
-
-        elif target in ['invoice', 'sales']:
-            inv_id = request.GET.get('id', '').strip()
-            inv_data = TaxationReportGenerator.get_invoice_vat_drilldown(inv_id)
-            return JsonResponse(inv_data, encoder=SafeTaxJSONEncoder)
-
-        elif target in ['grn', 'purchase']:
-            grn_id = request.GET.get('id', '').strip()
-            grn_data = TaxationReportGenerator.get_grn_vat_drilldown(grn_id)
-            return JsonResponse(grn_data, encoder=SafeTaxJSONEncoder)
-
-        elif target in ['sales_return', 'credit_note', 'sale_return', 'return']:
-            ret_id = request.GET.get('id') or request.GET.get('ref', '')
-            data = VatDrilldownAPIView.get_sales_return_vat_drilldown(ret_id)
-            return JsonResponse(data, encoder=SafeTaxJSONEncoder)
-
-        elif target in ['purchase_return', 'debit_note', 'pret']:
-            pret_id = request.GET.get('id') or request.GET.get('ref', '')
-            data = VatDrilldownAPIView.get_purchase_return_vat_drilldown(pret_id)
-            return JsonResponse(data, encoder=SafeTaxJSONEncoder)
-
-        return JsonResponse({'status': 'error', 'message': f'Unknown drill-down target: {target}'}, status=400)
-
-    def export_csv(self, report_data: dict, period_ctx: dict) -> HttpResponse:
+    def export_daily_ledger_csv(self, report_data: dict, period_ctx: dict) -> HttpResponse:
         response = HttpResponse(content_type='text/csv; charset=utf-8')
         filename = f"Day_Wise_VAT_Ledger_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.csv"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -764,7 +370,7 @@ class DailyVatReportView(TaxationAccessMixin, TemplateView):
         ]))
         return response
 
-    def export_excel(self, report_data: dict, period_ctx: dict, branch: Optional[Branch]) -> HttpResponse:
+    def export_daily_ledger_excel(self, report_data: dict, period_ctx: dict, branch: Optional[Branch]) -> HttpResponse:
         try:
             import openpyxl
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -891,34 +497,72 @@ class DailyVatReportView(TaxationAccessMixin, TemplateView):
             return response
 
         except ImportError:
-            return self.export_csv(report_data, period_ctx)
+            return self.export_daily_ledger_csv(report_data, period_ctx)
 
-# ==============================================================================
-# 5. 6-MONTH VAT REPORT & PERIOD-OVER-PERIOD COMPARISON VIEW
-# ==============================================================================
-class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
-    """
-    Authoritative 6-Month VAT Report & Period-Over-Period Comparison Controller.
-    
-    Accepts:
-      - branch (code or ID, defaults to active outlet)
-      - starting/ending BS month & year:
-        * start_bs_year, start_bs_month
-        * end_bs_year, end_bs_month
-        * fiscal_year & half (1=Shrawan-Poush, 2=Magh-Ashadh)
-        * defaults gracefully to the active half of current fiscal year.
-    
-    Returns:
-      - 6 monthly rows:
-        Month | Output VAT | Sales Return VAT | Net Output | Input VAT | Purchase Return VAT | Net Input | Net VAT
-      - Period-over-period comparison vs. previous 6-month period across all 7 metrics with % variance.
-      - Hierarchical drilldown parameters and links.
-      - Full CSV and Excel export options.
-    """
-    template_name = 'taxation/six_month_vat_report.html'
+
+class DailyVatReportView(TaxationAccessMixin, View):
+    def get(self, request, *args, **kwargs):
+        drilldown_target = request.GET.get('drilldown', '').strip().lower()
+        if drilldown_target:
+            active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+            branch_id = request.GET.get('branch')
+            if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
+                b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
+                if b_match:
+                    active_branch = b_match
+
+            return self._handle_drilldown_request(request, active_branch, drilldown_target)
+
+        if request.GET.get('format', '').strip().lower() == 'json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+            period_ctx = resolve_taxation_period(request.GET)
+            report_data = TaxationReportGenerator.generate_daily_vat_ledger(
+                active_branch, period_ctx['start_date'], period_ctx['end_date'], include_drilldown=True
+            )
+            return JsonResponse({'status': 'success', 'data': report_data}, encoder=SafeTaxJSONEncoder)
+
+        query_string = request.META.get('QUERY_STRING', '')
+        target_url = reverse('taxation:dashboard')
+        if query_string:
+            target_url = f"{target_url}?{query_string}"
+
+        return redirect(target_url)
+
+    def _handle_drilldown_request(self, request, branch: Branch, target: str) -> JsonResponse:
+        if target == 'day':
+            date_str = request.GET.get('date', '').strip()
+            parsed = parse_flexible_date(date_str)
+            target_date = parsed[0] if parsed else timezone.now().date()
+            day_data = TaxationReportGenerator.get_date_vat_drilldown(branch, target_date)
+            return JsonResponse({'status': 'success', 'data': day_data}, encoder=SafeTaxJSONEncoder)
+
+        elif target in ['invoice', 'sales']:
+            inv_id = request.GET.get('id', '').strip()
+            inv_data = TaxationReportGenerator.get_invoice_vat_drilldown(inv_id)
+            return JsonResponse(inv_data, encoder=SafeTaxJSONEncoder)
+
+        elif target in ['grn', 'purchase']:
+            grn_id = request.GET.get('id', '').strip()
+            grn_data = TaxationReportGenerator.get_grn_vat_drilldown(grn_id)
+            return JsonResponse(grn_data, encoder=SafeTaxJSONEncoder)
+
+        elif target in ['sales_return', 'credit_note', 'sale_return', 'return']:
+            ret_id = request.GET.get('id') or request.GET.get('ref', '')
+            data = VatDrilldownAPIView.get_sales_return_vat_drilldown(ret_id)
+            return JsonResponse(data, encoder=SafeTaxJSONEncoder)
+
+        elif target in ['purchase_return', 'debit_note', 'pret']:
+            pret_id = request.GET.get('id') or request.GET.get('ref', '')
+            data = VatDrilldownAPIView.get_purchase_return_vat_drilldown(pret_id)
+            return JsonResponse(data, encoder=SafeTaxJSONEncoder)
+
+        return JsonResponse({'status': 'error', 'message': f'Unknown drill-down target: {target}'}, status=400)
+
+
+class SalesRegisterReportView(TaxationAccessMixin, TemplateView):
+    template_name = 'taxation/sales_vat_register.html'
 
     def get(self, request, *args, **kwargs):
-        # 1. Resolve Branch
         active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
         branch_id = request.GET.get('branch')
         if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
@@ -929,7 +573,201 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
         config = SystemConfiguration.get_solo()
         is_vat_mode = (config.tax_system_mode == 'VAT')
 
-        # 2. Parse 6-Month Filter Parameters
+        period_ctx = resolve_taxation_period(request.GET)
+        start_date = period_ctx['start_date']
+        end_date = period_ctx['end_date']
+
+        report_data = {
+            'records': [],
+            'document_breakdown': [],
+            'returns_breakdown': [],
+            'is_vat_shop': is_vat_mode,
+            'totals': {
+                'taxable': Decimal('0.00'), 'non_taxable': Decimal('0.00'),
+                'vat': Decimal('0.00'), 'grand_total': Decimal('0.00'), 'total_refunds': Decimal('0.00'),
+            }
+        }
+
+        if active_branch:
+            report_data = TaxationReportGenerator.generate_sales_book(
+                active_branch, start_date, end_date, include_drilldown=True
+            )
+
+        if request.GET.get('format', '').strip().lower() == 'json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'status': 'success',
+                'period': period_ctx['period_label'],
+                'branch': active_branch.name if active_branch else '',
+                'totals': report_data.get('totals', {}),
+                'document_breakdown': report_data.get('document_breakdown', []),
+                'returns_breakdown': report_data.get('returns_breakdown', []),
+            }, encoder=SafeTaxJSONEncoder)
+
+        if request.GET.get('export', '').strip().lower() == 'csv':
+            response = HttpResponse(content_type='text/csv; charset=utf-8')
+            filename = f"Sales_Register_Annex5_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.csv"
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+            writer = csv.writer(response)
+            writer.writerow([
+                'Bill Date (AD)', 'Bill Date (BS)', 'Estimate Slip No', 'Customer Name',
+                'Customer Phone', 'Customer PAN', 'Taxable Base (NPR)', 'Non-Taxable Base (NPR)',
+                'Tax / VAT Amount (NPR)', 'Payable Grand Total (NPR)'
+            ])
+
+            for row in report_data.get('records', []):
+                writer.writerow(sanitize_csv_row([
+                    row.bill_date_ad,
+                    row.bill_date_bs or ad_to_bs_string(row.bill_date_ad, lang='en'),
+                    row.estimate_number,
+                    row.recipient_display_name,
+                    row.customer_phone_manual or (row.customer.phone_number if row.customer else ''),
+                    row.customer_pan or (row.customer.pan_number if row.customer and row.customer.pan_number else ''),
+                    f"{row.taxable_amount:.2f}",
+                    f"{row.non_taxable_amount:.2f}",
+                    f"{row.vat_amount:.2f}",
+                    f"{row.grand_total:.2f}"
+                ]))
+
+            t = report_data.get('totals', {})
+            writer.writerow(sanitize_csv_row([
+                'TOTALS', '', f"{len(report_data.get('records', []))} Invoices", '', '', '',
+                f"{t.get('taxable', Decimal('0.00')):.2f}",
+                f"{t.get('non_taxable', Decimal('0.00')):.2f}",
+                f"{t.get('vat', Decimal('0.00')):.2f}",
+                f"{t.get('grand_total', Decimal('0.00')):.2f}"
+            ]))
+            return response
+
+        context = self.get_context_data(
+            branch=active_branch,
+            branches=Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
+            report=report_data,
+            records=report_data.get('records', []),
+            document_breakdown=report_data.get('document_breakdown', []),
+            returns_breakdown=report_data.get('returns_breakdown', []),
+            totals=report_data.get('totals', {}),
+            config=config,
+            SYS_CONFIG=config,
+            IS_VAT_MODE=is_vat_mode,
+            SHOP_TAX_MODE=config.tax_system_mode,
+            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
+            **period_ctx,
+        )
+        return self.render_to_response(NonIRDDisclaimerEngine.inject_disclaimer(context))
+
+
+class PurchaseRegisterReportView(TaxationAccessMixin, TemplateView):
+    template_name = 'taxation/purchase_vat_register.html'
+
+    def get(self, request, *args, **kwargs):
+        active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        branch_id = request.GET.get('branch')
+        if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
+            b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
+            if b_match:
+                active_branch = b_match
+
+        config = SystemConfiguration.get_solo()
+        is_vat_mode = (config.tax_system_mode == 'VAT')
+
+        period_ctx = resolve_taxation_period(request.GET)
+        start_date = period_ctx['start_date']
+        end_date = period_ctx['end_date']
+
+        report_data = {
+            'records': [],
+            'document_breakdown': [],
+            'returns_breakdown': [],
+            'totals': {
+                'gross': Decimal('0.00'), 'discount': Decimal('0.00'), 'taxable': Decimal('0.00'),
+                'vat': Decimal('0.00'), 'freight': Decimal('0.00'), 'customs': Decimal('0.00'),
+                'handling': Decimal('0.00'), 'overheads': Decimal('0.00'), 'landed': Decimal('0.00'),
+                'net': Decimal('0.00'), 'paid': Decimal('0.00'), 'due': Decimal('0.00'),
+            }
+        }
+
+        if active_branch:
+            report_data = TaxationReportGenerator.generate_purchase_book(
+                active_branch, start_date, end_date, include_drilldown=True
+            )
+
+        raw_totals = report_data.get('totals', {})
+        totals_context = {
+            **raw_totals,
+            'total_gross': raw_totals.get('gross', Decimal('0.00')),
+            'total_discount': raw_totals.get('discount', Decimal('0.00')),
+            'total_taxable': raw_totals.get('taxable', Decimal('0.00')),
+            'total_vat': raw_totals.get('vat', Decimal('0.00')),
+            'total_freight': raw_totals.get('freight', Decimal('0.00')),
+            'total_customs': raw_totals.get('customs', Decimal('0.00')),
+            'total_handling': raw_totals.get('handling', Decimal('0.00')),
+            'total_overheads': raw_totals.get('overheads', Decimal('0.00')),
+            'total_landed': raw_totals.get('landed', Decimal('0.00')),
+            'total_net': raw_totals.get('net', Decimal('0.00')),
+            'total_paid': raw_totals.get('paid', Decimal('0.00')),
+            'total_due': raw_totals.get('due', Decimal('0.00')),
+        }
+        report_data['totals'].update(totals_context)
+
+        if request.GET.get('format', '').strip().lower() == 'json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'status': 'success',
+                'period': period_ctx['period_label'],
+                'branch': active_branch.name if active_branch else '',
+                'totals': totals_context,
+                'document_breakdown': report_data.get('document_breakdown', []),
+                'returns_breakdown': report_data.get('returns_breakdown', []),
+            }, encoder=SafeTaxJSONEncoder)
+
+        export_mode = request.GET.get('export', '').strip().lower()
+        if export_mode == 'csv':
+            return CSVExportEngine.export_purchase_register_csv(
+                records=report_data.get('records', []),
+                totals=totals_context,
+                filename=f"Purchase_Register_Annex7_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.csv"
+            )
+        elif export_mode == 'excel':
+            return CSVExportEngine.export_purchase_register_excel(
+                records=report_data.get('records', []),
+                totals=totals_context,
+                date_range_label=period_ctx['period_label'],
+                branch_name=active_branch.name if active_branch else "All Outlets",
+                filename=f"Purchase_Register_Annex7_{period_ctx['start_date_str']}_{period_ctx['end_date_str']}.xlsx"
+            )
+
+        context = self.get_context_data(
+            report=report_data,
+            totals=totals_context,
+            records=report_data.get('records', []),
+            document_breakdown=report_data.get('document_breakdown', []),
+            returns_breakdown=report_data.get('returns_breakdown', []),
+            config=config,
+            SYS_CONFIG=config,
+            IS_VAT_MODE=is_vat_mode,
+            SHOP_TAX_MODE=config.tax_system_mode,
+            DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
+            branch=active_branch,
+            branches=Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
+            **period_ctx,
+        )
+        return self.render_to_response(NonIRDDisclaimerEngine.inject_disclaimer(context))
+
+
+class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
+    template_name = 'taxation/six_month_vat_report.html'
+
+    def get(self, request, *args, **kwargs):
+        active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
+        branch_id = request.GET.get('branch')
+        if branch_id and str(branch_id).strip() not in ['', 'all', 'None']:
+            b_match = Branch.objects.filter(id=branch_id, is_active=True).first()
+            if b_match:
+                active_branch = b_match
+
+        config = SystemConfiguration.get_solo()
+        is_vat_mode = (config.tax_system_mode == 'VAT')
+
         def _parse_int_param(param_name: str) -> Optional[int]:
             val = request.GET.get(param_name, '').strip()
             if val and val.isdigit():
@@ -941,7 +779,6 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
         end_bs_year = _parse_int_param('end_bs_year')
         end_bs_month = _parse_int_param('end_bs_month')
 
-        # Allow fallback from single bs_year / bs_month selectors
         if not end_bs_year and not start_bs_year:
             fallback_year = _parse_int_param('bs_year')
             fallback_month = _parse_int_param('bs_month')
@@ -952,7 +789,6 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
         fiscal_year = request.GET.get('fiscal_year', '').strip() or None
         half = _parse_int_param('half')
 
-        # 3. Call Central Façade in Reports Layer
         report_data = TaxationReportGenerator.generate_six_month_vat_summary(
             branch=active_branch,
             end_bs_year=end_bs_year,
@@ -964,7 +800,6 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
             include_comparison=True
         )
 
-        # 4. JSON API Mode
         if request.GET.get('format', '').strip().lower() == 'json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return JsonResponse({
                 'status': 'success',
@@ -972,14 +807,12 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
                 'data': report_data
             }, encoder=SafeTaxJSONEncoder)
 
-        # 5. Export Actions
         export_mode = request.GET.get('export', '').strip().lower()
         if export_mode == 'csv':
             return self.export_csv(report_data)
         elif export_mode == 'excel':
             return self.export_excel(report_data, active_branch)
 
-        # 6. Render Web Template
         comparison_dict = report_data.get('comparison', {})
         context = self.get_context_data(
             branch=active_branch,
@@ -1023,7 +856,7 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
             selected_half=half,
             drilldown_urls={
                 'vat_overview': '/taxation/',
-                'daily_report': '/taxation/daily-report/',
+                'daily_report': '/taxation/',
                 'sales_register': '/taxation/sales-register/',
                 'purchase_register': '/taxation/purchase-register/',
                 'reconciliation': '/taxation/reconciliation/',
@@ -1045,7 +878,6 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
         writer.writerow(['AD Range:', f"{report_data.get('start_date_ad')} to {report_data.get('end_date_ad')}"])
         writer.writerow([])
 
-        # Table 1: 6-Month Breakdown
         writer.writerow([
             'BS Month', 'Date Range (BS)', 'Date Range (AD)',
             'Gross Output VAT (NPR)', 'Sales Return VAT (NPR)', 'Net Output VAT (NPR)',
@@ -1083,7 +915,6 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
             f"{report_data.get('final_cumulative_balance', Decimal('0.00')):.2f}"
         ]))
 
-        # Table 2: Period-over-period comparison
         comparison = report_data.get('comparison', {})
         if comparison and comparison.get('comparison_rows'):
             writer.writerow([])
@@ -1187,7 +1018,6 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
 
                 current_row += 1
 
-            # Summary Row
             ws.row_dimensions[current_row].height = 22
             ws.cell(row=current_row, column=1, value="6-MONTH TOTALS").font = bold_font
             ws.cell(row=current_row, column=2, value="")
@@ -1215,7 +1045,6 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
 
             current_row += 2
 
-            # Section 2: Period Comparison Table in Excel
             comparison = report_data.get('comparison', {})
             if comparison and comparison.get('comparison_rows'):
                 ws.cell(row=current_row, column=1, value="PERIOD-OVER-PERIOD COMPARISON (Current 6M vs. Previous 6M)").font = bold_font
@@ -1276,27 +1105,8 @@ class SixMonthVatReportView(TaxationAccessMixin, TemplateView):
         except ImportError:
             return self.export_csv(report_data)
 
-# ==============================================================================
-# 6. DEDICATED VAT-TO-GENERAL-LEDGER RECONCILIATION VIEW
-# ==============================================================================
+
 class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
-    """
-    Dedicated VAT-to-General-Ledger Parity Reconciliation View.
-    
-    Provides read-only audit comparison between:
-      1. Output VAT (Sales Register / Annex 5 Net) vs. GL Account 2210 (Output VAT)
-      2. Input VAT (Purchase Register / Annex 7 Net) vs. GL Account 1410 (Input VAT)
-      3. Net VAT Assessment comparison (Register Net vs. GL Net)
-      4. Overall reconciliation status (Balanced with 0.00 variance vs. Discrepancies Detected)
-      5. Detailed transaction-level discrepancies:
-         - Missing GL entries
-         - Orphan / manual GL entries on VAT accounts without source invoice/GRN
-         - Duplicate postings
-         - Amount mismatches
-         - Date mismatches
-         - Branch mismatches
-    Strictly read-only: does not alter accounting or inventory records.
-    """
     template_name = 'taxation/vat_gl_reconciliation.html'
 
     def get(self, request, *args, **kwargs):
@@ -1314,7 +1124,6 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
         start_date = period_ctx['start_date']
         end_date = period_ctx['end_date']
 
-        # Call the reporting façade
         recon_data = TaxationReportGenerator.reconcile_vat_with_general_ledger(
             branch=active_branch,
             start_date=start_date,
@@ -1322,7 +1131,6 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
             include_transaction_reconciliation=True
         )
 
-        # 1. JSON API Mode
         if request.GET.get('format', '').strip().lower() == 'json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return JsonResponse({
                 'status': 'success',
@@ -1331,11 +1139,9 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
                 'reconciliation': recon_data
             }, encoder=SafeTaxJSONEncoder)
 
-        # 2. CSV Export
         if request.GET.get('export', '').strip().lower() == 'csv':
             return self.export_csv(recon_data, period_ctx, active_branch)
 
-        # 3. HTML Render
         output_vat_info = recon_data.get('output_vat', {})
         input_vat_info = recon_data.get('input_vat', {})
         net_vat_info = recon_data.get('net_vat', {})
@@ -1373,7 +1179,7 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
             DEFAULT_TAX_RATE=str(config.default_vat_rate) if is_vat_mode else '0.00',
             drilldown_urls={
                 'vat_overview': '/taxation/',
-                'daily_report': '/taxation/daily-report/',
+                'daily_report': '/taxation/',
                 'sales_register': '/taxation/sales-register/',
                 'purchase_register': '/taxation/purchase-register/',
                 'six_month_report': '/taxation/six-month-report/',
@@ -1397,7 +1203,6 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
         writer.writerow(['Overall Status:', "RECONCILED (0.00 Variance)" if recon_data.get('is_reconciled') else "DISCREPANCIES DETECTED"])
         writer.writerow([])
 
-        # 1. Total-Level Comparison
         out_vat = recon_data.get('output_vat', {})
         in_vat = recon_data.get('input_vat', {})
         net_vat = recon_data.get('net_vat', {})
@@ -1429,7 +1234,6 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
         ]))
         writer.writerow([])
 
-        # 2. Transaction Discrepancies
         tx_recon = recon_data.get('transaction_reconciliation', {}) or {}
         discrepancies = tx_recon.get('discrepancies', []) or []
         writer.writerow([f"AUDIT DISCREPANCIES ({len(discrepancies)} Found)"])
@@ -1455,24 +1259,11 @@ class VatGlReconciliationView(TaxationAccessMixin, TemplateView):
 
         return response
 
-# Compatibility alias
+
 VATReconciliationView = VatGlReconciliationView
 
-# ==============================================================================
-# 7. DEDICATED VAT DRILL-DOWN CONTROLLER (API / MODAL / INSPECTION ENGINE)
-# ==============================================================================
-class VatDrilldownAPIView(TaxationAccessMixin, View):
-    """
-    Dedicated Drill-Down API & Controller Endpoint.
-    Enables deep inspection through the exact paths:
-      1. Output VAT:
-         Month → Day → Invoice → Invoice Item (with line-level VAT snapshot & GL Account 2210 entry)
-         Month → Day → Sales Return / Credit Note (with line-level VAT snapshot & GL Account 2210 reversal)
-      2. Input VAT:
-         Month → Day → GRN → GRN Item (with line-level VAT snapshot & GL Account 1410 entry)
-         Month → Day → Purchase Return / Debit Note (with line-level VAT snapshot & GL Account 1410 reversal)
-    """
 
+class VatDrilldownAPIView(TaxationAccessMixin, View):
     def get(self, request, *args, **kwargs):
         target = request.GET.get('target', '').strip().lower()
         branch_id = request.GET.get('branch')
@@ -1483,9 +1274,6 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
         if not branch:
             branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
-        # -------------------------------------------------------------
-        # Path A: Single-Day Drilldown (All Invoices & GRNs for Date)
-        # -------------------------------------------------------------
         if target == 'day':
             date_str = request.GET.get('date', '').strip()
             parsed = parse_flexible_date(date_str)
@@ -1500,9 +1288,6 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
                 'data': day_data
             }, encoder=SafeTaxJSONEncoder)
 
-        # -------------------------------------------------------------
-        # Path B: Invoice Drilldown (Invoice → Line Items → GL Entry 2210)
-        # -------------------------------------------------------------
         elif target in ['invoice', 'sales']:
             inv_ref = request.GET.get('id') or request.GET.get('ref', '')
             if not inv_ref:
@@ -1511,9 +1296,6 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
             data = TaxationReportGenerator.get_invoice_vat_drilldown(inv_ref)
             return JsonResponse(data, encoder=SafeTaxJSONEncoder)
 
-        # -------------------------------------------------------------
-        # Path C: GRN Drilldown (GRN → Line Items → GL Entry 1410)
-        # -------------------------------------------------------------
         elif target in ['grn', 'purchase']:
             grn_ref = request.GET.get('id') or request.GET.get('ref', '')
             if not grn_ref:
@@ -1522,9 +1304,6 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
             data = TaxationReportGenerator.get_grn_vat_drilldown(grn_ref)
             return JsonResponse(data, encoder=SafeTaxJSONEncoder)
 
-        # -------------------------------------------------------------
-        # Path D: Sales Return / Credit Note Drilldown (Return → Line Items → GL Entry 2210 Reversal)
-        # -------------------------------------------------------------
         elif target in ['sales_return', 'credit_note', 'sale_return', 'return']:
             ret_ref = request.GET.get('id') or request.GET.get('ref', '')
             if not ret_ref:
@@ -1533,9 +1312,6 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
             data = self.get_sales_return_vat_drilldown(ret_ref)
             return JsonResponse(data, encoder=SafeTaxJSONEncoder)
 
-        # -------------------------------------------------------------
-        # Path E: Purchase Return / Debit Note Drilldown (Debit Note → Line Items → GL Entry 1410 Reversal)
-        # -------------------------------------------------------------
         elif target in ['purchase_return', 'debit_note', 'pret']:
             pret_ref = request.GET.get('id') or request.GET.get('ref', '')
             if not pret_ref:
@@ -1544,9 +1320,6 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
             data = self.get_purchase_return_vat_drilldown(pret_ref)
             return JsonResponse(data, encoder=SafeTaxJSONEncoder)
 
-        # -------------------------------------------------------------
-        # Fallback / Documentation
-        # -------------------------------------------------------------
         return JsonResponse({
             'status': 'error',
             'message': 'Invalid drill-down target. Supported targets: "day", "invoice", "grn", "sales_return", "purchase_return".'
@@ -1554,10 +1327,6 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
 
     @staticmethod
     def get_sales_return_vat_drilldown(return_id_or_number: Union[int, str]) -> Dict[str, Any]:
-        """
-        Single-document drill-down resolver for Customer Sales Returns / Credit Notes.
-        Resolves return header, stored line VAT snapshots, and GL Entry.
-        """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
 
@@ -1615,10 +1384,6 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
 
     @staticmethod
     def get_purchase_return_vat_drilldown(return_id_or_number: Union[int, str]) -> Dict[str, Any]:
-        """
-        Single-document drill-down resolver for Supplier Purchase Returns / Debit Notes.
-        Resolves debit note header, stored line VAT snapshots, and GL Entry.
-        """
         clean_ref = str(return_id_or_number or '').strip()
         if not clean_ref:
             return {'status': 'NOT_FOUND', 'message': 'No debit note identifier provided.'}
@@ -1671,17 +1436,13 @@ class VatDrilldownAPIView(TaxationAccessMixin, View):
             'gl_entry': gl_entry,
         }
 
+
 class InvoiceVatDrilldownView(TaxationAccessMixin, View):
-    """
-    Direct View resolving the exact VAT Snapshot Tree for an Invoice:
-    Invoice Header ↔ Line Items VAT ↔ GL Account 2210 Entry.
-    """
     def get(self, request, pk_or_number, *args, **kwargs):
         data = TaxationReportGenerator.get_invoice_vat_drilldown(pk_or_number)
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.GET.get('format') == 'json':
             return JsonResponse(data, encoder=SafeTaxJSONEncoder)
 
-        # Standalone or popup inspection context
         context = {
             'data': data,
             'config': SystemConfiguration.get_solo(),
@@ -1689,11 +1450,8 @@ class InvoiceVatDrilldownView(TaxationAccessMixin, View):
         }
         return render(request, 'taxation/partials/_invoice_vat_modal.html', context)
 
+
 class GRNVatDrilldownView(TaxationAccessMixin, View):
-    """
-    Direct View resolving the exact VAT Snapshot Tree for a GRN:
-    GRN Consignment Header ↔ Line Items VAT ↔ GL Account 1410 Entry.
-    """
     def get(self, request, pk_or_number, *args, **kwargs):
         data = TaxationReportGenerator.get_grn_vat_drilldown(pk_or_number)
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.GET.get('format') == 'json':
@@ -1706,11 +1464,8 @@ class GRNVatDrilldownView(TaxationAccessMixin, View):
         }
         return render(request, 'taxation/partials/_grn_vat_modal.html', context)
 
+
 class SalesReturnVatDrilldownView(TaxationAccessMixin, View):
-    """
-    Direct View resolving the exact VAT Snapshot Tree for a Sales Return / Credit Note:
-    Return Voucher Header ↔ Line Items VAT Reversal ↔ GL Account 2210 Reversal.
-    """
     def get(self, request, pk_or_number, *args, **kwargs):
         data = VatDrilldownAPIView.get_sales_return_vat_drilldown(pk_or_number)
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.GET.get('format') == 'json':
@@ -1723,11 +1478,8 @@ class SalesReturnVatDrilldownView(TaxationAccessMixin, View):
         }
         return render(request, 'taxation/partials/_sales_return_vat_modal.html', context)
 
+
 class PurchaseReturnVatDrilldownView(TaxationAccessMixin, View):
-    """
-    Direct View resolving the exact VAT Snapshot Tree for a Purchase Return / Debit Note:
-    Debit Note Header ↔ Line Items VAT Reversal ↔ GL Account 1410 Reversal.
-    """
     def get(self, request, pk_or_number, *args, **kwargs):
         data = VatDrilldownAPIView.get_purchase_return_vat_drilldown(pk_or_number)
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.GET.get('format') == 'json':

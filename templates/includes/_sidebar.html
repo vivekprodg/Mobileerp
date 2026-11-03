@@ -368,7 +368,7 @@
         </div>
     </div>
 
-    <!-- Sub-Group A: Financial Ledgers & Taxation Suite (Enhanced with Party Confirmation Ledger) -->
+    <!-- Sub-Group A: Financial Ledgers & Taxation Suite -->
     <div class="sidebar-subgroup-wrap">
         <div class="sidebar-nav-item sidebar-subgroup-toggle" onclick="toggleSubgroup('subgroupA', this)">
             <i class="fas fa-landmark text-success"></i>
@@ -384,13 +384,9 @@
             <a href="{% url 'accounting:party_ledger' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'accounting' and 'party' in request.resolver_match.url_name %}active{% endif %}">
                 <i class="fas fa-file-invoice-dollar fs-2xs me-1 text-primary"></i> Party Confirmation Ledger
             </a>
-            <!-- VAT Overview Dashboard -->
-            <a href="{% url 'taxation:dashboard' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
-                <i class="fas fa-chart-pie fs-2xs me-1 text-primary"></i> VAT Overview
-            </a>
-            <!-- Day-Wise VAT Ledger -->
-            <a href="{% url 'taxation:daily_vat_report' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'daily_vat_report' %}active{% endif %}">
-                <i class="fas fa-calendar-days fs-2xs me-1 text-danger"></i> Day-Wise VAT Ledger
+            <!-- Consolidated VAT & Tax Assessment Cockpit (Overview + Day-Wise Running Ledger) -->
+            <a href="{% url 'taxation:dashboard' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name in 'dashboard,daily_vat_report' %}active{% endif %}">
+                <i class="fas fa-calculator fs-2xs me-1 text-primary"></i> VAT &amp; Tax Assessment
             </a>
             <!-- Sales Book (Annex 5) -->
             <a href="{% url 'taxation:sales_register' %}" class="sidebar-subgroup-link {% if request.resolver_match.app_name == 'taxation' and request.resolver_match.url_name == 'sales_register' %}active{% endif %}">

@@ -35,11 +35,11 @@
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
   --shadow-dropdown: 0 12px 28px -4px rgba(15, 23, 42, 0.18), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
   --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-mono: 'JetBrains Mono', 'Courier New', Courier, monospace;
 }
 
 .grn-app-container {
-  max-width: 1560px;
+  max-width: 1600px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -144,9 +144,7 @@
 }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
-.grid-6 { grid-template-columns: repeat(6, 1fr); }
 .col-span-2 { grid-column: span 2; }
-.col-span-4 { grid-column: span 4; }
 
 .form-group-grn {
   display: flex;
@@ -175,11 +173,11 @@
 .form-group-grn textarea,
 .table-container input,
 .table-container select {
-  height: 34px;
+  height: 36px;
   padding: 6px 10px;
   border: 1px solid var(--slate-300);
   border-radius: var(--radius-sm);
-  font-size: 12.5px;
+  font-size: 13px;
   font-family: inherit;
   color: var(--slate-800);
   background-color: var(--surface);
@@ -194,16 +192,16 @@
 .table-container input:focus,
 .table-container select:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
 }
 
 input.readonly-display,
 .table-container input.readonly-display {
   background-color: var(--slate-100) !important;
-  color: var(--slate-600) !important;
+  color: var(--slate-700) !important;
   border-color: var(--slate-200) !important;
   cursor: not-allowed;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 textarea.form-control-grn {
@@ -212,25 +210,36 @@ textarea.form-control-grn {
   line-height: 1.4;
 }
 
+/* ==========================================================================
+   SECTION 2 & SECTION 3 SHARED "Rs." CURRENCY PREFIX INPUT FORMATTER
+   ========================================================================== */
 .input-prefix-wrap {
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
 }
 
 .input-prefix-wrap span.prefix {
   position: absolute;
-  left: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--slate-400);
+  left: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-500);
   pointer-events: none;
+  user-select: none;
+  z-index: 2;
 }
 
 .input-prefix-wrap input {
-  padding-left: 30px !important;
+  padding-left: 36px !important;
+  padding-right: 12px !important;
   text-align: right;
   font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 500;
+  height: 36px;
+  width: 100%;
 }
 
 /* SUMMARY VAT TOGGLE SWITCH */
@@ -283,35 +292,58 @@ textarea.form-control-grn {
   color: #ffffff;
 }
 
-/* TABLE CONTAINER & EXPANDED RESPONSIVE LAYOUT */
+/* ==========================================================================
+   TABLE CONTAINER: PERMANENT SCROLLBAR & 3600px CANVAS FOR 15-DIGIT DATA
+   ========================================================================== */
 .table-container {
-  overflow-x: auto;
-  border: 1px solid var(--slate-200);
+  width: 100%;
+  max-height: 520px;
+  overflow-x: scroll !important; /* Always visible horizontal scrollbar */
+  overflow-y: auto !important;   /* Always functional vertical scrollbar */
+  border: 1px solid var(--slate-300);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  min-height: 360px;
-  padding-bottom: 140px;
   position: relative;
+}
+
+.table-container::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+.table-container::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 4px;
+}
+.table-container::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 4px;
+  border: 2px solid #e2e8f0;
+}
+.table-container::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }
 
 table.items-table {
   width: 100%;
-  min-width: 1820px;
+  min-width: 3600px; /* Spacious width accommodating all 15-digit fields */
   border-collapse: collapse;
   text-align: left;
 }
 
 table.items-table th {
-  background-color: var(--slate-100);
-  color: var(--slate-700);
+  background-color: #e2e8f0;
+  color: var(--slate-800);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   padding: 10px 8px;
-  border-bottom: 1px solid var(--slate-300);
+  border-bottom: 2px solid var(--slate-300);
   border-right: 1px solid var(--slate-200);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 table.items-table td {
@@ -319,47 +351,11 @@ table.items-table td {
   border-bottom: 1px solid var(--slate-200);
   border-right: 1px solid var(--slate-200);
   vertical-align: middle;
-  background-color: #fff;
+  background-color: #ffffff;
 }
 
 table.items-table tr:hover td {
-  background-color: #fafbfc;
-}
-
-table.items-table input,
-table.items-table select {
-  height: 32px;
-  font-size: 12px;
-  padding: 4px 6px;
-}
-
-/* ==========================================================================
-   TARGET ENHANCEMENTS: CLEAN, CLEAR, BIG & REGULAR (NON-BOLD) FIELDS
-   Applied directly to: Qty, UOM, Rate, MRP, Taxable Amt, VAT Amt, Net Amount
-   ========================================================================== */
-.table-container .item-qty,
-.table-container .item-uom,
-.table-container .item-rate,
-.table-container .item-mrp,
-.table-container .item-taxable-amount,
-.table-container .item-vat-amount,
-.table-container .item-net-amount {
-  font-size: 14.5px !important;
-  font-weight: 400 !important;
-  height: 36px !important;
-  line-height: 1.4 !important;
-  padding: 6px 10px !important;
-  color: var(--slate-800) !important;
-}
-
-/* Ensure read-only amount inputs look crisp, clean, with strictly regular weight (NO BOLD) */
-.table-container input.item-taxable-amount.readonly-display,
-.table-container input.item-vat-amount.readonly-display,
-.table-container input.item-net-amount.readonly-display {
-  font-weight: 400 !important;
-  color: var(--slate-800) !important;
-  background-color: #f8fafc !important;
-  border-color: var(--slate-300) !important;
+  background-color: #f8fafc;
 }
 
 .select-tax-rate {
@@ -376,13 +372,13 @@ table.items-table select {
   border: 1px solid transparent;
   color: var(--slate-400);
   cursor: pointer;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: bold;
 }
 
@@ -418,8 +414,8 @@ table.items-table select {
   background-color: var(--primary-light);
   color: var(--primary);
   border: 1px solid var(--primary-border);
-  padding: 6px 14px;
-  font-size: 12px;
+  padding: 7px 16px;
+  font-size: 12.5px;
   font-weight: 600;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -451,7 +447,7 @@ table.items-table select {
   flex-direction: column;
   justify-content: space-between;
   border-top: 3.5px solid var(--slate-400);
-  min-height: 105px;
+  min-height: 95px;
 }
 
 .recon-step-card.step-1 { border-top-color: #3b82f6; }
@@ -464,30 +460,21 @@ table.items-table select {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--slate-500);
-  margin-bottom: 2px;
 }
 
 .recon-step-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--slate-700);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .recon-step-value {
   font-size: 17px;
   font-weight: 800;
   color: var(--slate-900);
-  letter-spacing: -0.01em;
   font-family: var(--font-mono);
-}
-
-.recon-step-sub {
-  font-size: 11px;
-  color: var(--slate-500);
-  margin-top: 3px;
 }
 
 /* LOWER DECK */
@@ -498,7 +485,7 @@ table.items-table select {
   align-items: start;
 }
 
-/* SUMMARY PANEL */
+/* SUMMARY PANEL (SECTION 4) */
 .summary-card-grn {
   background: var(--surface);
   border: 1px solid var(--slate-200);
@@ -553,46 +540,23 @@ table.items-table select {
   font-weight: 700;
 }
 
-/* BOTTOM ACTION DOCK */
+/* STICKY ACTION DOCK */
 .action-bar-grn {
   background: var(--surface);
   border: 1px solid var(--slate-200);
   border-radius: var(--radius-lg);
-  padding: 14px 20px;
+  padding: 12px 20px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
   position: fixed;
   bottom: 12px;
-  left: 16px;
-  right: 16px;
-  max-width: 1560px;
+  left: 24px;
+  right: 24px;
+  max-width: 1600px;
   margin: 0 auto;
   z-index: 1050;
-}
-
-.action-info-grn {
-  font-size: 11.5px;
-  color: var(--slate-500);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.action-info-grn::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: var(--success);
-  display: inline-block;
-}
-
-.btn-group-actions-grn {
-  display: flex;
-  gap: 10px;
-  align-items: center;
 }
 
 .btn-action-grn {
@@ -605,28 +569,21 @@ table.items-table select {
   align-items: center;
   gap: 6px;
   border: none;
-  transition: background 0.15s, transform 0.05s;
 }
-
-.btn-action-grn:active { transform: scale(0.98); }
 
 .btn-action-primary-grn {
   background-color: var(--primary);
   color: #ffffff;
-  border: 1px solid var(--primary-hover);
-  box-shadow: 0 1px 2px rgba(13, 148, 136, 0.2);
 }
-.btn-action-primary-grn:hover { background-color: var(--primary-hover); color:#fff; }
+.btn-action-primary-grn:hover { background-color: var(--primary-hover); color: #fff; }
 
 .btn-action-success-grn {
   background-color: var(--success);
   color: #ffffff;
-  border: 1px solid var(--success-hover);
-  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.2);
 }
-.btn-action-success-grn:hover { background-color: var(--success-hover); color:#fff; }
+.btn-action-success-grn:hover { background-color: var(--success-hover); color: #fff; }
 
-/* AUTOCOMPLETE & ENHANCED FLOATING DROPDOWN */
+/* AUTOCOMPLETE & FLOATING DROPDOWN */
 .search-wrapper-relative {
   position: relative;
   width: 100%;
@@ -636,9 +593,9 @@ table.items-table select {
   position: absolute;
   top: calc(100% + 2px);
   left: 0;
-  min-width: 320px;
+  min-width: 340px;
   width: max-content;
-  max-width: 480px;
+  max-width: 520px;
   z-index: 1200;
   background: #ffffff;
   border: 1px solid var(--slate-300);
@@ -659,18 +616,13 @@ table.items-table select {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: background-color 0.12s ease, border-left-color 0.12s ease;
   background-color: #ffffff;
   text-decoration: none !important;
   color: inherit;
 }
 
-.dropdown-item-grn:last-child {
-  border-bottom: none;
-}
-
-.dropdown-item-grn:hover,
-.dropdown-item-grn.active {
+.dropdown-item-grn:last-child { border-bottom: none; }
+.dropdown-item-grn:hover, .dropdown-item-grn.active {
   background-color: var(--primary-light) !important;
   border-left: 3px solid var(--primary);
   padding-left: 9px;
@@ -682,7 +634,6 @@ table.items-table select {
   text-decoration: underline;
 }
 
-/* TOAST NOTIFICATION */
 #toast-notification {
   position: fixed;
   bottom: 24px;
@@ -709,33 +660,16 @@ table.items-table select {
   transform: translateY(0);
 }
 
-/* RESPONSIVE */
 @media (max-width: 1100px) {
-  .grid-4 { grid-template-columns: repeat(2, 1fr); }
-  .grid-6 { grid-template-columns: repeat(3, 1fr); }
-  .reconciliation-deck { grid-template-columns: repeat(2, 1fr); }
   .lower-deck-grn { grid-template-columns: 1fr; }
-  .col-span-2 { grid-column: span 1; }
 }
 
 @media (max-width: 768px) {
-  .grid-4, .grid-3, .grid-6 { grid-template-columns: 1fr; }
+  .grid-4, .grid-3 { grid-template-columns: 1fr; }
   .reconciliation-deck { grid-template-columns: 1fr; }
   .col-span-2 { grid-column: span 1; }
   .page-header-grn { flex-direction: column; align-items: flex-start; gap: 8px; }
   .action-bar-grn { flex-direction: column; gap: 10px; position: static; }
-  .btn-group-actions-grn { width: 100%; flex-wrap: wrap; }
-  .btn-group-actions-grn button { flex: 1; }
-}
-
-@media print {
-  body { background-color: #fff !important; }
-  .action-bar-grn, .btn-primary-outline-grn, .btn-remove-row-grn, .no-print, header, aside, footer {
-    display: none !important;
-  }
-  .card-grn { box-shadow: none !important; border: 1px solid #ccc !important; }
-  table.items-table { min-width: 100% !important; }
-  .table-container { min-height: auto !important; padding-bottom: 0 !important; }
 }
 </style>
 {% endblock %}
@@ -763,27 +697,26 @@ table.items-table select {
     <!-- Management Form for Django Inline Formset -->
     {{ formset.management_form }}
 
-    <!-- SECTION 1: SUPPLIER & DOCUMENT INFORMATION -->
+    <!-- =========================================================================
+         SECTION 1: SUPPLIER & DOCUMENT INFORMATION
+         ========================================================================= -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>1. Supplier &amp; Document Information</span>
         <span class="tag">Basic Inward Registry</span>
       </div>
       <div class="grid-grn grid-4">
-        <!-- GRN No -->
         <div class="form-group-grn">
           <label>GRN No. <span class="required-star">*</span></label>
           <input type="text" name="grn_number" id="grnNo" value="{{ form.instance.grn_number|default:'Auto-Allocated on Save' }}" readonly class="readonly-display font-mono">
         </div>
 
-        <!-- GRN Date (Bill Date AD) -->
         <div class="form-group-grn">
           <label for="billDate">GRN / Invoice Date <span class="required-star">*</span></label>
           <input type="date" name="bill_date" id="billDate" value="{% if form.bill_date.value %}{% if form.bill_date.value.isoformat %}{{ form.bill_date.value|date:'Y-m-d' }}{% else %}{{ form.bill_date.value }}{% endif %}{% else %}{{ today|date:'Y-m-d' }}{% endif %}" required>
           <input type="hidden" name="bill_date_bs" id="billDateBs" value="{{ form.bill_date_bs.value|default:today_bs }}">
         </div>
 
-        <!-- Warehouse / Stock Location (Branch) -->
         <div class="form-group-grn col-span-2">
           <label for="warehouse">Warehouse / Stock Location <span class="required-star">*</span></label>
           <select name="branch" id="warehouse" required>
@@ -795,7 +728,6 @@ table.items-table select {
           </select>
         </div>
 
-        <!-- Supplier Autocomplete Search -->
         <div class="form-group-grn col-span-2">
           <label for="supplierName">Supplier / Distributor Name <span class="required-star">*</span></label>
           <div class="search-wrapper-relative">
@@ -806,37 +738,31 @@ table.items-table select {
           </div>
         </div>
 
-        <!-- Supplier PAN -->
         <div class="form-group-grn">
           <label for="supplierPan">Supplier PAN / VAT No.</label>
           <input type="text" id="supplierPan" placeholder="9-digit PAN/VAT" value="{% if form.instance.supplier %}{{ form.instance.supplier.pan_number|default:form.instance.supplier.vat_number|default:'' }}{% endif %}">
         </div>
 
-        <!-- Supplier Mobile -->
         <div class="form-group-grn">
           <label for="supplierMobile">Supplier Mobile / Contact</label>
           <input type="text" id="supplierMobile" placeholder="Contact number" value="{% if form.instance.supplier %}{{ form.instance.supplier.phone_number|default:'' }}{% endif %}">
         </div>
 
-        <!-- Supplier Invoice / Bill Ref -->
         <div class="form-group-grn">
           <label for="supplierInvoiceNo">Supplier Invoice / Bill Ref <span class="required-star">*</span></label>
           <input type="text" name="supplier_bill_no" id="supplierInvoiceNo" placeholder="e.g. INV-8849" value="{{ form.supplier_bill_no.value|default:'' }}" required>
         </div>
 
-        <!-- Bill Date Copy -->
         <div class="form-group-grn">
           <label for="invoiceDateSecondary">Bill / Invoice Date <span class="required-star">*</span></label>
           <input type="date" id="invoiceDateSecondary" value="{% if form.bill_date.value %}{% if form.bill_date.value.isoformat %}{{ form.bill_date.value|date:'Y-m-d' }}{% else %}{{ form.bill_date.value }}{% endif %}{% else %}{{ today|date:'Y-m-d' }}{% endif %}">
         </div>
 
-        <!-- Delivery Challan No -->
         <div class="form-group-grn">
           <label for="challanNo">Challan / Delivery Ref No.</label>
           <input type="text" name="challan_no" id="challanNo" placeholder="e.g. CH-2041" value="{{ form.challan_no.value|default:'' }}">
         </div>
 
-        <!-- Challan Date -->
         <div class="form-group-grn">
           <label for="challanDate">Challan Date</label>
           <input type="date" name="challan_date" id="challanDate" value="{% if form.challan_date.value %}{% if form.challan_date.value.isoformat %}{{ form.challan_date.value|date:'Y-m-d' }}{% else %}{{ form.challan_date.value }}{% endif %}{% else %}{{ today|date:'Y-m-d' }}{% endif %}">
@@ -845,14 +771,15 @@ table.items-table select {
       </div>
     </section>
 
-    <!-- SECTION 2: DISCOUNT & ADDITIONAL CHARGES -->
+    <!-- =========================================================================
+         SECTION 2: DISCOUNT & ADDITIONAL LANDED CHARGES
+         ========================================================================= -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>2. Discount &amp; Additional Landed Charges</span>
         <span class="tag">Direct Logistics &amp; Overheads</span>
       </div>
       <div class="grid-grn grid-4">
-        <!-- Whole Bill Discount -->
         <div class="form-group-grn">
           <label for="wholeBillDiscount">Whole Bill / Consignment Disc.</label>
           <input type="hidden" name="bill_discount_type" id="id_bill_discount_type" value="AMOUNT">
@@ -862,7 +789,6 @@ table.items-table select {
           </div>
         </div>
 
-        <!-- 1. Freight -->
         <div class="form-group-grn">
           <label for="freightCharge">Freight / Courier</label>
           <div class="input-prefix-wrap">
@@ -871,7 +797,6 @@ table.items-table select {
           </div>
         </div>
 
-        <!-- 2. Customs / Duty -->
         <div class="form-group-grn">
           <label for="customsDuty">Customs / Duty</label>
           <div class="input-prefix-wrap">
@@ -880,7 +805,6 @@ table.items-table select {
           </div>
         </div>
 
-        <!-- 3. Handling -->
         <div class="form-group-grn">
           <label for="handlingCharge">Handling &amp; Unloading</label>
           <div class="input-prefix-wrap">
@@ -889,7 +813,6 @@ table.items-table select {
           </div>
         </div>
 
-        <!-- 4. Transit Insurance -->
         <div class="form-group-grn">
           <label for="insuranceCharge">Transit Insurance</label>
           <div class="input-prefix-wrap">
@@ -898,7 +821,6 @@ table.items-table select {
           </div>
         </div>
 
-        <!-- 5. Other Direct Overheads -->
         <div class="form-group-grn">
           <label for="otherOverheads">Other Direct Overheads</label>
           <div class="input-prefix-wrap">
@@ -907,7 +829,6 @@ table.items-table select {
           </div>
         </div>
 
-        <!-- Spot Paid on Delivery -->
         <div class="form-group-grn">
           <label for="spotPaidDelivery">Spot Paid on Delivery</label>
           <div class="input-prefix-wrap">
@@ -916,7 +837,6 @@ table.items-table select {
           </div>
         </div>
 
-        <!-- Total Overheads Display -->
         <div class="form-group-grn">
           <label>Total Overheads (Landed)</label>
           <input type="text" id="totalOverheadsDisplay" value="Rs. 0.00" readonly class="readonly-display font-mono" style="font-weight: 700; color: #b45309;">
@@ -924,44 +844,49 @@ table.items-table select {
       </div>
     </section>
 
-    <!-- SECTION 3: RECEIVED ITEMS & LANDED CALCULATION -->
+    <!-- =========================================================================
+         SECTION 3: RECEIVED ITEMS & LANDED CALCULATION
+         (All 8 Fields Widened to 260px - 310px for 15 Digits with Section 2 Rs. Style)
+         ========================================================================= -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>3. Received Items &amp; Landed Calculation</span>
-        <button type="button" class="btn-primary-outline-grn" id="btnAddRow">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-          Add Another Item
+        <button type="button" class="btn-primary-outline-grn" id="btnAddRowTop">
+          <i class="fa-solid fa-plus"></i> Add Another Item
         </button>
       </div>
 
-      <div class="table-container">
+      <!-- Scrollable Container with Visible Horizontal & Vertical Scrollbars -->
+      <div class="table-container" id="grnTableContainer">
         <table class="items-table" id="itemsTable">
           <thead>
             <tr>
-              <th style="width: 38px;" class="text-center">S.N.</th>
-              <th style="width: 270px;">Product / Item Description <span class="required-star">*</span></th>
-              <th style="width: 120px;">Batch No.</th>
-              <th style="width: 170px;">Serial / IMEI Refs</th>
-              <!-- WIDENED COLUMNS FOR HIGH VISIBILITY -->
-              <th style="width: 105px;" class="text-right">Qty <span class="required-star">*</span></th>
-              <th style="width: 95px;">UOM</th>
-              <th style="width: 135px;" class="text-right" id="thRateLabel">Rate <span class="required-star">*</span></th>
-              <th style="width: 135px;" class="text-right">MRP / Retail</th>
-              <th style="width: 90px;">Disc. Type</th>
-              <th style="width: 85px;" class="text-right">Disc. Val</th>
+              <th style="width: 50px;" class="text-center">S.N.</th>
+              <th style="width: 340px;">Product / Item Description <span class="required-star">*</span></th>
+              <th style="width: 160px;">Batch No.</th>
+              <th style="width: 220px;">Serial / IMEI Refs</th>
+              <th style="width: 120px;" class="text-right">Qty <span class="required-star">*</span></th>
+              <th style="width: 100px;">UOM</th>
+              
+              <!-- 8 MONETARY COLUMNS WIDENED FOR 15 DIGITS (WITH "Rs." PREFIX) -->
+              <th style="width: 300px;" class="text-right" id="thRateLabel">Rate (Pre-VAT) <span class="required-star">*</span></th>
+              <th style="width: 300px;" class="text-right">MRP / Retail</th>
+              <th style="width: 110px;">Disc. Type</th>
+              <th style="width: 260px;" class="text-right">Disc. Val</th>
               <th style="width: 110px;" class="text-center">Tax Rate <span class="required-star">*</span></th>
-              <th style="width: 135px;" class="text-right">Taxable Amt</th>
-              <th style="width: 120px;" class="text-right">VAT Amt</th>
-              <th style="width: 140px;" class="text-right">Net Amount</th>
-              <th style="width: 105px;" class="text-right">Alloc. Ovh</th>
-              <th style="width: 120px; background:#f5f3ff; color:#6b21a8;" class="text-right">Landed Unit Cost</th>
-              <th style="width: 44px;" class="text-center">Del</th>
+              <th style="width: 300px;" class="text-right">Taxable Amt</th>
+              <th style="width: 280px;" class="text-right">VAT Amt</th>
+              <th style="width: 310px;" class="text-right">Net Amount</th>
+              
+              <th style="width: 260px;" class="text-right">Alloc. Ovh</th>
+              <th style="width: 300px; background:#f5f3ff; color:#6b21a8;" class="text-right">Landed Cost</th>
+              <th style="width: 50px;" class="text-center">Del</th>
             </tr>
           </thead>
           <tbody id="itemsTableBody">
             {% for item_form in formset %}
             <tr class="item-row" data-row-idx="{{ forloop.counter0 }}">
-              <td class="text-center row-sn font-mono" style="font-weight:400; color:var(--slate-500);">{{ forloop.counter }}</td>
+              <td class="text-center row-sn font-mono">{{ forloop.counter }}</td>
               
               <!-- Product Search Column -->
               <td>
@@ -982,12 +907,12 @@ table.items-table select {
                 <input type="text" name="items-{{ forloop.counter0 }}-scanned_imei_list" class="item-serial font-mono" placeholder="IMEI / Serials" value="{{ item_form.scanned_imei_list.value|default:'' }}">
               </td>
 
-              <!-- Qty (Big, Clean, Regular Font) -->
+              <!-- Qty -->
               <td>
                 <input type="number" name="items-{{ forloop.counter0 }}-purchased_quantity" class="item-qty text-right font-mono" value="{{ item_form.purchased_quantity.value|default:'1.000' }}" min="0.001" step="any" required>
               </td>
 
-              <!-- UOM (Clean, Clear) -->
+              <!-- UOM -->
               <td>
                 <select class="item-uom">
                   <option value="Pcs" selected>Pcs</option>
@@ -998,14 +923,20 @@ table.items-table select {
                 </select>
               </td>
 
-              <!-- Purchase Rate (Big, Clean, Regular Font) -->
+              <!-- 1. Rate (Pre-VAT) - 300px Wide with Section 2 Rs. Style -->
               <td>
-                <input type="number" name="items-{{ forloop.counter0 }}-purchase_rate" class="item-rate text-right font-mono" value="{{ item_form.purchase_rate.value|default:'0.00' }}" min="0" step="0.01" required>
+                <div class="input-prefix-wrap">
+                  <span class="prefix">Rs.</span>
+                  <input type="number" name="items-{{ forloop.counter0 }}-purchase_rate" class="item-rate font-mono" value="{{ item_form.purchase_rate.value|default:'0.00' }}" min="0" step="0.01" required>
+                </div>
               </td>
 
-              <!-- MRP (Big, Clean, Regular Font) -->
+              <!-- 2. MRP / Retail - 300px Wide with Section 2 Rs. Style -->
               <td>
-                <input type="number" name="items-{{ forloop.counter0 }}-new_selling_price" class="item-mrp text-right font-mono" value="{{ item_form.new_selling_price.value|default:'0.00' }}" min="0" step="0.01">
+                <div class="input-prefix-wrap">
+                  <span class="prefix">Rs.</span>
+                  <input type="number" name="items-{{ forloop.counter0 }}-new_selling_price" class="item-mrp font-mono" value="{{ item_form.new_selling_price.value|default:'0.00' }}" min="0" step="0.01">
+                </div>
               </td>
 
               <!-- Disc. Type -->
@@ -1017,45 +948,63 @@ table.items-table select {
                 </select>
               </td>
 
-              <!-- Disc. Value -->
+              <!-- 3. Disc. Val - 260px Wide with Section 2 Rs. Style -->
               <td>
-                <input type="number" name="items-{{ forloop.counter0 }}-discount_input_value" class="item-disc-val text-right font-mono" value="{{ item_form.discount_input_value.value|default:'0.00' }}" min="0" step="0.01">
+                <div class="input-prefix-wrap">
+                  <span class="prefix">Rs.</span>
+                  <input type="number" name="items-{{ forloop.counter0 }}-discount_input_value" class="item-disc-val font-mono" value="{{ item_form.discount_input_value.value|default:'0.00' }}" min="0" step="0.01">
+                </div>
               </td>
 
               <!-- Tax Rate (Strict Dropdown: 13% or 0%) -->
               <td>
-                <select name="items-{{ forloop.counter0 }}-vat_rate" class="item-tax-percent select-tax-rate text-center">
+                <select name="items-{{ forloop.counter0 }}-vat_rate" class="item-tax-percent select-tax-rate text-center font-mono">
                   <option value="13.00" {% if item_form.vat_rate.value == '13.00' or item_form.vat_rate.value == 13 or not item_form.vat_rate.value %}selected{% endif %}>13%</option>
                   <option value="0.00" {% if item_form.vat_rate.value == '0.00' or item_form.vat_rate.value == 0 %}selected{% endif %}>0% (Exempt)</option>
                 </select>
               </td>
 
-              <!-- Taxable Amount (Big, Clean, Readonly, Regular Font) -->
+              <!-- 4. Taxable Amt - 300px Wide with Section 2 Rs. Style -->
               <td>
-                <input type="text" class="item-taxable-amount text-right readonly-display font-mono" readonly value="0.00">
+                <div class="input-prefix-wrap">
+                  <span class="prefix">Rs.</span>
+                  <input type="text" class="item-taxable-amount font-mono readonly-display" readonly value="0.00">
+                </div>
               </td>
 
-              <!-- VAT Amount (Big, Clean, Readonly, Regular Font) -->
+              <!-- 5. VAT Amt - 280px Wide with Section 2 Rs. Style -->
               <td>
-                <input type="text" class="item-vat-amount text-right readonly-display font-mono" readonly value="0.00">
+                <div class="input-prefix-wrap">
+                  <span class="prefix">Rs.</span>
+                  <input type="text" class="item-vat-amount font-mono readonly-display" readonly value="0.00">
+                </div>
               </td>
 
-              <!-- Net Amount (Big, Clean, Readonly, Regular Font - No Bold) -->
+              <!-- 6. Net Amount - 310px Wide with Section 2 Rs. Style -->
               <td>
-                <input type="text" class="item-net-amount text-right readonly-display font-mono" readonly value="0.00">
+                <div class="input-prefix-wrap">
+                  <span class="prefix">Rs.</span>
+                  <input type="text" class="item-net-amount font-mono readonly-display" readonly value="0.00">
+                </div>
               </td>
 
-              <!-- Alloc Overhead (Readonly) -->
+              <!-- 7. Alloc. Ovh - 260px Wide with Section 2 Rs. Style -->
               <td>
-                <input type="text" class="item-alloc-overhead text-right readonly-display font-mono" readonly value="0.00" style="color:#b45309; font-weight:400;">
+                <div class="input-prefix-wrap">
+                  <span class="prefix">Rs.</span>
+                  <input type="text" class="item-alloc-overhead font-mono readonly-display" readonly value="0.00" style="color:#b45309;">
+                </div>
               </td>
 
-              <!-- Landed Unit Cost (Readonly) -->
+              <!-- 8. Landed Cost - 300px Wide with Section 2 Rs. Style -->
               <td>
-                <input type="text" class="item-landed-unit-cost text-right readonly-display font-mono" readonly value="0.00" style="color:#6b21a8; background:#f5f3ff; font-weight:400;">
+                <div class="input-prefix-wrap">
+                  <span class="prefix">Rs.</span>
+                  <input type="text" class="item-landed-unit-cost font-mono readonly-display" readonly value="0.00" style="color:#6b21a8; background:#f5f3ff;">
+                </div>
               </td>
 
-              <!-- Del Row -->
+              <!-- Delete Row -->
               <td class="text-center">
                 <div style="display: none;">{{ item_form.DELETE }}</div>
                 <button type="button" class="btn-remove-row-grn" title="Remove Row">&times;</button>
@@ -1066,13 +1015,15 @@ table.items-table select {
         </table>
       </div>
 
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
         <span style="font-size: 11.5px; color: var(--slate-500);" id="itemsCountBadge">Total Item Lines: 1 | Total Units: 1.00</span>
         <button type="button" class="btn-secondary-grn" id="btnAddRowBottom">+ Add Row</button>
       </div>
     </section>
 
-    <!-- SECTION 5: LANDED COST RECONCILIATION -->
+    <!-- =========================================================================
+         SECTION 5: LANDED COST RECONCILIATION
+         ========================================================================= -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>5. Landed Cost Reconciliation</span>
@@ -1136,7 +1087,9 @@ table.items-table select {
       </div>
     </section>
 
-    <!-- LOWER DECK: SETTLEMENT, NARRATIONS & PURCHASE SUMMARY -->
+    <!-- =========================================================================
+         LOWER DECK: SECTIONS 6, 7 & SECTION 4 (PURCHASE SUMMARY)
+         ========================================================================= -->
     <div class="lower-deck-grn">
       
       <div style="display: flex; flex-direction: column; gap: 16px;">
@@ -1296,10 +1249,10 @@ table.items-table select {
 <!-- TOAST NOTIFICATION CONTAINER -->
 <div id="toast-notification">Notification Message</div>
 
-<!-- TEMPLATE FOR DYNAMIC ROWS -->
+<!-- TEMPLATE FOR DYNAMIC ROWS (WIDENED FOR 15 DIGITS WITH "Rs." PREFIX) -->
 <template id="rowTemplate">
   <tr class="item-row" data-row-idx="__prefix__">
-    <td class="text-center row-sn font-mono" style="font-weight:400; color:var(--slate-500);">1</td>
+    <td class="text-center row-sn font-mono">1</td>
     <td>
       <div class="search-wrapper-relative">
         <input type="hidden" name="items-__prefix__-product" class="item-product-id" value="" required>
@@ -1313,11 +1266,9 @@ table.items-table select {
     <td>
       <input type="text" name="items-__prefix__-scanned_imei_list" class="item-serial font-mono" placeholder="IMEI / Serials" value="">
     </td>
-    <!-- Qty (Big, Clean, Regular Font) -->
     <td>
       <input type="number" name="items-__prefix__-purchased_quantity" class="item-qty text-right font-mono" value="1.000" min="0.001" step="any" required>
     </td>
-    <!-- UOM (Clean, Clear) -->
     <td>
       <select class="item-uom">
         <option value="Pcs" selected>Pcs</option>
@@ -1327,14 +1278,23 @@ table.items-table select {
         <option value="Unit">Unit</option>
       </select>
     </td>
-    <!-- Purchase Rate (Big, Clean, Regular Font) -->
+
+    <!-- 1. Rate (Pre-VAT) -->
     <td>
-      <input type="number" name="items-__prefix__-purchase_rate" class="item-rate text-right font-mono" value="0.00" min="0" step="0.01" required>
+      <div class="input-prefix-wrap">
+        <span class="prefix">Rs.</span>
+        <input type="number" name="items-__prefix__-purchase_rate" class="item-rate font-mono" value="0.00" min="0" step="0.01" required>
+      </div>
     </td>
-    <!-- MRP (Big, Clean, Regular Font) -->
+
+    <!-- 2. MRP / Retail -->
     <td>
-      <input type="number" name="items-__prefix__-new_selling_price" class="item-mrp text-right font-mono" value="0.00" min="0" step="0.01">
+      <div class="input-prefix-wrap">
+        <span class="prefix">Rs.</span>
+        <input type="number" name="items-__prefix__-new_selling_price" class="item-mrp font-mono" value="0.00" min="0" step="0.01">
+      </div>
     </td>
+
     <!-- Disc Type -->
     <td>
       <select name="items-__prefix__-discount_type" class="item-disc-type">
@@ -1343,37 +1303,63 @@ table.items-table select {
         <option value="AMOUNT">Flat</option>
       </select>
     </td>
-    <!-- Disc Val -->
+
+    <!-- 3. Disc Val -->
     <td>
-      <input type="number" name="items-__prefix__-discount_input_value" class="item-disc-val text-right font-mono" value="0.00" min="0" step="0.01">
+      <div class="input-prefix-wrap">
+        <span class="prefix">Rs.</span>
+        <input type="number" name="items-__prefix__-discount_input_value" class="item-disc-val font-mono" value="0.00" min="0" step="0.01">
+      </div>
     </td>
+
     <!-- Tax Rate -->
     <td>
-      <select name="items-__prefix__-vat_rate" class="item-tax-percent select-tax-rate text-center">
+      <select name="items-__prefix__-vat_rate" class="item-tax-percent select-tax-rate text-center font-mono">
         <option value="13.00" selected>13%</option>
         <option value="0.00">0% (Exempt)</option>
       </select>
     </td>
-    <!-- Taxable Amount (Big, Clean, Readonly, Regular Font) -->
+
+    <!-- 4. Taxable Amount -->
     <td>
-      <input type="text" class="item-taxable-amount text-right readonly-display font-mono" readonly value="0.00">
+      <div class="input-prefix-wrap">
+        <span class="prefix">Rs.</span>
+        <input type="text" class="item-taxable-amount font-mono readonly-display" readonly value="0.00">
+      </div>
     </td>
-    <!-- VAT Amount (Big, Clean, Readonly, Regular Font) -->
+
+    <!-- 5. VAT Amount -->
     <td>
-      <input type="text" class="item-vat-amount text-right readonly-display font-mono" readonly value="0.00">
+      <div class="input-prefix-wrap">
+        <span class="prefix">Rs.</span>
+        <input type="text" class="item-vat-amount font-mono readonly-display" readonly value="0.00">
+      </div>
     </td>
-    <!-- Net Amount (Big, Clean, Readonly, Regular Font - No Bold) -->
+
+    <!-- 6. Net Amount -->
     <td>
-      <input type="text" class="item-net-amount text-right readonly-display font-mono" readonly value="0.00">
+      <div class="input-prefix-wrap">
+        <span class="prefix">Rs.</span>
+        <input type="text" class="item-net-amount font-mono readonly-display" readonly value="0.00">
+      </div>
     </td>
-    <!-- Alloc Overhead -->
+
+    <!-- 7. Alloc Overhead -->
     <td>
-      <input type="text" class="item-alloc-overhead text-right readonly-display font-mono" readonly value="0.00" style="color:#b45309; font-weight:400;">
+      <div class="input-prefix-wrap">
+        <span class="prefix">Rs.</span>
+        <input type="text" class="item-alloc-overhead font-mono readonly-display" readonly value="0.00" style="color:#b45309;">
+      </div>
     </td>
-    <!-- Landed Unit Cost -->
+
+    <!-- 8. Landed Unit Cost -->
     <td>
-      <input type="text" class="item-landed-unit-cost text-right readonly-display font-mono" readonly value="0.00" style="color:#6b21a8; background:#f5f3ff; font-weight:400;">
+      <div class="input-prefix-wrap">
+        <span class="prefix">Rs.</span>
+        <input type="text" class="item-landed-unit-cost font-mono readonly-display" readonly value="0.00" style="color:#6b21a8; background:#f5f3ff;">
+      </div>
     </td>
+
     <td class="text-center">
       <div style="display: none;"><input type="checkbox" name="items-__prefix__-DELETE"></div>
       <button type="button" class="btn-remove-row-grn" title="Remove Row">&times;</button>
@@ -1388,7 +1374,8 @@ table.items-table select {
   // STATE & ELEMENTS
   let vatMode = "{{ form.vat_handling_mode.value|default:'EXCLUSIVE' }}".toUpperCase();
   const tableBody = document.getElementById('itemsTableBody');
-  const btnAddRow = document.getElementById('btnAddRow');
+  const tableContainer = document.getElementById('grnTableContainer');
+  const btnAddRowTop = document.getElementById('btnAddRowTop');
   const btnAddRowBottom = document.getElementById('btnAddRowBottom');
   const vatModeToggle = document.getElementById('vatModeToggle');
   const vatModeHidden = document.getElementById('id_vat_handling_mode');
@@ -1406,7 +1393,9 @@ table.items-table select {
   const overheadInputs = document.querySelectorAll('.overhead-input');
 
   function parseNum(val) {
-    const n = parseFloat(val);
+    if (!val) return 0;
+    const cleanStr = String(val).replace(/,/g, '');
+    const n = parseFloat(cleanStr);
     return isNaN(n) ? 0 : n;
   }
 
@@ -1519,7 +1508,7 @@ table.items-table select {
     if (badge) badge.textContent = `Total Item Lines: ${activeRows.length}`;
   }
 
-  // ADD NEW ITEM ROW
+  // ADD NEW ITEM ROW WITH AUTO-SCROLL
   function addNewItem() {
     const currentCount = parseInt(totalFormsInput.value, 10);
     const html = rowTemplate.innerHTML.replace(/__prefix__/g, currentCount);
@@ -1533,20 +1522,17 @@ table.items-table select {
     attachRowEvents(newRow);
     renumberRows();
     calculateAll();
+
+    // Smooth Auto-scroll to ensure newly added row is in viewport
+    newRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const nameInput = newRow.querySelector('.item-name');
+    if (nameInput) nameInput.focus();
+
     return newRow;
   }
 
-  btnAddRow.addEventListener('click', () => {
-    const r = addNewItem();
-    const inp = r.querySelector('.item-name');
-    if (inp) inp.focus();
-  });
-
-  btnAddRowBottom.addEventListener('click', () => {
-    const r = addNewItem();
-    const inp = r.querySelector('.item-name');
-    if (inp) inp.focus();
-  });
+  if (btnAddRowTop) btnAddRowTop.addEventListener('click', addNewItem);
+  if (btnAddRowBottom) btnAddRowBottom.addEventListener('click', addNewItem);
 
   // =========================================================================
   // MATHEMATICALLY STRICT DUAL-POT CALCULATION ENGINE (13% / 0% LOCKED)
@@ -1664,17 +1650,17 @@ table.items-table select {
       const elAlloc = item.row.querySelector('.item-alloc-overhead');
       const elLanded = item.row.querySelector('.item-landed-unit-cost');
 
-      if (elTaxable) elTaxable.value = (item.taxPercent > 0 ? effectiveBase : 0).toFixed(2);
-      if (elVat) elVat.value = vatAmt.toFixed(2);
-      if (elNet) elNet.value = netLineAmount.toFixed(2);
-      if (elAlloc) elAlloc.value = rowAllocOverhead.toFixed(2);
-      if (elLanded) elLanded.value = landedUnitCost.toFixed(2);
+      if (elTaxable) elTaxable.value = (item.taxPercent > 0 ? effectiveBase : 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (elVat) elVat.value = vatAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (elNet) elNet.value = netLineAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (elAlloc) elAlloc.value = rowAllocOverhead.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (elLanded) elLanded.value = landedUnitCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     });
 
     // FINAL RECONCILED CONSIGNMENT VALUATIONS
-    const grandTotalPurchase = netTaxableSum + netNonTaxableSum + totalVatAmount;
+    const grandTotalPurchase = Math.max(0, netTaxableSum + netNonTaxableSum + totalVatAmount);
     const totalLandedCost = netTaxableSum + netNonTaxableSum + totalOverheads;
-    const supplierPayable = Math.max(0, grandTotalPurchase - spotPaid);
+    const supplierPayable = grandTotalPurchase;
     const cashPaid = parseNum(cashPaidInput?.value);
     const remainingCredit = Math.max(0, grandTotalPurchase - cashPaid);
 
@@ -1724,8 +1710,8 @@ table.items-table select {
     const cOut = document.getElementById('creditAmountOutput');
     const bBadge = document.getElementById('itemsCountBadge');
 
-    if (sPayTotal) sPayTotal.value = grandTotalPurchase.toFixed(2);
-    if (cOut) cOut.value = remainingCredit.toFixed(2);
+    if (sPayTotal) sPayTotal.value = grandTotalPurchase.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (cOut) cOut.value = remainingCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     if (bBadge) bBadge.textContent = `Total Item Lines: ${rows.length} | Total Received Units: ${totalItemUnits.toFixed(2)}`;
   }
 

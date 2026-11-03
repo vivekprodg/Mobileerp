@@ -1,44 +1,3 @@
-"""
-Purchases, Suppliers, GRN & Commercial Purchase Return (Debit Note) Views.
-
-Key Architectural Improvements & Capabilities:
-1. Purchase Order Item-Level VAT Calculation & Financial Rollup:
-   - In `PurchaseOrderCreateView.post`:
-     * Computes Pre-VAT merchandise subtotal (`ordered_quantity * unit_cost_price`).
-     * Accurately calculates line-level VAT (`tax_amount`) based on the chosen rate (13% or 0%).
-     * Sets `item.line_total = pre_tax_subtotal + tax_amount`.
-     * Accumulates Pre-VAT subtotal and VAT amount across all lines and writes `po.subtotal`,
-       `po.tax_amount`, and `po.total_amount` onto the Purchase Order header.
-2. Reversal Architecture Correction (Fixes Double-Reversal Bug in cancel_grn_view):
-   - Adopts the standard double-entry audit convention: the original purchase journal entry
-     remains POSTED (annotated with reversal cross-references) while a distinct reversing entry
-     is posted with status='POSTED' that inverts debits and credits.
-   - Prevents balance recalculations from double-subtracting cancelled bills into negative balances.
-3. Settlement-Aware Supplier Debt Cancellation:
-   - Differentiates between unpaid credit balances (due_amount > 0) and spot payments (paid_amount > 0).
-   - If a bill was an unpaid credit purchase, reverses strictly the unpaid debt added to supplier AP.
-   - If a bill was paid in full on delivery (due_amount == 0), does not penalize unrelated debts;
-     records the disbursed cash as an advance due from the supplier / pending refund.
-4. Supplier Payout Historical Date & Calendar Ingestion:
-   - SupplierPaymentRecordView extracts and synchronizes entry_date (AD) and entry_date_bs (BS).
-   - Stamps the sub-ledger and passes ledger_entry and date_ad directly to the General Ledger
-     so historical payment dates are preserved in both ledgers.
-5. Standardized Chart of Accounts Fallback Bindings:
-   - Fallback GL poster adheres to official Nepal COA codes:
-     Cash in Hand (1110), Bank (1120), and Accounts Payable (2110).
-6. Optimized GRNDetailView:
-   - Prefetches products, brands, categories, base units, and packaging conversions in one single query.
-   - Pre-packages the 5-Card Financial reconciliation dictionary directly in the view.
-   - Prepares and checks parsed_imei_pairs across all items.
-7. Dedicated Physical IMEI Scanner Controller (GRNManageIMEIsView):
-   - Displays all items on the purchase bill.
-   - Automatically enables requires_imei_tracking = True if IMEIs are added to an untracked product.
-   - Zero Stock Inflation & Zero Accounting Impact.
-8. Comprehensive Purchase Return VAT ➔ GL Audit Linkage (PurchaseReturnDetailView):
-   - Resolves the complete accounting chain when accessed from VAT reporting drill-down:
-     Debit Note ➔ GL Journal Entry ➔ Journal Items ➔ Input VAT 1410 Reversal.
-"""
-
 import csv
 import json
 import uuid
@@ -55,7 +14,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
 from django.urls import reverse_lazy, reverse
 from django.db import transaction
-from django.db.models import Q, Sum, Count, F, Prefetch
+from django.db.models import Q, Sum, Count, F, Prefetch, CharField
+from django.db.models.functions import Cast
 from django.utils import timezone
 from django.http import HttpResponse, JsonResponse
 from django.core.exceptions import ValidationError
@@ -125,7 +85,6 @@ try:
 
                 target_branch = branch or getattr(supplier, 'preferred_branch', None) or Branch.get_default_main_branch()
 
-                # Official Nepal Master Chart of Accounts Standard Codes
                 cash_acc = AutoPostingService.get_or_create_control_account(
                     target_branch, 'CASH', '1110', 'Cash in Hand (Main Drawer)', 'ASSET', 'DEBIT'
                 )
@@ -146,7 +105,6 @@ try:
                 else:
                     src_acc = bank_acc
 
-                # Determine True Historical Date
                 effective_date = date_ad
                 if not effective_date and ledger_entry:
                     effective_date = getattr(ledger_entry, 'entry_date', None)
@@ -194,12 +152,6 @@ except Exception:
     pass
 
 class PurchaseModuleAccessMixin(LoginRequiredMixin, UserPassesTestMixin):
-    """
-    Enforces strict role-based access control across all supplier records,
-    wholesale purchase costs, landed cost calculations, POs, GRN inward, and purchase returns.
-    Restricts access strictly to Superusers, Shop Owners, Branch Managers, and Accountants.
-    """
-
     def test_func(self):
         user = self.request.user
         return user.is_authenticated and (
@@ -213,15 +165,10 @@ class PurchaseModuleAccessMixin(LoginRequiredMixin, UserPassesTestMixin):
         )
         return redirect('core:dashboard')
 
-# ==============================================================================
+# =============================================================================
 # ASYNC SEARCH APIS (SUPPLIER & GRN)
-# ==============================================================================
+# =============================================================================
 class SupplierSearchAPIView(PurchaseModuleAccessMixin, View):
-    """
-    High-performance API endpoint for async Supplier search/autocomplete in Purchase Orders,
-    GRNs, Debit Notes, and Payment Modals.
-    """
-
     def get(self, request, *args, **kwargs):
         query = request.GET.get('q', '').strip()
         limit = min(int(request.GET.get('limit', 150)), 200)
@@ -277,18 +224,16 @@ class SupplierSearchAPIView(PurchaseModuleAccessMixin, View):
         return JsonResponse({'results': results, 'count': len(results)})
 
 class GRNSearchAPIView(PurchaseModuleAccessMixin, View):
-    """
-    API endpoint for async lookup of Goods Received Notes (GRNs) during Purchase Return / Debit Note creation.
-    Allows staff to locate verified inward consignment bills by grn_number, supplier_bill_no, or supplier.
-    """
-
     def get(self, request, *args, **kwargs):
         query = request.GET.get('q', '').strip()
         supplier_id = request.GET.get('supplier_id', '').strip()
         active_branch = getattr(request, 'active_branch', None)
         limit = min(int(request.GET.get('limit', 25)), 50)
 
-        qs = GoodsReceivedNote.objects.filter(status='RECEIVED').select_related('supplier', 'branch')
+        qs = GoodsReceivedNote.objects.filter(status='RECEIVED').select_related('supplier', 'branch').annotate(
+            net_amount_str=Cast('net_total_amount', CharField()),
+            bill_date_str=Cast('bill_date', CharField())
+        )
 
         if active_branch and not request.user.is_superuser:
             qs = qs.filter(branch=active_branch)
@@ -297,13 +242,29 @@ class GRNSearchAPIView(PurchaseModuleAccessMixin, View):
             qs = qs.filter(supplier_id=supplier_id)
 
         if query:
-            qs = qs.filter(
-                Q(grn_number__icontains=query) |
-                Q(supplier_bill_no__icontains=query) |
-                Q(challan_no__icontains=query) |
-                Q(supplier__company_name__icontains=query) |
-                Q(bill_date_bs__icontains=query)
-            )
+            tokens = [t.strip() for t in query.split() if t.strip()]
+            for token in tokens:
+                token_q = (
+                    Q(grn_number__icontains=token) |
+                    Q(supplier_bill_no__icontains=token) |
+                    Q(challan_no__icontains=token) |
+                    Q(supplier__company_name__icontains=token) |
+                    Q(supplier__code__icontains=token) |
+                    Q(bill_date_bs__icontains=token) |
+                    Q(fiscal_year__icontains=token) |
+                    Q(bill_date_str__icontains=token) |
+                    Q(net_amount_str__icontains=token) |
+                    Q(status__icontains=token)
+                )
+                token_lower = token.lower()
+                if 'rec' in token_lower:
+                    token_q |= Q(status='RECEIVED')
+                if 'dra' in token_lower:
+                    token_q |= Q(status='DRAFT')
+                if 'canc' in token_lower:
+                    token_q |= Q(status='CANCELLED')
+
+                qs = qs.filter(token_q)
 
         qs = qs.order_by('-bill_date', '-id')[:limit]
 
@@ -328,15 +289,16 @@ class GRNSearchAPIView(PurchaseModuleAccessMixin, View):
                 'net_total_amount_formatted': f"Rs. {grn.net_total_amount:,.2f}",
                 'due_amount': float(grn.due_amount),
                 'status': grn.status,
+                'status_display': grn.get_status_display(),
                 'items_count': grn.items.count(),
                 'text': f"{grn.grn_number} | Bill: {grn.supplier_bill_no} | {grn.supplier.company_name} (Rs. {grn.net_total_amount:,.2f})"
             })
 
         return JsonResponse({'results': results, 'count': len(results)})
 
-# ==============================================================================
+# =============================================================================
 # SUPPLIER CRUD & LEDGER VIEWS
-# ==============================================================================
+# =============================================================================
 class SupplierListView(PurchaseModuleAccessMixin, ListView):
     model = Supplier
     template_name = 'purchases/supplier_list.html'
@@ -382,7 +344,6 @@ class SupplierDetailView(PurchaseModuleAccessMixin, DetailView):
         context['recent_returns'] = self.object.purchase_returns.select_related('branch')[:10]
         context['ledger_entries'] = self.object.ledger_entries.select_related('branch', 'recorded_by')[:30]
 
-        # Initialize Payment Form with default today's dates
         today_ad = timezone.now().date()
         try:
             bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today_ad)
@@ -395,7 +356,6 @@ class SupplierDetailView(PurchaseModuleAccessMixin, DetailView):
             'entry_date_bs': today_bs
         })
 
-        # Resolve active Nepali Fiscal Year for party confirmation link
         try:
             current_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
         except Exception:
@@ -453,15 +413,6 @@ class SupplierUpdateView(PurchaseModuleAccessMixin, UpdateView):
         return response
 
 class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
-    """
-    Processes payouts made to suppliers via Cash, Bank Transfer, or Cheque.
-    Features:
-    - Ingests true historical dates (entry_date and entry_date_bs) with dual-calendar synchronization.
-    - Validates that retroactive dates do not fall into closed fiscal periods.
-    - Acquires row-level locks on Supplier inside an atomic database transaction.
-    - Synchronizes SupplierUdhaariLedger, updates supplier.last_payment_date, and auto-posts to the General Ledger.
-    """
-
     def post(self, request, pk, *args, **kwargs):
         form = SupplierPaymentForm(request.POST)
 
@@ -472,7 +423,6 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
             cheque_dt = form.cleaned_data.get('cheque_date')
             remarks = form.cleaned_data.get('remarks', '')
 
-            # 1. Extract and Synchronize Historical Payment Dates
             entry_date = form.cleaned_data.get('entry_date')
             entry_date_bs = form.cleaned_data.get('entry_date_bs')
 
@@ -496,7 +446,6 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
             elif isinstance(entry_date, datetime):
                 entry_date = entry_date.date()
 
-            # Closed Fiscal Year Pre-check
             try:
                 bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(entry_date)
                 fy_name = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
@@ -517,10 +466,8 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
                 with transaction.atomic():
                     supplier = Supplier.objects.select_for_update().get(pk=pk)
                     prev_bal = supplier.current_balance or Decimal('0.00')
-
                     active_branch = getattr(request, 'active_branch', None) or Branch.get_default_main_branch()
 
-                    # 2. Record sub-ledger entry with historical entry dates
                     ledger_entry = SupplierUdhaariLedger.objects.create(
                         supplier=supplier,
                         branch=active_branch,
@@ -537,17 +484,14 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
                         recorded_by=request.user
                     )
 
-                    # 3. Recalculate balance strictly from sub-ledger entries
                     new_bal = supplier.recalculate_balance_from_ledger(save=True)
                     if ledger_entry.resulting_balance != new_bal:
                         ledger_entry.resulting_balance = new_bal
                         ledger_entry.save(update_fields=['resulting_balance'])
 
-                    # Update last payment date on supplier profile
                     supplier.last_payment_date = entry_date
                     supplier.save(update_fields=['last_payment_date', 'updated_at'])
 
-                    # 4. Post Double-Entry Journal to General Ledger with historical date
                     import apps.accounting.services.auto_posting as auto_posting_service
                     gl_entry = auto_posting_service.post_supplier_payout_journal(
                         ledger_entry=ledger_entry,
@@ -565,7 +509,6 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
                             "Transaction rolled back to preserve ledger consistency."
                         )
 
-                    # 5. Record Audit Log
                     AuditLog.objects.create(
                         user=request.user,
                         branch=active_branch,
@@ -606,9 +549,9 @@ class SupplierPaymentRecordView(PurchaseModuleAccessMixin, View):
             messages.error(request, f"Invalid payment values: {'; '.join(err_msgs)}")
             return redirect('purchases:supplier_detail', pk=pk)
 
-# ==============================================================================
-# PURCHASE ORDER (PO) VIEWS (WITH PRE-VAT SUB-TOTAL & 13% VAT ROLLUP)
-# ==============================================================================
+# =============================================================================
+# PURCHASE ORDER (PO) VIEWS
+# =============================================================================
 class PurchaseOrderListView(PurchaseModuleAccessMixin, ListView):
     model = PurchaseOrder
     template_name = 'purchases/po_list.html'
@@ -710,10 +653,8 @@ class PurchaseOrderCreateView(PurchaseModuleAccessMixin, View):
                             cost = item.unit_cost_price if item.unit_cost_price is not None else item.product.purchase_price
                             item.unit_cost_price = cost
                             
-                            # 1. Calculate Pre-VAT Line Subtotal
                             pre_tax_line = (item.ordered_quantity * cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                             
-                            # 2. Extract and Normalize Item-Level VAT Rate (13% or 0%)
                             v_rate = item.vat_rate if (item.vat_rate is not None and item.vat_rate > Decimal('0.00')) else Decimal('0.00')
                             if v_rate > Decimal('0.00'):
                                 item.vat_rate = Decimal('13.00')
@@ -722,13 +663,11 @@ class PurchaseOrderCreateView(PurchaseModuleAccessMixin, View):
                                 item.vat_rate = Decimal('0.00')
                                 line_tax = Decimal('0.00')
 
-                            # 3. Snapshot Exact Line VAT and Total including VAT
                             item.tax_amount = line_tax
                             item.line_total = (pre_tax_line + line_tax).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                             item.received_quantity = Decimal('0.000')
                             item.save()
 
-                            # 4. Accumulate to Header Financial Buckets
                             running_pre_vat_subtotal += pre_tax_line
                             running_vat_total += line_tax
                             valid_items_count += 1
@@ -739,7 +678,6 @@ class PurchaseOrderCreateView(PurchaseModuleAccessMixin, View):
                     if valid_items_count == 0:
                         raise ValidationError("Please add at least one valid product line item with ordered quantity > 0.")
 
-                    # 5. Persist Header Totals (Subtotal + VAT = Grand Total)
                     po.subtotal = running_pre_vat_subtotal
                     po.tax_amount = running_vat_total
                     po.total_amount = (running_pre_vat_subtotal + running_vat_total).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -794,8 +732,6 @@ class PurchaseOrderDetailView(PurchaseModuleAccessMixin, DetailView):
         return context
 
 class PurchaseOrderStatusUpdateView(PurchaseModuleAccessMixin, View):
-    """Updates the workflow status of an existing Purchase Order."""
-
     def post(self, request, pk, *args, **kwargs):
         order = get_object_or_404(PurchaseOrder, pk=pk)
         new_status = request.POST.get('status', '').strip().upper()
@@ -832,7 +768,10 @@ class GRNListView(PurchaseModuleAccessMixin, ListView):
     paginate_by = 25
 
     def get_queryset(self):
-        qs = GoodsReceivedNote.objects.select_related('supplier', 'branch', 'received_by', 'purchase_order')
+        qs = GoodsReceivedNote.objects.select_related('supplier', 'branch', 'received_by', 'purchase_order').annotate(
+            net_amount_str=Cast('net_total_amount', CharField()),
+            bill_date_str=Cast('bill_date', CharField())
+        )
         active_branch = getattr(self.request, 'active_branch', None)
         if active_branch and not self.request.user.is_superuser:
             qs = qs.filter(branch=active_branch)
@@ -845,15 +784,32 @@ class GRNListView(PurchaseModuleAccessMixin, ListView):
         start_date = self.request.GET.get('start_date', '').strip()
         end_date = self.request.GET.get('end_date', '').strip()
 
+        # Database-wide search spanning all 6 target columns
         if query:
-            qs = qs.filter(
-                Q(grn_number__icontains=query) |
-                Q(supplier_bill_no__icontains=query) |
-                Q(challan_no__icontains=query) |
-                Q(supplier__company_name__icontains=query) |
-                Q(fiscal_year__icontains=query) |
-                Q(bill_date_bs__icontains=query)
-            )
+            tokens = [t.strip() for t in query.split() if t.strip()]
+            for token in tokens:
+                token_q = (
+                    Q(grn_number__icontains=token) |
+                    Q(supplier_bill_no__icontains=token) |
+                    Q(challan_no__icontains=token) |
+                    Q(supplier__company_name__icontains=token) |
+                    Q(supplier__code__icontains=token) |
+                    Q(bill_date_bs__icontains=token) |
+                    Q(fiscal_year__icontains=token) |
+                    Q(bill_date_str__icontains=token) |
+                    Q(net_amount_str__icontains=token) |
+                    Q(status__icontains=token)
+                )
+                token_lower = token.lower()
+                if 'rec' in token_lower:
+                    token_q |= Q(status='RECEIVED')
+                if 'dra' in token_lower:
+                    token_q |= Q(status='DRAFT')
+                if 'canc' in token_lower:
+                    token_q |= Q(status='CANCELLED')
+
+                qs = qs.filter(token_q)
+
         if status_filter:
             qs = qs.filter(status=status_filter)
         if vat_mode:
@@ -870,6 +826,31 @@ class GRNListView(PurchaseModuleAccessMixin, ListView):
             qs = qs.filter(bill_date__lte=end_date)
 
         return qs.order_by('-bill_date', '-created_at')
+
+    def render_to_response(self, context, **response_kwargs):
+        # Support smooth AJAX responses for instant live search requests
+        if self.request.headers.get('x-requested-with') == 'XMLHttpRequest' or self.request.GET.get('format') == 'json':
+            grns_data = []
+            for grn in context['grns']:
+                grns_data.append({
+                    'id': grn.id,
+                    'grn_number': grn.grn_number,
+                    'supplier_name': grn.supplier.company_name if grn.supplier else '',
+                    'supplier_bill_no': grn.supplier_bill_no,
+                    'challan_no': grn.challan_no or '',
+                    'bill_date': grn.bill_date.strftime('%b. %d, %Y') if grn.bill_date else '',
+                    'bill_date_bs': grn.bill_date_bs or '',
+                    'status': grn.status,
+                    'status_display': grn.get_status_display(),
+                    'net_total_amount': float(grn.net_total_amount),
+                    'detail_url': reverse('purchases:grn_detail', kwargs={'pk': grn.pk}),
+                })
+            return JsonResponse({
+                'status': 'success',
+                'count': context['page_obj'].paginator.count if context.get('is_paginated') else len(context['grns']),
+                'results': grns_data
+            })
+        return super().render_to_response(context, **response_kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -895,14 +876,6 @@ class GRNListView(PurchaseModuleAccessMixin, ListView):
         return context
 
 class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
-    """
-    Authoritative Procurement Goods Received Note (GRN) Detail Controller.
-    Point A: Optimized prefetching eliminates N+1 queries.
-    Point B: Pre-packages exact 5-card financial metrics and dual-pot reconciliation numbers.
-    Point C: Prepares structured IMEI pairs, dual-SIM states, and handset unit analytics.
-    Safe Staff Preparer: Defensively handles nullable grn.received_by, resolving full name,
-    username, or a polite fallback string ('Warehouse Staff') so template rendering never crashes.
-    """
     model = GoodsReceivedNote
     template_name = 'purchases/grn_detail.html'
     context_object_name = 'grn'
@@ -919,7 +892,6 @@ class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
         context = super().get_context_data(**kwargs)
         grn = self.object
 
-        # Point A: Intelligent Database Prefetching (Eliminates N+1 queries completely)
         items = list(
             grn.items.select_related(
                 'product',
@@ -931,7 +903,6 @@ class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
         )
         context['items'] = items
 
-        # Safe Staff Name Preparer (Defensive against None received_by)
         if grn.received_by:
             full_name = grn.received_by.get_full_name()
             if full_name and full_name.strip():
@@ -945,7 +916,6 @@ class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
 
         context['verified_by_name'] = verified_by_name
 
-        # Point B: Supplying the 5-Card Financial Numbers Pre-Packaged
         gross_val = grn.gross_amount or Decimal('0.00')
         taxable_val = grn.taxable_amount or Decimal('0.00')
         vat_val = grn.vat_amount or Decimal('0.00')
@@ -955,7 +925,6 @@ class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
         paid_val = grn.paid_amount or Decimal('0.00')
         due_val = grn.due_amount or Decimal('0.00')
 
-        # Mathematically strict calculation of Non-Taxable / Exempt merchandise base
         net_merchandise = max(Decimal('0.00'), net_invoice_val - vat_val)
         non_taxable_val = max(Decimal('0.00'), net_merchandise - taxable_val)
 
@@ -972,7 +941,6 @@ class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
         }
         context['non_taxable_base'] = non_taxable_val
 
-        # Point C: Preparing Structured IMEI Sets and Handset Analytics
         total_handsets_count = 0
         total_imeis_tracked = 0
         has_imei_products = False
@@ -1001,14 +969,6 @@ class GRNDetailView(PurchaseModuleAccessMixin, DetailView):
         return context
 
 class GRNCreateView(PurchaseModuleAccessMixin, View):
-    """
-    Inward Procurement Verification Controller.
-    Supports dual-action workflow:
-    1. 'Save Draft': Validates partial data, calculates line projections, and saves as DRAFT
-       without touching physical inventory or posting to GL.
-    2. 'Verify & Update Warehouse Stock': Executes complete approval, updates live inventory,
-       registers physical IMEIs, creates FIFO batches, and dispatches General Ledger postings.
-    """
     template_name = 'purchases/grn_form.html'
 
     def get(self, request, *args, **kwargs):
@@ -1142,7 +1102,6 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
                     if valid_items_count == 0:
                         raise ValidationError("Please add at least one product line item with quantity > 0.")
 
-                    # Full Approval & Stock Update Pipeline
                     PurchaseService.process_grn_approval_and_stock_in(grn=grn, user=request.user)
 
                     if grn.supplier:
@@ -1215,10 +1174,6 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
 # DEDICATED PHYSICAL IMEI SCANNER CONTROLLER (AUTO-ENABLES SERIALIZATION ON DEMAND)
 # ==============================================================================
 class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
-    """
-    Dedicated view allowing warehouse staff and managers to scan/type physical
-    15-digit IMEI numbers for mobile phones received on a completed GRN.
-    """
     template_name = 'purchases/grn_manage_imeis.html'
 
     def get(self, request, pk, *args, **kwargs):
@@ -1401,10 +1356,6 @@ class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
 @login_required
 @require_http_methods(["POST"])
 def cancel_grn_view(request, pk):
-    """
-    Dedicated view function allowing store managers and authorized users to atomically
-    cancel / void an erroneous purchase bill (GRN).
-    """
     grn = get_object_or_404(GoodsReceivedNote, pk=pk)
 
     is_authorized = (
@@ -1448,7 +1399,6 @@ def cancel_grn_view(request, pk):
         with transaction.atomic():
             grn = GoodsReceivedNote.objects.select_for_update().get(pk=pk)
 
-            # 1. Verify that no serialized handsets received on this GRN have already been sold
             instances = ItemInstance.objects.select_for_update().filter(
                 purchase_reference=grn.grn_number
             )
@@ -1461,7 +1411,6 @@ def cancel_grn_view(request, pk):
                     f"Please process a customer sales return first before voiding the inward consignment."
                 )
 
-            # 2. Deduct physical branch inventory and deplete batches for all line items
             for item in grn.items.select_related('product', 'product__base_unit').all():
                 base_qty = item.base_unit_quantity if item.base_unit_quantity > Decimal('0.000') else item.purchased_quantity
 
@@ -1486,14 +1435,12 @@ def cancel_grn_view(request, pk):
                     updated_at=timezone.now()
                 )
 
-            # 3. Archive unsold handset instances
             instances.filter(status='IN_STOCK').update(
                 status='ARCHIVED',
                 mdms_remarks=f"Consignment voided with GRN {grn.grn_number}: {reason}",
                 updated_at=timezone.now()
             )
 
-            # 4. Settle Supplier Balance & Udhaari Ledger with Full Mathematical Continuity
             supplier = Supplier.objects.select_for_update().get(pk=grn.supplier_id)
             prev_bal = supplier.current_balance or Decimal('0.00')
 
@@ -1561,7 +1508,6 @@ def cancel_grn_view(request, pk):
                     )
                 )
 
-            # 5. Method 1 (Audit Standard) General Ledger Reversal
             try:
                 from apps.accounting.models import JournalEntry
                 from apps.accounting.services.auto_posting import JournalEngine
@@ -1604,7 +1550,6 @@ def cancel_grn_view(request, pk):
             except Exception as gl_err:
                 logger.warning(f"[GRN Cancellation GL Reversal]: {gl_err}")
 
-            # 6. Mark GRN Status as CANCELLED
             grn.status = 'CANCELLED'
             if hasattr(grn, 'cancellation_reason'):
                 grn.cancellation_reason = reason
@@ -1615,7 +1560,6 @@ def cancel_grn_view(request, pk):
             else:
                 grn.save(update_fields=['status', 'updated_at'])
 
-            # 7. Forensic AuditLog Record
             AuditLog.objects.create(
                 user=request.user,
                 branch=grn.branch,
@@ -1846,10 +1790,8 @@ class PurchaseReturnCreateView(PurchaseModuleAccessMixin, View):
                     purchase_return.net_refund_amount = running_gross + running_tax
                     purchase_return.save(update_fields=['total_return_amount', 'tax_amount', 'net_refund_amount'])
 
-                    # Process Stock Deduction, IMEI Locking & Supplier Udhaari Adjustment
                     PurchaseReturnService.process_purchase_return(purchase_return, user=request.user)
 
-                    # Recalculate supplier balance strictly from sub-ledger entries
                     purchase_return.supplier.recalculate_balance_from_ledger(save=True)
 
                 messages.success(
@@ -1888,9 +1830,6 @@ class PurchaseReturnDetailView(PurchaseModuleAccessMixin, DetailView):
         context['config'] = config
         context['SYS_CONFIG'] = config
 
-        # -------------------------------------------------------------
-        # RESOLVE GL JOURNAL & VAT 1410 DRILLDOWN DATA
-        # -------------------------------------------------------------
         from apps.accounting.models import JournalEntry
         from apps.taxation.services.vat_ledger_service import VATLedgerService
 

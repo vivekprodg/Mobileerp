@@ -1,38 +1,3 @@
-"""
-Central VAT & Tax Assessment Ledger Service.
-
-The single authoritative source of truth across the entire ERP for:
-1. Sales VAT (Annex 5 Sales Book & Outward Billing)
-2. Purchase VAT (Annex 7 Purchase Book & Inward Consignments)
-3. Sales Return VAT (Credit Notes & Output Tax Reversals)
-4. Purchase Return VAT (Debit Notes & Input Tax Reversals)
-5. VAT Transaction Classification (13% Standard, 0% Non-Taxable / Exempt, Exclusive vs Inclusive)
-6. Hierarchical Multi-Tier Drill-Down:
-   - 6 Months ➔ Month ➔ Day ➔ Invoices / Returns / GRNs / Debit Notes ➔ Line Items ➔ GL Journal
-   - Sales Invoice Drilldown (Invoice ➔ Items ➔ GL Account 2210)
-   - Inward GRN Drilldown (GRN ➔ Items ➔ GL Account 1410)
-   - Sales Return Drilldown (Sales Return ➔ Credit Note ➔ GL Journal Entry ➔ Journal Items ➔ Output VAT 2210 Reversal, with Original Invoice as reference)
-   - Purchase Return Drilldown (Purchase Return ➔ Debit Note ➔ GL Journal Entry ➔ Journal Items ➔ Input VAT 1410 Reversal, with Original GRN as reference)
-7. Net VAT Assessment & Multi-Period Summaries (Daily, Monthly, 6-Month, Fiscal Year)
-8. 6-Month Period-Over-Period Comparison (Current 6 Months vs. Previous 6 Months with Difference & % Variance)
-9. General Ledger Parity Reconciliation:
-   - Total-Level Reconciliation (VAT Registers vs GL Accounts 2210 & 1410)
-   - Full Transaction-Level VAT ↔ GL Reconciliation (Expected VAT → GL VAT → Difference → Matched/Unmatched)
-   - Identifies: Missing GL entries, Orphan/Manual GL entries, Duplicate postings, Amount/Date/Branch/Reference mismatches, and Return Header vs Item differences
-   - Does NOT trust account totals alone: Matches using source_module, source_id, reference_document, voucher_type, branch, and date
-
-Auditing Invariants:
-- Historical Invoices are matched by original sale date across COMPLETED, PARTIALLY_RETURNED,
-  and RETURNED statuses so that later returns never remove the original sale from historical registers.
-- Historical Tax Independence: Reports inspect the actual transactions rather than shutting off
-  historical tax calculations if global settings are changed.
-- Defensive 13% Recalculation: Official sales bills with missing snapshots derive 13% tax backward
-  from the invoice total so reports never show 0.00 for completed VAT sales.
-- Sales Returns and Purchase Returns are recorded as separate reversal events on their actual return dates.
-- Net tax figures are never artificially clamped to zero (no max(0) zero-clamping), allowing valid
-  negative tax credit movements and audit traceability across all periods.
-"""
-
 import logging
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
@@ -53,26 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 class VATLedgerService:
-    """
-    Unified VAT calculation and reconciliation engine.
-    Ensures Dashboard, Daily Ledger, Monthly Reports, 6-Month Summaries, Fiscal Year Audits,
-    and CSV/Excel Exports compute tax consistently.
-    """
-
     STANDARD_VAT_RATE = Decimal('13.00')
     ZERO_VAT_RATE = Decimal('0.00')
-
-    # Statuses that represent valid completed sales for historical tax registers
     VALID_SALES_STATUSES = ['COMPLETED', 'PARTIALLY_RETURNED', 'RETURNED']
 
-    # =========================================================================
-    # 1. VAT TRANSACTION CLASSIFICATION & LINE ITEM EXTRACTION
-    # =========================================================================
     @classmethod
     def classify_vat_rate(cls, rate_val: Any) -> Decimal:
-        """
-        Normalizes any tax rate input to either 13.00% or 0.00% (Exempt).
-        """
         if rate_val is None:
             return cls.ZERO_VAT_RATE
         try:
@@ -87,12 +38,6 @@ class VATLedgerService:
         item: SalesEstimateItem,
         is_vat_shop: bool = True
     ) -> Dict[str, Any]:
-        """
-        Extracts the immutable line-level VAT snapshot for a SalesEstimateItem.
-        Defensive Fallback: If line tax is zero on an official sales bill, reconstructs
-        the 13% tax backward from the line total so historical reports remain accurate.
-        Decoupled from global settings: honors the transaction's own document type and line status.
-        """
         qty = item.quantity or Decimal('1.000')
         line_tot = (item.line_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         taxable_base = (item.base_taxable_amount or item.taxable_line_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -116,7 +61,6 @@ class VATLedgerService:
             taxable_base > Decimal('0.00')
         )
 
-        # Explicit non-taxable / exempt exclusion (unless it's an official VAT bill and merchandise is taxable)
         clean_tax_mode = str(item.tax_pricing_type or 'INCLUSIVE').upper().strip()
         if clean_tax_mode == 'EXEMPT' and not is_official_sales_bill:
             is_line_taxable = False
@@ -124,7 +68,6 @@ class VATLedgerService:
         if is_line_taxable:
             effective_rate = vat_rate if vat_rate > Decimal('0.00') else cls.STANDARD_VAT_RATE
 
-            # Defensive recovery for legacy or incomplete snapshots where tax amounts were saved as 0.00
             if (vat_amt <= Decimal('0.00') or taxable_base <= Decimal('0.00')) and line_tot > Decimal('0.00'):
                 divisor = Decimal('1.00') + (effective_rate / Decimal('100.00'))
                 taxable_base = (line_tot / divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -163,16 +106,8 @@ class VATLedgerService:
         r_item: SalesReturnItem,
         is_vat_shop: bool = True
     ) -> Dict[str, Any]:
-        """
-        Extracts line-level VAT reversal details for a SalesReturnItem.
-        1. Uses stored return VAT snapshots first (taxable_return_amount, vat_reversal_amount, non_taxable_return_amount).
-        2. For missing legacy snapshots, derives reliable figures from the original invoice item's
-           stored tax parameters and returned quantity.
-        Decoupled from global settings to prevent historical data wiping.
-        """
         refund_amt = (r_item.refund_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # 1. Use stored return VAT snapshots first
         has_snapshot = (
             (r_item.taxable_return_amount or Decimal('0.00')) > Decimal('0.00') or
             (r_item.vat_reversal_amount or Decimal('0.00')) > Decimal('0.00') or
@@ -194,7 +129,6 @@ class VATLedgerService:
                 'returned_imei': getattr(r_item, 'returned_imei', '') or '',
             }
 
-        # 2. Derive from linked original estimate item
         taxable_base = Decimal('0.00')
         vat_amt = Decimal('0.00')
         non_taxable = refund_amt
@@ -227,7 +161,6 @@ class VATLedgerService:
                 orig_base_taxable > Decimal('0.00')
             )
 
-            # Defensive recovery for legacy invoice line
             if is_taxable and orig_vat <= Decimal('0.00') and orig_total > Decimal('0.00'):
                 rate_to_use = orig_vat_rate if orig_vat_rate > Decimal('0.00') else cls.STANDARD_VAT_RATE
                 divisor = Decimal('1.00') + (rate_to_use / Decimal('100.00'))
@@ -264,9 +197,6 @@ class VATLedgerService:
 
     @classmethod
     def extract_grn_item_vat_detail(cls, item: GRNItem) -> Dict[str, Any]:
-        """
-        Extracts line-level inward VAT details for a GRNItem.
-        """
         qty = item.purchased_quantity or Decimal('1.000')
         rate = item.purchase_rate or Decimal('0.00')
         vat_rate = item.vat_rate if (item.is_vat_applicable and item.vat_rate is not None) else Decimal('0.00')
@@ -296,9 +226,6 @@ class VATLedgerService:
 
     @classmethod
     def extract_purchase_return_item_vat_detail(cls, item: PurchaseReturnItem) -> Dict[str, Any]:
-        """
-        Extracts line-level debit note VAT reversal details for a PurchaseReturnItem.
-        """
         qty = item.returned_quantity or Decimal('1.000')
         rate = item.purchase_rate or Decimal('0.00')
         tax_rate = item.tax_rate or Decimal('0.00')
@@ -323,9 +250,6 @@ class VATLedgerService:
             'returned_imei_list': item.returned_imei_list or '',
         }
 
-    # =========================================================================
-    # 2. SALES VAT AGGREGATION (ANNEX 5 / SALES BOOK)
-    # =========================================================================
     @classmethod
     def get_sales_vat_summary(
         cls,
@@ -334,14 +258,6 @@ class VATLedgerService:
         end_date: date,
         include_drilldown: bool = True
     ) -> Dict[str, Any]:
-        """
-        Compiles the authoritative Annex 5 Sales Book:
-        1. Selects sales invoices across COMPLETED, PARTIALLY_RETURNED, and RETURNED statuses.
-        2. Defensive Recalculation: For official sales bills (bill_type == 'SALES') with missing
-           or 0.00 taxable/VAT figures, derives 13% tax backward from the bill total.
-        3. Decoupled from Global Settings: Never wipes historical VAT to 0.00 if shop setting is PAN.
-        4. Selects customer sales returns strictly by return_date_ad as separate reversal events.
-        """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
 
@@ -361,10 +277,6 @@ class VATLedgerService:
             'items__product', 'items__unit_conversion', 'returns__items__product'
         ).order_by('bill_date_ad', 'estimate_number')
 
-        # ---------------------------------------------------------------------
-        # DEFENSIVE AGGREGATION ACROSS ALL INVOICES
-        # Reconstructs missing 13% VAT on official sales bills so reports never show 0.00
-        # ---------------------------------------------------------------------
         taxable_sum = Decimal('0.00')
         non_taxable_sum = Decimal('0.00')
         vat_sum = Decimal('0.00')
@@ -387,7 +299,6 @@ class VATLedgerService:
                 est_vat > Decimal('0.00')
             )
 
-            # Defensive 13% recalculation backward from invoice total if VAT fields were empty
             if is_official_sales_bill and est_vat <= Decimal('0.00') and est_taxable <= Decimal('0.00') and est_grand > Decimal('0.00'):
                 est_taxable = (est_grand / Decimal('1.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 est_vat = (est_grand - est_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -432,9 +343,6 @@ class VATLedgerService:
                     'items': items_detail
                 })
 
-        # ---------------------------------------------------------------------
-        # SALES RETURNS AGGREGATION & REVERSAL EVENTS
-        # ---------------------------------------------------------------------
         returns_filter: Dict[str, Any] = {
             'return_date_ad__gte': start_date,
             'return_date_ad__lte': end_date
@@ -511,10 +419,6 @@ class VATLedgerService:
         return_vat_deduct = return_vat_deduct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         return_non_taxable_deduct = return_non_taxable_deduct.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # ---------------------------------------------------------------------
-        # NET AGGREGATION (DECOUPLED FROM CURRENT GLOBAL SHOP SETTING)
-        # Prevents zero-clamping historical transactions when shop mode is PAN
-        # ---------------------------------------------------------------------
         net_taxable = (taxable_sum - return_taxable_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         net_vat = (vat_sum - return_vat_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         net_non_taxable = (non_taxable_sum - return_non_taxable_deduct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -543,9 +447,6 @@ class VATLedgerService:
             }
         }
 
-    # =========================================================================
-    # 3. PURCHASE VAT AGGREGATION (ANNEX 7 / PURCHASE BOOK)
-    # =========================================================================
     @classmethod
     def get_purchase_vat_summary(
         cls,
@@ -554,12 +455,6 @@ class VATLedgerService:
         end_date: date,
         include_drilldown: bool = True
     ) -> Dict[str, Any]:
-        """
-        Compiles the authoritative Annex 7 Purchase Register:
-        1. Selects inward GRNs verified within the date period.
-        2. Selects confirmed supplier debit notes on return_date.
-        3. Separates Input VAT from GRNs and Input VAT Reversals from Debit Notes.
-        """
         grn_filter: Dict[str, Any] = {
             'bill_date__gte': start_date,
             'bill_date__lte': end_date,
@@ -723,9 +618,6 @@ class VATLedgerService:
             }
         }
 
-    # =========================================================================
-    # 4. CHRONOLOGICAL DAY-WISE COMBINED VAT LEDGER
-    # =========================================================================
     @classmethod
     def get_daily_vat_ledger(
         cls,
@@ -734,11 +626,6 @@ class VATLedgerService:
         end_date: date,
         include_drilldown: bool = True
     ) -> Dict[str, Any]:
-        """
-        Generates the chronological Day-Wise Combined VAT & Tax Assessment Ledger.
-        Defensive Recalculation: Derives missing 13% tax backward from official sales invoices.
-        Decoupled from global shop settings.
-        """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
 
@@ -835,7 +722,6 @@ class VATLedgerService:
                 est_vat > Decimal('0.00')
             )
 
-            # Defensive 13% reconstruction from grand total
             if is_official and est_vat <= Decimal('0.00') and est_taxable <= Decimal('0.00') and est_grand > Decimal('0.00'):
                 est_taxable = (est_grand / Decimal('1.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 est_vat = (est_grand - est_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -1023,7 +909,6 @@ class VATLedgerService:
             day_sales_vat = s_data['vat']
             day_sales_return_vat = ret_data['vat_deduct']
 
-            # Decoupled daily calculations: Never zero-clamp because of global config
             net_day_sales_taxable = (s_data['taxable'] - ret_data['taxable_deduct']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             net_day_sales_vat = (day_sales_vat - day_sales_return_vat).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             net_day_sales_non_taxable = (s_data['non_taxable'] - ret_data['non_taxable_deduct']).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -1136,19 +1021,85 @@ class VATLedgerService:
             }
         }
 
-    # -------------------------------------------------------------------------
-    # BS CALENDAR MONTH HELPERS FOR CONSECUTIVE 6-MONTH CALCULATION
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # SINGLE-PASS UNIFIED COCKPIT ENGINE (CONSOLIDATED OVERVIEW + FULL LEDGER)
+    # =========================================================================
+    @classmethod
+    def get_unified_vat_cockpit(
+        cls,
+        branch: Optional[Branch],
+        start_date: date,
+        end_date: date,
+        bs_year: Optional[int] = None,
+        bs_month: Optional[int] = None,
+        fiscal_year_name: Optional[str] = None,
+        include_drilldown: bool = True
+    ) -> Dict[str, Any]:
+        daily_ledger = cls.get_daily_vat_ledger(
+            branch=branch,
+            start_date=start_date,
+            end_date=end_date,
+            include_drilldown=include_drilldown
+        )
+
+        d_totals = daily_ledger.get('totals', {})
+
+        sales_summary = {
+            'taxable': d_totals.get('sales_taxable', Decimal('0.00')),
+            'non_taxable': d_totals.get('sales_non_taxable', Decimal('0.00')),
+            'vat': d_totals.get('sales_vat', Decimal('0.00')),
+            'sales_output_vat': d_totals.get('sales_output_vat', Decimal('0.00')),
+            'sales_return_vat_reversal': d_totals.get('sales_return_vat', Decimal('0.00')),
+            'grand_total': d_totals.get('sales_grand_total', Decimal('0.00')),
+            'total_refunds': d_totals.get('sales_return_vat', Decimal('0.00')),
+        }
+
+        purchase_summary = {
+            'taxable': d_totals.get('purchase_taxable', Decimal('0.00')),
+            'vat': d_totals.get('purchase_vat', Decimal('0.00')),
+            'purchase_input_vat': d_totals.get('purchase_input_vat', Decimal('0.00')),
+            'purchase_return_vat_reversal': d_totals.get('purchase_return_vat', Decimal('0.00')),
+            'net': d_totals.get('purchase_net_total', Decimal('0.00')),
+            'total_landed': d_totals.get('purchase_net_total', Decimal('0.00')),
+            'gross': d_totals.get('purchase_taxable', Decimal('0.00')),
+        }
+
+        net_vat = d_totals.get('net_vat', Decimal('0.00'))
+
+        six_month_data = cls.get_six_month_vat_summary(
+            branch=branch,
+            end_bs_year=bs_year,
+            end_bs_month=bs_month,
+            fiscal_year_name=fiscal_year_name,
+            include_comparison=True
+        )
+
+        return {
+            'sales_summary': sales_summary,
+            'purchase_summary': purchase_summary,
+            'net_vat': net_vat,
+            'is_net_payable': d_totals.get('is_net_payable', False),
+            'is_net_credit': d_totals.get('is_net_credit', False),
+            'final_cumulative_balance': d_totals.get('final_cumulative_balance', Decimal('0.00')),
+            'daily_ledger': daily_ledger,
+            'daily_rows': daily_ledger.get('daily_rows', []),
+            'total_days_in_period': daily_ledger.get('total_days_in_period', 0),
+            'active_tax_days_count': daily_ledger.get('active_tax_days_count', 0),
+            'six_month_summary': six_month_data,
+            'six_month_rows': six_month_data.get('monthly_breakdown', []),
+            'six_month_totals': six_month_data.get('totals', {}),
+            'comparison': six_month_data.get('comparison', {}),
+            'comparison_rows': six_month_data.get('comparison', {}).get('comparison_rows', []),
+        }
+
     @staticmethod
     def _get_previous_bs_month(bs_year: int, bs_month: int) -> Tuple[int, int]:
-        """Returns the immediately preceding (bs_year, bs_month) in Bikram Sambat."""
         if bs_month == 1:
             return bs_year - 1, 12
         return bs_year, bs_month - 1
 
     @staticmethod
     def _get_next_bs_month(bs_year: int, bs_month: int) -> Tuple[int, int]:
-        """Returns the immediately succeeding (bs_year, bs_month) in Bikram Sambat."""
         if bs_month == 12:
             return bs_year + 1, 1
         return bs_year, bs_month + 1
@@ -1163,14 +1114,6 @@ class VATLedgerService:
         fiscal_year_name: Optional[str] = None,
         half: Optional[int] = None
     ) -> Tuple[List[Tuple[int, int]], str]:
-        """
-        Resolves 6 consecutive Bikram Sambat months in chronological order.
-        Supports:
-          1. Fiscal Year Half (H1: Shrawan-Poush vs H2: Magh-Ashadh)
-          2. Specific End Month (steps back 5 months)
-          3. Specific Start Month (steps forward 5 months)
-          4. Default Fallback (active half of current fiscal year)
-        """
         if fiscal_year_name and half in [1, 2]:
             clean_fy = fiscal_year_name.replace('-', '/').strip()
             base_year = int(clean_fy.split('/')[0])
@@ -1225,9 +1168,6 @@ class VATLedgerService:
 
         return month_tuples, label
 
-    # =========================================================================
-    # 5. MONTHLY, 6-MONTH & FISCAL YEAR VAT SUMMARIES
-    # =========================================================================
     @classmethod
     def get_monthly_vat_summary(
         cls,
@@ -1236,19 +1176,6 @@ class VATLedgerService:
         bs_month: int,
         include_drilldown: bool = False
     ) -> Dict[str, Any]:
-        """
-        Computes the authoritative monthly VAT summary for a single Bikram Sambat month.
-        Obtains Gregorian AD date boundaries for (bs_year, bs_month) using NepaliCalendar,
-        aggregates sales and purchase VAT using existing methods, and calculates:
-          - gross Output VAT (sales)
-          - sales-return VAT reversal
-          - net Output VAT
-          - gross Input VAT (purchases)
-          - purchase-return VAT reversal
-          - net Input VAT
-          - net VAT assessment (net Output - net Input)
-        Never forces negative tax adjustments to zero.
-        """
         bs_month = max(1, min(12, int(bs_month)))
         bs_year = int(bs_year)
 
@@ -1308,9 +1235,6 @@ class VATLedgerService:
             'purchase_returns_breakdown': purchases.get('returns_breakdown', []),
         }
 
-    # -------------------------------------------------------------------------
-    # 6-MONTH VAT REPORTING ENGINE (REQUIREMENT 16)
-    # -------------------------------------------------------------------------
     @classmethod
     def get_six_month_vat_summary(
         cls,
@@ -1323,14 +1247,6 @@ class VATLedgerService:
         half: Optional[int] = None,
         include_comparison: bool = True
     ) -> Dict[str, Any]:
-        """
-        Authoritative 6-Month VAT Reporting Engine.
-        Computes 6 consecutive Bikram Sambat months breakdown:
-          Month | Output VAT | Sales Return VAT | Net Output | Input VAT | Purchase Return VAT | Net Input | Net VAT
-        
-        Guarantees Full Drilldown Chain:
-          6 Months ➔ Month ➔ Day ➔ Invoice / Return / GRN / Debit Note ➔ Line Item ➔ GL Journal
-        """
         month_tuples, period_label = cls._resolve_six_month_tuples(
             end_bs_year=end_bs_year,
             end_bs_month=end_bs_month,
@@ -1375,7 +1291,7 @@ class VATLedgerService:
                 'net_vat': net_tax,
                 'cumulative_balance': cumulative_balance,
                 'drilldown_urls': {
-                    'daily_report': f"/taxation/daily-report/?bs_year={bs_y}&bs_month={bs_m}",
+                    'daily_report': f"/taxation/?bs_year={bs_y}&bs_month={bs_m}",
                     'sales_register': f"/taxation/sales-register/?bs_year={bs_y}&bs_month={bs_m}",
                     'purchase_register': f"/taxation/purchase-register/?bs_year={bs_y}&bs_month={bs_m}",
                 },
@@ -1449,9 +1365,6 @@ class VATLedgerService:
 
         return summary_result
 
-    # -------------------------------------------------------------------------
-    # 6-MONTH PERIOD-OVER-PERIOD COMPARISON ENGINE (REQUIREMENT 17)
-    # -------------------------------------------------------------------------
     @classmethod
     def get_six_month_vat_comparison(
         cls,
@@ -1464,19 +1377,6 @@ class VATLedgerService:
         half: Optional[int] = None,
         include_comparison: bool = False
     ) -> Dict[str, Any]:
-        """
-        Authoritative 6-Month Period-Over-Period VAT Comparison Engine.
-        Compares:
-          Current 6 Months versus Previous 6 Months
-        for:
-          1. Output VAT
-          2. Sales Return VAT
-          3. Net Output VAT
-          4. Input VAT
-          5. Purchase Return VAT
-          6. Net Input VAT
-          7. Net VAT Payable / Credit
-        """
         current_summary = cls.get_six_month_vat_summary(
             branch=branch,
             end_bs_year=end_bs_year,
@@ -1578,19 +1478,12 @@ class VATLedgerService:
             'previous_summary': previous_summary,
         }
 
-    # -------------------------------------------------------------------------
-    # FISCAL YEAR SUMMARY (ANNUAL RECONCILIATION)
-    # -------------------------------------------------------------------------
     @classmethod
     def get_fiscal_year_vat_summary(
         cls,
         branch: Optional[Branch],
         fiscal_year_name: str
     ) -> Dict[str, Any]:
-        """
-        Calculates the VAT summary for an entire Nepali Fiscal Year (Shrawan 1 - Ashadh 31/32).
-        Includes a month-by-month reconciliation array.
-        """
         clean_fy = fiscal_year_name.replace('-', '/').strip()
         start_ad, end_ad, start_bs, end_bs = NepaliCalendar.get_fiscal_year_range(clean_fy)
 
@@ -1608,10 +1501,10 @@ class VATLedgerService:
         for month_idx in range(1, 13):
             if month_idx <= 9:
                 bs_y = base_year
-                bs_m = month_idx + 3  # 1->Shrawan (4) ... 9->Chaitra (12)
+                bs_m = month_idx + 3
             else:
                 bs_y = base_year + 1
-                bs_m = month_idx - 9  # 10->Baishakh (1) ... 12->Ashadh (3)
+                bs_m = month_idx - 9
 
             m_summary = cls.get_monthly_vat_summary(branch, bs_y, bs_m)
             cumulative_balance += m_summary['net_vat']
@@ -1641,25 +1534,14 @@ class VATLedgerService:
             'monthly_breakdown': monthly_breakdown,
         }
 
-    # =========================================================================
-    # 6. HIERARCHICAL DRILL-DOWN RESOLVERS
-    # =========================================================================
     @classmethod
     def get_day_vat_drilldown(cls, branch: Optional[Branch], target_date: date) -> Dict[str, Any]:
-        """
-        Single-day drill-down: retrieves all sales invoices, GRNs, and returns for target_date.
-        """
         ledger = cls.get_daily_vat_ledger(branch, target_date, target_date, include_drilldown=True)
         rows = ledger.get('daily_rows', [])
         return rows[0] if rows else {}
 
     @classmethod
     def get_invoice_vat_drilldown(cls, invoice_id_or_number: Union[int, str]) -> Dict[str, Any]:
-        """
-        Single-document drill-down:
-        Sales Invoice ➔ Item-by-item VAT Snapshots ➔ Sales Returns ➔ General Ledger Entry (Account 2210).
-        Defensive fallback ensures 13% tax is reconstructed if snapshot was saved as zero.
-        """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
 
@@ -1727,10 +1609,6 @@ class VATLedgerService:
 
     @classmethod
     def get_grn_vat_drilldown(cls, grn_id_or_number: Union[int, str]) -> Dict[str, Any]:
-        """
-        Single-document drill-down:
-        Inward GRN ➔ Item-by-item VAT Snapshots ➔ General Ledger Entry (Account 1410).
-        """
         if isinstance(grn_id_or_number, int) or str(grn_id_or_number).isdigit():
             grn = GoodsReceivedNote.objects.filter(id=int(grn_id_or_number)).first()
         else:
@@ -1778,10 +1656,6 @@ class VATLedgerService:
 
     @classmethod
     def get_sales_return_vat_drilldown(cls, return_id_or_number: Union[int, str]) -> Dict[str, Any]:
-        """
-        Complete Single-Document Drill-Down Resolver for Customer Sales Returns / Credit Notes.
-        Calculates item-level VAT snapshots and ensures return totals accurately reflect the lines.
-        """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
 
@@ -1804,8 +1678,6 @@ class VATLedgerService:
 
         if not ret:
             return {'status': 'NOT_FOUND', 'message': f'Sales Return voucher {return_id_or_number} not found.'}
-
-        je_obj = None
 
         je_obj = JournalEntry.objects.filter(
             source_module='SALES_RETURN',
@@ -2033,9 +1905,6 @@ class VATLedgerService:
 
     @classmethod
     def get_purchase_return_vat_drilldown(cls, return_id_or_number: Union[int, str]) -> Dict[str, Any]:
-        """
-        Complete Single-Document Drill-Down Resolver for Supplier Purchase Returns / Debit Notes.
-        """
         clean_ref = str(return_id_or_number or '').strip()
         if not clean_ref:
             return {'status': 'NOT_FOUND', 'message': 'No purchase return identifier provided.'}
@@ -2055,8 +1924,6 @@ class VATLedgerService:
 
         if not pret:
             return {'status': 'NOT_FOUND', 'message': f'Purchase Return / Debit Note {return_id_or_number} not found.'}
-
-        je_obj = None
 
         je_obj = JournalEntry.objects.filter(
             source_module='PURCHASE_RETURN',
@@ -2248,10 +2115,6 @@ class VATLedgerService:
             }
         }
 
-    # =========================================================================
-    # 7. GENERAL LEDGER PARITY RECONCILIATION
-    #    (TOTAL-LEVEL & COMPREHENSIVE TRANSACTION-LEVEL AUDIT)
-    # =========================================================================
     @classmethod
     def reconcile_vat_with_general_ledger(
         cls,
@@ -2260,35 +2123,12 @@ class VATLedgerService:
         end_date: date,
         include_transaction_reconciliation: bool = True
     ) -> Dict[str, Any]:
-        """
-        Performs comprehensive double-entry audit:
-        1. Total-Level Reconciliation:
-           - Output VAT (Register Annex 5 Net) vs. General Ledger Account 2210 (Credits - Debits).
-           - Input VAT (Register Annex 7 Net) vs. General Ledger Account 1410 (Debits - Credits).
-        2. Transaction-Level Reconciliation:
-           - Checks every single Sales Invoice, Sales Return, GRN, and Purchase Return transaction.
-           - Compares Expected VAT with GL VAT and reports exact differences.
-           - Matches documents using multi-attribute reliable identifiers:
-             source_module, source_id, reference_document, voucher_type, branch, and date.
-           - Flags and isolates:
-             * Missing GL entries
-             * Orphan / unlinked manual GL entries on VAT accounts
-             * Duplicate GL postings
-             * Amount mismatches
-             * Date mismatches
-             * Branch mismatches
-             * Reference mismatches
-             * Differences between return-item VAT totals and the return header
-        """
         sales = cls.get_sales_vat_summary(branch, start_date, end_date, include_drilldown=False)
         purchases = cls.get_purchase_vat_summary(branch, start_date, end_date, include_drilldown=False)
 
         register_output_vat = sales['totals']['vat']
         register_input_vat = purchases['totals']['vat']
 
-        # ---------------------------------------------------------------------
-        # A. TOTAL-LEVEL RECONCILIATION (ACCOUNTS 2210 & 1410)
-        # ---------------------------------------------------------------------
         output_vat_items = JournalItem.objects.filter(
             Q(account__code='2210') | Q(account__code__startswith='2210-') | Q(account__system_tag='OUTPUT_VAT'),
             journal_entry__status='POSTED',
@@ -2324,9 +2164,6 @@ class VATLedgerService:
 
         is_totals_reconciled = (output_variance == Decimal('0.00') and input_variance == Decimal('0.00'))
 
-        # ---------------------------------------------------------------------
-        # B. FULL TRANSACTION-LEVEL VAT ↔ GL RECONCILIATION
-        # ---------------------------------------------------------------------
         tx_recon = None
         has_tx_discrepancies = False
 
@@ -2362,9 +2199,6 @@ class VATLedgerService:
             'transaction_reconciliation': tx_recon
         }
 
-    # =========================================================================
-    # 8. TRANSACTION-LEVEL VAT ↔ GL RECONCILIATION ENGINE
-    # =========================================================================
     @classmethod
     def reconcile_transactions_vat_with_gl(
         cls,
@@ -2372,25 +2206,11 @@ class VATLedgerService:
         start_date: date,
         end_date: date
     ) -> Dict[str, Any]:
-        """
-        Detailed Transaction-Level Reconciliation.
-        Examines every single VAT transaction across 4 registers:
-          1. Sales Invoices (Annex 5)
-          2. Sales Returns / Credit Notes
-          3. Goods Received Notes (Annex 7)
-          4. Purchase Returns / Debit Notes
-        Calculates expected Sales Return VAT reversal from the corrected return-item
-        figures rather than blindly trusting a zero or incorrect header.
-        Detects differences between return-item VAT totals and the return header.
-        """
         config = SystemConfiguration.get_solo()
         is_vat_shop = (config.tax_system_mode == 'VAT')
 
         discrepancies: List[Dict[str, Any]] = []
 
-        # -------------------------------------------------------------
-        # 1. LOAD MOVEMENTS FROM REGISTERS
-        # -------------------------------------------------------------
         sales_filter: Dict[str, Any] = {
             'bill_date_ad__gte': start_date,
             'bill_date_ad__lte': end_date,
@@ -2450,9 +2270,6 @@ class VATLedgerService:
             .order_by('return_date', 'return_number')
         )
 
-        # -------------------------------------------------------------
-        # 2. COLLECT DOCUMENT REFERENCES FOR FAST GL MATCHING
-        # -------------------------------------------------------------
         all_doc_refs = set()
         all_doc_refs.update(est.estimate_number for est in sales_qs if est.estimate_number)
         all_doc_refs.update(ret.return_number for ret in sales_returns_qs if ret.return_number)
@@ -2566,9 +2383,6 @@ class VATLedgerService:
 
             return [je_cache[cid] for cid in unique_ids]
 
-        # -------------------------------------------------------------
-        # 3. RECONCILE SALES INVOICES (ANNEX 5)
-        # -------------------------------------------------------------
         reconciled_sales = []
         for est in sales_qs:
             sales_items_detail = [
@@ -2586,7 +2400,6 @@ class VATLedgerService:
                 sales_header_vat > Decimal('0.00')
             )
 
-            # Defensive recovery if both header and line VAT were empty on an official sales invoice
             if is_official and sales_items_vat_total <= Decimal('0.00') and sales_header_vat <= Decimal('0.00') and est_grand > Decimal('0.00'):
                 reconstructed_base = (est_grand / Decimal('1.13')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 reconstructed_vat = (est_grand - reconstructed_base).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -2737,9 +2550,6 @@ class VATLedgerService:
                 'discrepancy_reasons': item_discrepancies,
             })
 
-        # -------------------------------------------------------------
-        # 4. RECONCILE SALES RETURNS / CREDIT NOTES
-        # -------------------------------------------------------------
         reconciled_sales_returns = []
         for ret in sales_returns_qs:
             items_detail = [
@@ -2747,7 +2557,6 @@ class VATLedgerService:
                 for item in ret.items.all()
             ]
             items_vat_total = sum((i['vat_amount'] for i in items_detail), Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            items_taxable_total = sum((i['taxable_amount'] for i in items_detail), Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             header_vat = (ret.vat_amount or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             expected_vat_rev = items_vat_total if (items_vat_total > Decimal('0.00') or header_vat == Decimal('0.00')) else header_vat
@@ -2896,9 +2705,6 @@ class VATLedgerService:
                 'discrepancy_reasons': item_discrepancies,
             })
 
-        # -------------------------------------------------------------
-        # 5. RECONCILE INWARD GRNS (ANNEX 7)
-        # -------------------------------------------------------------
         reconciled_grns = []
         for grn in grn_qs:
             grn_items_detail = [
@@ -3056,9 +2862,6 @@ class VATLedgerService:
                 'discrepancy_reasons': item_discrepancies,
             })
 
-        # -------------------------------------------------------------
-        # 6. RECONCILE PURCHASE RETURNS / DEBIT NOTES
-        # -------------------------------------------------------------
         reconciled_purchase_returns = []
         for pret in purchase_returns_qs:
             pret_items_detail = [
@@ -3213,9 +3016,6 @@ class VATLedgerService:
                 'discrepancy_reasons': item_discrepancies,
             })
 
-        # -------------------------------------------------------------
-        # 7. ISOLATE ORPHAN / MANUAL UNLINKED GL POSTINGS
-        # -------------------------------------------------------------
         orphan_gl_entries = []
         for je_id, je in je_cache.items():
             if je.entry_date >= start_date and je.entry_date <= end_date:
@@ -3301,15 +3101,8 @@ class VATLedgerService:
             'discrepancies': discrepancies,
         }
 
-    # =========================================================================
-    # INTERNAL GL JOURNAL HELPER
-    # =========================================================================
     @staticmethod
     def _fetch_gl_journal_map(doc_numbers: List[str], voucher_type: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
-        """
-        Fetches posted General Ledger journal vouchers matching the given document numbers.
-        Returns a dictionary: {document_number: {'voucher_number': ..., 'id': ..., 'total_debit': ...}}
-        """
         if not doc_numbers:
             return {}
 

@@ -1,33 +1,3 @@
-"""
-Django Admin Configuration for Suppliers, Purchase Orders, Goods Received Notes (GRN),
-Commercial Purchase Returns (Debit Notes) & Supplier Udhaari Ledgers.
-
-Synchronized with `apps/purchases/models.py`:
-- Purchase Order Enhancements:
-    1. Dual Calendar Delivery Dates: Tracks and displays `expected_delivery_date` (AD)
-       and `expected_delivery_date_bs` (BS) side-by-side.
-    2. Item-Level VAT Persistence: Displays `vat_rate` (13% vs 0%) and calculated `tax_amount`
-       on both `PurchaseOrderItemInline` and `PurchaseOrderItemAdmin`.
-    3. Formatted Financial Columns: Pre-VAT Subtotal, 13% VAT, and Grand Total.
-- Inward GRN features 5-Section Financial Summary Cards:
-    1. Gross Merchandise Value & Pre-VAT Bases (Dual-pot split: Taxable vs. Non-Taxable)
-    2. Dedicated 13% VAT Amount (Hardened Invariant: Exactly equals sum of line-level item VATs)
-    3. Total Overheads (Freight + Customs + Handling + Transit Insurance + Other Overheads)
-    4. Total Landed Valuation / Inventory COGS (Net Merchandise + 5-tier Overheads)
-    5. Net Due / Supplier Debt (Total Invoice - Paid Amount)
-- Line-item VAT persistence & visibility: Displays `tax_amount` on `GRNItemInline` and `GRNItemAdmin`.
-- Dual discount types supported per line item: Flat Amount (रू) vs Percentage (%).
-- Line-item physical Batch Number (`batch_number`) tracking.
-- Distinct delivery challan reference fields (`challan_no`, `challan_date`, `challan_date_bs`).
-- Dual VAT Handling Modes (`vat_handling_mode`: 'EXCLUSIVE' vs 'INCLUSIVE').
-- Strict Tax Rate Choices (`vat_rate`: 13.00% vs 0.00%).
-- Multi-field audit observations: `consignment_narration`, `receiving_notes`, `internal_notes`, and `remarks`.
-- Automatic overhead landed cost allocation and financial recalculation upon save.
-- Comprehensive date synchronization between Gregorian (AD) and Bikram Sambat (BS).
-- Explicit `entry_date` and `entry_date_bs` visibility in SupplierUdhaariLedger.
-- Supplier sub-ledger double-entry recalculation actions with spot-payment continuity safeguards.
-"""
-
 from decimal import Decimal
 from django.contrib import admin, messages
 from django.utils.html import format_html
@@ -462,11 +432,9 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         landed = obj.total_landed_cost or Decimal('0.00')
         due = obj.due_amount or Decimal('0.00')
 
-        # Calculate exact Non-Taxable Merchandise Base
         net_merchandise = max(Decimal('0.00'), net_total - vat)
         non_taxable = max(Decimal('0.00'), net_merchandise - taxable)
 
-        # Audit Line Invariant Verification: Header VAT == Sum(GRNItem.tax_amount)
         line_vat_sum = obj.total_line_vat_amount
         vat_matches = (abs(vat - line_vat_sum) < Decimal('0.01'))
         vat_audit_note = "Line Sum Verified: Rs. {:,.2f}".format(line_vat_sum) if vat_matches else "Discrepancy vs Lines: Rs. {:,.2f}".format(line_vat_sum)
@@ -478,7 +446,6 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         return format_html(
             '''
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 18px;">
-                <!-- 1. Gross Merchandise Value & Dual Pots -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid #2563eb; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">1. Gross Merchandise</div>
                     <div style="font-size: 18px; font-weight: 800; color: #1e293b; margin-top: 4px;">Rs. {:,.2f}</div>
@@ -487,7 +454,6 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
                     </div>
                 </div>
 
-                <!-- 2. Dedicated 13% VAT Amount (Line-Verified) -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid {}; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">2. Dedicated 13% VAT</div>
                     <div style="font-size: 18px; font-weight: 800; color: {}; margin-top: 4px;">Rs. {:,.2f}</div>
@@ -495,21 +461,18 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
                     <div style="font-size: 10px; color: #64748b; margin-top: 2px;">&bull; {}</div>
                 </div>
 
-                <!-- 3. Total Overheads (5-Tier Sum) -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid #d97706; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">3. Total Overheads</div>
                     <div style="font-size: 18px; font-weight: 800; color: #b45309; margin-top: 4px;">Rs. {:,.2f}</div>
                     <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Freight + Duty + Handl + Ins + Ovh</div>
                 </div>
 
-                <!-- 4. Total Landed Valuation (COGS) -->
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 5px solid #7c3aed; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">4. Total Landed (COGS)</div>
                     <div style="font-size: 18px; font-weight: 800; color: #6d28d9; margin-top: 4px;">Rs. {:,.2f}</div>
                     <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Net Merchandise Base + 5 Overheads</div>
                 </div>
 
-                <!-- 5. Net Due / Supplier Debt -->
                 <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 5px solid #dc2626; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <div style="font-size: 11px; text-transform: uppercase; color: #991b1b; font-weight: 700; letter-spacing: 0.5px;">5. Net Due (Supplier Debt)</div>
                     <div style="font-size: 18px; font-weight: 800; color: #b91c1c; margin-top: 4px;">Rs. {:,.2f}</div>
@@ -532,7 +495,6 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
         )
     financial_summary_card.short_description = _("Section 3: Executive Financial Summary")
 
-    # --- Badges & Formatted Table Columns ---
     def vat_mode_badge(self, obj):
         if obj.vat_handling_mode == 'INCLUSIVE':
             return format_html(
@@ -625,11 +587,6 @@ class GoodsReceivedNoteAdmin(admin.ModelAdmin):
     formatted_due.admin_order_field = 'due_amount'
 
     def save_related(self, request, form, formsets, change):
-        """
-        Executes after inline GRN items are saved to database.
-        Recalculates dual-pot pre-VAT merchandise, multi-rate line VAT, bill discounts,
-        and accurately distributes overheads proportionally to calculate line unit landed costs.
-        """
         super().save_related(request, form, formsets, change)
         form.instance.recalculate_financials(save=True)
 

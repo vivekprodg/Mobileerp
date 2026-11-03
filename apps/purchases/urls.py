@@ -1,30 +1,21 @@
-"""
-Purchases, Supplier Ledgers & Commercial Purchase Return URL Routes.
-"""
-
 from django.urls import path
 from apps.purchases.views import (
-    # Search APIs
     SupplierSearchAPIView,
     GRNSearchAPIView,
-    # Supplier Management
     SupplierListView,
     SupplierDetailView,
     SupplierCreateView,
     SupplierUpdateView,
     SupplierPaymentRecordView,
-    # Purchase Orders (PO)
     PurchaseOrderListView,
     PurchaseOrderCreateView,
     PurchaseOrderDetailView,
     PurchaseOrderStatusUpdateView,
-    # Goods Received Note (GRN)
     GRNListView,
     GRNDetailView,
     GRNCreateView,
     cancel_grn_view,
     GRNManageIMEIsView,
-    # Commercial Purchase Returns & Debit Notes
     PurchaseReturnListView,
     PurchaseReturnCreateView,
     PurchaseReturnDetailView,
@@ -33,9 +24,10 @@ from apps.purchases.views import (
 app_name = 'purchases'
 
 urlpatterns = [
-    # Async Search & Autocomplete APIs
+    # Search & Autocomplete Endpoints
     path('suppliers/api/search/', SupplierSearchAPIView.as_view(), name='supplier_search_api'),
     path('grn/api/search/', GRNSearchAPIView.as_view(), name='grn_search_api'),
+    path('grn/search/', GRNSearchAPIView.as_view(), name='grn_search'),
 
     # Supplier Management
     path('suppliers/', SupplierListView.as_view(), name='supplier_list'),
