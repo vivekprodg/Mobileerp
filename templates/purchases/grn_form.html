@@ -33,7 +33,7 @@
   --radius-lg: 8px;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  --shadow-dropdown: 0 12px 28px -4px rgba(15, 23, 42, 0.18), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+  --shadow-dropdown: 0 16px 36px -4px rgba(15, 23, 42, 0.22), 0 8px 16px -6px rgba(15, 23, 42, 0.12);
   --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: 'JetBrains Mono', 'Courier New', Courier, monospace;
 }
@@ -210,9 +210,7 @@ textarea.form-control-grn {
   line-height: 1.4;
 }
 
-/* ==========================================================================
-   SECTION 2 & SECTION 3 SHARED "Rs." CURRENCY PREFIX INPUT FORMATTER
-   ========================================================================== */
+/* SECTION 2 & 3 RS. PREFIX */
 .input-prefix-wrap {
   position: relative;
   display: flex;
@@ -242,7 +240,7 @@ textarea.form-control-grn {
   width: 100%;
 }
 
-/* SUMMARY VAT TOGGLE SWITCH */
+/* SUMMARY VAT TOGGLE */
 .summary-vat-toggle-box {
   background: var(--slate-50);
   border: 1px solid var(--slate-200);
@@ -293,13 +291,13 @@ textarea.form-control-grn {
 }
 
 /* ==========================================================================
-   TABLE CONTAINER: PERMANENT SCROLLBAR & 3600px CANVAS FOR 15-DIGIT DATA
+   TABLE CONTAINER: TIGHT TO ROWS (NO ARTIFICIAL EMPTY SPACE)
    ========================================================================== */
 .table-container {
   width: 100%;
   max-height: 520px;
-  overflow-x: scroll !important; /* Always visible horizontal scrollbar */
-  overflow-y: auto !important;   /* Always functional vertical scrollbar */
+  overflow-x: scroll !important;
+  overflow-y: auto !important;
   border: 1px solid var(--slate-300);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -307,8 +305,8 @@ textarea.form-control-grn {
 }
 
 .table-container::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
 }
 .table-container::-webkit-scrollbar-track {
   background: #e2e8f0;
@@ -325,7 +323,7 @@ textarea.form-control-grn {
 
 table.items-table {
   width: 100%;
-  min-width: 3600px; /* Spacious width accommodating all 15-digit fields */
+  min-width: 3600px;
   border-collapse: collapse;
   text-align: left;
 }
@@ -431,7 +429,7 @@ table.items-table tr:hover td {
   color: var(--primary-hover);
 }
 
-/* RECONCILIATION CARDS (SECTION 5) */
+/* RECONCILIATION CARDS */
 .reconciliation-deck {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -485,7 +483,7 @@ table.items-table tr:hover td {
   align-items: start;
 }
 
-/* SUMMARY PANEL (SECTION 4) */
+/* SUMMARY PANEL */
 .summary-card-grn {
   background: var(--surface);
   border: 1px solid var(--slate-200);
@@ -583,30 +581,29 @@ table.items-table tr:hover td {
 }
 .btn-action-success-grn:hover { background-color: var(--success-hover); color: #fff; }
 
-/* AUTOCOMPLETE & FLOATING DROPDOWN */
+/* ==========================================================================
+   DROPDOWN: POSITION FIXED (NEVER TRAPPED BY TABLE BOUNDARIES)
+   ========================================================================== */
 .search-wrapper-relative {
   position: relative;
   width: 100%;
 }
 
 .floating-results-dropdown {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  min-width: 340px;
-  width: max-content;
-  max-width: 520px;
-  z-index: 1200;
+  position: fixed;
+  z-index: 999999 !important;
   background: #ffffff;
-  border: 1px solid var(--slate-300);
+  border: 1.5px solid var(--primary);
   border-radius: var(--radius-md);
-  max-height: 270px;
+  max-height: 280px;
   overflow-y: auto;
   box-shadow: var(--shadow-dropdown);
   display: none;
 }
 
-.floating-results-dropdown.show { display: block; }
+.floating-results-dropdown.show {
+  display: block !important;
+}
 
 .dropdown-item-grn {
   padding: 8px 12px;
@@ -624,7 +621,7 @@ table.items-table tr:hover td {
 .dropdown-item-grn:last-child { border-bottom: none; }
 .dropdown-item-grn:hover, .dropdown-item-grn.active {
   background-color: var(--primary-light) !important;
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid var(--primary) !important;
   padding-left: 9px;
 }
 
@@ -652,7 +649,7 @@ table.items-table tr:hover td {
   transform: translateY(20px);
   transition: opacity 0.25s ease, transform 0.25s ease;
   pointer-events: none;
-  z-index: 9999;
+  z-index: 999999;
 }
 
 #toast-notification.show {
@@ -694,12 +691,9 @@ table.items-table tr:hover td {
     {% csrf_token %}
     <input type="hidden" name="action" id="grnFormAction" value="verify_stock">
 
-    <!-- Management Form for Django Inline Formset -->
     {{ formset.management_form }}
 
-    <!-- =========================================================================
-         SECTION 1: SUPPLIER & DOCUMENT INFORMATION
-         ========================================================================= -->
+    <!-- SECTION 1: SUPPLIER & DOCUMENT INFORMATION -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>1. Supplier &amp; Document Information</span>
@@ -771,9 +765,7 @@ table.items-table tr:hover td {
       </div>
     </section>
 
-    <!-- =========================================================================
-         SECTION 2: DISCOUNT & ADDITIONAL LANDED CHARGES
-         ========================================================================= -->
+    <!-- SECTION 2: DISCOUNT & ADDITIONAL LANDED CHARGES -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>2. Discount &amp; Additional Landed Charges</span>
@@ -844,10 +836,7 @@ table.items-table tr:hover td {
       </div>
     </section>
 
-    <!-- =========================================================================
-         SECTION 3: RECEIVED ITEMS & LANDED CALCULATION
-         (All 8 Fields Widened to 260px - 310px for 15 Digits with Section 2 Rs. Style)
-         ========================================================================= -->
+    <!-- SECTION 3: RECEIVED ITEMS & LANDED CALCULATION -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>3. Received Items &amp; Landed Calculation</span>
@@ -856,19 +845,18 @@ table.items-table tr:hover td {
         </button>
       </div>
 
-      <!-- Scrollable Container with Visible Horizontal & Vertical Scrollbars -->
+      <!-- Table Container: Compact and Directly Hugging Rows -->
       <div class="table-container" id="grnTableContainer">
         <table class="items-table" id="itemsTable">
           <thead>
             <tr>
               <th style="width: 50px;" class="text-center">S.N.</th>
-              <th style="width: 340px;">Product / Item Description <span class="required-star">*</span></th>
+              <th style="width: 360px;">Product / Item Description <span class="required-star">*</span></th>
               <th style="width: 160px;">Batch No.</th>
               <th style="width: 220px;">Serial / IMEI Refs</th>
               <th style="width: 120px;" class="text-right">Qty <span class="required-star">*</span></th>
               <th style="width: 100px;">UOM</th>
               
-              <!-- 8 MONETARY COLUMNS WIDENED FOR 15 DIGITS (WITH "Rs." PREFIX) -->
               <th style="width: 300px;" class="text-right" id="thRateLabel">Rate (Pre-VAT) <span class="required-star">*</span></th>
               <th style="width: 300px;" class="text-right">MRP / Retail</th>
               <th style="width: 110px;">Disc. Type</th>
@@ -923,7 +911,7 @@ table.items-table tr:hover td {
                 </select>
               </td>
 
-              <!-- 1. Rate (Pre-VAT) - 300px Wide with Section 2 Rs. Style -->
+              <!-- 1. Rate -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -931,7 +919,7 @@ table.items-table tr:hover td {
                 </div>
               </td>
 
-              <!-- 2. MRP / Retail - 300px Wide with Section 2 Rs. Style -->
+              <!-- 2. MRP / Retail -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -948,7 +936,7 @@ table.items-table tr:hover td {
                 </select>
               </td>
 
-              <!-- 3. Disc. Val - 260px Wide with Section 2 Rs. Style -->
+              <!-- 3. Disc. Val -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -956,7 +944,7 @@ table.items-table tr:hover td {
                 </div>
               </td>
 
-              <!-- Tax Rate (Strict Dropdown: 13% or 0%) -->
+              <!-- Tax Rate -->
               <td>
                 <select name="items-{{ forloop.counter0 }}-vat_rate" class="item-tax-percent select-tax-rate text-center font-mono">
                   <option value="13.00" {% if item_form.vat_rate.value == '13.00' or item_form.vat_rate.value == 13 or not item_form.vat_rate.value %}selected{% endif %}>13%</option>
@@ -964,7 +952,7 @@ table.items-table tr:hover td {
                 </select>
               </td>
 
-              <!-- 4. Taxable Amt - 300px Wide with Section 2 Rs. Style -->
+              <!-- 4. Taxable Amt -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -972,7 +960,7 @@ table.items-table tr:hover td {
                 </div>
               </td>
 
-              <!-- 5. VAT Amt - 280px Wide with Section 2 Rs. Style -->
+              <!-- 5. VAT Amt -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -980,7 +968,7 @@ table.items-table tr:hover td {
                 </div>
               </td>
 
-              <!-- 6. Net Amount - 310px Wide with Section 2 Rs. Style -->
+              <!-- 6. Net Amount -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -988,7 +976,7 @@ table.items-table tr:hover td {
                 </div>
               </td>
 
-              <!-- 7. Alloc. Ovh - 260px Wide with Section 2 Rs. Style -->
+              <!-- 7. Alloc. Ovh -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -996,7 +984,7 @@ table.items-table tr:hover td {
                 </div>
               </td>
 
-              <!-- 8. Landed Cost - 300px Wide with Section 2 Rs. Style -->
+              <!-- 8. Landed Cost -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -1021,9 +1009,7 @@ table.items-table tr:hover td {
       </div>
     </section>
 
-    <!-- =========================================================================
-         SECTION 5: LANDED COST RECONCILIATION
-         ========================================================================= -->
+    <!-- SECTION 5: LANDED COST RECONCILIATION -->
     <section class="card-grn mb-3">
       <div class="card-title-grn">
         <span>5. Landed Cost Reconciliation</span>
@@ -1087,9 +1073,7 @@ table.items-table tr:hover td {
       </div>
     </section>
 
-    <!-- =========================================================================
-         LOWER DECK: SECTIONS 6, 7 & SECTION 4 (PURCHASE SUMMARY)
-         ========================================================================= -->
+    <!-- LOWER DECK: SECTIONS 6, 7 & SECTION 4 -->
     <div class="lower-deck-grn">
       
       <div style="display: flex; flex-direction: column; gap: 16px;">
@@ -1156,7 +1140,7 @@ table.items-table tr:hover td {
           <span class="tag">Financial Breakdown</span>
         </div>
 
-        <!-- RELOCATED VAT CALCULATION MODE SWITCH -->
+        <!-- VAT CALCULATION MODE SWITCH -->
         <div class="summary-vat-toggle-box">
           <div class="summary-vat-toggle-label">
             <span>VAT Calculation Mode</span>
@@ -1249,7 +1233,7 @@ table.items-table tr:hover td {
 <!-- TOAST NOTIFICATION CONTAINER -->
 <div id="toast-notification">Notification Message</div>
 
-<!-- TEMPLATE FOR DYNAMIC ROWS (WIDENED FOR 15 DIGITS WITH "Rs." PREFIX) -->
+<!-- TEMPLATE FOR DYNAMIC ROWS -->
 <template id="rowTemplate">
   <tr class="item-row" data-row-idx="__prefix__">
     <td class="text-center row-sn font-mono">1</td>
@@ -1279,7 +1263,7 @@ table.items-table tr:hover td {
       </select>
     </td>
 
-    <!-- 1. Rate (Pre-VAT) -->
+    <!-- 1. Rate -->
     <td>
       <div class="input-prefix-wrap">
         <span class="prefix">Rs.</span>
@@ -1371,7 +1355,6 @@ table.items-table tr:hover td {
 (function () {
   "use strict";
 
-  // STATE & ELEMENTS
   let vatMode = "{{ form.vat_handling_mode.value|default:'EXCLUSIVE' }}".toUpperCase();
   const tableBody = document.getElementById('itemsTableBody');
   const tableContainer = document.getElementById('grnTableContainer');
@@ -1434,7 +1417,6 @@ table.items-table tr:hover td {
     }, 3500);
   }
 
-  // VAT HANDLING MODE TOGGLE IN SECTION 4 (PURCHASE SUMMARY)
   function updateVatModeUI() {
     if (vatModeLabelBadge) {
       vatModeLabelBadge.textContent = vatMode === 'INCLUSIVE' ? 'INCLUSIVE (TAX EXTRACTED)' : 'EXCLUSIVE (TAX ON TOP)';
@@ -1460,7 +1442,6 @@ table.items-table tr:hover td {
     });
   }
 
-  // ATTACH ROW EVENT LISTENERS
   function attachRowEvents(row) {
     const inputs = row.querySelectorAll('input:not(.item-name), select:not(.item-uom)');
     inputs.forEach(input => {
@@ -1473,7 +1454,6 @@ table.items-table tr:hover td {
       uomSelect.addEventListener('change', calculateAll);
     }
 
-    // Delete row
     const btnRemove = row.querySelector('.btn-remove-row-grn');
     if (btnRemove) {
       btnRemove.addEventListener('click', () => {
@@ -1494,7 +1474,6 @@ table.items-table tr:hover td {
       });
     }
 
-    // Autocomplete Product with Keyboard & Selection Navigation
     initProductAutocomplete(row);
   }
 
@@ -1508,7 +1487,6 @@ table.items-table tr:hover td {
     if (badge) badge.textContent = `Total Item Lines: ${activeRows.length}`;
   }
 
-  // ADD NEW ITEM ROW WITH AUTO-SCROLL
   function addNewItem() {
     const currentCount = parseInt(totalFormsInput.value, 10);
     const html = rowTemplate.innerHTML.replace(/__prefix__/g, currentCount);
@@ -1523,7 +1501,6 @@ table.items-table tr:hover td {
     renumberRows();
     calculateAll();
 
-    // Smooth Auto-scroll to ensure newly added row is in viewport
     newRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     const nameInput = newRow.querySelector('.item-name');
     if (nameInput) nameInput.focus();
@@ -1534,16 +1511,12 @@ table.items-table tr:hover td {
   if (btnAddRowTop) btnAddRowTop.addEventListener('click', addNewItem);
   if (btnAddRowBottom) btnAddRowBottom.addEventListener('click', addNewItem);
 
-  // =========================================================================
-  // MATHEMATICALLY STRICT DUAL-POT CALCULATION ENGINE (13% / 0% LOCKED)
-  // =========================================================================
   function calculateAll() {
     const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
     let totalPreVatMerchandise = 0;
     let totalItemDiscount = 0;
     let totalItemUnits = 0;
 
-    // 1. Gather Overheads
     const freight = parseNum(document.getElementById('freightCharge')?.value);
     const customs = parseNum(document.getElementById('customsDuty')?.value);
     const handling = parseNum(document.getElementById('handlingCharge')?.value);
@@ -1560,7 +1533,6 @@ table.items-table tr:hover td {
 
     const rowCalculations = [];
 
-    // Phase 1: Line Item Gross, Line Discounts & Initial Pre-Tax Extraction
     rows.forEach(row => {
       const qty = parseNum(row.querySelector('.item-qty')?.value);
       const rate = parseNum(row.querySelector('.item-rate')?.value);
@@ -1606,7 +1578,6 @@ table.items-table tr:hover td {
 
     const netMerchandiseTotal = Math.max(0, totalPreVatMerchandise - totalItemDiscount);
 
-    // Phase 2: Whole Bill Discount Proration & Line VAT
     let netTaxableSum = 0;
     let netNonTaxableSum = 0;
     let totalVatAmount = 0;
@@ -1657,14 +1628,12 @@ table.items-table tr:hover td {
       if (elLanded) elLanded.value = landedUnitCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     });
 
-    // FINAL RECONCILED CONSIGNMENT VALUATIONS
     const grandTotalPurchase = Math.max(0, netTaxableSum + netNonTaxableSum + totalVatAmount);
     const totalLandedCost = netTaxableSum + netNonTaxableSum + totalOverheads;
     const supplierPayable = grandTotalPurchase;
     const cashPaid = parseNum(cashPaidInput?.value);
     const remainingCredit = Math.max(0, grandTotalPurchase - cashPaid);
 
-    // Section 4: Purchase Summary Panel
     const sSubtotal = document.getElementById('sumMerchandiseSubtotal');
     const sItemDisc = document.getElementById('sumItemDiscount');
     const sBillDisc = document.getElementById('sumWholeBillDiscount');
@@ -1692,7 +1661,6 @@ table.items-table tr:hover td {
       vatPctBadge.textContent = hasTaxableItem ? "13" : "0";
     }
 
-    // Section 5: Landed Cost Reconciliation Step Cards
     const r1 = document.getElementById('reconStep1');
     const r2 = document.getElementById('reconStep2');
     const r3 = document.getElementById('reconStep3');
@@ -1705,7 +1673,6 @@ table.items-table tr:hover td {
     if (r4) r4.textContent = formatCurrency(totalLandedCost);
     if (r5) r5.textContent = formatCurrency(supplierPayable);
 
-    // Section 6: Payment & Settlement
     const sPayTotal = document.getElementById('supplierPayableTotal');
     const cOut = document.getElementById('creditAmountOutput');
     const bBadge = document.getElementById('itemsCountBadge');
@@ -1715,9 +1682,6 @@ table.items-table tr:hover td {
     if (bBadge) bBadge.textContent = `Total Item Lines: ${rows.length} | Total Received Units: ${totalItemUnits.toFixed(2)}`;
   }
 
-  // =========================================================================
-  // ENHANCED PRODUCT AUTOCOMPLETE WITH SELECTION AUTOFILL
-  // =========================================================================
   function initProductAutocomplete(row) {
     const input = row.querySelector('.item-name');
     const hiddenId = row.querySelector('.item-product-id');
@@ -1728,8 +1692,19 @@ table.items-table tr:hover td {
 
     if (!input || !dropdown) return;
 
+    function updateDropdownPosition() {
+      if (!dropdown.classList.contains('show')) return;
+      const rect = input.getBoundingClientRect();
+      dropdown.style.position = 'fixed';
+      dropdown.style.top = `${rect.bottom + 2}px`;
+      dropdown.style.left = `${rect.left}px`;
+      dropdown.style.width = `${Math.max(rect.width, 380)}px`;
+      dropdown.style.zIndex = '999999';
+    }
+
     function closeDropdown() {
       dropdown.classList.remove('show');
+      dropdown.style.display = 'none';
       dropdown.innerHTML = '';
       activeHighlightIndex = -1;
       currentResults = [];
@@ -1750,15 +1725,27 @@ table.items-table tr:hover td {
       try {
         dropdown.innerHTML = '<div class="p-2 text-center text-muted fs-xs"><i class="fas fa-spinner fa-spin me-1 text-primary"></i> Searching catalog...</div>';
         dropdown.classList.add('show');
+        dropdown.style.display = 'block';
+        updateDropdownPosition();
 
         const cleanQ = (query || '').trim();
         const url = cleanQ
-          ? `/products/api/search/?mode=simple&q=${encodeURIComponent(cleanQ)}&limit=15`
-          : `/products/api/search/?mode=simple&limit=15`;
+          ? `/products/api/search/?mode=simple&q=${encodeURIComponent(cleanQ)}&limit=20`
+          : `/products/api/search/?mode=simple&limit=20`;
 
-        const res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const res = await fetch(url, { 
+          credentials: 'same-origin', 
+          headers: { 
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest' 
+          } 
+        });
+
         if (!res.ok) {
           dropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Search unavailable. Please retry.</div>';
+          dropdown.classList.add('show');
+          dropdown.style.display = 'block';
+          updateDropdownPosition();
           return;
         }
 
@@ -1771,6 +1758,8 @@ table.items-table tr:hover td {
             ? `<div class="p-2.5 text-center text-muted fs-xs">No products found matching "<strong>${escapeHtml(cleanQ)}</strong>".</div>`
             : '<div class="p-2.5 text-center text-muted fs-xs">No active catalog items found.</div>';
           dropdown.classList.add('show');
+          dropdown.style.display = 'block';
+          updateDropdownPosition();
           return;
         }
 
@@ -1802,6 +1791,8 @@ table.items-table tr:hover td {
 
         dropdown.innerHTML = html;
         dropdown.classList.add('show');
+        dropdown.style.display = 'block';
+        updateDropdownPosition();
 
         dropdown.querySelectorAll('.dropdown-item-grn').forEach(el => {
           el.addEventListener('click', (e) => {
@@ -1816,6 +1807,9 @@ table.items-table tr:hover td {
       } catch (err) {
         console.warn('[GRN Product Search Error]:', err);
         dropdown.innerHTML = '<div class="p-2 text-center text-danger fs-xs">Search error. Please verify network.</div>';
+        dropdown.classList.add('show');
+        dropdown.style.display = 'block';
+        updateDropdownPosition();
       }
     }
 
@@ -1885,27 +1879,27 @@ table.items-table tr:hover td {
       if (qtyInput) qtyInput.focus();
     }
 
-    input.addEventListener('focus', () => {
+    input.addEventListener('focus', (e) => {
+      e.stopPropagation();
       const q = input.value.trim();
       fetchProducts(q, true);
     });
 
     input.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (!dropdown.classList.contains('show')) {
-        const q = input.value.trim();
-        fetchProducts(q, true);
-      }
+      const q = input.value.trim();
+      fetchProducts(q, true);
     });
 
-    input.addEventListener('input', () => {
+    input.addEventListener('input', (e) => {
+      e.stopPropagation();
       clearTimeout(timer);
       hiddenId.value = '';
       const q = input.value;
 
       timer = setTimeout(() => {
         fetchProducts(q, false);
-      }, 160);
+      }, 140);
     });
 
     input.addEventListener('keydown', (e) => {
@@ -1932,11 +1926,14 @@ table.items-table tr:hover td {
         closeDropdown();
       }
     });
+
+    window.addEventListener('scroll', updateDropdownPosition, true);
+    window.addEventListener('resize', updateDropdownPosition);
+    if (tableContainer) {
+      tableContainer.addEventListener('scroll', updateDropdownPosition);
+    }
   }
 
-  // =========================================================================
-  // SUPPLIER AUTOCOMPLETE
-  // =========================================================================
   function initSupplierAutocomplete() {
     const sInput = document.getElementById('supplierName');
     const sHidden = document.getElementById('id_supplier');
@@ -1949,6 +1946,7 @@ table.items-table tr:hover td {
 
     function closeSupplierDropdown() {
       sDropdown.classList.remove('show');
+      sDropdown.style.display = 'none';
       sDropdown.innerHTML = '';
     }
 
@@ -1964,6 +1962,7 @@ table.items-table tr:hover td {
         if (suppliers.length === 0) {
           sDropdown.innerHTML = '<div class="p-2 text-muted fs-xs">No suppliers found.</div>';
           sDropdown.classList.add('show');
+          sDropdown.style.display = 'block';
           return;
         }
 
@@ -1983,6 +1982,7 @@ table.items-table tr:hover td {
         });
         sDropdown.innerHTML = html;
         sDropdown.classList.add('show');
+        sDropdown.style.display = 'block';
 
         sDropdown.querySelectorAll('.dropdown-item-grn').forEach(el => {
           el.addEventListener('click', (e) => {
@@ -2013,17 +2013,16 @@ table.items-table tr:hover td {
     });
   }
 
-  // GLOBAL DOCUMENT CLICK LISTENER TO CLOSE ALL FLOATING DROPDOWNS
   document.addEventListener('click', (e) => {
+    if (e.target.closest('.search-wrapper-relative') || e.target.closest('.floating-results-dropdown')) {
+      return;
+    }
     document.querySelectorAll('.floating-results-dropdown').forEach(dd => {
-      const wrapper = dd.closest('.search-wrapper-relative');
-      if (wrapper && !wrapper.contains(e.target)) {
-        dd.classList.remove('show');
-      }
+      dd.classList.remove('show');
+      dd.style.display = 'none';
     });
   });
 
-  // GLOBAL LISTENERS FOR OVERHEADS & SUMMARY INPUTS
   overheadInputs.forEach(inp => inp.addEventListener('input', calculateAll));
   if (wholeBillDiscountInput) wholeBillDiscountInput.addEventListener('input', calculateAll);
   if (spotPaidDeliveryInput) spotPaidDeliveryInput.addEventListener('input', calculateAll);
@@ -2034,7 +2033,6 @@ table.items-table tr:hover td {
     });
   }
 
-  // DATE SYNCHRONIZERS
   const billDate = document.getElementById('billDate');
   const billDateSec = document.getElementById('invoiceDateSecondary');
   if (billDate && billDateSec) {
@@ -2042,7 +2040,6 @@ table.items-table tr:hover td {
     billDateSec.addEventListener('change', () => billDate.value = billDateSec.value);
   }
 
-  // ACTION BUTTONS BEHAVIOR
   document.getElementById('btnPrint')?.addEventListener('click', () => window.print());
 
   document.getElementById('btnSaveDraft')?.addEventListener('click', () => {
@@ -2096,7 +2093,6 @@ table.items-table tr:hover td {
     }
   });
 
-  // INITIALIZE ON LOAD
   updateVatModeUI();
   tableBody.querySelectorAll('.item-row').forEach(row => attachRowEvents(row));
   initSupplierAutocomplete();

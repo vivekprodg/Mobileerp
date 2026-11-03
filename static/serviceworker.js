@@ -1,16 +1,4 @@
-/**
- * PWA Service Worker for Mobile Shop & Optical Store ERP (Nepal)
- * Cache Version: v3.4.0 (Pre-VAT Landed Valuation & Dual-Mode Discount Strategy)
- * 
- * Features:
- * - Pre-caches only purely static CSS, JS, icon fonts, and the dedicated /offline/ fallback view.
- * - Dynamic route '/' (live dashboard) is excluded to eliminate stale KPI metrics and reloading loops.
- * - Stale-While-Revalidate caching strategy for static scripts and CSS assets.
- * - Network-First strategy with resilient cache fallback for catalog search APIs, contextual lookups, and date converters.
- * - Network-First navigation with fallback to /offline/ when network connection is unavailable.
- */
-
-const CACHE_NAME = 'mobile-shop-erp-v3.4.0';
+const CACHE_NAME = 'mobile-shop-erp-v3.5.0';
 
 const STATIC_ASSETS = [
     '/offline/',
@@ -39,9 +27,6 @@ const STATIC_ASSETS = [
     '/static/manifest.json'
 ];
 
-// =============================================================================
-// INSTALL EVENT: Pre-cache static shell assets (Resilient against individual 404s)
-// =============================================================================
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
@@ -56,9 +41,6 @@ self.addEventListener('install', (event) => {
     );
 });
 
-// =============================================================================
-// ACTIVATE EVENT: Purge legacy cache buckets
-// =============================================================================
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys().then((keys) => {
@@ -74,14 +56,10 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// =============================================================================
-// FETCH EVENT: Intelligent Caching & Offline Routing
-// =============================================================================
 self.addEventListener('fetch', (event) => {
     const request = event.request;
     const url = new URL(request.url);
 
-    // Skip non-GET requests (e.g., POST checkout, API mutations, form submissions)
     if (request.method !== 'GET' || !url.protocol.startsWith('http')) return;
 
     // 1. Static Assets (JS, CSS, Images, Fonts): Stale-While-Revalidate
@@ -101,10 +79,23 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 2. Read-Only Lookup & Search APIs: Network-First with Stale Cache Fallback
-    const isSearchOrLookupApi = 
+    // 2. Live Dynamic Autocomplete Searches (Bypasses Cache to Prevent Stale Empty Lists)
+    const isLiveSearchQuery = 
+        url.searchParams.has('q') || 
+        url.pathname.includes('/products/api/search/') ||
+        url.pathname.includes('/purchases/suppliers/api/search/') ||
+        url.pathname.includes('/grn/api/search/');
+
+    if (isLiveSearchQuery) {
+        event.respondWith(
+            fetch(request).catch(() => caches.match(request))
+        );
+        return;
+    }
+
+    // 3. Read-Only Standard Lookup APIs: Network-First with Cache Fallback
+    const isLookupApi = 
         url.pathname.includes('/core/api/global-search/') ||
-        url.pathname.includes('/api/search/') ||
         url.pathname.includes('/inventory/api/') ||
         url.pathname.includes('/customers/api/') ||
         url.pathname.includes('/purchases/api/') ||
@@ -113,7 +104,7 @@ self.addEventListener('fetch', (event) => {
         url.pathname.includes('/repairs/api/') ||
         url.pathname.includes('/api/convert-date/');
 
-    if (isSearchOrLookupApi) {
+    if (isLookupApi) {
         event.respondWith(
             fetch(request).then((networkResponse) => {
                 if (networkResponse && networkResponse.status === 200) {
@@ -126,8 +117,7 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 3. HTML Navigation Routes (Dashboard, POS, Invoices, Reports): Network-First
-    // Live pages are always retrieved from Django to ensure real-time data & CSRF validity.
+    // 4. HTML Navigation Routes: Network-First with Offline Fallback
     if (request.mode === 'navigate' || (request.headers.get('accept') && request.headers.get('accept').includes('text/html'))) {
         event.respondWith(
             fetch(request).catch(() => {

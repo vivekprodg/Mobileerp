@@ -1,25 +1,3 @@
-"""
-Product Catalog, IMEI / Serial Tracking & Universal Real-Time Search API.
-
-Capabilities:
-1. Zero-Query Instant Population:
-   - When `q` is empty or focused, immediately returns up to 20 top-selling,
-     highest-stock, or recently updated products.
-2. Progressive Character Matching (v -> vi -> viv):
-   - Fast partial substring searches across product names, brand names (e.g. Vivo, Apple, Samsung),
-     model names, model numbers, variants, SKUs, and barcodes using case-insensitive containment (__icontains).
-   - Annotates prefix priority so items with brands or names starting with the typed query appear first.
-   - Preserves .distinct() to prevent duplicate rows from joined IMEI instances.
-3. Prioritized IMEI & Serial Hardware Lookups:
-   - Instant prioritized resolution for exact or partial 15-digit IMEI scans (`imei_1`, `imei_2`, `serial_number`).
-4. Dual Mode Operation:
-   - mode='pos': Rich POS structure containing in-stock physical handset boxes, dual-SIM flags,
-     tax pricing classifications, avatar icons, and multi-component warranty parameters.
-   - mode='simple': Lightweight, highly enriched records providing full procurement metadata
-     (product ID, name, SKU, barcode, unit cost, counter MRP, UOM, VAT %, and IMEI tracking flags)
-     for GRN purchase inward, purchase orders, transfers, and table row dropdowns.
-"""
-
 import re
 import logging
 from decimal import Decimal
@@ -43,12 +21,6 @@ from apps.integrations.mdms.nta_checker import NTAMDMSClient
 logger = logging.getLogger(__name__)
 
 def get_product_avatar_meta(product):
-    """
-    Intelligent Smart Hardware & Product Classification Engine.
-    Evaluates category names, RAM/Storage presence, brand names, and smartphone model keywords
-    to ensure phones (e.g. '15 128 Black-O', '16 128 Pink 1', 'iPhone', 'Galaxy') are always
-    correctly classified with avatar-phone and 'PHONES' category key with 0 KB server image overhead.
-    """
     cat_name = (product.category.name if product.category else '').lower()
     cat_name_np = (product.category.name_np if product.category and product.category.name_np else '').lower()
     brand_name = (product.brand.name if product.brand else '').lower()
@@ -56,7 +28,6 @@ def get_product_avatar_meta(product):
     model_name = (product.model_name or '').lower()
     full_text = f"{prod_name} {model_name} {cat_name} {cat_name_np} {brand_name}"
 
-    # 1. Smartphones & Handsets Detection
     is_phone = bool(product.requires_imei_tracking)
 
     if not is_phone and any(k in cat_name or k in cat_name_np for k in ['phone', 'mobile', 'smartphone', 'ह्यान्डसेट', 'स्मार्टफोन']):
@@ -86,45 +57,36 @@ def get_product_avatar_meta(product):
             return {'avatar_class': 'avatar-phone', 'icon_class': 'fas fa-mobile-screen', 'category_key': 'PHONES'}
         return {'avatar_class': 'avatar-phone', 'icon_class': 'fas fa-mobile-screen-button', 'category_key': 'PHONES'}
 
-    # 2. Fast Chargers, Adapters & Power Cables
     if any(k in full_text for k in ['charger', 'cable', 'adapter', 'power', 'chrg', 'चार्जर', 'केबल', 'data cable', 'type-c cable', 'lightning']):
         return {'avatar_class': 'avatar-charger', 'icon_class': 'fas fa-bolt', 'category_key': 'CHARGERS'}
 
-    # 3. Tempered Glass, Screen Protectors & Back Covers
     if any(k in full_text for k in ['glass', 'cover', 'case', 'tempered', 'protector', 'कभर', 'ग्लास', 'गिलास', 'screen guard', 'skin']):
         return {'avatar_class': 'avatar-glass', 'icon_class': 'fas fa-shield-halved', 'category_key': 'GLASS_COVER'}
 
-    # 4. Audio, Earbuds, Neckbands & Speakers
     if any(k in full_text for k in ['audio', 'earbud', 'headphone', 'airpod', 'neckband', 'speaker', 'earphone', 'tws', 'handsfree', 'एयरबड्स', 'हेडफोन']):
         return {'avatar_class': 'avatar-audio', 'icon_class': 'fas fa-headphones-simple', 'category_key': 'AUDIO'}
 
-    # 5. Service Spare Parts, Screens & Replacement Batteries
     if product.is_spare_part or any(k in full_text for k in ['part', 'spare', 'battery', 'display', 'screen replacement', 'touch panel', 'charging flex', 'मर्मत', 'पार्ट्स']):
         return {'avatar_class': 'avatar-part', 'icon_class': 'fas fa-car-battery', 'category_key': 'PARTS'}
 
-    # 6. Fallback General Product Icon
     return {'avatar_class': 'avatar-phone', 'icon_class': 'fas fa-box', 'category_key': 'ALL'}
 
 def _get_base_product_queryset():
-    """Returns base queryset safely taking into account optional is_active attribute."""
     qs = Product.objects.all()
-    if hasattr(Product, 'is_active'):
-        qs = qs.filter(is_active=True)
+    try:
+        has_is_active = any(f.name == 'is_active' for f in Product._meta.get_fields())
+        if has_is_active:
+            qs = qs.exclude(is_active=False)
+    except Exception as e:
+        logger.debug(f"[_get_base_product_queryset] Field resolution fallback: {e}")
     return qs
 
 class ProductSearchAPIView(APIView):
-    """
-    Universal High-Speed Product Search & Auto-Complete API.
-    Supports two operating modes:
-      - mode='pos': Rich POS structure (in-stock IMEIs, dual-SIM flags, warranty rules, tax pricing).
-      - mode='simple' (default): Clean, fully enriched records for GRN purchase inward,
-        dropdown selectors, table row cells, POs, transfers, and barcode generation.
-    When 'q' is empty, returns the top 20 recently updated active products immediately.
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
-        query = request.GET.get('q', '').strip()
+        raw_query = request.GET.get('q', '')
+        query = ' '.join(raw_query.strip().split())
         mode = request.GET.get('mode', 'simple').strip().lower()
         customer_type = request.GET.get('customer_type', 'RETAIL').strip().upper()
         branch = getattr(request, 'active_branch', None)
@@ -135,9 +97,6 @@ class ProductSearchAPIView(APIView):
         except (ValueError, TypeError):
             limit = 20 if not query else 30
 
-        # =========================================================================
-        # 1. EMPTY QUERY: IMMEDIATE ZERO-QUERY POPULATION OF TOP/RECENT PRODUCTS
-        # =========================================================================
         if not query:
             products_qs = _get_base_product_queryset().select_related(
                 'base_unit', 'category', 'brand'
@@ -149,7 +108,7 @@ class ProductSearchAPIView(APIView):
                 except (ValueError, TypeError):
                     pass
 
-            products = list(products_qs.order_by('-updated_at')[:limit])
+            products = list(products_qs.order_by('-updated_at', '-id')[:limit])
 
             if mode == 'pos':
                 pos_results = [self._build_pos_product_payload(p, branch, customer_type) for p in products]
@@ -158,9 +117,6 @@ class ProductSearchAPIView(APIView):
             simple_results = [self._build_simple_product_payload(p, branch, customer_type) for p in products]
             return Response({'status': 'success', 'results': simple_results, 'count': len(simple_results)})
 
-        # =========================================================================
-        # 2. PRIORITIZED LOOKUP: EXACT / PARTIAL IMEI / SERIAL MATCH
-        # =========================================================================
         if len(query) >= 4 and any(c.isdigit() for c in query):
             imei_qs = ItemInstance.objects.filter(
                 Q(imei_1__icontains=query) |
@@ -185,9 +141,6 @@ class ProductSearchAPIView(APIView):
                     return Response({'status': 'success', 'results': [self._build_pos_imei_payload(imei_match, customer_type)], 'count': 1})
                 return Response({'status': 'success', 'results': [self._build_simple_imei_payload(imei_match, customer_type)], 'count': 1})
 
-        # =========================================================================
-        # 3. PRIORITIZED LOOKUP: EXACT PACKAGING BARCODE (BULK BOX CONVERSIONS)
-        # =========================================================================
         pkg_match = UnitConversion.objects.filter(barcode__iexact=query).select_related(
             'product', 'product__base_unit', 'product__category', 'product__brand'
         ).first()
@@ -197,23 +150,23 @@ class ProductSearchAPIView(APIView):
                 return Response({'status': 'success', 'results': [self._build_pos_package_payload(pkg_match, branch)], 'count': 1})
             return Response({'status': 'success', 'results': [self._build_simple_package_payload(pkg_match, branch)], 'count': 1})
 
-        # =========================================================================
-        # 4. GENERAL PROGRESSIVE LOOKUP (v -> vi -> viv across brands, names, models)
-        # =========================================================================
-        base_filter = (
-            Q(name__icontains=query) |
-            Q(model_name__icontains=query) |
-            Q(model_number__icontains=query) |
-            Q(brand__name__icontains=query) |
-            Q(category__name__icontains=query) |
-            Q(sku__icontains=query) |
-            Q(barcode__icontains=query) |
-            Q(variant_name__icontains=query) |
-            Q(ram__icontains=query) |
-            Q(internal_storage__icontains=query) |
-            Q(tracked_instances__imei_1__icontains=query) |
-            Q(tracked_instances__imei_2__icontains=query)
-        )
+        tokens = [t.strip() for t in query.split() if t.strip()]
+        base_filter = Q()
+        for token in tokens:
+            base_filter &= (
+                Q(name__icontains=token) |
+                Q(model_name__icontains=token) |
+                Q(model_number__icontains=token) |
+                Q(brand__name__icontains=token) |
+                Q(category__name__icontains=token) |
+                Q(sku__icontains=token) |
+                Q(barcode__icontains=token) |
+                Q(variant_name__icontains=token) |
+                Q(ram__icontains=token) |
+                Q(internal_storage__icontains=token) |
+                Q(tracked_instances__imei_1__icontains=token) |
+                Q(tracked_instances__imei_2__icontains=token)
+            )
 
         products_qs = _get_base_product_queryset().filter(base_filter).distinct()
 
@@ -223,14 +176,14 @@ class ProductSearchAPIView(APIView):
             except (ValueError, TypeError):
                 pass
 
-        # Relevance weighting: items starting with query (e.g. Brand 'Vivo' or Name 'Vivo...') rank highest
+        first_token = tokens[0] if tokens else query
         products_qs = products_qs.annotate(
             match_priority=Case(
-                When(brand__name__istartswith=query, then=Value(1)),
-                When(name__istartswith=query, then=Value(2)),
-                When(model_name__istartswith=query, then=Value(3)),
-                When(sku__istartswith=query, then=Value(4)),
-                When(barcode__istartswith=query, then=Value(5)),
+                When(brand__name__istartswith=first_token, then=Value(1)),
+                When(name__istartswith=first_token, then=Value(2)),
+                When(model_name__istartswith=first_token, then=Value(3)),
+                When(sku__istartswith=first_token, then=Value(4)),
+                When(barcode__istartswith=first_token, then=Value(5)),
                 default=Value(10),
                 output_field=IntegerField()
             )
@@ -247,9 +200,6 @@ class ProductSearchAPIView(APIView):
         simple_results = [self._build_simple_product_payload(p, branch, customer_type) for p in products]
         return Response({'status': 'success', 'results': simple_results, 'count': len(simple_results)})
 
-    # -------------------------------------------------------------------------
-    # PAYLOAD BUILDERS: SIMPLE MODE (ENRICHED FOR GRN INWARD & TABLE ROWS)
-    # -------------------------------------------------------------------------
     def _build_simple_product_payload(self, p, branch, customer_type):
         stock_qty = Decimal('0.000')
         if branch:
@@ -257,23 +207,21 @@ class ProductSearchAPIView(APIView):
             if bs:
                 stock_qty = bs.available_quantity
 
-        # Defensive price resolution guaranteeing zero 500 error crashes
         try:
             resolved_selling_price = ProductCatalogService.get_applicable_price(p, Decimal('1.000'), customer_type)
         except Exception as err:
             logger.warning(f"[ProductSearchAPIView] Price tier resolution fallback for {p.id}: {err}")
             resolved_selling_price = p.selling_price if p.selling_price is not None else Decimal('0.00')
 
-        cost_price = p.purchase_price if p.purchase_price is not None else Decimal('0.00')
-        selling_price = resolved_selling_price if resolved_selling_price is not None else Decimal('0.00')
+        cost_price = p.purchase_price if (p.purchase_price is not None) else Decimal('0.00')
+        selling_price = resolved_selling_price if (resolved_selling_price is not None) else Decimal('0.00')
         wholesale_price = p.wholesale_price if (p.wholesale_price is not None and p.wholesale_price > Decimal('0.00')) else selling_price
-        vat_rate = p.vat_rate if p.vat_rate is not None else Decimal('13.00')
+        vat_rate = p.vat_rate if (p.vat_rate is not None) else Decimal('13.00')
 
         variant_desc = p.variant_name or f"{p.ram or ''}/{p.internal_storage or ''} {p.color_variant or ''}".strip()
         variant_tag = f" ({variant_desc})" if variant_desc else ""
         badge = "IMEI" if p.requires_imei_tracking else ("SPARE" if p.is_spare_part else "STD")
 
-        # Build clean component warranty breakdown tags
         rules = p.component_warranty_rules.all()
         if rules.exists():
             comp_map = {r.component_type: r.warranty_months for r in rules}
@@ -315,9 +263,9 @@ class ProductSearchAPIView(APIView):
             'base_unit_code': unit_code,
             'unit_code': unit_code,
             'unit_name': unit_name,
-            'is_vat_applicable': bool(p.is_vat_applicable),
+            'is_vat_applicable': bool(getattr(p, 'is_vat_applicable', True)),
             'vat_rate': float(vat_rate),
-            'tax_pricing_type': p.tax_pricing_type or 'EXEMPT',
+            'tax_pricing_type': getattr(p, 'tax_pricing_type', None) or 'EXEMPT',
             'requires_imei': bool(p.requires_imei_tracking),
             'requires_imei_tracking': bool(p.requires_imei_tracking),
             'requires_serial': bool(p.requires_serial_tracking),
@@ -355,9 +303,9 @@ class ProductSearchAPIView(APIView):
             'base_unit_code': unit_code,
             'unit_code': unit_code,
             'unit_name': unit_name,
-            'is_vat_applicable': bool(p.is_vat_applicable),
+            'is_vat_applicable': bool(getattr(p, 'is_vat_applicable', True)),
             'vat_rate': str(vat_rate),
-            'tax_pricing_type': p.tax_pricing_type or 'EXEMPT',
+            'tax_pricing_type': getattr(p, 'tax_pricing_type', None) or 'EXEMPT',
             'requires_imei': bool(p.requires_imei_tracking),
             'requires_imei_tracking': bool(p.requires_imei_tracking),
             'requires_serial': bool(p.requires_serial_tracking),
@@ -420,9 +368,9 @@ class ProductSearchAPIView(APIView):
             'unit_name': unit_name,
             'sku': prod.sku,
             'barcode': prod.barcode or '',
-            'is_vat_applicable': bool(prod.is_vat_applicable),
+            'is_vat_applicable': bool(getattr(prod, 'is_vat_applicable', True)),
             'vat_rate': float(vat_rate),
-            'tax_pricing_type': prod.tax_pricing_type or 'EXEMPT',
+            'tax_pricing_type': getattr(prod, 'tax_pricing_type', None) or 'EXEMPT',
             'mdms_status': imei_match.mdms_status,
             'status': imei_match.status,
             'warranty_summary': warranty_summary
@@ -462,9 +410,9 @@ class ProductSearchAPIView(APIView):
             'base_unit_code': unit_code,
             'unit_code': unit_code,
             'unit_name': unit_name,
-            'is_vat_applicable': bool(prod.is_vat_applicable),
+            'is_vat_applicable': bool(getattr(prod, 'is_vat_applicable', True)),
             'vat_rate': str(vat_rate),
-            'tax_pricing_type': prod.tax_pricing_type or 'EXEMPT',
+            'tax_pricing_type': getattr(prod, 'tax_pricing_type', None) or 'EXEMPT',
             'mdms_status': imei_match.mdms_status,
             'status': imei_match.status,
             'warranty_summary': warranty_summary,
@@ -507,9 +455,9 @@ class ProductSearchAPIView(APIView):
             'base_unit_code': pkg_match.unit_name,
             'unit_code': pkg_match.unit_name,
             'unit_name': pkg_match.unit_name,
-            'is_vat_applicable': bool(prod.is_vat_applicable),
+            'is_vat_applicable': bool(getattr(prod, 'is_vat_applicable', True)),
             'vat_rate': float(vat_rate),
-            'tax_pricing_type': prod.tax_pricing_type or 'EXEMPT',
+            'tax_pricing_type': getattr(prod, 'tax_pricing_type', None) or 'EXEMPT',
             'warranty_summary': warranty_summary
         }
 
@@ -543,16 +491,13 @@ class ProductSearchAPIView(APIView):
             'is_spare_part': bool(prod.is_spare_part),
             'base_unit_code': pkg_match.unit_name,
             'unit_code': pkg_match.unit_name,
-            'is_vat_applicable': bool(prod.is_vat_applicable),
+            'is_vat_applicable': bool(getattr(prod, 'is_vat_applicable', True)),
             'vat_rate': str(vat_rate),
-            'tax_pricing_type': prod.tax_pricing_type or 'EXEMPT',
+            'tax_pricing_type': getattr(prod, 'tax_pricing_type', None) or 'EXEMPT',
             'warranty_summary': warranty_summary,
             'extra_data': extra_data
         }
 
-    # -------------------------------------------------------------------------
-    # PAYLOAD BUILDERS: POS MODE (RICH BILLING & CART STRUCTURE)
-    # -------------------------------------------------------------------------
     def _build_pos_imei_payload(self, imei_match, customer_type):
         prod = imei_match.product
         try:
@@ -677,50 +622,6 @@ class ProductSearchAPIView(APIView):
             'available_stock': '1.000' if imei_match.status == 'IN_STOCK' else '0.000',
             'requires_imei': True,
             'requires_imei_tracking': True,
-            'avatar_class': avatar_meta['avatar_class'],
-            'icon_class': avatar_meta['icon_class'],
-            'category_key': avatar_meta['category_key'],
-        }
-
-    def _build_pos_package_payload(self, pkg_match, branch):
-        prod = pkg_match.product
-        stock_qty = Decimal('0.000')
-        if branch:
-            bs = BranchStock.objects.filter(branch=branch, product=prod).first()
-            if bs:
-                stock_qty = bs.available_quantity
-
-        pkg_price = pkg_match.selling_price_per_unit or (prod.selling_price * pkg_match.conversion_factor)
-        avatar_meta = get_product_avatar_meta(prod)
-        warranty_summary = f"{prod.warranty_months}M General Warranty" if prod.warranty_months and prod.warranty_months > 0 else "No Warranty"
-
-        return {
-            'match_type': 'PACKAGE_UNIT',
-            'id': prod.id,
-            'product_id': prod.id,
-            'category_id': prod.category_id,
-            'category_name': prod.category.name if prod.category else '',
-            'package_conversion_id': pkg_match.id,
-            'name': f"{prod.name} ({pkg_match.unit_name})",
-            'brand_name': prod.brand.name if prod.brand else '',
-            'model_name': prod.model_name or prod.name,
-            'sku': prod.sku,
-            'barcode': pkg_match.barcode,
-            'unit_code': pkg_match.unit_name,
-            'unit_name': pkg_match.unit_name,
-            'conversion_factor': str(pkg_match.conversion_factor),
-            'price': str(pkg_price),
-            'selling_price': str(pkg_price),
-            'cost_price': str(prod.purchase_price * pkg_match.conversion_factor),
-            'purchase_price': str(prod.purchase_price * pkg_match.conversion_factor),
-            'is_vat_applicable': prod.is_vat_applicable,
-            'vat_rate': str(prod.vat_rate),
-            'tax_pricing_type': prod.tax_pricing_type,
-            'warranty_summary': warranty_summary,
-            'available_stock': str(stock_qty / pkg_match.conversion_factor if pkg_match.conversion_factor else stock_qty),
-            'requires_imei': False,
-            'requires_imei_tracking': False,
-            'requires_dual_imei_scan': False,
             'avatar_class': avatar_meta['avatar_class'],
             'icon_class': avatar_meta['icon_class'],
             'category_key': avatar_meta['category_key'],
