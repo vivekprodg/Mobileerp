@@ -1,36 +1,3 @@
-"""
-POS Counter Terminal, Sales Estimation & Parked Bill Recovery Service.
-
-Core Capabilities & Architectural Safeguards:
-1. Guaranteed 13% VAT Split & Inclusive Retail Default:
-   - When bill_type == 'SALES', 13% Output VAT is automatically enabled by default on all taxable merchandise,
-     preventing zero-VAT invoices even if the global shop configuration is temporarily set to PAN or Proforma mode.
-   - Treats retail prices as VAT-Inclusive by default (Nepal standard retail convention). When an item is sold
-     at retail MRP (e.g. Rs. 25,500.00), the service authoritatively decomposes it into:
-       * Taxable Base: Rs. 22,566.37
-       * 13% Output VAT: Rs. 2,933.63
-       * Payable Grand Total: Rs. 25,500.00
-   - Prevents treating the net taxable base as the total bill, eliminating phantom customer cash-change leakages.
-2. Absolute Historical Tax Immutability:
-   - All tax attributes (rate, pricing type, taxable base, VAT amount) are captured and
-     frozen onto `SalesEstimateItem` and `SalesEstimate` at the exact moment of sale.
-   - Any subsequent alteration to product master tax settings NEVER mutates historical invoices.
-3. Corrected Sales Return VAT Processing:
-   - Derives returned item VAT snapshots directly from the original invoice line item's stored
-     historical tax data (base_taxable_amount, tax_amount, line_total, vat_rate, tax_pricing_type).
-   - Accurately allocates returned portion based on return_quantity vs. original quantity.
-   - Caps cumulative VAT reversals across partial returns to never exceed the original item's VAT.
-   - Sets and saves SalesReturn header totals (taxable_amount, non_taxable_amount, vat_amount,
-     total_refund_amount) before General Ledger auto-posting dispatches.
-4. Dual Document Sequencing:
-   - 'SALES': Generates official Sales/Tax Invoices (e.g. INV-NR-000001) using document_type='SALES_INVOICE'.
-   - 'ESTIMATE': Generates quotation estimation slips (e.g. EST-NR-000001) using document_type='SALES_ESTIMATE'.
-5. Turnover Accounting & Barter Offsets:
-   - grand_total strictly represents the full merchandise gross sales value + applicable tax.
-   - trade_in_discount_amount is treated exclusively as a tender settlement offset (barter payment).
-6. Comprehensive Atomic Bill Cancellation with Payroll & Trade-In Safeguards.
-"""
-
 import re
 import uuid
 import inspect
@@ -91,14 +58,16 @@ class TaxCalculator:
             - final_line_total: Final payable line total
         """
         if not is_vat_registered or not is_product_taxable or effective_vat_rate <= Decimal('0.00'):
-            return Decimal('0.00'), Decimal('0.00'), net_line_payable
+            clean_payable = net_line_payable.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            return Decimal('0.00'), Decimal('0.00'), clean_payable
 
         clean_tax_mode = str(tax_mode or 'INCLUSIVE').upper().strip()
 
         if clean_tax_mode == 'EXCLUSIVE':
-            # Tax added on top of net price
-            base_taxable = net_line_payable
-            line_vat = (base_taxable * (effective_vat_rate / Decimal('100.00'))).quantize(
+            # Base Rate Mode: The incoming net_line_payable is the amount WITHOUT VAT
+            base_taxable = net_line_payable.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            vat_factor = (effective_vat_rate / Decimal('100.00')) if effective_vat_rate > Decimal('0.00') else Decimal('0.13')
+            line_vat = (base_taxable * vat_factor).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
             )
             final_line_total = (base_taxable + line_vat).quantize(
@@ -107,10 +76,10 @@ class TaxCalculator:
             return base_taxable, line_vat, final_line_total
 
         elif clean_tax_mode == 'INCLUSIVE':
-            # Tax extracted from retail price using statutory divisor: Base = Price / (1 + Rate)
-            final_line_total = net_line_payable
-            multiplier = Decimal('1.00') + (effective_vat_rate / Decimal('100.00'))
-            base_taxable = (final_line_total / multiplier).quantize(
+            # MRP Mode: The incoming net_line_payable is the retail price containing VAT
+            final_line_total = net_line_payable.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            divisor = (Decimal('1.00') + (effective_vat_rate / Decimal('100.00'))) if effective_vat_rate > Decimal('0.00') else Decimal('1.13')
+            base_taxable = (final_line_total / divisor).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
             )
             # Line VAT is the exact difference: ensures base_taxable + line_vat == final_line_total
@@ -120,7 +89,8 @@ class TaxCalculator:
             return base_taxable, line_vat, final_line_total
 
         # Default fallback: Non-taxable / Exempt
-        return Decimal('0.00'), Decimal('0.00'), net_line_payable
+        clean_payable = net_line_payable.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        return Decimal('0.00'), Decimal('0.00'), clean_payable
 
 # =============================================================================
 # SALES POS SERVICE
@@ -210,9 +180,8 @@ class SalesPOSService:
         **kwargs
     ) -> SalesEstimate:
         """
-        Main transactional checkout coordinator supporting dual document sequencing (Sales vs Estimate).
-        Executes the authoritative VAT snapshot chain:
-            POS input -> Calculate VAT -> Save line snapshot -> Add line VATs -> Save estimate snapshot.
+        Main transactional checkout coordinator supporting dual document sequencing (Sales vs Estimate)
+        and dual tax calculation modes (MRP Inclusive vs Base Rate Exclusive).
         """
         cls._validate_cart_items(cart_items)
 
@@ -225,6 +194,10 @@ class SalesPOSService:
         # Auto-Enable VAT for Official Sales Invoices:
         # If bill_type == 'SALES', force VAT to True so standard retail sales calculate 13% tax.
         is_shop_vat_registered = bool(config.tax_system_mode == 'VAT' or normalized_bill_type == 'SALES')
+
+        # Standardize Tax Mode: 'INCLUSIVE' (MRP) vs. 'EXCLUSIVE' (Base Rate + 13%)
+        raw_tax_mode = kwargs.get('tax_mode') or kwargs.get('tax_pricing_type') or 'INCLUSIVE'
+        clean_tax_mode = 'EXCLUSIVE' if str(raw_tax_mode).upper().strip() in ['EXCLUSIVE', 'EXCL', 'BASE'] else 'INCLUSIVE'
 
         # ---------------------------------------------------------------------
         # 1. DATE & FISCAL PERIOD RESOLUTION (TWO-WAY SYNCHRONIZATION)
@@ -265,7 +238,6 @@ class SalesPOSService:
             elif not is_historical_import:
                 raise ValidationError(f"Selected customer (ID {resolved_customer_id}) is inactive or no longer exists.")
         else:
-            # Attempt early identification via PAN or Phone
             clean_pan = re.sub(r'\D', '', str(customer_pan or '').strip())
             clean_phone = str(customer_phone or '').strip()
             clean_name = str(customer_name or '').strip()
@@ -292,7 +264,7 @@ class SalesPOSService:
         trade_in_voucher, trade_in_credit_amt = cls._validate_trade_in_voucher(branch, trade_in_voucher_id)
 
         # ---------------------------------------------------------------------
-        # 4. PARSE CART LINES (DUAL-MODE ITEM DISCOUNTS & PRICE OVERRIDE AUDIT)
+        # 4. PARSE CART LINES (RESPECTS CHOSEN TAX MODE: INCLUSIVE VS EXCLUSIVE)
         # ---------------------------------------------------------------------
         processed_lines, subtotal, item_discount_sum = cls._parse_cart_lines(
             cart_items=cart_items,
@@ -303,7 +275,8 @@ class SalesPOSService:
             cashier=cashier,
             branch=branch,
             is_historical=is_historical_import,
-            bill_type=normalized_bill_type
+            bill_type=normalized_bill_type,
+            tax_mode=clean_tax_mode
         )
 
         # ---------------------------------------------------------------------
@@ -447,6 +420,11 @@ class SalesPOSService:
         else:
             setattr(estimate, 'bill_type', normalized_bill_type)
 
+        if hasattr(estimate, 'tax_pricing_type'):
+            estimate.tax_pricing_type = clean_tax_mode
+        elif hasattr(estimate, 'tax_mode'):
+            setattr(estimate, 'tax_mode', clean_tax_mode)
+
         # ---------------------------------------------------------------------
         # 8. PROCESS LINE ITEMS, SNAPSHOT EXACT VAT, COGS & INVENTORY
         # ---------------------------------------------------------------------
@@ -520,7 +498,7 @@ class SalesPOSService:
             object_repr=estimate.estimate_number,
             details={
                 'bill_type': normalized_bill_type,
-                'tax_mode': config.tax_system_mode,
+                'tax_mode': clean_tax_mode,
                 'bill_date_ad': str(estimate.bill_date_ad),
                 'bill_date_bs': estimate.bill_date_bs,
                 'fiscal_year': estimate.fiscal_year,
@@ -590,12 +568,12 @@ class SalesPOSService:
         cashier=None,
         branch: Branch = None,
         is_historical: bool = False,
-        bill_type: str = 'SALES'
+        bill_type: str = 'SALES',
+        tax_mode: str = 'INCLUSIVE'
     ) -> Tuple[list, Decimal, Decimal]:
         """
         Parses cart items, verifies prices, and captures explicit tax attributes per line
-        from the POS cart input (or falls back to the current product snapshot).
-        Retail Standard: Defaults to INCLUSIVE 13% VAT for official sales invoices.
+        from the POS cart input, honoring the active tax calculation mode (INCLUSIVE vs. EXCLUSIVE).
         """
         processed = []
         subtotal = Decimal('0.00')
@@ -607,6 +585,8 @@ class SalesPOSService:
             is_historical or
             (cashier and (cashier.is_superuser or getattr(cashier, 'role', '') in ['OWNER', 'MANAGER']))
         )
+
+        active_tax_mode = 'EXCLUSIVE' if str(tax_mode).upper().strip() in ['EXCLUSIVE', 'EXCL', 'BASE'] else 'INCLUSIVE'
 
         for item_data in cart_items:
             product_id = item_data.get('product_id')
@@ -787,21 +767,16 @@ class SalesPOSService:
 
             # -------------------------------------------------------------
             # EXACT TAX SNAPSHOT CAPTURE FROM CART / PRODUCT STATE
-            # Retail Convention: Default to INCLUSIVE 13% VAT for official sales
             # -------------------------------------------------------------
             if not is_shop_vat_registered and bill_type != 'SALES':
                 line_tax_mode = 'EXEMPT'
                 line_is_vat_applicable = False
                 line_vat_rate = Decimal('0.00')
             else:
-                raw_tax_mode = item_data.get('tax_pricing_type') or getattr(product, 'tax_pricing_type', 'INCLUSIVE')
-                line_tax_mode = str(raw_tax_mode).upper().strip()
+                raw_line_tax_mode = item_data.get('tax_pricing_type') or active_tax_mode or getattr(product, 'tax_pricing_type', 'INCLUSIVE')
+                line_tax_mode = str(raw_line_tax_mode).upper().strip()
                 if line_tax_mode not in ['INCLUSIVE', 'EXCLUSIVE', 'EXEMPT']:
-                    line_tax_mode = 'INCLUSIVE'
-
-                # If official Sales bill and item was passed as EXCLUSIVE, preserve or extract appropriately
-                if bill_type == 'SALES' and line_tax_mode == 'EXEMPT' and getattr(product, 'tax_pricing_type', '') != 'EXEMPT':
-                    line_tax_mode = 'INCLUSIVE'
+                    line_tax_mode = active_tax_mode
 
                 if item_data.get('is_vat_applicable') is not None:
                     line_is_vat_applicable = bool(item_data.get('is_vat_applicable'))
@@ -813,6 +788,8 @@ class SalesPOSService:
 
                 if line_tax_mode == 'EXEMPT':
                     line_is_vat_applicable = False
+                elif bill_type == 'SALES' and line_is_vat_applicable:
+                    line_tax_mode = active_tax_mode
 
                 if not line_is_vat_applicable:
                     line_vat_rate = Decimal('0.00')
@@ -1284,20 +1261,45 @@ class SalesPOSService:
         """
         Finalizes invoice financial snapshot. Sums line VAT and taxable amounts,
         saving the exact snapshot onto the SalesEstimate header.
-        """
-        gross_merchandise = (subtotal - item_discount_sum - bill_discount_amt) + calc_result['exclusive_vat_to_add']
-        gross_merchandise = gross_merchandise.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # ---------------------------------------------------------------------
-        # EXACT AGGREGATION FROM SNAPSHOTTED LINES
-        # ---------------------------------------------------------------------
+        Strictly honors tax pricing mode:
+        - In EXCLUSIVE mode (Base Rate Mode):
+            estimate.subtotal = Sum of all line items' pre-tax amounts.
+            estimate.taxable_amount = Pre-tax taxable base.
+            estimate.vat_amount = Exactly the sum of 13% VAT added on top.
+            estimate.non_taxable_amount = Non-taxable base.
+            estimate.grand_total = Taxable Base + Non-Taxable Base + 13% VAT.
+            estimate.round_off = 0.00.
+        - In INCLUSIVE mode (MRP Mode):
+            estimate.subtotal = Gross MRP.
+            estimate.grand_total = MRP minus discounts.
+            estimate.taxable_amount = Extracted pre-tax base.
+            estimate.vat_amount = Extracted 13% VAT.
+            estimate.non_taxable_amount = Non-taxable base.
+            estimate.round_off = grand_total - (taxable + non-taxable + vat).
+        """
+        tax_mode = getattr(estimate, 'tax_pricing_type', 'INCLUSIVE') or 'INCLUSIVE'
+        clean_tax_mode = str(tax_mode).upper().strip()
+        is_exclusive = (clean_tax_mode == 'EXCLUSIVE')
+
+        # Exact aggregation from snapshotted lines
         taxable_total = calc_result['taxable_total'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         non_taxable_total = calc_result['non_taxable_total'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         vat_sum = calc_result['vat_sum'].quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        merchandise_tax_sum = taxable_total + non_taxable_total + vat_sum
-        round_off = (gross_merchandise - merchandise_tax_sum).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        grand_total = gross_merchandise
+        if is_exclusive:
+            # Base Rate Mode: Tax is calculated and added on top of the net base rate
+            grand_total = (taxable_total + non_taxable_total + vat_sum).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+            round_off = Decimal('0.00')
+        else:
+            # MRP Mode: Rates include VAT; Grand total is MRP minus discounts
+            grand_total = max(Decimal('0.00'), subtotal - item_discount_sum - bill_discount_amt).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+            merchandise_tax_sum = taxable_total + non_taxable_total + vat_sum
+            round_off = (grand_total - merchandise_tax_sum).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         if trade_in_credit_amt > grand_total:
             excess_trade_in_credit = (trade_in_credit_amt - grand_total).quantize(
@@ -1315,8 +1317,8 @@ class SalesPOSService:
         )
 
         # Save Header VAT and Financial Snapshots
-        estimate.subtotal = subtotal
-        estimate.item_discount_total = item_discount_sum
+        estimate.subtotal = subtotal.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        estimate.item_discount_total = item_discount_sum.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         estimate.taxable_amount = taxable_total
         estimate.non_taxable_amount = non_taxable_total
         estimate.vat_amount = vat_sum
@@ -1686,11 +1688,14 @@ class SalesPOSService:
                 call_kwargs['trade_in_amount'] = estimate.trade_in_discount_amount
             if 'bill_type' in sig.parameters and hasattr(estimate, 'bill_type'):
                 call_kwargs['bill_type'] = getattr(estimate, 'bill_type', 'SALES')
+            if 'tax_mode' in sig.parameters:
+                call_kwargs['tax_mode'] = getattr(estimate, 'tax_pricing_type', 'INCLUSIVE')
             if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
                 call_kwargs['payment_details'] = payment_details
                 call_kwargs['payment_transactions'] = monetary_transactions
                 call_kwargs['trade_in_amount'] = estimate.trade_in_discount_amount
                 call_kwargs['trade_in_voucher_reference'] = estimate.trade_in_voucher_reference
+                call_kwargs['tax_mode'] = getattr(estimate, 'tax_pricing_type', 'INCLUSIVE')
 
             result_voucher = AutoPostingService.post_sales_estimate(**call_kwargs)
 
@@ -1918,8 +1923,6 @@ class SalesPOSService:
                     calc_vat = min(rem_vat, (orig_vat * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
                 line_vat_reversal = calc_vat
-                # In both VAT-inclusive and VAT-exclusive items, refund_val already incorporates VAT.
-                # Taxable base reversed is the pre-tax portion of the refund: refund_val - line_vat_reversal
                 line_taxable_return = max(Decimal('0.00'), refund_val - line_vat_reversal)
                 line_non_taxable_return = Decimal('0.00')
             else:

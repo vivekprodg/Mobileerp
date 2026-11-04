@@ -143,13 +143,14 @@
         {% endif %}
     </div>
 
-    <!-- 2. Bill Metadata -->
+    <!-- 2. Bill Metadata with Explicit Pricing Mode Line -->
     <div>
         Slip No    : <strong>{{ estimate.estimate_number }}</strong><br>
         Date (AD)  : {{ estimate.bill_date_ad }} | BS: {{ estimate.bill_date_bs|default:"-" }}<br>
         Customer   : <strong>{{ estimate.recipient_display_name }}</strong><br>
         {% if estimate.customer_phone_manual %}Phone      : {{ estimate.customer_phone_manual }}<br>{% endif %}
         {% if estimate.customer_pan %}Cust PAN   : {{ estimate.customer_pan }}<br>{% endif %}
+        Pricing    : <strong>{% if estimate.is_tax_exclusive %}Base Rate (+13% VAT){% else %}MRP (Tax Included){% endif %}</strong><br>
         Sales Rep  : {% if estimate.salesperson %}{{ estimate.salesperson.get_full_name|default:estimate.salesperson.username }}{% else %}{{ estimate.cashier.get_full_name|default:estimate.cashier.username }}{% endif %}<br>
         Billed By  : {{ estimate.cashier.username }}
         {% if estimate.manager_override_by %}
@@ -165,7 +166,9 @@
             <tr>
                 <th align="left">Item Description</th>
                 <th align="center">Qty</th>
-                <th align="right">Rate</th>
+                <th align="right">
+                    {% if estimate.is_tax_exclusive %}Base Rate{% else %}Rate{% endif %}
+                </th>
                 <th align="right">Total</th>
             </tr>
         </thead>
@@ -185,6 +188,7 @@
             <tr>
                 <td></td>
                 <td align="center">{{ item.quantity|floatformat:0 }}</td>
+                <!-- Unit Rate (Base Rate without VAT if exclusive; MRP if inclusive) -->
                 <td align="right">Rs. {{ item.unit_price|floatformat:2 }}</td>
                 <td align="right">Rs. {{ item.line_total|floatformat:2 }}</td>
             </tr>
@@ -193,7 +197,7 @@
             {% if item.official_unit_price and item.official_unit_price > item.unit_price %}
             <tr>
                 <td colspan="4" class="concession-line">
-                    [Catalog MRP: Rs. {{ item.official_unit_price|floatformat:2 }} | Override: -Rs. {{ item.price_override_amount|floatformat:2 }}]
+                    [Catalog Price: Rs. {{ item.official_unit_price|floatformat:2 }} | Override: -Rs. {{ item.price_override_amount|floatformat:2 }}]
                 </td>
             </tr>
             {% endif %}
@@ -270,55 +274,122 @@
 
     <div class="divider"></div>
 
-    <!-- 4. Merchandise Discounts & Subtotals -->
+    <!-- 4. Merchandise Discounts & Subtotals (Clean Breakdown Matching Chosen Mode) -->
     <table>
-        <tr>
-            <td>Subtotal (Gross):</td>
-            <td align="right">Rs. {{ estimate.subtotal|floatformat:2 }}</td>
-        </tr>
+        {% if estimate.is_tax_exclusive %}
+            <!-- BASE RATE MODE BREAKDOWN -->
+            <tr>
+                <td>Subtotal (Without VAT):</td>
+                <td align="right">Rs. {{ estimate.subtotal|floatformat:2 }}</td>
+            </tr>
 
-        <!-- Item-Level Discounts Total -->
-        {% if estimate.item_discount_total > 0 %}
-        <tr>
-            <td>Line Discounts Total:</td>
-            <td align="right">-Rs. {{ estimate.item_discount_total|floatformat:2 }}</td>
-        </tr>
-        {% endif %}
+            {% if estimate.item_discount_total > 0 %}
+            <tr>
+                <td>Line Discounts:</td>
+                <td align="right">-Rs. {{ estimate.item_discount_total|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
 
-        <!-- Dual-Mode Bill-Level Discount -->
-        {% if estimate.bill_discount_amount > 0 %}
-        <tr>
-            <td>
-                {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
-                    Bill Discount (Amount):
-                {% else %}
-                    Bill Discount ({{ estimate.bill_discount_percent|floatformat:1 }}%):
-                {% endif %}
-            </td>
-            <td align="right">-Rs. {{ estimate.bill_discount_amount|floatformat:2 }}</td>
-        </tr>
-        {% endif %}
+            {% if estimate.bill_discount_amount > 0 %}
+            <tr>
+                <td>
+                    {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
+                        Bill Discount (Amount):
+                    {% else %}
+                        Bill Discount ({{ estimate.bill_discount_percent|floatformat:1 }}%):
+                    {% endif %}
+                </td>
+                <td align="right">-Rs. {{ estimate.bill_discount_amount|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
 
-        {% if estimate.discount_reason %}
-        <tr>
-            <td colspan="2" style="font-size: 8.5px; color: #555; padding-left: 4px;">
-                [Disc Reason: {{ estimate.discount_reason }}]
-            </td>
-        </tr>
-        {% endif %}
+            {% if estimate.discount_reason %}
+            <tr>
+                <td colspan="2" style="font-size: 8.5px; color: #555; padding-left: 4px;">
+                    [Disc Reason: {{ estimate.discount_reason }}]
+                </td>
+            </tr>
+            {% endif %}
 
-        <!-- Taxes & Grand Total -->
-        {% if estimate.vat_amount > 0 %}
-            {% if estimate.taxable_amount > 0 %}
             <tr>
                 <td>Taxable Base:</td>
                 <td align="right">Rs. {{ estimate.taxable_amount|floatformat:2 }}</td>
             </tr>
-            {% endif %}
+
+            {% if estimate.non_taxable_amount > 0 %}
             <tr>
-                <td>Tax / VAT:</td>
-                <td align="right">Rs. {{ estimate.vat_amount|floatformat:2 }}</td>
+                <td>Non-Taxable Base:</td>
+                <td align="right">Rs. {{ estimate.non_taxable_amount|floatformat:2 }}</td>
             </tr>
+            {% endif %}
+
+            <tr>
+                <td>13% VAT (+Added):</td>
+                <td align="right">+Rs. {{ estimate.vat_amount|floatformat:2 }}</td>
+            </tr>
+
+        {% else %}
+            <!-- MRP MODE BREAKDOWN -->
+            <tr>
+                <td>Subtotal (MRP):</td>
+                <td align="right">Rs. {{ estimate.subtotal|floatformat:2 }}</td>
+            </tr>
+
+            {% if estimate.item_discount_total > 0 %}
+            <tr>
+                <td>Line Discounts:</td>
+                <td align="right">-Rs. {{ estimate.item_discount_total|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
+
+            {% if estimate.bill_discount_amount > 0 %}
+            <tr>
+                <td>
+                    {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
+                        Bill Discount (Amount):
+                    {% else %}
+                        Bill Discount ({{ estimate.bill_discount_percent|floatformat:1 }}%):
+                    {% endif %}
+                </td>
+                <td align="right">-Rs. {{ estimate.bill_discount_amount|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
+
+            {% if estimate.discount_reason %}
+            <tr>
+                <td colspan="2" style="font-size: 8.5px; color: #555; padding-left: 4px;">
+                    [Disc Reason: {{ estimate.discount_reason }}]
+                </td>
+            </tr>
+            {% endif %}
+
+            {% if estimate.vat_amount > 0 %}
+                {% if estimate.taxable_amount > 0 %}
+                <tr>
+                    <td>Taxable Base:</td>
+                    <td align="right">Rs. {{ estimate.taxable_amount|floatformat:2 }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <td>13% VAT (Included):</td>
+                    <td align="right">Rs. {{ estimate.vat_amount|floatformat:2 }}</td>
+                </tr>
+            {% endif %}
+
+            {% if estimate.non_taxable_amount > 0 %}
+            <tr>
+                <td>Non-Taxable Base:</td>
+                <td align="right">Rs. {{ estimate.non_taxable_amount|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
+
+        {% endif %}
+
+        {% if estimate.round_off and estimate.round_off != 0 %}
+        <tr>
+            <td>Round Off:</td>
+            <td align="right">Rs. {{ estimate.round_off|floatformat:2 }}</td>
+        </tr>
         {% endif %}
 
         <tr class="fw-bold" style="font-size: 12.5px; border-top: 1px solid #000; border-bottom: 1px solid #000;">

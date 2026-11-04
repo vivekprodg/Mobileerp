@@ -456,6 +456,8 @@ body {
     margin-bottom: 14px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--border-subtle);
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .pos-items-header-title {
@@ -463,6 +465,59 @@ body {
     font-weight: 800;
     color: var(--text-main);
     letter-spacing: -0.01em;
+}
+
+/* --------------------------------------------------------------------------
+   6A. SEGMENTED TAX MODE TOGGLE SWITCH (MRP vs. BASE RATE)
+   ----------------------------------------------------------------------- */
+.tax-mode-toggle-group {
+    display: inline-flex;
+    background: #f1f5f9;
+    padding: 3px;
+    border-radius: var(--radius-sm);
+    gap: 2px;
+    border: 1px solid var(--border-color);
+    box-sizing: border-box;
+}
+
+.tax-mode-btn {
+    border: none;
+    background: transparent;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    line-height: 1.25;
+    font-family: inherit;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.tax-mode-btn:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.tax-mode-btn.active {
+    background: var(--text-main);
+    color: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+}
+
+.tax-mode-btn.active i {
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+}
+
+#taxModeSummaryBadge {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
 }
 
 /* Master Item Card */
@@ -1210,6 +1265,22 @@ body {
         gap: 10px;
     }
 
+    .pos-items-header-bar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .tax-mode-toggle-group {
+        width: 100%;
+    }
+
+    .tax-mode-btn {
+        flex: 1;
+        justify-content: center;
+        padding: 6px 8px;
+    }
+
     .tier-bottom {
         grid-template-columns: 1fr 1fr;
         padding-left: 0;
@@ -1234,6 +1305,7 @@ body {
     .row-product-search-dropdown,
     .btn-remove,
     .item-disc-toggle-group,
+    .tax-mode-toggle-group,
     .no-print {
         display: none !important;
     }

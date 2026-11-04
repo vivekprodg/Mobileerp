@@ -1,39 +1,3 @@
-/**
- * POS Counter Terminal & Billing Engine (GrowERP Minimalist Architecture)
- * File: static/js/pos_engine.js
- *
- * Core Capabilities & Upgrades:
- * 1. Default VAT-Inclusive Retail Pricing (Nepal Convention):
- *    - Standard counter prices (MRP) are treated as VAT-Inclusive by default.
- *    - Decomposes Rs. 25,500.00 into Base: Rs. 22,566.37 and VAT: Rs. 2,933.63 while
- *      keeping Grand Total strictly at Rs. 25,500.00.
- *    - Eliminates phantom "Change Returned: Rs. 2,933.63" cash leakages.
- * 2. Bill Type State Management:
- *    - Tracks active document mode: this.billType ('SALES' vs 'ESTIMATE').
- *    - Binds #btnBillTypeSales and #btnBillTypeEstimate buttons with active class toggling.
- *    - Injects bill_type into checkout payload and parked bill records.
- * 3. Active Thermal Print Driver & Modal Integration:
- *    - Captures data.print_url and data.estimate_id from server response.
- *    - Dynamically wires up #printThermalReceiptModalBtn to launch thermal print window.
- *    - Updates modal title and receipt slip header dynamically based on bill_type.
- * 4. Self-Healing Two-Tier Card Rendering:
- *    - Dynamically detects or creates items container (#itemsContainer) without null crashes.
- *    - Renders two-tier stacked cards (.item-card) with instant quantity, price, and discount calculations.
- * 5. Complete Historical & Backdated Bill Synchronization:
- *    - Entire #btnChangeBillDate container is clickable with hover feedback.
- *    - 1-Click Auto-Select Date Event (onChange) without "Apply" button dependency.
- *    - Closes floating #ndp-nepali-box immediately to prevent on-screen hanging.
- *    - Validates selected dates against active open Fiscal Year (e.g. 2083/84).
- * 6. Zero-Query Instant Suggestions & Live Typeahead:
- *    - Barcode / 15-Digit IMEI box opens live suggestions with recent products.
- *    - Patron Details box opens live suggestions with recent customers and debtors.
- *    - Two-tier item row autocomplete queries live catalog under active row.
- * 7. Dual-Mode Discounts (% vs Flat Rs.):
- *    - In-row and whole-bill segmented toggles with instant VAT recalculation and savings badges.
- * 8. Split Payments & Customer Udhaari Allocation [F8].
- * 9. Trade-In [F6], Repair Handover [F7], and Parked Cart [F9/F10] Parity.
- */
-
 // ============================================================================
 // 0. GLOBAL SECURITY, FORMATTING & UTILITIES
 // ============================================================================
@@ -394,7 +358,7 @@ class POSCustomerManager {
 }
 
 // ============================================================================
-// 3. TWO-TIER STACKED CARD CART & VAT-INCLUSIVE CALCULATION ENGINE
+// 3. TWO-TIER STACKED CARD CART & DUAL TAX MODE CALCULATION ENGINE
 // ============================================================================
 class POSCart {
     constructor(engine) {
@@ -407,6 +371,9 @@ class POSCart {
         this.customerType = 'RETAIL';
 
         this.activeCartIdempotencyKey = generateUUID();
+
+        // Tax Mode State: 'INCLUSIVE' (MRP Mode) vs 'EXCLUSIVE' (Base Rate Mode)
+        this.taxMode = 'INCLUSIVE';
 
         // Whole-Bill Discount State
         this.billDiscountType = 'PERCENTAGE';
@@ -447,6 +414,7 @@ class POSCart {
         this.termsInput = document.getElementById('posBillTerms');
 
         this.initBillDiscountControls();
+        this.initTaxModeControls();
         this.initEvents();
     }
 
@@ -488,6 +456,86 @@ class POSCart {
             }
         }
         return this.container;
+    }
+
+    initTaxModeControls() {
+        const btnInclusive = document.getElementById('btnTaxModeInclusive');
+        const btnExclusive = document.getElementById('btnTaxModeExclusive');
+
+        if (btnInclusive) {
+            btnInclusive.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.setTaxPricingMode('INCLUSIVE');
+            });
+        }
+
+        if (btnExclusive) {
+            btnExclusive.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.setTaxPricingMode('EXCLUSIVE');
+            });
+        }
+
+        this.syncTaxModeUI();
+    }
+
+    setTaxPricingMode(mode) {
+        const normalized = (mode === 'EXCLUSIVE') ? 'EXCLUSIVE' : 'INCLUSIVE';
+        if (this.taxMode === normalized && this.items.length > 0 && this.items[0].tax_pricing_type === normalized) {
+            this.syncTaxModeUI();
+            return;
+        }
+
+        const previousMode = this.taxMode;
+        this.taxMode = normalized;
+
+        this.items.forEach(item => {
+            if (item.tax_type === '13%') {
+                item.tax_pricing_type = this.taxMode;
+                // Seamless rate transition when switching modes:
+                if (previousMode === 'INCLUSIVE' && normalized === 'EXCLUSIVE' && item.unit_price > 0) {
+                    item.unit_price = Math.round((item.unit_price / 1.13) * 100) / 100;
+                } else if (previousMode === 'EXCLUSIVE' && normalized === 'INCLUSIVE' && item.unit_price > 0) {
+                    item.unit_price = Math.round((item.unit_price * 1.13) * 100) / 100;
+                }
+            }
+        });
+
+        this.syncTaxModeUI();
+        this.render();
+
+        const modeLabel = (this.taxMode === 'EXCLUSIVE') ? 'Base Rate Mode (+13% VAT Added)' : 'MRP Mode (Tax Included)';
+        if (this.engine && typeof this.engine.showNotification === 'function') {
+            this.engine.showNotification(`Pricing Mode Switched: ${modeLabel}`, 'info');
+        }
+    }
+
+    syncTaxModeUI() {
+        const btnInclusive = document.getElementById('btnTaxModeInclusive');
+        const btnExclusive = document.getElementById('btnTaxModeExclusive');
+        const badge = document.getElementById('taxModeSummaryBadge');
+        const subtotalLabel = document.getElementById('posSubtotalLabel');
+        const vatLabel = document.getElementById('posVatLabel');
+
+        if (this.taxMode === 'EXCLUSIVE') {
+            if (btnInclusive) btnInclusive.classList.remove('active');
+            if (btnExclusive) btnExclusive.classList.add('active');
+            if (badge) {
+                badge.textContent = 'Base Rate (+13% VAT)';
+                badge.className = 'badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 font-mono';
+            }
+            if (subtotalLabel) subtotalLabel.textContent = 'Sub Total (Base Rate / Without VAT)';
+            if (vatLabel) vatLabel.textContent = 'Tax (+13% Added on Top)';
+        } else {
+            if (btnExclusive) btnExclusive.classList.remove('active');
+            if (btnInclusive) btnInclusive.classList.add('active');
+            if (badge) {
+                badge.textContent = 'MRP Mode (Tax Incl.)';
+                badge.className = 'badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 font-mono';
+            }
+            if (subtotalLabel) subtotalLabel.textContent = 'Sub Total';
+            if (vatLabel) vatLabel.textContent = 'Tax (13% VAT)';
+        }
     }
 
     initBillDiscountControls() {
@@ -621,7 +669,8 @@ class POSCart {
 
                 if (target.classList.contains('cart-tax-select') || target.classList.contains('calc-tax')) {
                     this.items[idx].tax_type = target.value;
-                    this.recalculateTotals();
+                    this.items[idx].tax_pricing_type = (target.value === '13%') ? this.taxMode : 'EXEMPT';
+                    this.updateRowCalculations(idx);
                 }
             });
 
@@ -850,14 +899,32 @@ class POSCart {
         const selectRowProduct = (item, rowIdx) => {
             if (!this.items[rowIdx]) return;
 
-            const price = parseFloat(item.price || item.selling_price || 0);
             const isVatApplicable = item.is_vat_applicable !== false && item.tax_pricing_type !== 'EXEMPT';
+            const isExclusive = (this.taxMode === 'EXCLUSIVE');
+
+            let price = 0;
+            if (isExclusive && isVatApplicable) {
+                if (item.cost_price !== undefined && item.cost_price !== null && !isNaN(parseFloat(item.cost_price)) && parseFloat(item.cost_price) > 0) {
+                    price = parseFloat(item.cost_price);
+                } else if (item.purchase_price !== undefined && item.purchase_price !== null && !isNaN(parseFloat(item.purchase_price)) && parseFloat(item.purchase_price) > 0) {
+                    price = parseFloat(item.purchase_price);
+                } else if (item.wholesale_price !== undefined && item.wholesale_price !== null && !isNaN(parseFloat(item.wholesale_price)) && parseFloat(item.wholesale_price) > 0) {
+                    price = parseFloat(item.wholesale_price);
+                } else if (item.base_price !== undefined && item.base_price !== null && !isNaN(parseFloat(item.base_price)) && parseFloat(item.base_price) > 0) {
+                    price = parseFloat(item.base_price);
+                } else {
+                    const rawSelling = parseFloat(item.price || item.selling_price || 0);
+                    price = rawSelling > 0 ? Math.round((rawSelling / 1.13) * 100) / 100 : 0;
+                }
+            } else {
+                price = parseFloat(item.price || item.selling_price || 0);
+            }
 
             this.items[rowIdx].product_id = item.id || item.product_id;
             this.items[rowIdx].name = item.name || item.title;
             this.items[rowIdx].unit_price = price;
             this.items[rowIdx].tax_type = isVatApplicable ? '13%' : 'No';
-            this.items[rowIdx].tax_pricing_type = item.tax_pricing_type || 'INCLUSIVE';
+            this.items[rowIdx].tax_pricing_type = isVatApplicable ? this.taxMode : 'EXEMPT';
             this.items[rowIdx].requires_imei = Boolean(item.requires_imei || item.requires_imei_tracking);
             this.items[rowIdx].imei_1 = item.imei_1 || '';
 
@@ -912,7 +979,7 @@ class POSCart {
             discount_value: 0,
             discount_percent: 0,
             tax_type: '13%',
-            tax_pricing_type: 'INCLUSIVE',
+            tax_pricing_type: this.taxMode,
             requires_imei: false,
             imei_1: '',
             imei_2: '',
@@ -975,15 +1042,31 @@ class POSCart {
             rawPrice = parseFloat(product.selling_price);
         }
 
-        const extractedPrice = Math.max(0, rawPrice);
-        const extractedQuantity = (product.quantity !== undefined && product.quantity !== null && parseFloat(product.quantity) > 0)
-            ? parseFloat(product.quantity)
-            : 1;
-
         let taxType = '13%';
         if (product.is_vat_applicable === false || product.tax_pricing_type === 'EXEMPT') {
             taxType = 'No';
         }
+
+        const isExclusive = (this.taxMode === 'EXCLUSIVE');
+        let extractedPrice = Math.max(0, rawPrice);
+
+        if (isExclusive && taxType === '13%') {
+            if (product.cost_price !== undefined && product.cost_price !== null && !isNaN(parseFloat(product.cost_price)) && parseFloat(product.cost_price) > 0) {
+                extractedPrice = parseFloat(product.cost_price);
+            } else if (product.purchase_price !== undefined && product.purchase_price !== null && !isNaN(parseFloat(product.purchase_price)) && parseFloat(product.purchase_price) > 0) {
+                extractedPrice = parseFloat(product.purchase_price);
+            } else if (product.wholesale_price !== undefined && product.wholesale_price !== null && !isNaN(parseFloat(product.wholesale_price)) && parseFloat(product.wholesale_price) > 0) {
+                extractedPrice = parseFloat(product.wholesale_price);
+            } else if (product.base_price !== undefined && product.base_price !== null && !isNaN(parseFloat(product.base_price)) && parseFloat(product.base_price) > 0) {
+                extractedPrice = parseFloat(product.base_price);
+            } else if (extractedPrice > 0) {
+                extractedPrice = Math.round((extractedPrice / 1.13) * 100) / 100;
+            }
+        }
+
+        const extractedQuantity = (product.quantity !== undefined && product.quantity !== null && parseFloat(product.quantity) > 0)
+            ? parseFloat(product.quantity)
+            : 1;
 
         let discountType = 'PERCENTAGE';
         if (product.discount_type) {
@@ -1015,7 +1098,7 @@ class POSCart {
                 discount_value: discountValue,
                 discount_percent: discountType === 'PERCENTAGE' ? discountValue : 0,
                 tax_type: taxType,
-                tax_pricing_type: product.tax_pricing_type || 'INCLUSIVE',
+                tax_pricing_type: (taxType === '13%') ? this.taxMode : 'EXEMPT',
                 requires_imei: isSerializedHandset,
                 imei_1: incomingImei1,
                 imei_2: incomingImei2,
@@ -1059,6 +1142,7 @@ class POSCart {
         this.billDiscountPercent = 0;
         if (this.billDiscountInput) this.billDiscountInput.value = '0';
         this.syncBillDiscountUI();
+        this.syncTaxModeUI();
 
         this.renewIdempotencyKey();
         if (this.tradeInInput) this.tradeInInput.value = '0.00';
@@ -1100,7 +1184,11 @@ class POSCart {
             item.discount_value = 0;
         }
 
-        const netLine = Math.max(0, gross - lineDisc);
+        const netBeforeTax = Math.max(0, gross - lineDisc);
+        // Both in EXCLUSIVE and INCLUSIVE modes, netLine displays the net line amount of the entered rate:
+        // In Base Rate Mode: Rate is without VAT, so Gross & Net Line display the exact pre-tax base without VAT.
+        // In MRP Mode: Rate is with VAT, so Gross & Net Line display the tax-inclusive net amount.
+        const netLine = netBeforeTax;
 
         const container = this.getContainer();
         if (container) {
@@ -1128,15 +1216,6 @@ class POSCart {
         this.recalculateTotals();
     }
 
-    /**
-     * Authoritative VAT-Inclusive Retail Pricing Math (Nepal Standard):
-     * MRP / Counter Price = Gross retail amount (e.g. Rs. 25,500.00).
-     * Decomposes line totals into:
-     * - Pre-Tax Base: Rs. 22,566.37
-     * - 13% Output VAT: Rs. 2,933.63
-     * - Total Payable: Rs. 25,500.00
-     * Eliminates phantom cash change leakages.
-     */
     recalculateTotals() {
         let subTotal = 0;
         let itemDiscountTotal = 0;
@@ -1206,19 +1285,18 @@ class POSCart {
             const finalLinePayable = Math.max(0, lineNet - lineBillDisc);
 
             const isTaxable = (item.tax_type === '13%');
-            const taxMode = (item.tax_pricing_type || 'INCLUSIVE').toUpperCase().trim();
+            const taxMode = (item.tax_pricing_type || this.taxMode || 'INCLUSIVE').toUpperCase().trim();
 
             if (isTaxable) {
                 if (taxMode === 'EXCLUSIVE') {
-                    // Tax added on top
+                    // Base Rate Mode: Rate is without VAT. Tax is calculated and added on top!
                     const lineBase = finalLinePayable;
                     const lineTax = Math.round(lineBase * 0.13 * 100) / 100;
                     taxableAmount += lineBase;
                     vatAmount += lineTax;
                     exclusiveVatToAdd += lineTax;
                 } else {
-                    // Standard Retail Default: VAT-Inclusive (Tax extracted from price)
-                    // Base = Payable / 1.13, VAT = Payable - Base
+                    // MRP Mode: Rate contains VAT. Tax is extracted backwards: Base = Price / 1.13
                     const lineBase = Math.round((finalLinePayable / 1.13) * 100) / 100;
                     const lineTax = Math.round((finalLinePayable - lineBase) * 100) / 100;
                     taxableAmount += lineBase;
@@ -1229,10 +1307,6 @@ class POSCart {
             }
         }
 
-        // Net merchandise payable before barter trade-in deductions
-        // In INCLUSIVE mode: taxableAmount + vatAmount + nonTaxableAmount == (subTotal - itemDiscountTotal - billDiscountAmt)
-        const grossMerchandisePayable = (netAfterItemDisc - billDiscountAmt) + exclusiveVatToAdd;
-
         let tradeInCredit = 0;
         if (this.tradeInInput) {
             tradeInCredit = Math.max(0, parseFloat(this.tradeInInput.value) || 0);
@@ -1240,10 +1314,15 @@ class POSCart {
             tradeInCredit = this.engine.tradeInManager.getCreditAmount();
         }
 
-        const payableTotal = Math.max(0, (subTotal - itemDiscountTotal - billDiscountAmt + exclusiveVatToAdd) - tradeInCredit);
+        const isBaseRateMode = (this.taxMode === 'EXCLUSIVE');
+        const payableTotal = isBaseRateMode
+            ? Math.max(0, (taxableAmount + nonTaxableAmount + vatAmount) - tradeInCredit)
+            : Math.max(0, (subTotal - itemDiscountTotal - billDiscountAmt) - tradeInCredit);
+
         const grandTotal = Math.round(payableTotal * 100) / 100;
         const combinedDiscount = itemDiscountTotal + billDiscountAmt;
 
+        // Subtotal & VAT Labels and Display
         if (this.subtotalText) {
             this.subtotalText.innerText = subTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
@@ -1329,7 +1408,9 @@ class POSCart {
                 }
             }
 
-            const netLine = Math.max(0, gross - lineDisc);
+            const netBeforeTax = Math.max(0, gross - lineDisc);
+            const netLine = netBeforeTax;
+
             const primaryImei = item.imei_1 || item.imei_number || '';
             const card = document.createElement('div');
             card.className = 'item-card';
@@ -1569,7 +1650,7 @@ class POSHoldCartManager {
             discount_input_value: item.discount_value || 0,
             discount_percent: item.discount_percent || 0,
             tax_type: item.tax_type || '13%',
-            tax_pricing_type: item.tax_pricing_type || (item.tax_type === '13%' ? 'INCLUSIVE' : 'EXEMPT'),
+            tax_pricing_type: item.tax_pricing_type || this.engine.cart.taxMode || 'INCLUSIVE',
             requires_imei: Boolean(item.requires_imei),
             imei_1: item.imei_1 || '',
             imei_2: item.imei_2 || '',
@@ -1588,6 +1669,8 @@ class POSHoldCartManager {
             customer_pan: customerPan,
             bill_date_bs: effectiveBillDateBs || '',
             bill_type: this.engine.billType || 'SALES',
+            tax_mode: this.engine.cart.taxMode || 'INCLUSIVE',
+            tax_pricing_type: this.engine.cart.taxMode || 'INCLUSIVE',
             bill_discount_type: this.engine.cart.billDiscountType,
             bill_discount_input_value: this.engine.cart.billDiscountValue,
             bill_discount_value: this.engine.cart.billDiscountValue,
@@ -1708,15 +1791,20 @@ class POSHoldCartManager {
             if (items.length > 0) {
                 this.engine.cart.clear(false);
 
+                const recalledTaxMode = (data.cart_payload && (data.cart_payload.tax_mode || data.cart_payload.tax_pricing_type)) || data.tax_mode || 'INCLUSIVE';
+                this.engine.cart.taxMode = recalledTaxMode;
+
                 items.forEach(item => {
                     this.engine.cart.addItem({
                         ...item,
                         unit_price: item.unit_price || item.price || 0,
                         discount_value: item.discount_value || item.discount_amount || 0,
                         tax_type: item.tax_type || (item.tax_pricing_type === 'EXEMPT' ? 'No' : '13%'),
-                        tax_pricing_type: item.tax_pricing_type || (item.tax_type === 'No' ? 'EXEMPT' : 'INCLUSIVE')
+                        tax_pricing_type: item.tax_pricing_type || this.engine.cart.taxMode
                     });
                 });
+
+                this.engine.cart.syncTaxModeUI();
 
                 const recalledBsDate = (data.cart_payload && data.cart_payload.bill_date_bs) || data.bill_date_bs || '';
                 if (recalledBsDate) {
@@ -1945,9 +2033,12 @@ class POSCheckout {
         const terms = document.getElementById('posBillTerms')?.value.trim() || '';
 
         const effectiveBsDate = this.engine.getEffectiveBillDateBs();
+        const activeTaxMode = this.engine.cart.taxMode || 'INCLUSIVE';
 
         const packagedCartItems = this.engine.cart.items.map(item => {
             const qty = Math.max(1, parseFloat(item.quantity) || 1);
+            // In Base Rate Mode (EXCLUSIVE), the rate entered is already without VAT.
+            // In MRP Mode (INCLUSIVE), the rate entered is the final retail price with VAT.
             const price = Math.max(0, parseFloat(item.unit_price) || 0);
             const discVal = Math.max(0, parseFloat(item.discount_value) || 0);
             const discType = item.discount_type || 'PERCENTAGE';
@@ -1961,8 +2052,7 @@ class POSCheckout {
             }
 
             const isTaxable = (item.tax_type === '13%');
-            // INCLUSIVE RETAIL STANDARD: Default to INCLUSIVE for taxable merchandise!
-            const taxPricingType = isTaxable ? (item.tax_pricing_type || 'INCLUSIVE') : 'EXEMPT';
+            const taxPricingType = isTaxable ? activeTaxMode : 'EXEMPT';
 
             return {
                 product_id: item.product_id,
@@ -1996,6 +2086,8 @@ class POSCheckout {
             cart: packagedCartItems,
             payments: payments,
             bill_type: this.engine.billType || 'SALES',
+            tax_mode: activeTaxMode,
+            tax_pricing_type: activeTaxMode,
             customer_id: custId || (this.engine.cart.customer ? this.engine.cart.customer.id : null),
             customer_name: custName,
             customer_phone: custPhone,
@@ -2159,6 +2251,12 @@ class SmartPOSEngine {
 
         const modeLabel = (this.billType === 'SALES') ? 'Sales Bill (Tax Invoice)' : 'Estimation Slip';
         this.showNotification(`Billing Mode Switched: ${modeLabel}`, 'info');
+    }
+
+    setTaxPricingMode(mode) {
+        if (this.cart) {
+            this.cart.setTaxPricingMode(mode);
+        }
     }
 
     getEffectiveBillDateBs() {
@@ -2884,7 +2982,7 @@ class SmartPOSEngine {
                     imei_1: code.length >= 14 ? code : '',
                     requires_imei: code.length >= 14,
                     tax_type: '13%',
-                    tax_pricing_type: 'INCLUSIVE'
+                    tax_pricing_type: this.cart ? this.cart.taxMode : 'INCLUSIVE'
                 });
                 this.showNotification(`Item '${code}' added to bill. Please verify name and rate.`, 'info');
                 POSAudioSynthesizer.play('second');

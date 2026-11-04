@@ -354,6 +354,8 @@ body {
     margin-bottom: 14px;
     padding-bottom: 10px;
     border-bottom: 1px solid #f1f5f9;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .pos-items-header-title {
@@ -361,6 +363,42 @@ body {
     font-weight: 800;
     color: var(--ms-text-dark);
     letter-spacing: -0.01em;
+}
+
+/* Segmented Tax Mode Toggle Group */
+.tax-mode-toggle-group {
+    display: inline-flex;
+    background: #f1f5f9;
+    padding: 3px;
+    border-radius: var(--radius-sm);
+    gap: 2px;
+    border: 1px solid var(--ms-border);
+}
+
+.tax-mode-btn {
+    border: none;
+    background: transparent;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--ms-text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    line-height: 1.2;
+}
+
+.tax-mode-btn:hover {
+    color: var(--ms-text-dark);
+}
+
+.tax-mode-btn.active {
+    background: var(--ms-text-dark);
+    color: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
 }
 
 /* Two-Tier Card Item */
@@ -1048,6 +1086,27 @@ body {
             <div class="pos-items-card-container">
                 <div class="pos-items-header-bar">
                     <span class="pos-items-header-title">Invoice Items</span>
+
+                    <!-- Segmented Tax Mode Toggle Switch: MRP Mode vs Base Rate Mode -->
+                    <div class="d-inline-flex align-items-center gap-2">
+                        <span class="text-muted fw-bold" style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px;">Pricing Mode:</span>
+                        <div class="tax-mode-toggle-group" id="taxModeToggleGroup" role="group" aria-label="Tax Calculation Mode">
+                            <button type="button" 
+                                    class="tax-mode-btn active" 
+                                    id="btnTaxModeInclusive" 
+                                    data-mode="INCLUSIVE" 
+                                    title="MRP Mode: The price entered is the final customer price containing 13% VAT. Total matches MRP.">
+                                <i class="fas fa-tag text-warning"></i> MRP Mode (Tax Included)
+                            </button>
+                            <button type="button" 
+                                    class="tax-mode-btn" 
+                                    id="btnTaxModeExclusive" 
+                                    data-mode="EXCLUSIVE" 
+                                    title="Base Rate Mode: The price entered is before VAT. 13% VAT will be calculated and added on top.">
+                                <i class="fas fa-plus-circle text-primary"></i> Base Rate Mode (+13% VAT Added)
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Dynamic Item Cards Stack Container (Populated dynamically via pos_engine.js) -->
@@ -1106,13 +1165,18 @@ body {
 
                 <!-- Bottom-Right: Vertical Financial Summary Card -->
                 <div class="hisaav-summary-card">
-                    <div class="summary-card-title">Billing Summary</div>
+                    <div class="summary-card-title d-flex justify-content-between align-items-center">
+                        <span>Billing Summary</span>
+                        <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 font-mono" id="taxModeSummaryBadge" style="font-size: 9.5px; text-transform: uppercase;">
+                            MRP Mode (Tax Incl.)
+                        </span>
+                    </div>
 
                     <!-- Vertical Stack of Financial Rows -->
                     <div class="summary-list">
                         <!-- Row 1: Sub Total -->
                         <div class="summary-row">
-                            <span class="summary-label">Sub Total</span>
+                            <span class="summary-label" id="posSubtotalLabel">Sub Total</span>
                             <span class="summary-value" id="posSubtotalText">0.00</span>
                         </div>
 
@@ -1167,7 +1231,7 @@ body {
 
                         <!-- Row 5: Dedicated 13% VAT Highlight Row -->
                         <div class="summary-row tax-row" id="posVatRow">
-                            <span class="summary-label">Tax (13% VAT)</span>
+                            <span class="summary-label" id="posVatLabel">Tax (13% VAT)</span>
                             <span class="summary-value" id="posVatText">Rs. 0.00</span>
                         </div>
 
@@ -1498,6 +1562,61 @@ body {
  * are centralized authoritatively inside static/js/pos_engine.js.
  */
 document.addEventListener('DOMContentLoaded', () => {
+    // -------------------------------------------------------------
+    // 0. Segmented Tax Mode Toggle (MRP vs. Base Rate) Event Binding
+    // -------------------------------------------------------------
+    const btnTaxModeInclusive = document.getElementById('btnTaxModeInclusive');
+    const btnTaxModeExclusive = document.getElementById('btnTaxModeExclusive');
+    const taxModeSummaryBadge = document.getElementById('taxModeSummaryBadge');
+    const posSubtotalLabel = document.getElementById('posSubtotalLabel');
+    const posVatLabel = document.getElementById('posVatLabel');
+
+    function applyTaxModeUI(mode) {
+        if (mode === 'EXCLUSIVE') {
+            if (btnTaxModeInclusive) btnTaxModeInclusive.classList.remove('active');
+            if (btnTaxModeExclusive) btnTaxModeExclusive.classList.add('active');
+            if (taxModeSummaryBadge) {
+                taxModeSummaryBadge.textContent = 'Base Rate (+13% VAT)';
+                taxModeSummaryBadge.className = 'badge bg-warning bg-opacity-10 text-warning-emphasis border border-warning border-opacity-25 font-mono';
+            }
+            if (posSubtotalLabel) posSubtotalLabel.textContent = 'Sub Total (Base)';
+            if (posVatLabel) posVatLabel.textContent = 'Tax (+13% Added)';
+        } else {
+            if (btnTaxModeExclusive) btnTaxModeExclusive.classList.remove('active');
+            if (btnTaxModeInclusive) btnTaxModeInclusive.classList.add('active');
+            if (taxModeSummaryBadge) {
+                taxModeSummaryBadge.textContent = 'MRP Mode (Tax Incl.)';
+                taxModeSummaryBadge.className = 'badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 font-mono';
+            }
+            if (posSubtotalLabel) posSubtotalLabel.textContent = 'Sub Total';
+            if (posVatLabel) posVatLabel.textContent = 'Tax (13% VAT)';
+        }
+    }
+
+    if (btnTaxModeInclusive) {
+        btnTaxModeInclusive.addEventListener('click', (e) => {
+            e.preventDefault();
+            applyTaxModeUI('INCLUSIVE');
+            if (window.smartPos && typeof window.smartPos.setTaxPricingMode === 'function') {
+                window.smartPos.setTaxPricingMode('INCLUSIVE');
+            } else if (window.smartPos && window.smartPos.cart && typeof window.smartPos.cart.setTaxPricingMode === 'function') {
+                window.smartPos.cart.setTaxPricingMode('INCLUSIVE');
+            }
+        });
+    }
+
+    if (btnTaxModeExclusive) {
+        btnTaxModeExclusive.addEventListener('click', (e) => {
+            e.preventDefault();
+            applyTaxModeUI('EXCLUSIVE');
+            if (window.smartPos && typeof window.smartPos.setTaxPricingMode === 'function') {
+                window.smartPos.setTaxPricingMode('EXCLUSIVE');
+            } else if (window.smartPos && window.smartPos.cart && typeof window.smartPos.cart.setTaxPricingMode === 'function') {
+                window.smartPos.cart.setTaxPricingMode('EXCLUSIVE');
+            }
+        });
+    }
+
     // -------------------------------------------------------------
     // 1. One-Click Clear Buttons for Patron Fields
     // -------------------------------------------------------------

@@ -1,47 +1,3 @@
-"""
-Sales & POS Billing Module Models: Estimations, Line Items, Split Payments,
-Itemized Sales Returns, and Pre-Owned Trade-In Exchanges.
-
-Key Capabilities & Forensic Architecture:
-1. Persistent Bill Type Architecture:
-   - Tracks official VAT Sales Invoices ('SALES') vs Internal Estimation Slips ('ESTIMATE')
-     directly in the database (`bill_type`).
-2. Status Helper & Security Properties:
-   - Provides `can_be_edited`, `can_be_voided`, and `is_cancelled` guards.
-   - Enforces the golden rule: CANCELLED, RETURNED, and PARTIALLY_RETURNED bills are
-     strictly locked from front-end editing.
-3. True Bidirectional Historical Date & Fiscal Year Synchronization:
-   - When bill_date_bs is explicitly supplied, converts to Gregorian AD and sets the Nepali
-     Fiscal Year (e.g., 2080/81 to 2083/84).
-   - Automatically propagates date updates down to linked General Ledger Journal Entries,
-     ItemInstance sale records, active component warranties, and customer udhaari debt ledgers.
-4. Retail Turnover Accounting Model:
-   - grand_total strictly represents the total gross sales turnover of merchandise sold plus applicable taxes.
-   - Trade-in buy-back valuation allowance (trade_in_discount_amount) is treated as a tender settlement offset.
-5. Canonical Routing & URL Resolution:
-   - Implements standard `get_absolute_url()` resolving to the detailed invoice sheet view.
-6. Safe IMEI Schema Architecture:
-   - imei_number and secondary_imei allow null=True, blank=True at the database level.
-7. Decoupled KYC Document Storage:
-   - TradeInLegalUndertaking upload fields use safe settings fallbacks, preventing module import
-     and server startup crashes if custom directory variables are omitted.
-8. Autonomous Self-Contained VAT Snapshot for Sales Returns:
-   - Both SalesReturn (header) and SalesReturnItem (lines) permanently record:
-     * return_quantity
-     * refund_amount
-     * vat_rate (at return)
-     * taxable_return_amount (pre-tax base reversed)
-     * non_taxable_return_amount (exempt base reversed)
-     * vat_reversal_amount (output VAT reversed)
-   - Every returned item is a self-contained VAT transaction that accurately derives its VAT
-     reversal from the original SalesEstimateItem's stored historical VAT (tax_amount and
-     base_taxable_amount), preventing double taxation on VAT-exclusive bills and capping total
-     reversed tax across multiple partial returns.
-   - Preserves explicitly supplied VAT snapshot values without destructive overwriting.
-   - Enforces parent SalesReturn header totals to strictly match the sum of its items and raises
-     exceptions if synchronization fails.
-"""
-
 import re
 import uuid
 import logging
@@ -85,6 +41,11 @@ DISCOUNT_TYPE_CHOICES = [
 BILL_TYPE_CHOICES = [
     ('SALES', _('Official VAT / Sales Invoice (कर बिजक)')),
     ('ESTIMATE', _('Internal Estimation Slip (अनुमानित पर्चा)')),
+]
+
+TAX_PRICING_MODE_CHOICES = [
+    ('INCLUSIVE', _('MRP Mode / Tax Included (कर समावेश भएको मूल्य)')),
+    ('EXCLUSIVE', _('Base Rate Mode / Tax Excluded (+13% कर थप)')),
 ]
 
 def sync_nepali_and_ad_dates(
@@ -178,7 +139,7 @@ class SalesEstimate(TimeStampedModel):
     Sales Estimation Slip / POS Invoice Header.
     Tracks salesperson, customer information, multi-mode split payments,
     dynamic tax calculations, trade-in exchange deductions, customer warranty cards,
-    and structured merchandise discounts (Percentage or Fixed Cash Amount).
+    pricing mode (MRP Inclusive vs Base Rate Exclusive), and structured merchandise discounts.
     """
     STATUS_CHOICES = [
         ('DRAFT', _('Draft / On Hold (होल्ड)')),
@@ -196,6 +157,7 @@ class SalesEstimate(TimeStampedModel):
 
     DISCOUNT_TYPE_CHOICES = DISCOUNT_TYPE_CHOICES
     BILL_TYPE_CHOICES = BILL_TYPE_CHOICES
+    TAX_PRICING_MODE_CHOICES = TAX_PRICING_MODE_CHOICES
 
     estimate_number = models.CharField(
         max_length=50, unique=True, db_index=True, verbose_name=_("Estimate Slip No.")
@@ -207,6 +169,14 @@ class SalesEstimate(TimeStampedModel):
         db_index=True,
         verbose_name=_("Document / Bill Type"),
         help_text=_("Designates whether this transaction is an official VAT sales invoice or an internal estimation voucher.")
+    )
+    tax_pricing_type = models.CharField(
+        max_length=20,
+        choices=TAX_PRICING_MODE_CHOICES,
+        default='INCLUSIVE',
+        db_index=True,
+        verbose_name=_("Tax Calculation Mode"),
+        help_text=_("INCLUSIVE: The price entered is MRP (Tax extracted). EXCLUSIVE: The price entered is base rate (+13% VAT added on top).")
     )
     branch = models.ForeignKey(
         Branch, on_delete=models.PROTECT, related_name='sales_estimates',
@@ -373,10 +343,11 @@ class SalesEstimate(TimeStampedModel):
             models.Index(fields=['customer_pan'], name='idx_est_cust_pan'),
             models.Index(fields=['branch', 'customer_phone_manual'], name='idx_est_branch_cust_phone'),
             models.Index(fields=['bill_type', 'status'], name='idx_est_type_status'),
+            models.Index(fields=['tax_pricing_type'], name='idx_est_tax_mode'),
         ]
 
     def __str__(self):
-        return f"{self.estimate_number} - Rs. {self.grand_total} ({self.status})"
+        return f"{self.estimate_number} - Rs. {self.grand_total} ({self.status}) [{self.tax_pricing_type}]"
 
     def get_absolute_url(self) -> str:
         """Standard Django model canonical URL: resolves directly to the bill details view."""
@@ -390,6 +361,9 @@ class SalesEstimate(TimeStampedModel):
     def save(self, *args, **kwargs):
         if self.bill_discount_type == 'FIXED':
             self.bill_discount_type = 'AMOUNT'
+
+        if not self.tax_pricing_type:
+            self.tax_pricing_type = 'INCLUSIVE'
 
         # Auto-infer bill_type from estimate_number prefix if not explicitly set
         if not self.bill_type:
@@ -469,7 +443,6 @@ class SalesEstimate(TimeStampedModel):
                     inst.warranty_end_date = self.bill_date_ad + timedelta(days=inst.product.warranty_months * 30)
                 inst.save(update_fields=['sale_date', 'warranty_start_date', 'warranty_end_date', 'updated_at'])
 
-                # Recalculate component warranties
                 from apps.inventory.models import DeviceComponentWarranty
                 comp_warranties = DeviceComponentWarranty.objects.filter(item_instance=inst, status='ACTIVE')
                 for cw in comp_warranties:
@@ -493,6 +466,19 @@ class SalesEstimate(TimeStampedModel):
                 CustomerUdhaariLedger.objects.filter(reference_invoice=self.estimate_number).update(**ledger_updates)
         except Exception as e:
             logger.warning(f"Could not propagate date update to CustomerUdhaariLedger for {self.estimate_number}: {e}")
+
+    # =========================================================================
+    # TAX MODE & PRICING REGIME HELPERS
+    # =========================================================================
+    @property
+    def is_tax_inclusive(self) -> bool:
+        """Returns True if this bill was priced and issued in MRP Mode (Tax Included in rate)."""
+        return self.tax_pricing_type == 'INCLUSIVE'
+
+    @property
+    def is_tax_exclusive(self) -> bool:
+        """Returns True if this bill was priced and issued in Base Rate Mode (+13% Tax Added on Top)."""
+        return self.tax_pricing_type == 'EXCLUSIVE'
 
     # =========================================================================
     # STATUS & PERMISSION GUARDS
@@ -1426,7 +1412,6 @@ class SalesReturnItem(TimeStampedModel):
         if self.discount_type == 'FIXED':
             self.discount_type = 'AMOUNT'
 
-        # Ensure base_unit_quantity is populated
         if (not self.base_unit_quantity or self.base_unit_quantity <= Decimal('0.000')) and self.return_quantity:
             factor = Decimal('1.000')
             if self.estimate_item_id and self.estimate_item.conversion_factor:
@@ -1438,7 +1423,6 @@ class SalesReturnItem(TimeStampedModel):
         # ---------------------------------------------------------------------
         # AUTONOMOUS VAT SNAPSHOT POPULATION
         # ---------------------------------------------------------------------
-        # Requirement 8: Preserve explicitly supplied VAT snapshot values instead of overwriting them
         has_explicit_snapshot = (
             (self.taxable_return_amount is not None and self.taxable_return_amount > Decimal('0.00')) or
             (self.non_taxable_return_amount is not None and self.non_taxable_return_amount > Decimal('0.00')) or
@@ -1455,21 +1439,18 @@ class SalesReturnItem(TimeStampedModel):
             orig_total = (est_item.line_total or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             orig_vat_rate = (est_item.vat_rate or Decimal('0.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            # Determine whether original line was taxable
             is_taxable = bool(
                 est_item.is_vat_applicable and 
                 orig_vat_rate > Decimal('0.00') and 
                 (orig_vat > Decimal('0.00') or orig_base_taxable > Decimal('0.00'))
             )
 
-            # Defensive recovery for legacy invoices where VAT rate was recorded but tax was not snapshotted
             if not is_taxable and est_item.is_vat_applicable and orig_vat_rate > Decimal('0.00') and orig_total > Decimal('0.00'):
                 divisor = Decimal('1.00') + (orig_vat_rate / Decimal('100.00'))
                 orig_base_taxable = (orig_total / divisor).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 orig_vat = (orig_total - orig_base_taxable).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 is_taxable = (orig_vat > Decimal('0.00'))
 
-            # Query prior returns on this estimate_item to accurately handle partial return rounding
             prior_items_qs = SalesReturnItem.objects.filter(estimate_item=est_item)
             if self.pk:
                 prior_items_qs = prior_items_qs.exclude(pk=self.pk)
@@ -1490,7 +1471,6 @@ class SalesReturnItem(TimeStampedModel):
             is_final_return = bool(prior_qty + return_qty >= orig_qty)
             ratio = min(Decimal('1.000000'), return_qty / orig_qty) if orig_qty > Decimal('0.000') else Decimal('1.000000')
 
-            # Populate refund_amount if not already set
             if not self.refund_amount or self.refund_amount <= Decimal('0.00'):
                 if is_final_return:
                     self.refund_amount = max(Decimal('0.00'), orig_total - prior_refund)
@@ -1508,8 +1488,6 @@ class SalesReturnItem(TimeStampedModel):
                     calc_vat = min(rem_vat, (orig_vat * ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
                 self.vat_reversal_amount = calc_vat
-                # In both VAT-inclusive and VAT-exclusive items, refund_amount includes VAT.
-                # Taxable base reversed is the pre-tax portion of the refund: refund_amount - vat_reversal_amount
                 self.taxable_return_amount = max(Decimal('0.00'), self.refund_amount - self.vat_reversal_amount)
                 self.non_taxable_return_amount = Decimal('0.00')
 
@@ -1520,7 +1498,6 @@ class SalesReturnItem(TimeStampedModel):
                 self.non_taxable_return_amount = self.refund_amount
 
         elif has_explicit_snapshot and self.estimate_item_id:
-            # If snapshot was explicitly supplied but vat_rate was omitted, inherit original rate
             if (not self.vat_rate or self.vat_rate <= Decimal('0.00')) and self.estimate_item.vat_rate:
                 if self.vat_reversal_amount and self.vat_reversal_amount > Decimal('0.00'):
                     self.vat_rate = self.estimate_item.vat_rate

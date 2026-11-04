@@ -1,25 +1,3 @@
-"""
-Django Admin Configuration for Sales, Invoices, POS Checkouts,
-Trade-In Exchanges, and Itemized Sales Returns.
-
-Aligned with `apps/sales/models.py`:
-- Standard Retail Turnover Accounting: Grand Total reflects merchandise gross sales + tax;
-  Trade-In buy-back allowances operate strictly as tender settlement offsets (barter payment).
-- Bidirectional Bikram Sambat (BS) and Gregorian (AD) Date Synchronization with auto-propagation.
-- Police-Compliant Customer Ownership Undertaking Administration with image evidence previews.
-- Safe Counter and Backend Override Capabilities:
-  1. Superusers and Store Managers can safely modify bill dates, customer details,
-     and remarks without financial total corruption.
-  2. Status transitions to CANCELLED in the admin panel are intercepted to execute
-     atomic inventory restock, phone IMEI release, customer debt reversal, and GL balancing.
-- Autonomous Self-Contained VAT Snapshot for Sales Returns:
-  1. Displays line-item VAT rate, taxable return amount, non-taxable return amount,
-     and VAT reversal amount in `SalesReturnItemInline`.
-  2. Displays return-level taxable base, non-taxable base, and output VAT reversals in `SalesReturnAdmin`.
-  3. Provides admin action to re-aggregate self-contained VAT snapshots from line items.
-- High-Performance Database Scoping using raw_id_fields for scalable customer and product lookups.
-"""
-
 from decimal import Decimal
 from django.contrib import admin, messages
 from django.utils.html import format_html
@@ -107,7 +85,7 @@ class SalesPaymentTransactionInline(admin.TabularInline):
 @admin.register(SalesEstimate)
 class SalesEstimateAdmin(admin.ModelAdmin):
     list_display = [
-        'estimate_number', 'bill_type_badge', 'branch', 'recipient_display_name',
+        'estimate_number', 'bill_type_badge', 'tax_mode_badge', 'branch', 'recipient_display_name',
         'customer_phone_display', 'customer_pan_display',
         'bill_date_ad', 'bill_date_bs', 'fiscal_year',
         'taxable_amount_display', 'vat_amount_display', 'grand_total_display',
@@ -115,7 +93,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         'net_payable_display', 'paid_amount', 'due_amount', 'status_badge', 'payment_status_badge'
     ]
     list_filter = [
-        'bill_type', 'status', 'payment_status', 'fiscal_year', 'bill_discount_type',
+        'bill_type', 'tax_pricing_type', 'status', 'payment_status', 'fiscal_year', 'bill_discount_type',
         'has_trade_in_exchange', 'is_vat_applicable', 'branch',
         'salesperson', 'cashier', 'bill_date_ad'
     ]
@@ -136,7 +114,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
                 "General Ledger entries, sold phone warranty dates, and debt ledgers automatically upon saving."
             ),
             'fields': (
-                ('estimate_number', 'branch', 'bill_type'),
+                ('estimate_number', 'branch', 'bill_type', 'tax_pricing_type'),
                 ('bill_date_ad', 'bill_date_bs', 'fiscal_year'),
                 ('cashier', 'salesperson')
             )
@@ -218,7 +196,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
         )
 
         if is_privileged:
-            # Privileged staff can edit: bill_type, dates (AD/BS), customer fields, status, reasons, and notes
+            # Privileged staff can edit: bill_type, tax_pricing_type, dates (AD/BS), customer fields, status, reasons, and notes
             return permanent_readonly
 
         # Non-privileged staff have full read-only view
@@ -282,6 +260,7 @@ class SalesEstimateAdmin(admin.ModelAdmin):
                 details={
                     'changed_fields': list(form.changed_data),
                     'status': obj.status,
+                    'tax_pricing_type': obj.tax_pricing_type,
                     'bill_date_ad': str(obj.bill_date_ad),
                     'bill_date_bs': obj.bill_date_bs,
                     'fiscal_year': obj.fiscal_year,
@@ -315,6 +294,17 @@ class SalesEstimateAdmin(admin.ModelAdmin):
             '<span style="color: #6b21a8; background-color: #f3e8ff; border: 1px solid #e9d5ff; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">ESTIMATE</span>'
         )
     bill_type_badge.short_description = _("Doc Type")
+
+    def tax_mode_badge(self, obj):
+        if obj.is_tax_inclusive:
+            return format_html(
+                '<span style="color: #0f766e; background-color: #f0fdfa; border: 1px solid #99f6e4; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">MRP INCL</span>'
+            )
+        return format_html(
+            '<span style="color: #b45309; background-color: #fffbeb; border: 1px solid #fde68a; padding: 2px 7px; border-radius: 999px; font-weight: 700; font-size: 10px;">BASE EXCL</span>'
+        )
+    tax_mode_badge.short_description = _("Tax Mode")
+    tax_mode_badge.admin_order_field = 'tax_pricing_type'
 
     def customer_phone_display(self, obj):
         phone = obj.customer_phone_manual or (obj.customer.phone_number if obj.customer else None)

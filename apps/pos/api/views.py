@@ -12,6 +12,7 @@ from apps.core.models import SystemConfiguration
 class HoldCartListCreateAPIView(APIView):
     """
     API endpoint to list and suspend (park) active customer carts with complete preservation of:
+    - Active tax mode: 'INCLUSIVE' (MRP Mode) vs. 'EXCLUSIVE' (Base Rate Mode)
     - Explicit item discount types: AMOUNT (Rs.), PERCENTAGE (%), and NONE
     - Item discount input values, calculated deductions, and effective percentages
     - Multi-quantity lines with per-unit discount integrity
@@ -30,12 +31,17 @@ class HoldCartListCreateAPIView(APIView):
         serializer = POSHoldCartSerializer(qs, many=True)
         data = serializer.data
 
-        # Guarantee that customer_pan, trade_in_voucher_id, and repair_ticket_id are exposed
+        # Guarantee that customer_pan, trade_in_voucher_id, repair_ticket_id, and tax_mode are exposed
         for idx, cart_obj in enumerate(qs):
             payload_data = cart_obj.cart_payload if isinstance(cart_obj.cart_payload, dict) else {}
             data[idx]['customer_pan'] = cart_obj.customer_pan or payload_data.get('customer_pan') or ''
             data[idx]['trade_in_voucher_id'] = cart_obj.trade_in_voucher_id or payload_data.get('trade_in_voucher_id') or None
             data[idx]['repair_ticket_id'] = cart_obj.repair_ticket_id or payload_data.get('repair_ticket_id') or None
+
+            # Expose tax calculation mode
+            tax_mode = payload_data.get('tax_mode') or payload_data.get('tax_pricing_type') or 'INCLUSIVE'
+            data[idx]['tax_mode'] = tax_mode
+            data[idx]['tax_pricing_type'] = tax_mode
 
         return Response({'held_carts': data})
 
@@ -53,6 +59,10 @@ class HoldCartListCreateAPIView(APIView):
                 {'error': 'Cannot park an empty cart.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # Standardize active tax mode (INCLUSIVE vs. EXCLUSIVE)
+        raw_tax_mode = str(request.data.get('tax_mode') or request.data.get('tax_pricing_type') or 'INCLUSIVE').upper().strip()
+        tax_mode = 'EXCLUSIVE' if raw_tax_mode in ['EXCLUSIVE', 'EXCL', 'BASE'] else 'INCLUSIVE'
 
         # Evaluate Master Configuration switch for IMEI enforcement
         try:
@@ -149,6 +159,12 @@ class HoldCartListCreateAPIView(APIView):
                 item_discount_amount = Decimal('0.00')
                 effective_pct = Decimal('0.00')
 
+            # Preserve item tax mode or inherit from cart tax mode
+            raw_item_tax_mode = str(item.get('tax_pricing_type') or tax_mode).upper().strip()
+            item_tax_pricing_type = 'EXCLUSIVE' if raw_item_tax_mode in ['EXCLUSIVE', 'EXCL', 'BASE'] else (
+                'EXEMPT' if raw_item_tax_mode == 'EXEMPT' else 'INCLUSIVE'
+            )
+
             sanitized_item = {
                 'product_id': item.get('product_id'),
                 'item_instance_id': item.get('item_instance_id') or None,
@@ -167,7 +183,7 @@ class HoldCartListCreateAPIView(APIView):
                 'item_discount_amount': float(item_discount_amount),
                 'effective_discount_percent': float(effective_pct),
                 'is_discountable': is_discountable,
-                'tax_pricing_type': item.get('tax_pricing_type', 'EXEMPT'),
+                'tax_pricing_type': item_tax_pricing_type,
                 'vat_rate': float(Decimal(str(item.get('vat_rate', 0) or 0))),
                 'requires_imei': requires_imei,
                 'imei_1': imei_1,
@@ -263,9 +279,11 @@ class HoldCartListCreateAPIView(APIView):
         except (InvalidOperation, ValueError, TypeError):
             subtotal = running_subtotal
 
-        # Build comprehensive payload snapshot
+        # Build comprehensive payload snapshot with preserved tax calculation mode
         cart_payload = {
             'items': sanitized_items,
+            'tax_mode': tax_mode,
+            'tax_pricing_type': tax_mode,
             'bill_discount_type': raw_bill_type,
             'bill_discount_value': str(bill_discount_value),
             'bill_discount_percent': str(discount_percent),
@@ -307,6 +325,7 @@ class HoldCartRecallDeleteAPIView(APIView):
     """
     API endpoint to retrieve (recall) and permanently discard suspended hold carts.
     Guarantees that:
+    - Active tax mode ('INCLUSIVE' vs 'EXCLUSIVE') is completely restored.
     - Customer PAN, trade-in voucher ID, and repair ticket ID are fully restored.
     - Item discount types (AMOUNT, PERCENTAGE, NONE) and input values are returned intact.
     - Top-level bill discount type, value, and reasons are completely preserved.
@@ -329,22 +348,28 @@ class HoldCartRecallDeleteAPIView(APIView):
         data['bill_discount_value'] = str(cart.bill_discount_value)
         data['discount_percent'] = str(cart.discount_percent)
 
-        # Restore customer PAN, trade-in voucher ID, and repair ticket ID
+        # Restore customer PAN, trade-in voucher ID, repair ticket ID, and tax mode
         payload_data = cart.cart_payload if isinstance(cart.cart_payload, dict) else {}
 
         customer_pan = cart.customer_pan or payload_data.get('customer_pan') or ''
         trade_in_voucher_id = cart.trade_in_voucher_id or payload_data.get('trade_in_voucher_id') or None
         repair_ticket_id = cart.repair_ticket_id or payload_data.get('repair_ticket_id') or None
 
+        tax_mode = payload_data.get('tax_mode') or payload_data.get('tax_pricing_type') or 'INCLUSIVE'
+
         data['customer_pan'] = customer_pan
         data['trade_in_voucher_id'] = trade_in_voucher_id
         data['repair_ticket_id'] = repair_ticket_id
+        data['tax_mode'] = tax_mode
+        data['tax_pricing_type'] = tax_mode
 
         # Guarantee payload dictionary reflects the restored attributes
         if 'cart_payload' in data and isinstance(data['cart_payload'], dict):
             data['cart_payload']['customer_pan'] = customer_pan
             data['cart_payload']['trade_in_voucher_id'] = trade_in_voucher_id
             data['cart_payload']['repair_ticket_id'] = repair_ticket_id
+            data['cart_payload']['tax_mode'] = tax_mode
+            data['cart_payload']['tax_pricing_type'] = tax_mode
 
         return Response(data, status=status.HTTP_200_OK)
 

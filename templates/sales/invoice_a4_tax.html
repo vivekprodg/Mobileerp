@@ -94,6 +94,16 @@
             font-family: 'Consolas', 'Courier New', monospace;
         }
 
+        .pricing-mode-badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-top: 3px;
+            text-transform: uppercase;
+        }
+
         @media print { 
             .no-print { display: none !important; } 
         }
@@ -141,6 +151,7 @@
         <div style="text-align: right;">
             Estimate Slip No: <strong style="font-size: 13px; color: #2563eb;">{{ estimate.estimate_number }}</strong><br>
             Date (AD)  : {{ estimate.bill_date_ad }} | BS: {{ estimate.bill_date_bs|default:"-" }} BS<br>
+            Pricing    : <strong>{% if estimate.is_tax_exclusive %}Base Rate (+13% VAT Added){% else %}MRP Mode (Tax Included){% endif %}</strong><br>
             Sales Rep  : {% if estimate.salesperson %}{{ estimate.salesperson.get_full_name|default:estimate.salesperson.username }}{% else %}{{ estimate.cashier.get_full_name|default:estimate.cashier.username }}{% endif %}<br>
             Cashier    : {{ estimate.cashier.username }}
             {% if estimate.manager_override_by %}
@@ -149,20 +160,20 @@
         </div>
     </div>
 
-    <!-- Line Items Table -->
+    <!-- Line Items Table with Exact IRD Standards -->
     <table>
         <thead>
             <tr>
-                <th style="width: 30px;" class="text-center">SN</th>
+                <th style="width: 28px;" class="text-center">SN</th>
                 <th>Item Description &amp; Handset Details</th>
-                <th style="width: 110px;" class="text-center">NTA MDMS</th>
-                <th style="width: 50px;" class="text-center">Qty</th>
-                <th style="width: 100px;" class="text-end">Rate (NPR)</th>
-                <th style="width: 135px;" class="text-end">Discount</th>
-                {% if estimate.vat_amount > 0 %}
-                    <th style="width: 80px;" class="text-end">Tax / VAT</th>
-                {% endif %}
-                <th style="width: 100px;" class="text-end">Net Total (NPR)</th>
+                <th style="width: 80px;" class="text-center">NTA MDMS</th>
+                <th style="width: 40px;" class="text-center">Qty</th>
+                <th style="width: 85px;" class="text-end">Rate (Without VAT)</th>
+                <th style="width: 80px;" class="text-end">Pre-Tax Amount</th>
+                <th style="width: 70px;" class="text-end">Discount</th>
+                <th style="width: 80px;" class="text-end">Taxable Base</th>
+                <th style="width: 70px;" class="text-end">13% VAT</th>
+                <th style="width: 90px;" class="text-end">Total with VAT</th>
             </tr>
         </thead>
         <tbody>
@@ -170,7 +181,7 @@
             <tr>
                 <td class="text-center">{{ forloop.counter }}</td>
                 <td>
-                    <strong style="font-size: 12.5px;">{{ item.product.name }}</strong>
+                    <strong style="font-size: 12px;">{{ item.product.name }}</strong>
                     {% if item.product.ram and item.product.internal_storage %}
                         <span>({{ item.product.ram }}/{{ item.product.internal_storage }}{% if item.product.color_variant %} - {{ item.product.color_variant }}{% endif %})</span>
                     {% endif %}
@@ -178,8 +189,8 @@
                     <!-- Cashier Price Override Concession Notice -->
                     {% if item.official_unit_price and item.official_unit_price > item.unit_price %}
                     <div class="concession-note">
-                        Catalog MRP: <span style="text-decoration: line-through;">Rs. {{ item.official_unit_price|floatformat:2|intcomma }}</span> 
-                        (Price Override Concession: -Rs. {{ item.price_override_amount|floatformat:2|intcomma }})
+                        Catalog Price: <span style="text-decoration: line-through;">Rs. {{ item.official_unit_price|floatformat:2|intcomma }}</span> 
+                        (Price Override: -Rs. {{ item.price_override_amount|floatformat:2|intcomma }})
                     </div>
                     {% endif %}
 
@@ -187,10 +198,10 @@
                     {% if item.imei_number or item.secondary_imei %}
                     <div class="imei-box">
                         {% if item.imei_number %}
-                            <div><strong>IMEI 1 (Primary SIM):</strong> {{ item.imei_number }}</div>
+                            <div><strong>IMEI 1:</strong> {{ item.imei_number }}</div>
                         {% endif %}
                         {% if item.secondary_imei %}
-                            <div><strong>IMEI 2 (Secondary SIM / eSIM):</strong> {{ item.secondary_imei }}</div>
+                            <div><strong>IMEI 2:</strong> {{ item.secondary_imei }}</div>
                         {% endif %}
                         {% if item.serial_number and item.serial_number != item.imei_number and item.serial_number != item.secondary_imei %}
                             <div><strong>S/N:</strong> {{ item.serial_number }}</div>
@@ -200,94 +211,188 @@
                 </td>
                 <td class="text-center">
                     {% if item.item_instance %}
-                        <small style="font-size: 10px; font-weight: bold; color: {% if item.item_instance.mdms_status == 'REGISTERED_OFFICIAL' %}#059669{% else %}#dc2626{% endif %};">
+                        <small style="font-size: 9.5px; font-weight: bold; color: {% if item.item_instance.mdms_status == 'REGISTERED_OFFICIAL' %}#059669{% else %}#dc2626{% endif %};">
                             {{ item.item_instance.get_mdms_status_display }}
                         </small>
                     {% else %}
-                        <small style="color: #64748b;">{{ item.product.get_default_mdms_status_display }}</small>
+                        <small style="color: #64748b; font-size: 9.5px;">{{ item.product.get_default_mdms_status_display }}</small>
                     {% endif %}
                 </td>
-                <td class="text-center">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</td>
+                <td class="text-center font-monospace">{{ item.quantity|floatformat:0 }} {{ item.product.base_unit.code }}</td>
                 
-                <!-- Selling Rate -->
-                <td class="text-end">{{ item.unit_price|floatformat:2|intcomma }}</td>
-
-                <!-- Line Discount -->
-                <td class="text-end">
-                    {% if item.discount_amount > 0 %}
-                        <span style="color: #b91c1c; font-weight: bold;">-Rs. {{ item.discount_amount|floatformat:2|intcomma }}</span>
-                        {% if item.discount_type == 'AMOUNT' or item.discount_type == 'FIXED' %}
-                            <div style="font-size: 9px; color: #64748b;">Amount (Eff. {{ item.effective_discount_percent|default:item.discount_percent|floatformat:1 }}%)</div>
-                        {% else %}
-                            <div style="font-size: 9px; color: #64748b;">{{ item.effective_discount_percent|default:item.discount_percent|floatformat:1 }}%</div>
-                        {% endif %}
-                        {% if item.quantity > 1 %}
-                            <div style="font-size: 8.5px; color: #64748b;">(Rs. {{ item.unit_discount_amount|floatformat:2|intcomma }}/unit)</div>
-                        {% endif %}
+                <!-- Rate (Without VAT): Unit pre-tax rate -->
+                <td class="text-end font-monospace">
+                    {% if estimate.is_tax_exclusive or item.tax_pricing_type == 'EXCLUSIVE' %}
+                        {{ item.unit_price|floatformat:2|intcomma }}
+                    {% elif item.base_taxable_amount > 0 and item.quantity > 0 %}
+                        {{ item.base_taxable_amount|floatformat:2|intcomma }}
                     {% else %}
-                        -
+                        {{ item.unit_price|floatformat:2|intcomma }}
                     {% endif %}
                 </td>
 
-                {% if estimate.vat_amount > 0 %}
-                    <td class="text-end">{{ item.tax_amount|floatformat:2|intcomma }}</td>
-                {% endif %}
+                <!-- Pre-Tax Amount: (Rate Without VAT x Qty) -->
+                <td class="text-end font-monospace">
+                    {% if estimate.is_tax_exclusive or item.tax_pricing_type == 'EXCLUSIVE' %}
+                        {{ item.unit_price|floatformat:2|intcomma }}
+                    {% elif item.base_taxable_amount > 0 %}
+                        {{ item.base_taxable_amount|floatformat:2|intcomma }}
+                    {% else %}
+                        {{ item.line_total|floatformat:2|intcomma }}
+                    {% endif %}
+                </td>
 
-                <!-- Net Total -->
-                <td class="text-end fw-bold">{{ item.line_total|floatformat:2|intcomma }}</td>
+                <!-- Discount -->
+                <td class="text-end font-monospace">
+                    {% if item.discount_amount > 0 %}
+                        <span style="color: #b91c1c;">-{{ item.discount_amount|floatformat:2|intcomma }}</span>
+                    {% else %}
+                        0.00
+                    {% endif %}
+                </td>
+
+                <!-- Taxable Base -->
+                <td class="text-end font-monospace">
+                    {% if item.base_taxable_amount > 0 %}
+                        {{ item.base_taxable_amount|floatformat:2|intcomma }}
+                    {% else %}
+                        0.00
+                    {% endif %}
+                </td>
+
+                <!-- 13% VAT -->
+                <td class="text-end font-monospace">
+                    {% if item.tax_amount > 0 %}
+                        {{ item.tax_amount|floatformat:2|intcomma }}
+                    {% else %}
+                        0.00
+                    {% endif %}
+                </td>
+
+                <!-- Total with VAT -->
+                <td class="text-end fw-bold font-monospace">{{ item.line_total|floatformat:2|intcomma }}</td>
             </tr>
             {% endfor %}
         </tbody>
         <tfoot>
-            {% with col_span=estimate.vat_amount|yesno:"7,6" %}
-            <tr>
-                <th colspan="{{ col_span }}" class="text-end">Gross Subtotal:</th>
-                <td class="text-end font-monospace">Rs. {{ estimate.subtotal|floatformat:2|intcomma }}</td>
-            </tr>
-            
-            <!-- Item-Level Discounts Total -->
-            {% if estimate.item_discount_total > 0 %}
-            <tr>
-                <th colspan="{{ col_span }}" class="text-end">Line Items Discount Total:</th>
-                <td class="text-end font-monospace" style="color: #b91c1c;">-Rs. {{ estimate.item_discount_total|floatformat:2|intcomma }}</td>
-            </tr>
+            <!-- Footer Reflects Chosen Mode -->
+            {% if estimate.is_tax_exclusive %}
+                <!-- BASE RATE MODE FOOTER TOTALS -->
+                <tr>
+                    <th colspan="9" class="text-end">Subtotal (Without VAT):</th>
+                    <td class="text-end font-monospace">Rs. {{ estimate.subtotal|floatformat:2|intcomma }}</td>
+                </tr>
+
+                {% if estimate.item_discount_total > 0 %}
+                <tr>
+                    <th colspan="9" class="text-end">Line Items Discount:</th>
+                    <td class="text-end font-monospace" style="color: #b91c1c;">-Rs. {{ estimate.item_discount_total|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endif %}
+
+                {% if estimate.bill_discount_amount > 0 %}
+                <tr>
+                    <th colspan="9" class="text-end">
+                        {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
+                            Bill Discount (Amount):
+                        {% else %}
+                            Bill Discount ({{ estimate.bill_discount_percent|floatformat:1 }}%):
+                        {% endif %}
+                        {% if estimate.discount_reason %}
+                            <span style="font-size: 9px; font-weight: normal; color: #64748b;">(Reason: {{ estimate.discount_reason }})</span>
+                        {% endif %}
+                    </th>
+                    <td class="text-end font-monospace" style="color: #b91c1c;">-Rs. {{ estimate.bill_discount_amount|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endif %}
+
+                <tr>
+                    <th colspan="9" class="text-end">Taxable Base Amount (Without VAT):</th>
+                    <td class="text-end font-monospace fw-bold">Rs. {{ estimate.taxable_amount|floatformat:2|intcomma }}</td>
+                </tr>
+
+                {% if estimate.non_taxable_amount > 0 %}
+                <tr>
+                    <th colspan="9" class="text-end">Non-Taxable Merchandise:</th>
+                    <td class="text-end font-monospace">Rs. {{ estimate.non_taxable_amount|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endif %}
+
+                <tr>
+                    <th colspan="9" class="text-end">13% Output VAT (+Added on Top):</th>
+                    <td class="text-end font-monospace fw-bold" style="color: #1e40af;">+Rs. {{ estimate.vat_amount|floatformat:2|intcomma }}</td>
+                </tr>
+
+            {% else %}
+                <!-- MRP MODE FOOTER TOTALS -->
+                <tr>
+                    <th colspan="9" class="text-end">Gross Subtotal (MRP):</th>
+                    <td class="text-end font-monospace">Rs. {{ estimate.subtotal|floatformat:2|intcomma }}</td>
+                </tr>
+
+                {% if estimate.item_discount_total > 0 %}
+                <tr>
+                    <th colspan="9" class="text-end">Line Items Discount:</th>
+                    <td class="text-end font-monospace" style="color: #b91c1c;">-Rs. {{ estimate.item_discount_total|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endif %}
+
+                {% if estimate.bill_discount_amount > 0 %}
+                <tr>
+                    <th colspan="9" class="text-end">
+                        {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
+                            Bill Discount (Amount):
+                        {% else %}
+                            Bill Discount ({{ estimate.bill_discount_percent|floatformat:1 }}%):
+                        {% endif %}
+                        {% if estimate.discount_reason %}
+                            <span style="font-size: 9px; font-weight: normal; color: #64748b;">(Reason: {{ estimate.discount_reason }})</span>
+                        {% endif %}
+                    </th>
+                    <td class="text-end font-monospace" style="color: #b91c1c;">-Rs. {{ estimate.bill_discount_amount|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endif %}
+
+                {% if estimate.taxable_amount > 0 %}
+                <tr>
+                    <th colspan="9" class="text-end">Taxable Base Amount (Extracted):</th>
+                    <td class="text-end font-monospace">Rs. {{ estimate.taxable_amount|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endif %}
+
+                {% if estimate.non_taxable_amount > 0 %}
+                <tr>
+                    <th colspan="9" class="text-end">Non-Taxable Merchandise:</th>
+                    <td class="text-end font-monospace">Rs. {{ estimate.non_taxable_amount|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endif %}
+
+                {% if estimate.vat_amount > 0 %}
+                <tr>
+                    <th colspan="9" class="text-end">13% Output VAT (Included in Total):</th>
+                    <td class="text-end font-monospace">Rs. {{ estimate.vat_amount|floatformat:2|intcomma }}</td>
+                </tr>
+                {% endif %}
+
             {% endif %}
 
-            <!-- Bill-Level Discount with Indicator -->
-            {% if estimate.bill_discount_amount > 0 %}
+            {% if estimate.round_off and estimate.round_off != 0 %}
             <tr>
-                <th colspan="{{ col_span }}" class="text-end">
-                    {% if estimate.bill_discount_type == 'AMOUNT' or estimate.bill_discount_type == 'FIXED' %}
-                        Bill Discount (Amount):
-                    {% else %}
-                        Bill Discount ({{ estimate.bill_discount_percent|floatformat:1 }}%):
-                    {% endif %}
-                    {% if estimate.discount_reason %}
-                        <div style="font-size: 9px; font-weight: normal; color: #64748b;">Reason: {{ estimate.discount_reason }}</div>
-                    {% endif %}
-                </th>
-                <td class="text-end font-monospace" style="color: #b91c1c;">-Rs. {{ estimate.bill_discount_amount|floatformat:2|intcomma }}</td>
-            </tr>
-            {% endif %}
-
-            <!-- Taxes -->
-            {% if estimate.vat_amount > 0 %}
-            <tr>
-                <th colspan="{{ col_span }}" class="text-end">Output Tax / VAT Breakdown ({{ DEFAULT_TAX_RATE }}%):</th>
-                <td class="text-end font-monospace">Rs. {{ estimate.vat_amount|floatformat:2|intcomma }}</td>
+                <th colspan="9" class="text-end">Round Off:</th>
+                <td class="text-end font-monospace">Rs. {{ estimate.round_off|floatformat:2 }}</td>
             </tr>
             {% endif %}
 
             <!-- Payable Grand Total -->
-            <tr>
-                <th colspan="{{ col_span }}" class="text-end" style="font-size: 13px;">Grand Total (Payable):</th>
-                <td class="text-end fw-bold font-monospace" style="font-size: 14px; color: #2563eb;">Rs. {{ estimate.grand_total|floatformat:2|intcomma }}</td>
+            <tr style="background-color: #f1f5f9;">
+                <th colspan="9" class="text-end" style="font-size: 13px;">Grand Total (Payable):</th>
+                <td class="text-end fw-bold font-monospace" style="font-size: 14px; color: #1e40af;">Rs. {{ estimate.grand_total|floatformat:2|intcomma }}</td>
             </tr>
 
             <!-- Settlement / Tender Section -->
             {% if estimate.has_trade_in_exchange and estimate.trade_in_discount_amount > 0 %}
             <tr style="background-color: #fffbeb;">
-                <th colspan="{{ col_span }}" class="text-end" style="color: #b45309;">
+                <th colspan="9" class="text-end" style="color: #b45309;">
                     Trade-In Buy-Back Credit{% if estimate.trade_in_voucher_reference %} (Voucher: {{ estimate.trade_in_voucher_reference }}){% endif %}:
                 </th>
                 <td class="text-end fw-bold font-monospace" style="color: #b45309;">-Rs. {{ estimate.trade_in_discount_amount|floatformat:2|intcomma }}</td>
@@ -295,29 +400,28 @@
             {% endif %}
             
             <tr>
-                <th colspan="{{ col_span }}" class="text-end">Paid Amount:</th>
+                <th colspan="9" class="text-end">Paid Amount:</th>
                 <td class="text-end fw-bold font-monospace text-success">Rs. {{ estimate.paid_amount|floatformat:2|intcomma }}</td>
             </tr>
             
             {% if estimate.due_amount > 0 %}
             <tr style="background-color: #fef2f2;">
-                <th colspan="{{ col_span }}" class="text-end" style="color: #dc2626;">Due Balance (Udhaari):</th>
+                <th colspan="9" class="text-end" style="color: #dc2626;">Due Balance (Udhaari):</th>
                 <td class="text-end fw-bold font-monospace" style="color: #dc2626;">Rs. {{ estimate.due_amount|floatformat:2|intcomma }}</td>
             </tr>
             {% endif %}
 
             {% if estimate.change_returned > 0 %}
             <tr>
-                <th colspan="{{ col_span }}" class="text-end">Change Returned:</th>
+                <th colspan="9" class="text-end">Change Returned:</th>
                 <td class="text-end font-monospace">Rs. {{ estimate.change_returned|floatformat:2|intcomma }}</td>
             </tr>
             {% endif %}
-            {% endwith %}
         </tfoot>
     </table>
 
     <!-- OFFICIAL COMPONENT-LEVEL WARRANTY SCHEDULE -->
-    <h4 style="margin: 20px 0 6px 0; font-size: 12.5px; color: #1e3a8a;">
+    <h4 style="margin: 20px 0 6px 0; font-size: 12px; color: #1e3a8a;">
         OFFICIAL COMPONENT-LEVEL WARRANTY SCHEDULE &amp; EXCLUSION CERTIFICATE
     </h4>
     <table class="warranty-cert-table">
