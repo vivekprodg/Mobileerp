@@ -512,7 +512,13 @@ class GoodsReceivedNoteForm(forms.ModelForm):
         target_date_bs = None
         target_fiscal_year = None
 
-        if bill_date_bs:
+        # =====================================================================
+        # DATE SYNCHRONIZATION LOGIC (PRIORITIZES EXPLICIT AD OR EXPLICIT BS SELECTION)
+        # Prevents default/stale hidden bill_date_bs from overriding the user's chosen bill_date!
+        # =====================================================================
+
+        # Case 1: Existing record being edited and Bikram Sambat date was explicitly modified
+        if self.instance.pk and self.instance.bill_date_bs and bill_date_bs and bill_date_bs != self.instance.bill_date_bs:
             try:
                 bs_y, bs_m, bs_d = parse_bs_date_components(bill_date_bs)
                 target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
@@ -527,6 +533,8 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             except Exception:
                 self.add_error('bill_date_bs', _("Could not convert Nepali date to Gregorian calendar."))
                 return cleaned_data
+
+        # Case 2: User explicitly selected or supplied bill_date (AD) - Primary UI date picker
         elif bill_date:
             try:
                 ad_date = bill_date.date() if isinstance(bill_date, datetime) else bill_date
@@ -540,6 +548,24 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             except Exception:
                 self.add_error('bill_date', _("Could not convert Gregorian date to Nepali calendar."))
                 return cleaned_data
+
+        # Case 3: Only bill_date_bs was supplied (e.g. non-calendar manual input without bill_date)
+        elif bill_date_bs:
+            try:
+                bs_y, bs_m, bs_d = parse_bs_date_components(bill_date_bs)
+                target_date_ad = NepaliCalendar.bs_to_ad(bs_y, bs_m, bs_d)
+                target_date_bs = f"{bs_y:04d}-{bs_m:02d}-{bs_d:02d}"
+                target_fiscal_year = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+
+                cleaned_data['bill_date'] = target_date_ad
+                cleaned_data['bill_date_bs'] = target_date_bs
+            except ValueError as ve:
+                self.add_error('bill_date_bs', _(f"Invalid Bikram Sambat date: {ve}"))
+                return cleaned_data
+            except Exception:
+                self.add_error('bill_date_bs', _("Could not convert Nepali date to Gregorian calendar."))
+                return cleaned_data
+
         elif not self.is_draft:
             self.add_error('bill_date', _("Bill date is mandatory."))
             return cleaned_data
@@ -549,7 +575,10 @@ class GoodsReceivedNoteForm(forms.ModelForm):
             cleaned_data['bill_date'] = today
             cleaned_data['bill_date_bs'] = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
 
-        if challan_date_bs:
+        # =====================================================================
+        # CHALLAN DATE SYNCHRONIZATION
+        # =====================================================================
+        if self.instance.pk and self.instance.challan_date_bs and challan_date_bs and challan_date_bs != self.instance.challan_date_bs:
             try:
                 c_y, c_m, c_d = parse_bs_date_components(challan_date_bs)
                 cleaned_data['challan_date'] = NepaliCalendar.bs_to_ad(c_y, c_m, c_d)
@@ -564,7 +593,15 @@ class GoodsReceivedNoteForm(forms.ModelForm):
                 cleaned_data['challan_date_bs'] = NepaliCalendar.format_bs(c_y, c_m, c_d, lang='en')
             except Exception:
                 pass
+        elif challan_date_bs:
+            try:
+                c_y, c_m, c_d = parse_bs_date_components(challan_date_bs)
+                cleaned_data['challan_date'] = NepaliCalendar.bs_to_ad(c_y, c_m, c_d)
+                cleaned_data['challan_date_bs'] = f"{c_y:04d}-{c_m:02d}-{c_d:02d}"
+            except Exception:
+                pass
 
+        # Fiscal Year Audit Lock Validation
         if target_fiscal_year:
             locked_fy = AccountingFiscalYear.objects.filter(
                 name=target_fiscal_year,

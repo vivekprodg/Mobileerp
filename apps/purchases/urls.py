@@ -14,6 +14,7 @@ from apps.purchases.views import (
     GRNListView,
     GRNDetailView,
     GRNCreateView,
+    GRNUpdateView,
     cancel_grn_view,
     GRNManageIMEIsView,
     PurchaseReturnListView,
@@ -46,6 +47,7 @@ urlpatterns = [
     path('grn/', GRNListView.as_view(), name='grn_list'),
     path('grn/create/', GRNCreateView.as_view(), name='grn_create'),
     path('grn/<int:pk>/', GRNDetailView.as_view(), name='grn_detail'),
+    path('grn/<int:pk>/edit/', GRNUpdateView.as_view(), name='grn_edit'),
     path('grn/<int:pk>/manage-imeis/', GRNManageIMEIsView.as_view(), name='grn_manage_imeis'),
     path('grn/<int:pk>/cancel/', cancel_grn_view, name='grn_cancel'),
 

@@ -976,7 +976,7 @@ table.items-table tr:hover td {
                 </div>
               </td>
 
-              <!-- 7. Alloc. Ovh -->
+              <!-- 7. Alloc Ovh -->
               <td>
                 <div class="input-prefix-wrap">
                   <span class="prefix">Rs.</span>
@@ -2033,17 +2033,87 @@ table.items-table tr:hover td {
     });
   }
 
+  // =========================================================================
+  // STRICT BIDIRECTIONAL DATE SYNCHRONIZATION (AD <-> BS)
+  // Ensures bill_date_bs is updated on every change, and never defaults to today_bs when an old date is picked!
+  // =========================================================================
   const billDate = document.getElementById('billDate');
   const billDateSec = document.getElementById('invoiceDateSecondary');
-  if (billDate && billDateSec) {
-    billDate.addEventListener('change', () => billDateSec.value = billDate.value);
-    billDateSec.addEventListener('change', () => billDate.value = billDateSec.value);
+  const billDateBs = document.getElementById('billDateBs');
+  const challanDate = document.getElementById('challanDate');
+  const challanDateBs = document.getElementById('challanDateBs');
+
+  function convertAdToBsDate(adVal) {
+    if (!adVal) return '';
+    if (typeof NepaliFunctions !== 'undefined' && NepaliFunctions.AD2BS) {
+      try {
+        const res = NepaliFunctions.AD2BS(adVal);
+        if (typeof res === 'string') return res;
+        if (res && res.year) {
+          const mm = String(res.month).padStart(2, '0');
+          const dd = String(res.day).padStart(2, '0');
+          return `${res.year}-${mm}-${dd}`;
+        }
+      } catch (err) {
+        console.warn('[convertAdToBsDate error]:', err);
+      }
+    }
+    return '';
+  }
+
+  function syncBillDate(newDateVal) {
+    if (!newDateVal) return;
+    if (billDate && billDate.value !== newDateVal) billDate.value = newDateVal;
+    if (billDateSec && billDateSec.value !== newDateVal) billDateSec.value = newDateVal;
+
+    const bsConverted = convertAdToBsDate(newDateVal);
+    if (billDateBs) {
+      // If client conversion succeeds, write the exact matching BS date.
+      // If client converter is unavailable, clear the field so backend's NepaliCalendar.ad_to_bs
+      // computes the authoritative BS date from bill_date, instead of retaining stale today_bs!
+      billDateBs.value = bsConverted;
+    }
+  }
+
+  function syncChallanDate(newDateVal) {
+    if (!newDateVal) return;
+    if (challanDate && challanDate.value !== newDateVal) challanDate.value = newDateVal;
+
+    const bsConverted = convertAdToBsDate(newDateVal);
+    if (challanDateBs) {
+      challanDateBs.value = bsConverted;
+    }
+  }
+
+  if (billDate) {
+    billDate.addEventListener('change', () => syncBillDate(billDate.value));
+    billDate.addEventListener('input', () => syncBillDate(billDate.value));
+  }
+
+  if (billDateSec) {
+    billDateSec.addEventListener('change', () => syncBillDate(billDateSec.value));
+    billDateSec.addEventListener('input', () => syncBillDate(billDateSec.value));
+  }
+
+  if (challanDate) {
+    challanDate.addEventListener('change', () => syncChallanDate(challanDate.value));
+    challanDate.addEventListener('input', () => syncChallanDate(challanDate.value));
+  }
+
+  // Pre-sync dates on initialization
+  if (billDate && billDate.value) {
+    syncBillDate(billDate.value);
+  }
+  if (challanDate && challanDate.value) {
+    syncChallanDate(challanDate.value);
   }
 
   document.getElementById('btnPrint')?.addEventListener('click', () => window.print());
 
   document.getElementById('btnSaveDraft')?.addEventListener('click', () => {
     actionHidden.value = 'save_draft';
+    if (billDate && billDate.value) syncBillDate(billDate.value);
+    if (challanDate && challanDate.value) syncChallanDate(challanDate.value);
     showToast("Saving GRN Draft into local store...");
     masterForm.submit();
   });
@@ -2060,6 +2130,9 @@ table.items-table tr:hover td {
 
   document.getElementById('btnUpdateStock')?.addEventListener('click', (e) => {
     actionHidden.value = 'verify_stock';
+    if (billDate && billDate.value) syncBillDate(billDate.value);
+    if (challanDate && challanDate.value) syncChallanDate(challanDate.value);
+
     const supplierId = document.getElementById('id_supplier')?.value;
     const invNo = document.getElementById('supplierInvoiceNo')?.value.trim();
     const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');

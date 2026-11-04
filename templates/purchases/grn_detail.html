@@ -872,7 +872,7 @@ tr.drawer-row td {
         {% endif %}
 
         <!-- NTA MDMS Clearance Chip -->
-        {% if grn.distributor_mdMS_certified %}
+        {% if grn.distributor_mdms_certified %}
           <span class="status-chip mdms">
             <i class="fa-solid fa-shield-halved"></i> NTA MDMS Certified
           </span>
@@ -885,7 +885,11 @@ tr.drawer-row td {
           <i class="fa-solid fa-print"></i> Print Slip
         </button>
 
-        {% if grn.status != 'CANCELLED' %}
+        {% if grn.status != 'CANCELLED' and not is_fiscal_year_closed and not grn.is_fiscal_year_closed %}
+          <a href="{% url 'purchases:grn_edit' grn.pk %}" class="btn-action">
+            <i class="fa-solid fa-pen-to-square"></i> Edit Bill
+          </a>
+
           <a href="{% url 'purchases:grn_manage_imeis' grn.pk %}" class="btn-action primary">
             <i class="fa-solid fa-barcode"></i> Scan / Enter IMEIs
           </a>

@@ -1171,6 +1171,238 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
         return render(request, self.template_name, context)
 
 # ==============================================================================
+# GRN UPDATE / EDIT VIEW (WITH STRICT OPEN FISCAL YEAR ENFORCEMENT)
+# ==============================================================================
+class GRNUpdateView(PurchaseModuleAccessMixin, View):
+    template_name = 'purchases/grn_form.html'
+
+    def get(self, request, pk, *args, **kwargs):
+        grn = get_object_or_404(
+            GoodsReceivedNote.objects.select_related('supplier', 'branch', 'purchase_order'),
+            pk=pk
+        )
+        if grn.status == 'CANCELLED':
+            messages.error(request, f"Cannot edit GRN {grn.grn_number}: It is cancelled and voided.")
+            return redirect('purchases:grn_detail', pk=grn.pk)
+
+        # Enforce that current record belongs to an active, open fiscal year
+        fy_name = grn.fiscal_year
+        if not fy_name and grn.bill_date:
+            try:
+                bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(grn.bill_date)
+                fy_name = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+            except Exception:
+                pass
+
+        if fy_name:
+            locked_fy = AccountingFiscalYear.objects.filter(name=fy_name, is_closed=True).first()
+            if locked_fy:
+                messages.error(
+                    request,
+                    f"Editing Denied: GRN {grn.grn_number} is in Fiscal Year {fy_name}, which is audited and closed."
+                )
+                return redirect('purchases:grn_detail', pk=grn.pk)
+
+        form = GoodsReceivedNoteForm(instance=grn)
+        formset = GRNItemFormSet(instance=grn)
+        config = SystemConfiguration.get_solo()
+
+        today = timezone.now().date()
+        try:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+            today_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+        except Exception:
+            today_bs = ''
+
+        context = {
+            'form': form,
+            'formset': formset,
+            'active_branch': grn.branch,
+            'branches': Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
+            'suppliers': Supplier.objects.filter(status='ACTIVE').order_by('company_name'),
+            'active_fiscal_year': fy_name or '2083/84',
+            'default_vat_rate': getattr(config, 'default_vat_rate', Decimal('13.00')),
+            'today': today,
+            'today_bs': today_bs,
+            'SYS_CONFIG': config,
+            'config': config,
+            'grn': grn,
+            'is_edit': True,
+        }
+        return render(request, self.template_name, context)
+
+    def post(self, request, pk, *args, **kwargs):
+        grn = get_object_or_404(
+            GoodsReceivedNote.objects.select_for_update().select_related('supplier', 'branch', 'purchase_order'),
+            pk=pk
+        )
+        if grn.status == 'CANCELLED':
+            messages.error(request, f"Cannot edit GRN {grn.grn_number}: It is cancelled and voided.")
+            return redirect('purchases:grn_detail', pk=grn.pk)
+
+        # Enforce open fiscal year on existing record
+        if grn.fiscal_year:
+            locked_fy = AccountingFiscalYear.objects.filter(name=grn.fiscal_year, is_closed=True).first()
+            if locked_fy:
+                messages.error(
+                    request,
+                    f"Editing Denied: Original bill date belongs to closed Fiscal Year {grn.fiscal_year}."
+                )
+                return redirect('purchases:grn_detail', pk=grn.pk)
+
+        action = (request.POST.get('action') or request.POST.get('submit_action') or '').strip().lower()
+        is_draft = (action in ['save_draft', 'draft'] or 'save_draft' in request.POST)
+
+        form = GoodsReceivedNoteForm(request.POST, instance=grn, is_draft=is_draft)
+        formset = GRNItemFormSet(request.POST, instance=grn, is_draft=is_draft)
+
+        if form.is_valid() and formset.is_valid():
+            try:
+                with transaction.atomic():
+                    # Validate that new selected date also belongs to an open fiscal year
+                    new_bill_date = form.cleaned_data.get('bill_date')
+                    if new_bill_date:
+                        bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(new_bill_date)
+                        target_fy = NepaliCalendar.get_fiscal_year(bs_y, bs_m)
+                        locked_fy = AccountingFiscalYear.objects.filter(name=target_fy, is_closed=True).first()
+                        if locked_fy:
+                            raise ValidationError(
+                                f"Editing Rejected: The selected date falls into Fiscal Year {target_fy}, which is closed and audited."
+                            )
+
+                    old_bill_date = grn.bill_date
+                    old_bill_date_bs = grn.bill_date_bs
+
+                    updated_grn = form.save(commit=False)
+                    updated_grn.save()
+
+                    # Save line items
+                    items = formset.save(commit=False)
+                    for item in items:
+                        item.grn = updated_grn
+                        factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
+                        item.base_unit_quantity = (item.purchased_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+                        item.save()
+
+                    for deleted_item in formset.deleted_objects:
+                        deleted_item.delete()
+
+                    # If bill was already received/approved, recalculate and synchronize linked records without duplicating stock
+                    if updated_grn.status == 'RECEIVED':
+                        updated_grn.recalculate_financials(save=True)
+
+                        date_changed = (old_bill_date != updated_grn.bill_date or old_bill_date_bs != updated_grn.bill_date_bs)
+                        if date_changed:
+                            # 1. Update linked Accounting Journal Entry
+                            from apps.accounting.models import JournalEntry
+                            JournalEntry.objects.filter(
+                                Q(source_module='PURCHASE_GRN', source_id=str(updated_grn.id)) |
+                                Q(voucher_type='PURCHASE', reference_document=updated_grn.grn_number)
+                            ).update(
+                                entry_date=updated_grn.bill_date,
+                                entry_date_bs=updated_grn.bill_date_bs,
+                                fiscal_year=updated_grn.fiscal_year,
+                                updated_at=timezone.now()
+                            )
+
+                            # 2. Update linked SupplierUdhaariLedger entries
+                            SupplierUdhaariLedger.objects.filter(
+                                supplier=updated_grn.supplier,
+                                reference_number=updated_grn.grn_number
+                            ).update(
+                                entry_date=updated_grn.bill_date,
+                                entry_date_bs=updated_grn.bill_date_bs,
+                                updated_at=timezone.now()
+                            )
+                            SupplierUdhaariLedger.objects.filter(
+                                supplier=updated_grn.supplier,
+                                reference_number=f"PMT-{updated_grn.grn_number}"
+                            ).update(
+                                entry_date=updated_grn.bill_date,
+                                entry_date_bs=updated_grn.bill_date_bs,
+                                updated_at=timezone.now()
+                            )
+
+                            # 3. Update ProductBatch and ItemInstance purchase dates
+                            ProductBatch.objects.filter(
+                                grn_reference=updated_grn.grn_number,
+                                branch=updated_grn.branch
+                            ).update(
+                                purchase_date=updated_grn.bill_date,
+                                updated_at=timezone.now()
+                            )
+
+                            ItemInstance.objects.filter(
+                                purchase_reference=updated_grn.grn_number,
+                                branch=updated_grn.branch
+                            ).update(
+                                purchase_date=updated_grn.bill_date,
+                                updated_at=timezone.now()
+                            )
+
+                            # 4. Re-reconcile supplier ledger balance
+                            if updated_grn.supplier:
+                                updated_grn.supplier.recalculate_balance_from_ledger(save=True)
+
+                    elif is_draft:
+                        PurchaseService.save_grn_draft(grn=updated_grn, items=None, user=request.user)
+                    else:
+                        PurchaseService.process_grn_approval_and_stock_in(grn=updated_grn, user=request.user)
+
+                    AuditLog.objects.create(
+                        user=request.user,
+                        branch=updated_grn.branch,
+                        action_type='UPDATE',
+                        module='PurchaseGRN',
+                        object_repr=updated_grn.grn_number,
+                        details={
+                            'action': 'EDIT_GRN',
+                            'bill_no': updated_grn.supplier_bill_no,
+                            'bill_date_ad': str(updated_grn.bill_date),
+                            'bill_date_bs': updated_grn.bill_date_bs or '',
+                            'fiscal_year': updated_grn.fiscal_year or '',
+                            'net_amount': str(updated_grn.net_total_amount)
+                        }
+                    )
+
+                messages.success(request, f"GRN {updated_grn.grn_number} updated successfully!")
+                return redirect('purchases:grn_detail', pk=updated_grn.pk)
+
+            except ValidationError as ve:
+                err_text = str(ve.message if hasattr(ve, 'message') else ve)
+                messages.error(request, f"Validation Error: {err_text}")
+            except Exception as e:
+                logger.error(f"[GRN Edit Error]: {e}", exc_info=True)
+                messages.error(request, f"Error updating GRN: {str(e)}")
+        else:
+            messages.error(request, "Validation errors occurred. Please review the line entries.")
+
+        config = SystemConfiguration.get_solo()
+        today = timezone.now().date()
+        try:
+            bs_y, bs_m, bs_d = NepaliCalendar.ad_to_bs(today)
+            today_bs = NepaliCalendar.format_bs(bs_y, bs_m, bs_d, lang='en')
+        except Exception:
+            today_bs = ''
+
+        context = {
+            'form': form,
+            'formset': formset,
+            'active_branch': grn.branch,
+            'branches': Branch.objects.filter(is_active=True).order_by('-is_main_branch', 'name'),
+            'suppliers': Supplier.objects.filter(status='ACTIVE').order_by('company_name'),
+            'active_fiscal_year': grn.fiscal_year or '2083/84',
+            'default_vat_rate': getattr(config, 'default_vat_rate', Decimal('13.00')),
+            'today': today,
+            'today_bs': today_bs,
+            'SYS_CONFIG': config,
+            'config': config,
+            'grn': grn,
+            'is_edit': True,
+        }
+        return render(request, self.template_name, context)
+
+# ==============================================================================
 # DEDICATED PHYSICAL IMEI SCANNER CONTROLLER (AUTO-ENABLES SERIALIZATION ON DEMAND)
 # ==============================================================================
 class GRNManageIMEIsView(PurchaseModuleAccessMixin, View):
