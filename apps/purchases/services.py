@@ -300,7 +300,7 @@ class PurchaseService:
                     updated_at=timezone.now()
                 )
 
-                # 4. Update ProductBatch and ItemInstance records
+                # 4. Update ProductBatch and ItemInstance purchase dates
                 ProductBatch.objects.filter(
                     grn_reference=grn.grn_number,
                     branch=grn.branch
@@ -390,9 +390,6 @@ class PurchaseService:
     # =========================================================================
     @classmethod
     def _validate_grn_lines(cls, grn: GoodsReceivedNote, items: List[GRNItem]) -> None:
-        sys_config = SystemConfiguration.get_solo()
-        enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
-
         seen_imeis = set()
 
         for item in items:
@@ -413,37 +410,41 @@ class PurchaseService:
 
                 expected_units = int(base_qty)
                 scanned_raw = (item.scanned_imei_list or '').strip()
-                has_imeis = bool(scanned_raw)
 
-                if not enforce_imei and not has_imeis:
+                if not scanned_raw:
+                    # Incomplete IMEI check: Non-blocking warning path
+                    logger.info(
+                        f"[GRN Inward Notice] Phone '{product.name}' on GRN {grn.grn_number} inwarded with {expected_units} pending physical IMEIs."
+                    )
                     continue
 
-                if not has_imeis:
-                    raise ValidationError(
-                        f"IMEI / Serial numbers are strictly required for '{product.name}'. "
-                        f"Expected exactly {expected_units} unit identifier(s), but the scanned list is completely empty. "
-                        f"(You can disable 'Enforce Mandatory Handset IMEI Tracking' in Settings to enter backlog purchase bills without IMEIs)."
-                    )
+                raw_tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
 
-                imei_tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
-                scanned_count = len(imei_tokens)
-
-                if scanned_count != expected_units:
-                    raise ValidationError(
-                        f"IMEI count mismatch for '{product.name}': Purchased quantity is {expected_units} unit(s), "
-                        f"but received {scanned_count} IMEI entry/pair(s). "
-                        f"Please scan exactly {expected_units} IMEI pair(s), or leave completely blank in Backlog Mode."
-                    )
-
-                for token in imei_tokens:
+                # Sanitize tokens and extract pure numeric serials
+                clean_tokens = []
+                for token in raw_tokens:
                     parts = token.split('|')
-                    im1 = parts[0].strip() if len(parts) > 0 and parts[0].strip() else None
-                    im2 = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+                    im1 = parts[0].strip() if len(parts) > 0 and parts[0].strip() else ''
+                    im2 = parts[1].strip() if len(parts) > 1 and parts[1].strip() else ''
 
+                    c_im1 = re.sub(r'\D', '', im1)
+                    c_im2 = re.sub(r'\D', '', im2) if im2 else ''
+
+                    if c_im1:
+                        if c_im2 and c_im1 == c_im2:
+                            c_im2 = ''
+                        clean_tokens.append((c_im1, c_im2))
+
+                scanned_count = len(clean_tokens)
+
+                if scanned_count < expected_units:
+                    logger.info(
+                        f"[GRN IMEI Notice] '{product.name}' has {scanned_count} of {expected_units} IMEIs scanned. "
+                        f"Remaining units allowed to be linked later."
+                    )
+
+                for im1, im2 in clean_tokens:
                     if im1:
-                        if not im1.isdigit() and len(im1) >= 14:
-                            raise ValidationError(f"Invalid IMEI 1 '{im1}' for '{product.name}'. IMEIs must be numeric digits.")
-
                         if im1 in seen_imeis:
                             raise ValidationError(
                                 f"Duplicate IMEI 1 '{im1}' entered multiple times in the consignment for '{product.name}'."
@@ -453,7 +454,7 @@ class PurchaseService:
                         existing_im1 = ItemInstance.objects.filter(
                             Q(imei_1=im1) | Q(imei_2=im1),
                             status='IN_STOCK'
-                        ).select_related('branch', 'product').first()
+                        ).exclude(purchase_reference=grn.grn_number).select_related('branch', 'product').first()
 
                         if existing_im1:
                             raise ValidationError(
@@ -463,9 +464,6 @@ class PurchaseService:
                             )
 
                     if im2:
-                        if not im2.isdigit() and len(im2) >= 14:
-                            raise ValidationError(f"Invalid IMEI 2 '{im2}' for '{product.name}'. IMEIs must be numeric digits.")
-
                         if im1 and im1 == im2:
                             raise ValidationError(
                                 f"Invalid dual-IMEI pair on '{product.name}': IMEI 1 and IMEI 2 cannot be identical ('{im1}')."
@@ -480,7 +478,7 @@ class PurchaseService:
                         existing_im2 = ItemInstance.objects.filter(
                             Q(imei_1=im2) | Q(imei_2=im2),
                             status='IN_STOCK'
-                        ).select_related('branch', 'product').first()
+                        ).exclude(purchase_reference=grn.grn_number).select_related('branch', 'product').first()
 
                         if existing_im2:
                             raise ValidationError(
@@ -595,10 +593,13 @@ class PurchaseService:
             rate = entry['vat_rate']
             pre_tax_net = entry['pre_tax_net']
 
+            # DEFENSIVE ZERO-DIVISION SAFEGUARDS
             if net_merchandise_subtotal > Decimal('0.00'):
-                weight = pre_tax_net / net_merchandise_subtotal
+                weight = (pre_tax_net / net_merchandise_subtotal).quantize(Decimal('0.0000000001'), rounding=ROUND_HALF_UP)
+            elif item_count > 0:
+                weight = (Decimal('1.00') / Decimal(item_count)).quantize(Decimal('0.0000000001'), rounding=ROUND_HALF_UP)
             else:
-                weight = Decimal('1.00') / Decimal(item_count) if item_count > 0 else Decimal('0.00')
+                weight = Decimal('0.00')
 
             line_bill_disc = (grn.bill_discount_amount * weight).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             effective_net_base = max(Decimal('0.00'), pre_tax_net - line_bill_disc)
@@ -607,7 +608,8 @@ class PurchaseService:
             line_landed_total = effective_net_base + line_overhead
 
             factor = item.conversion_factor if (item.conversion_factor and item.conversion_factor > Decimal('0.000')) else Decimal('1.000')
-            base_qty = (item.purchased_quantity * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
+            qty_val = item.purchased_quantity if (item.purchased_quantity and item.purchased_quantity > Decimal('0.000')) else Decimal('1.000')
+            base_qty = (qty_val * factor).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
             item.base_unit_quantity = base_qty
 
             if base_qty > Decimal('0.000'):
@@ -861,7 +863,19 @@ class PurchaseService:
         # Step B & C: Generate Linked Spot PAYMENT Entry if Paid on Delivery
         final_balance = (prev_bal + due).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if paid > Decimal('0.00'):
-            payment_mode = getattr(grn, 'preferred_payment_method', None) or 'CASH'
+            raw_mode = getattr(supplier, 'preferred_payment_method', None) or 'CASH'
+            mode_upper = str(raw_mode).upper().strip()
+            if mode_upper in ['DIGITAL_QR', 'QR', 'FONEPAY']:
+                resolved_payment_mode = 'FONEPAY'
+            elif mode_upper in ['BANK_TRANSFER', 'BANK', 'IPS', 'CONNECT_IPS']:
+                resolved_payment_mode = 'BANK_TRANSFER'
+            elif mode_upper in ['CHEQUE', 'CHECK']:
+                resolved_payment_mode = 'CHEQUE'
+            elif mode_upper in ['CASH']:
+                resolved_payment_mode = 'CASH'
+            else:
+                resolved_payment_mode = 'CASH'
+
             SupplierUdhaariLedger.objects.create(
                 supplier=supplier,
                 branch=grn.branch,
@@ -869,14 +883,14 @@ class PurchaseService:
                 amount=paid,
                 previous_balance=intermediate_bal,
                 resulting_balance=final_balance,
-                payment_mode=payment_mode,
+                payment_mode=resolved_payment_mode,
                 reference_number=f"PMT-{grn.grn_number}",
                 entry_date=grn.bill_date,
                 entry_date_bs=grn.bill_date_bs,
                 recorded_by=user,
                 remarks=(
                     f"Spot payment disbursed on receipt of GRN {grn.grn_number} "
-                    f"(Supplier Bill: {grn.supplier_bill_no}) via {payment_mode}."
+                    f"(Supplier Bill: {grn.supplier_bill_no}) via {resolved_payment_mode}."
                 )
             )
             supplier.last_payment_date = grn.bill_date
@@ -912,23 +926,48 @@ class PurchaseService:
         )
 
     # =========================================================================
-    # STEP 4: GENERAL LEDGER POSTING BRIDGE
+    # STEP 4: GENERAL LEDGER POSTING BRIDGE (SAFE EXCEPTION TRAPPING)
     # =========================================================================
     @staticmethod
     def _post_gl_journal(grn: GoodsReceivedNote, user=None) -> None:
-        import apps.accounting.services.auto_posting as auto_posting_module
-        if hasattr(auto_posting_module, 'post_grn_journal'):
-            auto_posting_module.post_grn_journal(grn, user=user)
-        elif hasattr(auto_posting_module, 'AutoPostingService'):
-            service = auto_posting_module.AutoPostingService
-            if hasattr(service, 'post_grn_journal'):
-                service.post_grn_journal(grn, user=user)
-            elif hasattr(service, 'post_grn_receipt'):
-                service.post_grn_receipt(grn=grn, user=user)
+        try:
+            import apps.accounting.services.auto_posting as auto_posting_module
+            if hasattr(auto_posting_module, 'post_grn_journal'):
+                auto_posting_module.post_grn_journal(grn, user=user)
+            elif hasattr(auto_posting_module, 'AutoPostingService'):
+                service = auto_posting_module.AutoPostingService
+                if hasattr(service, 'post_grn_journal'):
+                    service.post_grn_journal(grn, user=user)
+                elif hasattr(service, 'post_grn_receipt'):
+                    service.post_grn_receipt(grn=grn, user=user)
+                else:
+                    logger.warning(
+                        f"[PurchaseService GL Posting] AutoPostingService has no post_grn_journal "
+                        f"or post_grn_receipt for GRN {grn.grn_number}."
+                    )
             else:
-                raise ValidationError("AutoPostingService has no post_grn_journal or post_grn_receipt implementation.")
-        else:
-            raise ValidationError("Accounting auto_posting module is unavailable for GRN journal posting.")
+                logger.warning(
+                    f"[PurchaseService GL Posting] Accounting auto_posting module unavailable for GRN {grn.grn_number}."
+                )
+        except Exception as err:
+            logger.error(
+                f"[PurchaseService GL Auto-Posting Error] GRN {grn.grn_number}: {err}",
+                exc_info=True
+            )
+            try:
+                AuditLog.objects.create(
+                    user=user,
+                    branch=grn.branch,
+                    action_type='UPDATE',
+                    module='AccountingGL_PostingDeferred',
+                    object_repr=grn.grn_number,
+                    details={
+                        'error': str(err),
+                        'message': 'Physical stock and supplier ledger inward succeeded. General Ledger auto-posting deferred for reconciliation.'
+                    }
+                )
+            except Exception:
+                pass
 
     # =========================================================================
     # SPECIALIZED ACTION: ATTACH / LINK PHYSICAL IMEIS TO ALREADY-RECEIVED GRN

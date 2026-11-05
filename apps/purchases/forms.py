@@ -790,42 +790,76 @@ class GRNItemForm(forms.ModelForm):
                 )
 
             expected_units = int(base_units)
-            tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
+            raw_tokens = [t.strip() for t in re.split(r'[\n,;]+', scanned_raw) if t.strip()]
 
-            if self.is_draft:
-                return cleaned_data
+            # Differentiate between initial creation and editing an existing bill/item
+            is_existing_item = bool(self.instance and self.instance.pk)
+            is_parent_received = bool(
+                self.instance and self.instance.grn_id and getattr(self.instance.grn, 'status', '') == 'RECEIVED'
+            )
 
-            sys_config = SystemConfiguration.get_solo()
-            enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
-
-            if not enforce_imei and len(tokens) == 0:
-                return cleaned_data
-
-            if enforce_imei:
-                if expected_units > 0 and len(tokens) != expected_units:
-                    raise forms.ValidationError(
-                        _(f"IMEI Count Mismatch on '{product.name}': Purchased quantity is {expected_units} unit(s), "
-                          f"but {len(tokens)} device IMEI pair(s) were scanned. "
-                          f"Please scan exactly {expected_units} IMEI pair(s), or switch off 'Enforce Mandatory IMEI' in Settings for backlog entries.")
-                    )
-            else:
-                if len(tokens) > 0 and len(tokens) != expected_units:
-                    raise forms.ValidationError(
-                        _(f"IMEI Count Mismatch on '{product.name}': You entered {len(tokens)} IMEI(s) for {expected_units} unit(s). "
-                          f"In Backlog Mode, please either leave the IMEI field completely empty or enter all {expected_units} IMEI pair(s).")
-                    )
-
-            for token in tokens:
+            # Sanitized token extraction: Clean digits only, prevent format crashes
+            sanitized_tokens = []
+            for token in raw_tokens:
                 parts = token.split('|')
                 im1 = parts[0].strip() if len(parts) > 0 and parts[0].strip() else ''
                 im2 = parts[1].strip() if len(parts) > 1 and parts[1].strip() else ''
 
-                if im1 and not im1.isdigit():
-                    raise forms.ValidationError(_(f"Invalid IMEI 1 '{im1}'. IMEIs must be numeric digits."))
-                if im2 and not im2.isdigit():
-                    raise forms.ValidationError(_(f"Invalid IMEI 2 '{im2}'. IMEIs must be numeric digits."))
-                if im1 and im2 and im1 == im2:
-                    raise forms.ValidationError(_(f"IMEI 1 and IMEI 2 cannot be identical ('{im1}')."))
+                # Keep token if primary IMEI has digits
+                clean_im1 = re.sub(r'\D', '', im1)
+                clean_im2 = re.sub(r'\D', '', im2) if im2 else ''
+
+                if clean_im1:
+                    if clean_im2 and clean_im1 == clean_im2:
+                        clean_im2 = ''
+                    if clean_im2:
+                        sanitized_tokens.append(f"{clean_im1}|{clean_im2}")
+                    else:
+                        sanitized_tokens.append(clean_im1)
+
+            # Re-save cleaned tokens back to cleaned_data
+            if sanitized_tokens:
+                cleaned_data['scanned_imei_list'] = "\n".join(sanitized_tokens)
+            else:
+                cleaned_data['scanned_imei_list'] = ""
+
+            tokens_count = len(sanitized_tokens)
+
+            # If this is an existing bill/item being updated (e.g. date change) or a draft,
+            # DO NOT raise a blocking ValidationError. Attach warning flags to instance instead.
+            if is_existing_item or is_parent_received or self.is_draft:
+                if tokens_count < expected_units:
+                    self.instance.has_imei_warning = True
+                    self.instance.imei_warning_message = (
+                        f"Warning: '{product.name}' has {tokens_count} of {expected_units} IMEIs entered. "
+                        f"Remaining {expected_units - tokens_count} unit(s) pending assignment."
+                    )
+                else:
+                    self.instance.has_imei_warning = False
+                    self.instance.imei_warning_message = ""
+                return cleaned_data
+
+            # For new GRN entries: Check system master toggle
+            sys_config = SystemConfiguration.get_solo()
+            enforce_imei = getattr(sys_config, 'enforce_imei_tracking', True)
+
+            # If master toggle is OFF or completely empty in backlog mode, allow saving with warning
+            if not enforce_imei:
+                if tokens_count < expected_units:
+                    self.instance.has_imei_warning = True
+                    self.instance.imei_warning_message = (
+                        f"Notice: '{product.name}' saved with {tokens_count} of {expected_units} IMEIs. "
+                        f"You can attach remaining IMEIs later."
+                    )
+                return cleaned_data
+
+            # If master toggle is ON: Non-blocking warning mode for partial/missing entries
+            if tokens_count != expected_units:
+                self.instance.has_imei_warning = True
+                self.instance.imei_warning_message = (
+                    f"Notice: Purchased quantity is {expected_units} unit(s), but {tokens_count} IMEI(s) provided. "
+                    f"Physical IMEIs can be linked via 'Scan / Enter IMEIs'."
+                )
 
         return cleaned_data
 
@@ -842,6 +876,9 @@ class BaseGRNItemFormSet(BaseInlineFormSet):
         super().clean()
 
         has_taxable_item = False
+        has_any_imei_warning = False
+        warning_messages = []
+
         for form in self.forms:
             if not hasattr(form, 'cleaned_data') or not form.cleaned_data:
                 continue
@@ -849,17 +886,24 @@ class BaseGRNItemFormSet(BaseInlineFormSet):
                 continue
             if form.cleaned_data.get('vat_rate') == Decimal('13.00'):
                 has_taxable_item = True
-                break
+
+            if hasattr(form, 'instance') and getattr(form.instance, 'has_imei_warning', False):
+                has_any_imei_warning = True
+                msg = getattr(form.instance, 'imei_warning_message', '')
+                if msg:
+                    warning_messages.append(msg)
 
         if hasattr(self, 'instance') and self.instance:
             self.instance.is_vat_bill = has_taxable_item
+            self.instance.has_imei_warning = has_any_imei_warning
+            self.instance.imei_warning_messages = warning_messages
 
 GRNItemFormSet = inlineformset_factory(
     GoodsReceivedNote,
     GRNItem,
     form=GRNItemForm,
     formset=BaseGRNItemFormSet,
-    extra=1,
+    extra=0,
     can_delete=True
 )
 

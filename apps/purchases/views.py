@@ -1171,7 +1171,7 @@ class GRNCreateView(PurchaseModuleAccessMixin, View):
         return render(request, self.template_name, context)
 
 # ==============================================================================
-# GRN UPDATE / EDIT VIEW (WITH STRICT OPEN FISCAL YEAR ENFORCEMENT)
+# GRN UPDATE / EDIT VIEW (WITH STRICT OPEN FISCAL YEAR ENFORCEMENT & ATOMIC GUARDS)
 # ==============================================================================
 class GRNUpdateView(PurchaseModuleAccessMixin, View):
     template_name = 'purchases/grn_form.html'
@@ -1232,8 +1232,9 @@ class GRNUpdateView(PurchaseModuleAccessMixin, View):
         return render(request, self.template_name, context)
 
     def post(self, request, pk, *args, **kwargs):
+        # 1. Fetch un-locked instance first to safely check cancellation and open fiscal year
         grn = get_object_or_404(
-            GoodsReceivedNote.objects.select_for_update().select_related('supplier', 'branch', 'purchase_order'),
+            GoodsReceivedNote.objects.select_related('supplier', 'branch', 'purchase_order'),
             pk=pk
         )
         if grn.status == 'CANCELLED':
@@ -1259,7 +1260,10 @@ class GRNUpdateView(PurchaseModuleAccessMixin, View):
         if form.is_valid() and formset.is_valid():
             try:
                 with transaction.atomic():
-                    # Validate that new selected date also belongs to an open fiscal year
+                    # 2. Acquire database row-level lock safely without outer joins
+                    locked_grn = GoodsReceivedNote.objects.select_for_update().get(pk=pk)
+
+                    # Validate that newly selected bill date also belongs to an open fiscal year
                     new_bill_date = form.cleaned_data.get('bill_date')
                     if new_bill_date:
                         bs_y, bs_m, _ = NepaliCalendar.ad_to_bs(new_bill_date)
@@ -1270,9 +1274,10 @@ class GRNUpdateView(PurchaseModuleAccessMixin, View):
                                 f"Editing Rejected: The selected date falls into Fiscal Year {target_fy}, which is closed and audited."
                             )
 
-                    old_bill_date = grn.bill_date
-                    old_bill_date_bs = grn.bill_date_bs
+                    old_bill_date = locked_grn.bill_date
+                    old_bill_date_bs = locked_grn.bill_date_bs
 
+                    # Save updated header data
                     updated_grn = form.save(commit=False)
                     updated_grn.save()
 
@@ -1287,8 +1292,22 @@ class GRNUpdateView(PurchaseModuleAccessMixin, View):
                     for deleted_item in formset.deleted_objects:
                         deleted_item.delete()
 
-                    # If bill was already received/approved, recalculate and synchronize linked records without duplicating stock
-                    if updated_grn.status == 'RECEIVED':
+                    # 3. Synchronize Form Actions with Status Updates cleanly
+                    if is_draft:
+                        # Save as draft without inward stock changes
+                        PurchaseService.save_grn_draft(grn=updated_grn, items=None, user=request.user)
+
+                    elif updated_grn.status == 'DRAFT':
+                        # Bill was a Draft and user clicked "Verify & Update Warehouse Stock": process full inward
+                        PurchaseService.process_grn_approval_and_stock_in(grn=updated_grn, user=request.user)
+
+                        if updated_grn.purchase_order:
+                            po = updated_grn.purchase_order
+                            po.status = 'COMPLETED'
+                            po.save(update_fields=['status', 'updated_at'])
+
+                    else:
+                        # Bill was already 'RECEIVED': recalculate financials and update linked audit ledgers without duplicating stock
                         updated_grn.recalculate_financials(save=True)
 
                         date_changed = (old_bill_date != updated_grn.bill_date or old_bill_date_bs != updated_grn.bill_date_bs)
@@ -1344,11 +1363,6 @@ class GRNUpdateView(PurchaseModuleAccessMixin, View):
                             if updated_grn.supplier:
                                 updated_grn.supplier.recalculate_balance_from_ledger(save=True)
 
-                    elif is_draft:
-                        PurchaseService.save_grn_draft(grn=updated_grn, items=None, user=request.user)
-                    else:
-                        PurchaseService.process_grn_approval_and_stock_in(grn=updated_grn, user=request.user)
-
                     AuditLog.objects.create(
                         user=request.user,
                         branch=updated_grn.branch,
@@ -1361,19 +1375,62 @@ class GRNUpdateView(PurchaseModuleAccessMixin, View):
                             'bill_date_ad': str(updated_grn.bill_date),
                             'bill_date_bs': updated_grn.bill_date_bs or '',
                             'fiscal_year': updated_grn.fiscal_year or '',
-                            'net_amount': str(updated_grn.net_total_amount)
+                            'net_amount': str(updated_grn.net_total_amount),
+                            'status': updated_grn.status
                         }
                     )
 
-                messages.success(request, f"GRN {updated_grn.grn_number} updated successfully!")
+                success_msg = f"GRN {updated_grn.grn_number} updated successfully!"
+
+                # Surface soft warning message if any mobile item has pending/unassigned IMEIs
+                warning_msgs = getattr(formset, 'imei_warning_messages', []) or []
+                if not warning_msgs and hasattr(updated_grn, 'imei_warning_messages'):
+                    warning_msgs = updated_grn.imei_warning_messages
+
+                if not warning_msgs:
+                    for itm in updated_grn.items.select_related('product').all():
+                        p = itm.product
+                        if p and (p.requires_imei_tracking or p.requires_serial_tracking):
+                            base_qty = int(itm.base_unit_quantity or itm.purchased_quantity or 0)
+                            existing_instances_count = ItemInstance.objects.filter(
+                                purchase_reference=updated_grn.grn_number,
+                                product=p
+                            ).count()
+                            if existing_instances_count < base_qty:
+                                pending = base_qty - existing_instances_count
+                                warning_msgs.append(
+                                    f"'{p.name}' still has {pending} unassigned IMEI(s) (purchased: {base_qty}, linked: {existing_instances_count})."
+                                )
+
+                if warning_msgs:
+                    detailed_warning = " | ".join(warning_msgs)
+                    success_msg += f" (Note: {detailed_warning} You can link them anytime via 'Scan / Enter IMEIs'.)"
+                    messages.warning(request, f"Notice: {detailed_warning} You can link physical IMEIs anytime from the 'Scan / Enter IMEIs' action button.")
+
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': success_msg,
+                        'warnings': warning_msgs,
+                        'grn_id': updated_grn.id,
+                        'grn_number': updated_grn.grn_number,
+                        'redirect_url': reverse('purchases:grn_detail', kwargs={'pk': updated_grn.pk})
+                    })
+
+                messages.success(request, success_msg)
                 return redirect('purchases:grn_detail', pk=updated_grn.pk)
 
             except ValidationError as ve:
                 err_text = str(ve.message if hasattr(ve, 'message') else ve)
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+                    return JsonResponse({'status': 'error', 'message': err_text}, status=400)
                 messages.error(request, f"Validation Error: {err_text}")
             except Exception as e:
                 logger.error(f"[GRN Edit Error]: {e}", exc_info=True)
-                messages.error(request, f"Error updating GRN: {str(e)}")
+                err_text = f"Error updating GRN: {str(e)}"
+                if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
+                    return JsonResponse({'status': 'error', 'message': err_text}, status=500)
+                messages.error(request, err_text)
         else:
             messages.error(request, "Validation errors occurred. Please review the line entries.")
 
@@ -1819,10 +1876,10 @@ def cancel_grn_view(request, pk):
         return redirect('purchases:grn_detail', pk=grn.pk)
 
     except ValidationError as ve:
-        err_msg = str(ve.message if hasattr(ve, 'message') else ve)
+        err_text = str(ve.message if hasattr(ve, 'message') else ve)
         if request.headers.get('x-requested-with') == 'XMLHttpRequest' or request.content_type == 'application/json':
-            return JsonResponse({'status': 'error', 'message': err_msg}, status=400)
-        messages.error(request, err_msg)
+            return JsonResponse({'status': 'error', 'message': err_text}, status=400)
+        messages.error(request, err_text)
         return redirect('purchases:grn_detail', pk=grn.pk)
     except Exception as err:
         err_msg = f"Error voiding purchase bill {grn.grn_number}: {str(err)}"

@@ -690,6 +690,7 @@ table.items-table tr:hover td {
   <form method="post" id="masterGrnForm" novalidate>
     {% csrf_token %}
     <input type="hidden" name="action" id="grnFormAction" value="verify_stock">
+    <input type="hidden" name="confirm_incomplete_imei" id="confirmIncompleteImeiHidden" value="false">
 
     {{ formset.management_form }}
 
@@ -892,7 +893,7 @@ table.items-table tr:hover td {
 
               <!-- Serials / IMEIs -->
               <td>
-                <input type="text" name="items-{{ forloop.counter0 }}-scanned_imei_list" class="item-serial font-mono" placeholder="IMEI / Serials" value="{{ item_form.scanned_imei_list.value|default:'' }}">
+                <input type="text" name="items-{{ forloop.counter0 }}-scanned_imei_list" class="item-serial font-mono" placeholder="Optional IMEI / Serials" value="{{ item_form.scanned_imei_list.value|default:'' }}">
               </td>
 
               <!-- Qty -->
@@ -994,7 +995,10 @@ table.items-table tr:hover td {
 
               <!-- Delete Row -->
               <td class="text-center">
-                <div style="display: none;">{{ item_form.DELETE }}</div>
+                <div style="display: none;">
+                  {{ item_form.id }}
+                  {{ item_form.DELETE }}
+                </div>
                 <button type="button" class="btn-remove-row-grn" title="Remove Row">&times;</button>
               </td>
             </tr>
@@ -1230,6 +1234,41 @@ table.items-table tr:hover td {
 
 </div>
 
+<!-- =========================================================================
+     NON-BLOCKING WARNING MODAL: MISSING OR INCOMPLETE IMEIS DETECTED
+     ========================================================================= -->
+<div class="modal fade" id="missingImeiWarningModal" tabindex="-1" aria-labelledby="missingImeiWarningModalLabel" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+      <div class="modal-header bg-warning text-dark border-0 py-2.5 px-3">
+        <h6 class="modal-title fw-bold fs-sm mb-0" id="missingImeiWarningModalLabel">
+          <i class="fa-solid fa-triangle-exclamation me-1"></i> Notice: Missing IMEIs Detected
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4 bg-white fs-xs">
+        <p class="text-dark mb-2">
+          You are saving this purchase bill with missing or incomplete serial/IMEI numbers on one or more mobile phone rows:
+        </p>
+        <div class="p-2.5 bg-light rounded-3 border mb-3 font-mono" id="missingImeisSummaryList" style="max-height: 140px; overflow-y: auto;">
+          <!-- Item details injected dynamically -->
+        </div>
+        <p class="text-muted mb-0">
+          The bill date and financial values will update successfully. You can link physical 15-digit IMEIs to warehouse stock anytime using the <strong>"Scan / Enter IMEIs"</strong> action button.
+        </p>
+      </div>
+      <div class="modal-footer bg-light border-0 py-2.5 px-3 d-flex justify-content-between">
+        <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3" data-bs-dismiss="modal" id="btnReviewImeisModal">
+          <i class="fa-solid fa-pen-to-square me-1"></i> Review &amp; Enter IMEIs
+        </button>
+        <button type="button" class="btn btn-primary btn-sm rounded-pill px-4 fw-bold shadow-sm" id="btnProceedAnywayModal">
+          <i class="fa-solid fa-check-circle me-1"></i> Proceed Anyway
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST NOTIFICATION CONTAINER -->
 <div id="toast-notification">Notification Message</div>
 
@@ -1248,7 +1287,7 @@ table.items-table tr:hover td {
       <input type="text" name="items-__prefix__-batch_number" class="item-batch font-mono" placeholder="Batch No" value="">
     </td>
     <td>
-      <input type="text" name="items-__prefix__-scanned_imei_list" class="item-serial font-mono" placeholder="IMEI / Serials" value="">
+      <input type="text" name="items-__prefix__-scanned_imei_list" class="item-serial font-mono" placeholder="Optional IMEI / Serials" value="">
     </td>
     <td>
       <input type="number" name="items-__prefix__-purchased_quantity" class="item-qty text-right font-mono" value="1.000" min="0.001" step="any" required>
@@ -1373,6 +1412,19 @@ table.items-table tr:hover td {
   const toast = document.getElementById('toast-notification');
   const rowTemplate = document.getElementById('rowTemplate');
 
+  // Warning Modal Elements
+  const warningModalEl = document.getElementById('missingImeiWarningModal');
+  let warningModalInstance = null;
+  const missingImeisList = document.getElementById('missingImeisSummaryList');
+  const btnProceedAnyway = document.getElementById('btnProceedAnywayModal');
+  const btnReviewImeis = document.getElementById('btnReviewImeisModal');
+  const confirmIncompleteHidden = document.getElementById('confirmIncompleteImeiHidden');
+  let firstIncompleteInput = null;
+
+  if (warningModalEl && typeof bootstrap !== 'undefined') {
+    warningModalInstance = new bootstrap.Modal(warningModalEl);
+  }
+
   const overheadInputs = document.querySelectorAll('.overhead-input');
 
   function parseNum(val) {
@@ -1442,6 +1494,37 @@ table.items-table tr:hover td {
     });
   }
 
+  function getActiveRows() {
+    return Array.from(tableBody.querySelectorAll('.item-row')).filter(r => {
+      const delCheck = r.querySelector('input[name$="-DELETE"]');
+      return r.style.display !== 'none' && (!delCheck || !delCheck.checked);
+    });
+  }
+
+  function isRowBlank(r) {
+    const pId = r.querySelector('.item-product-id')?.value;
+    const pName = r.querySelector('.item-name')?.value?.trim();
+    return (!pId && !pName);
+  }
+
+  function reindexRows() {
+    const allRows = tableBody.querySelectorAll('.item-row');
+    allRows.forEach((r, idx) => {
+      r.dataset.rowIdx = idx;
+      r.querySelectorAll('input, select, textarea').forEach(el => {
+        if (el.name) {
+          el.name = el.name.replace(/items-\d+-/, `items-${idx}-`);
+        }
+        if (el.id) {
+          el.id = el.id.replace(/items-\d+-/, `items-${idx}-`);
+        }
+      });
+    });
+    if (totalFormsInput) {
+      totalFormsInput.value = allRows.length;
+    }
+  }
+
   function attachRowEvents(row) {
     const inputs = row.querySelectorAll('input:not(.item-name), select:not(.item-uom)');
     inputs.forEach(input => {
@@ -1457,18 +1540,36 @@ table.items-table tr:hover td {
     const btnRemove = row.querySelector('.btn-remove-row-grn');
     if (btnRemove) {
       btnRemove.addEventListener('click', () => {
-        const activeRows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
-        if (activeRows.length <= 1) {
+        const activeRows = getActiveRows();
+
+        const isCurrentRowEmpty = isRowBlank(row);
+        const otherRowsWithData = activeRows.filter(r => r !== row && !isRowBlank(r));
+
+        if (activeRows.length <= 1 && otherRowsWithData.length === 0) {
           showToast("At least one line item is required.", false);
           return;
         }
-        const deleteCheck = row.querySelector('input[name$="-DELETE"]');
-        if (deleteCheck) {
+
+        const idInput = row.querySelector('input[name$="-id"]');
+        const hasDbId = Boolean(idInput && idInput.value && idInput.value.trim() !== '');
+
+        if (!hasDbId) {
+          row.remove();
+          reindexRows();
+        } else {
+          let deleteCheck = row.querySelector('input[name$="-DELETE"]');
+          if (!deleteCheck) {
+            const rowIdx = row.dataset.rowIdx;
+            deleteCheck = document.createElement('input');
+            deleteCheck.type = 'checkbox';
+            deleteCheck.name = `items-${rowIdx}-DELETE`;
+            deleteCheck.style.display = 'none';
+            row.appendChild(deleteCheck);
+          }
           deleteCheck.checked = true;
           row.style.display = 'none';
-        } else {
-          row.remove();
         }
+
         renumberRows();
         calculateAll();
       });
@@ -1478,7 +1579,7 @@ table.items-table tr:hover td {
   }
 
   function renumberRows() {
-    const activeRows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
+    const activeRows = getActiveRows();
     activeRows.forEach((row, idx) => {
       const snEl = row.querySelector('.row-sn');
       if (snEl) snEl.textContent = idx + 1;
@@ -1488,7 +1589,7 @@ table.items-table tr:hover td {
   }
 
   function addNewItem() {
-    const currentCount = parseInt(totalFormsInput.value, 10);
+    const currentCount = parseInt(totalFormsInput.value, 10) || 0;
     const html = rowTemplate.innerHTML.replace(/__prefix__/g, currentCount);
     const tempDiv = document.createElement('tbody');
     tempDiv.innerHTML = html;
@@ -1512,7 +1613,7 @@ table.items-table tr:hover td {
   if (btnAddRowBottom) btnAddRowBottom.addEventListener('click', addNewItem);
 
   function calculateAll() {
-    const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
+    const rows = getActiveRows();
     let totalPreVatMerchandise = 0;
     let totalItemDiscount = 0;
     let totalItemUnits = 0;
@@ -1859,11 +1960,13 @@ table.items-table tr:hover td {
       const isPhone = Boolean(p.requires_imei || p.requires_imei_tracking || (p.extra_data && (p.extra_data.requires_imei || p.extra_data.requires_imei_tracking)));
       const serialInput = row.querySelector('.item-serial');
       if (serialInput) {
+        row.dataset.requiresImei = isPhone ? 'true' : 'false';
+        serialInput.removeAttribute('required');
         if (isPhone) {
-          serialInput.placeholder = 'Scan 15-digit IMEI(s) *';
+          serialInput.placeholder = 'Optional Serial / IMEI (Add anytime)';
           serialInput.style.borderColor = 'var(--primary)';
           serialInput.style.backgroundColor = 'var(--primary-light)';
-          serialInput.title = 'Serialized handset: scan or enter valid 15-digit IMEI.';
+          serialInput.title = 'Serialized phone: enter IMEIs now or link them anytime via "Scan / Enter IMEIs".';
         } else {
           serialInput.placeholder = 'Optional Serial / Batch';
           serialInput.style.borderColor = '';
@@ -2035,7 +2138,6 @@ table.items-table tr:hover td {
 
   // =========================================================================
   // STRICT BIDIRECTIONAL DATE SYNCHRONIZATION (AD <-> BS)
-  // Ensures bill_date_bs is updated on every change, and never defaults to today_bs when an old date is picked!
   // =========================================================================
   const billDate = document.getElementById('billDate');
   const billDateSec = document.getElementById('invoiceDateSecondary');
@@ -2068,9 +2170,6 @@ table.items-table tr:hover td {
 
     const bsConverted = convertAdToBsDate(newDateVal);
     if (billDateBs) {
-      // If client conversion succeeds, write the exact matching BS date.
-      // If client converter is unavailable, clear the field so backend's NepaliCalendar.ad_to_bs
-      // computes the authoritative BS date from bill_date, instead of retaining stale today_bs!
       billDateBs.value = bsConverted;
     }
   }
@@ -2100,7 +2199,6 @@ table.items-table tr:hover td {
     challanDate.addEventListener('input', () => syncChallanDate(challanDate.value));
   }
 
-  // Pre-sync dates on initialization
   if (billDate && billDate.value) {
     syncBillDate(billDate.value);
   }
@@ -2110,49 +2208,146 @@ table.items-table tr:hover td {
 
   document.getElementById('btnPrint')?.addEventListener('click', () => window.print());
 
-  document.getElementById('btnSaveDraft')?.addEventListener('click', () => {
-    actionHidden.value = 'save_draft';
-    if (billDate && billDate.value) syncBillDate(billDate.value);
-    if (challanDate && challanDate.value) syncChallanDate(challanDate.value);
-    showToast("Saving GRN Draft into local store...");
-    masterForm.submit();
-  });
+  // =========================================================================
+  // CLIENT-SIDE MISSING IMEI SCANNER DETECTOR & NON-BLOCKING CONFIRMATION MODAL
+  // =========================================================================
+  function findIncompleteImeiLines() {
+    const activeRows = getActiveRows();
+    const incomplete = [];
 
-  document.getElementById('btnVerifyGrn')?.addEventListener('click', () => {
-    const invNo = document.getElementById('supplierInvoiceNo')?.value.trim();
-    if (!invNo) {
-      showToast("Supplier Invoice Ref is mandatory for verification.", false);
-      document.getElementById('supplierInvoiceNo')?.focus();
-      return;
-    }
-    showToast("GRN verified successfully. Ready for warehouse ledger inward.");
-  });
+    activeRows.forEach(r => {
+      const pName = r.querySelector('.item-name')?.value?.trim() || 'Handset Model';
+      const serialInp = r.querySelector('.item-serial');
+      const qty = parseNum(r.querySelector('.item-qty')?.value);
+      const isPhone = (r.dataset.requiresImei === 'true') || 
+                      (serialInp && serialInp.placeholder.toLowerCase().includes('imei'));
 
-  document.getElementById('btnUpdateStock')?.addEventListener('click', (e) => {
+      if (isPhone && qty > 0) {
+        const rawSerial = (serialInp?.value || '').trim();
+        const tokens = rawSerial.split(/[\n,;]+/).map(t => t.trim()).filter(Boolean);
+        if (tokens.length < qty) {
+          incomplete.push({
+            name: pName,
+            expected: Math.round(qty),
+            found: tokens.length,
+            inputElement: serialInp
+          });
+        }
+      }
+    });
+
+    return incomplete;
+  }
+
+  // Proceed button inside modal
+  if (btnProceedAnyway) {
+    btnProceedAnyway.addEventListener('click', () => {
+      if (confirmIncompleteHidden) confirmIncompleteHidden.value = "true";
+      if (warningModalInstance) warningModalInstance.hide();
+      triggerDirectFormSubmission();
+    });
+  }
+
+  // Review button inside modal
+  if (btnReviewImeis) {
+    btnReviewImeis.addEventListener('click', () => {
+      if (warningModalInstance) warningModalInstance.hide();
+      if (firstIncompleteInput) {
+        setTimeout(() => {
+          firstIncompleteInput.focus();
+          firstIncompleteInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+      }
+    });
+  }
+
+  function triggerDirectFormSubmission() {
     actionHidden.value = 'verify_stock';
     if (billDate && billDate.value) syncBillDate(billDate.value);
     if (challanDate && challanDate.value) syncChallanDate(challanDate.value);
 
+    const btn = document.getElementById('btnUpdateStock');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Updating Stock...';
+    }
+
+    showToast("Committing bill changes and inward stock...", true);
+    masterForm.submit();
+  }
+
+  // Save Draft Submission
+  document.getElementById('btnSaveDraft')?.addEventListener('click', () => {
+    actionHidden.value = 'save_draft';
+    if (billDate && billDate.value) syncBillDate(billDate.value);
+    if (challanDate && challanDate.value) syncChallanDate(challanDate.value);
+
+    const btn = document.getElementById('btnSaveDraft');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> Saving Draft...';
+
+    showToast("Saving GRN Draft into local store...");
+    masterForm.submit();
+  });
+
+  // Verify GRN (Check & Feedback)
+  document.getElementById('btnVerifyGrn')?.addEventListener('click', () => {
     const supplierId = document.getElementById('id_supplier')?.value;
     const invNo = document.getElementById('supplierInvoiceNo')?.value.trim();
-    const rows = Array.from(tableBody.querySelectorAll('.item-row')).filter(r => r.style.display !== 'none');
+    const activeRows = getActiveRows();
 
     if (!supplierId && !document.getElementById('supplierName')?.value.trim()) {
-      e.preventDefault();
       showToast("Validation Error: Please select or enter a valid Supplier.", false);
       document.getElementById('supplierName')?.focus();
       return;
     }
 
     if (!invNo) {
-      e.preventDefault();
       showToast("Validation Error: Supplier Invoice / Bill Ref No is required.", false);
       document.getElementById('supplierInvoiceNo')?.focus();
       return;
     }
 
+    if (activeRows.length === 0) {
+      showToast("Validation Error: Please add at least one product line item.", false);
+      return;
+    }
+
+    const incompleteImeis = findIncompleteImeiLines();
+    if (incompleteImeis.length > 0) {
+      showToast(`Notice: ${incompleteImeis.length} phone model(s) have unassigned IMEIs. You can link them anytime via 'Scan / Enter IMEIs'.`, true);
+    } else {
+      showToast("GRN verified successfully. Ready for warehouse stock update.", true);
+    }
+  });
+
+  // Verify & Update Warehouse Stock (Intercept with Warning Modal if missing IMEIs)
+  document.getElementById('btnUpdateStock')?.addEventListener('click', (e) => {
+    e.preventDefault();
+
+    const supplierId = document.getElementById('id_supplier')?.value;
+    const invNo = document.getElementById('supplierInvoiceNo')?.value.trim();
+    const activeRows = getActiveRows();
+
+    if (!supplierId && !document.getElementById('supplierName')?.value.trim()) {
+      showToast("Validation Error: Please select or enter a valid Supplier.", false);
+      document.getElementById('supplierName')?.focus();
+      return;
+    }
+
+    if (!invNo) {
+      showToast("Validation Error: Supplier Invoice / Bill Ref No is required.", false);
+      document.getElementById('supplierInvoiceNo')?.focus();
+      return;
+    }
+
+    if (activeRows.length === 0) {
+      showToast("Validation Error: Please add at least one product line item.", false);
+      return;
+    }
+
     let hasInvalidItem = false;
-    rows.forEach(r => {
+    activeRows.forEach(r => {
       const pId = r.querySelector('.item-product-id')?.value;
       const pName = r.querySelector('.item-name')?.value.trim();
       const qty = parseNum(r.querySelector('.item-qty')?.value);
@@ -2160,14 +2355,46 @@ table.items-table tr:hover td {
     });
 
     if (hasInvalidItem) {
-      e.preventDefault();
       showToast("Validation Error: Please ensure all lines have product names and valid quantities.", false);
       return;
     }
+
+    // Check for incomplete IMEIs on phones
+    const incompleteImeis = findIncompleteImeiLines();
+    if (incompleteImeis.length > 0 && confirmIncompleteHidden.value !== "true" && warningModalInstance) {
+      firstIncompleteInput = incompleteImeis[0].inputElement;
+
+      let listHtml = '<ul class="mb-0 ps-3">';
+      incompleteImeis.forEach(item => {
+        listHtml += `<li><strong>${escapeHtml(item.name)}</strong>: ${item.found} of ${item.expected} IMEIs entered (${item.expected - item.found} missing)</li>`;
+      });
+      listHtml += '</ul>';
+
+      if (missingImeisList) missingImeisList.innerHTML = listHtml;
+      warningModalInstance.show();
+      return;
+    }
+
+    // Form is completely valid or user already clicked "Proceed Anyway"
+    triggerDirectFormSubmission();
   });
 
   updateVatModeUI();
-  tableBody.querySelectorAll('.item-row').forEach(row => attachRowEvents(row));
+
+  // Initialization: If table has 0 rows (new bill), add exactly 1 starting row.
+  // For existing bills with saved items, attach events to existing rows without adding phantom rows.
+  const existingRows = tableBody.querySelectorAll('.item-row');
+  if (existingRows.length === 0) {
+    addNewItem();
+  } else {
+    existingRows.forEach(row => {
+      const serialInp = row.querySelector('.item-serial');
+      if (serialInp) serialInp.removeAttribute('required');
+      attachRowEvents(row);
+    });
+    renumberRows();
+  }
+
   initSupplierAutocomplete();
   calculateAll();
 
